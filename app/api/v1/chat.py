@@ -16,7 +16,8 @@ async def chat(
     request: ChatRequest,
     current_user: User = Depends(deps.get_current_user),
     db: Session = Depends(deps.get_db),
-    ai_service: AIService = Depends(deps.get_ai_service)
+    # AI Service will be created dynamically based on request.provider
+    # ai_service: AIService = Depends(deps.get_ai_service) 
 ):
     """
     Process a natural language question about revenue/sales.
@@ -49,7 +50,51 @@ async def chat(
             if chat.ai_response:
                 history.append({"role": "assistant", "content": chat.ai_response})
     
-    # 3. Call AI Service with history
+    # 3. Instantiate AI Service based on provider
+    from app.services.ai_service import create_gemini_service, create_claude_service
+    from app.config import settings
+    from app.services.prompt_manager import PromptManager
+    
+    prompt_manager = PromptManager(db)
+    
+    provider = request.provider or settings.AI_PROVIDER
+    
+    if provider == "claude":
+        if not settings.ANTHROPIC_API_KEY:
+             raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
+        
+        # Get DB path
+        if "sqlite" in settings.DATABASE_URL:
+            db_path = settings.DATABASE_URL.replace("sqlite:///", "")
+        else:
+            db_path = "nt_revenue.sqlite"
+            
+        ai_service = create_claude_service(
+            api_key=settings.ANTHROPIC_API_KEY,
+            db_path=db_path,
+            model=settings.CLAUDE_MODEL,
+            prompt_manager=prompt_manager
+        )
+    elif provider == "gemini":
+        if not settings.GOOGLE_AI_API_KEY:
+             raise HTTPException(status_code=500, detail="GOOGLE_AI_API_KEY not configured")
+             
+        # Get DB path
+        if "sqlite" in settings.DATABASE_URL:
+            db_path = settings.DATABASE_URL.replace("sqlite:///", "")
+        else:
+            db_path = "nt_revenue.sqlite"
+            
+        ai_service = create_gemini_service(
+            api_key=settings.GOOGLE_AI_API_KEY,
+            db_path=db_path,
+            model=settings.GEMINI_MODEL,
+            prompt_manager=prompt_manager
+        )
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
+
+    # 4. Call AI Service with history
     result = ai_service.query(request.question, history=history)
     
     execution_time = (time.time() - start_time) * 1000

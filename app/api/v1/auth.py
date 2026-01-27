@@ -23,10 +23,11 @@ async def login(
     otp_service = OTPService(db, email_service)
     
     try:
+        ip_address = request.client.host if request.client else "unknown"
         success, message = await otp_service.request_otp(
             email=login_data.email,
             platform=login_data.platform,
-            ip_address=request.client.host
+            ip_address=ip_address
         )
         return {"message": message}
     except AppError as e:
@@ -60,10 +61,11 @@ def verify_otp(
         user = auth_service.get_or_create_user(verify_data.email)
         
         # Create Session
+        ip_address = request.client.host if request.client else "unknown"
         session = auth_service.create_session(
             user=user,
             platform=verify_data.platform,
-            ip_address=request.client.host,
+            ip_address=ip_address,
             user_agent=request.headers.get("user-agent")
         )
         

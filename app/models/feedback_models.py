@@ -63,4 +63,14 @@ class UserFeedback(Base):
     is_golden_example = Column(Boolean, default=False)
     
     # Relations
+    # Relations
     chat = relationship("ChatHistory", backref=backref("feedback", uselist=False))
+
+class TrendingQuery(Base):
+    __tablename__ = "trending_queries"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    question = Column(String, index=True, nullable=False)
+    count = Column(Integer, default=1)
+    date = Column(DateTime, default=datetime.utcnow) # Represents the day/period
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

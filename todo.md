@@ -116,7 +116,7 @@
 ### ยังไม่ได้ทำ
 
 - [ ] Streaming response
-- [ ] Error handling & retry mechanism
+- [x] Error handling & retry mechanism (`tenacity` decorator)
 - [x] Cost tracking service (`app/services/cost_service.py`)
 - [x] Conversation context management (multi-turn chat)
 
@@ -145,17 +145,19 @@
 - [x] Request ID correlation
 - [x] Feedback API endpoints (`app/api/v1/feedback.py`)
   - [x] POST `/{chat_id}` - submit feedback
+  - [x] Feedback API endpoints (`app/api/v1/feedback.py`)
+  - [x] POST `/{chat_id}` - submit feedback
   - [x] GET `/pending` - admin review (basic)
+  - [x] GET `/stats` - feedback statistics
+  - [x] GET `/trending` - popular queries
+  - [x] POST `/{feedback_id}/review` - admin review & golden example
+  - [x] GET `/admin/dashboard` - consolidated admin view
+  - [x] **Golden Example Logic** (Auto-add to few-shot training)
 
 ### ยังไม่ได้ทำ
 
-- [ ] GET `/stats` - feedback statistics
-- [ ] POST `/{feedback_id}/review` - review feedback
-- [ ] TrendingQuery model (Using ChatHistory aggregation)
-- [ ] Admin review dashboard endpoint
-- [ ] Mark as golden example logic
-- [ ] Prompt version activation/rollback
-- [ ] Feedback statistics calculation
+- [x] TrendingQuery model (Separate model: `TrendingQuery` in `feedback_models.py`)
+- [x] Prompt version activation/rollback (`POST /prompts/{id}/activate`)
 
 ---
 
@@ -295,7 +297,7 @@
 
 6. Unit tests for core services
 7. Streaming response
-8. Error handling & retry
+8. ~~Error handling & retry~~ ✅ เสร็จแล้ว
 9. Feedback statistics endpoints
 
 ### 🟢 Medium Priority

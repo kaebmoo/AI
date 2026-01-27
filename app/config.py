@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     
     # Model Configuration
     GEMINI_MODEL: str = "gemini-2.0-flash-exp"
-    CLAUDE_MODEL: str = "claude-3-sonnet-20240229"
+    CLAUDE_MODEL: str = "claude-sonnet-4-20250514"
     
     METADATA_DB_PATH: Optional[str] = None # Defaults to DATABASE_URL path if None 
 

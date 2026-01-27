@@ -85,3 +85,38 @@ class PromptManager:
 Prompt Version: {active_version.version}
 """
         return full_prompt
+    def activate_version(self, version_id: int) -> Optional[PromptVersion]:
+        """Activate a specific prompt version"""
+        # Deactivate all
+        self.db.query(PromptVersion).update({PromptVersion.is_active: False})
+        
+        # Activate target
+        target = self.db.query(PromptVersion).filter(PromptVersion.id == version_id).first()
+        if target:
+            target.is_active = True
+            self.db.commit()
+            self.db.refresh(target)
+            # Clear cache
+            if 'active_prompt' in self._cache:
+                del self._cache['active_prompt']
+            return target
+        
+        self.db.rollback()
+        return None
+
+    def create_new_version(self, system_prompt: str, notes: str = None, user_id: int = None) -> PromptVersion:
+        """Create a new prompt version"""
+        # Get latest version number
+        latest = self.db.query(PromptVersion).order_by(PromptVersion.version.desc()).first()
+        new_version_num = (latest.version + 1) if latest else 1
+        
+        new_ver = PromptVersion(
+            version=new_version_num,
+            system_prompt=system_prompt,
+            notes=notes,
+            created_by=user_id,
+            is_active=False # Default inactive
+        )
+        self.db.add(new_ver)
+        self.db.commit()
+        return new_ver

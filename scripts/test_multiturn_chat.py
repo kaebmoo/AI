@@ -60,7 +60,7 @@ def test_multiturn_chat():
 
     # 2. First Question (Start Conversation)
     print("\n2. Sending First Question...")
-    q1 = "รายได้รวมเดือนมกราคม 2568?"
+    q1 = "รายได้รวมเดือนมกราคม 2568 รายได้ของ กลุ่มบริการ Satellite NT และ กลุ่มบริการ Satellite ไทยคม?"
     resp1 = requests.post(
         f"{BASE_URL}/chat/", 
         headers=headers,
