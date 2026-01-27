@@ -185,9 +185,11 @@
 | Phase 2 | 3 สัปดาห์ | Authentication & Security | |
 | Phase 3 | 3 สัปดาห์ | Core Features (Chat, Query) | |
 | **Phase 3.5** | **1 สัปดาห์** | **[NEW] Feedback Loop & Logging** | |
-| Phase 4 | 2 สัปดาห์ | Reports & Export | |
-| Phase 5 | 2 สัปดาห์ | Dashboard & Visualization | |
-| Phase 6 | 2 สัปดาห์ | Templates & Scheduling | |
+| **Phase 4** | **3 สัปดาห์** | **[NEW] Universal Frontend (Expo)** | |
+| **Phase 4.5** | **1 สัปดาห์** | **[NEW] Telegram Bot Integration** | |
+| Phase 5 | 2 สัปดาห์ | Reports & Export | |
+| Phase 6 | 2 สัปดาห์ | Dashboard & Visualization | |
+| Phase 7 | 2 สัปดาห์ | Templates & Scheduling | |
 | Phase 7 | 2 สัปดาห์ | Testing & Security Audit | |
 | **Phase 7.5** | **0.5 สัปดาห์** | **[NEW] DR Drill & Backup Test** | |
 | Phase 8 | 1 สัปดาห์ | Deployment & Go-Live | |
@@ -643,6 +645,55 @@ Version: {active_prompt.version}
         if prompt:
             self.activate_version(prompt.id)
 ```
+
+---
+
+## Phase 4: [NEW] Universal Frontend (Expo) (3 สัปดาห์)
+
+**Technology Stack:**
+- **Framework**: Expo (React Native)
+- **Styling**: NativeWind (TailwindCSS)
+- **Routing**: Expo Router (File-based routing like Next.js)
+- **API Client**: TanStack Query (React Query) + Axios
+- **Platform**: Web, iOS, Android (Universal Codebase)
+
+### 4.1 Project Setup
+```
+frontend/
+├── app/                  # Expo Router pages
+│   ├── (auth)/           # Authentication group
+│   │   ├── login.tsx
+│   │   └── verify.tsx
+│   ├── (tabs)/           # Main app tabs
+│   │   ├── index.tsx     # Chat
+│   │   ├── history.tsx
+│   │   └── settings.tsx
+│   └── _layout.tsx       # Root layout
+├── components/           # Reusable components (NativeWind)
+├── constants/            # Config & Colors
+├── hooks/                # Custom React Hooks
+└── services/             # API services
+```
+
+### 4.2 Key Features
+- **Chat Interface**: Streaming response, Markdown rendering, Copy SQL/Result buttons.
+- **Authentication**: Login screen with OTP verification flow.
+- **History**: Infinite scroll list of past conversations (cached).
+- **Settings**: Language switch (TH/EN), Theme toggle.
+
+---
+
+## Phase 4.5: [NEW] Telegram Bot Integration (1 สัปดาห์)
+
+**Technology Stack:**
+- **Library**: `python-telegram-bot` (Async)
+- **Integration**: Direct service call to `AIService`
+
+### 4.5.1 Bot Features
+- **/start**: Welcome & Language selection.
+- **/login**: Link Telegram account with Email OTP.
+- **Chat**: Direct question processing.
+- **Voice**: (Optional) Transcribe voice to text using AI.
 
 ---
 

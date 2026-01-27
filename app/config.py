@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     # Support both SQLite and PostgreSQL
     # Example SQLite: sqlite:///./sql_app.db
     # Example Postgres: postgresql://user:pass@localhost:5432/db
-    DATABASE_URL: str = "sqlite:///./nt_revenue.db"
+    DATABASE_URL: str = "sqlite:///./nt_revenue.sqlite"
     
     @validator("DATABASE_URL", pre=True)
     def assemble_db_connection(cls, v: Optional[str], values: dict[str, Any]) -> Any:
@@ -38,10 +38,23 @@ class Settings(BaseSettings):
 
     # Security
     SECRET_KEY: str = "YOUR_SECRET_KEY_HERE_CHANGE_IN_PROD"
+    MAX_TOKENS: int = 1000
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7 # 7 days
     
+    # AI Provider Settings
+    AI_PROVIDER: str = "gemini" # claude or gemini
+    ANTHROPIC_API_KEY: Optional[str] = None
+    GOOGLE_AI_API_KEY: Optional[str] = None
+    
+    # Model Configuration
+    GEMINI_MODEL: str = "gemini-2.0-flash-exp"
+    CLAUDE_MODEL: str = "claude-3-sonnet-20240229"
+    
+    METADATA_DB_PATH: Optional[str] = None # Defaults to DATABASE_URL path if None 
+
+    
     # Allowed Domains
-    ALLOWED_EMAIL_DOMAINS: List[str] = ["nt.co.th", "ntplc.co.th"]
+    ALLOWED_EMAIL_DOMAINS: List[str] = ["example.com", "test.com"]
     
     # OTP Settings
     OTP_LENGTH: int = 6
@@ -54,11 +67,11 @@ class Settings(BaseSettings):
     SESSION_REFRESH_THRESHOLD_HOURS: int = 1
     
     # Email Settings
-    SMTP_HOST: str = "smtp.gmail.com"
-    SMTP_PORT: int = 587
-    SMTP_USER: str = "your-email@gmail.com"
-    SMTP_PASSWORD: str = "your-password"
-    FROM_EMAIL: str = "noreply@nt.co.th"
+    EMAIL_HOST: str = "mock"
+    EMAIL_PORT: int = 587
+    EMAIL_USER: str = "user@example.com"
+    EMAIL_PASSWORD: str = "password"
+    EMAIL_FROM: str = "noreply@example.com"
 
     # Rate Limiting
     LOGIN_RATE_LIMIT: str = "5/minute"

@@ -1,5 +1,5 @@
 from sqlalchemy import Column, Integer, String, DateTime, BigInteger
-from app.db.base import Base
+from app.db.base_class import Base
 
 class OTPRequest(Base):
     """

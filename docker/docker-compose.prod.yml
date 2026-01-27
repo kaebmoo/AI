@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile
+    restart: always
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../:/app
+      - ./data:/app/data  # Persist SQLite data if using SQLite
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-sqlite:///./nt_revenue.sqlite}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - AI_PROVIDER=${AI_PROVIDER:-gemini}
+      - GOOGLE_AI_API_KEY=${GOOGLE_AI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - EMAIL_HOST=${EMAIL_HOST}
+      - EMAIL_PORT=${EMAIL_PORT}
+      - EMAIL_USER=${EMAIL_USER}
+      - EMAIL_PASSWORD=${EMAIL_PASSWORD}
+      - EMAIL_FROM=${EMAIL_FROM}
+    depends_on:
+      - redis
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+
+  worker:
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile
+    restart: always
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-sqlite:///./nt_revenue.sqlite}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - EMAIL_HOST=${EMAIL_HOST}
+      - EMAIL_PORT=${EMAIL_PORT}
+      - EMAIL_USER=${EMAIL_USER}
+      - EMAIL_PASSWORD=${EMAIL_PASSWORD}
+      - EMAIL_FROM=${EMAIL_FROM}
+    depends_on:
+      - redis
+      - app
+    command: celery -A app.celery.celery_app worker --loglevel=info
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+volumes:
+  redis_data:
