@@ -108,6 +108,10 @@
 - [x] ChatHistory model (`app/models/chat.py`)
 - [x] Cache service (`app/services/cache_service.py` - Redis)
 - [x] Token usage tracking (saved to ChatHistory)
+- [x] **Advanced Schema & Rules**
+  - [x] `revenue_search` View for English column mapping
+  - [x] Flexible Business Rules engine (`schema_business_rules` table)
+  - [x] Context-aware variable column mapping (`BUSINESS_GROUP` vs `product_group`)
 
 ### ยังไม่ได้ทำ
 
