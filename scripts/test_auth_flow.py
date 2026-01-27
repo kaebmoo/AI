@@ -1,9 +1,10 @@
 import requests
 import sys
+import time
 
 # Configuration
 BASE_URL = "http://localhost:8000/api/v1"
-EMAIL = "test.user@ntplc.co.th"
+EMAIL = f"test_{int(time.time())}@example.com"
 
 def test_login():
     print(f"Testing Login with {EMAIL}...")

@@ -12,7 +12,7 @@
 - **Project Structure:** FastAPI standard layout
 - **Database:** SQLAlchemy setup (SQLite/PostgreSQL support)
 - **Authentication:**
-  - Email OTP (Limited to `ntplc.co.th`)
+  - Email OTP (Limited to configured domains e.g. `example.com`)`)
   - Session Management (Token-based)
   - Login & Verify API Endpoints
 - **Services:**

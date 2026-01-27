@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, Boolean, DateTime
 from sqlalchemy.orm import relationship
 from datetime import datetime
-from app.db.base import Base
+from app.db.base_class import Base
 
 class User(Base):
     """
@@ -21,3 +21,4 @@ class User(Base):
 
     # Relationships
     sessions = relationship("UserSession", back_populates="user")
+    chats = relationship("ChatHistory", back_populates="user")

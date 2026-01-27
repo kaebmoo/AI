@@ -10,6 +10,8 @@ from app.db.base import Base
 from app.models.user import User
 from app.models.session import UserSession
 from app.models.otp import OTPRequest
+from app.models.chat import ChatHistory
+from app.models.feedback_models import PromptVersion, GoldenExample, UserFeedback
 
 def init_db():
     print("Creating database tables...")

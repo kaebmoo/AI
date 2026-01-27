@@ -11,9 +11,32 @@
     - [x] Create `app/main.py`
 - [/] Database Layer
     - [x] Setup SQLAlchemy `app/db/`
-    - [ ] Define Models
-- [/] Authenticaton & Security
+    - [x] Define Models (User, Session, OTP)
+    - [x] Define Chat Models (ChatHistory)
+- [/] Authentication & Security
     - [x] OTP Service (pyotp)
     - [x] Auth Service
     - [x] API Endpoints (Login/Verify/Logout)
     - [ ] Middleware (Rate Limit)
+- [/] Core Features (Chat & Query) (Phase 3)
+    - [x] Claude Service (Mockable)
+    - [x] Chat Service (Integrated in API)
+    - [x] Chat API Endpoints
+    - [x] Database Query Service (Mock MSSQL)
+    - [x] Multi-LLM Support (Gemini/Claude)
+    - [x] Schema Management (Dynamic)
+    - [x] Prompt Manager Service (Versioning)
+    - [x] Feedback Service (Backend)
+    - [ ] Middleware (Rate Limit)
+- [ ] Universal Frontend (Expo) (Phase 4)
+    - [ ] Init Expo Project (TypeScript + NativeWind)
+    - [ ] Setup Navigation (Expo Router)
+    - [ ] Auth Screens (Login/OTP)
+    - [ ] Chat Interface (Streaming support)
+    - [ ] History & Settings Screens
+    - [ ] API Client Integration
+- [ ] Telegram Bot Integration (Phase 4.5)
+    - [ ] Bot Service Setup (python-telegram-bot)
+    - [ ] Command Handlers (/start, /login)
+    - [ ] Message Handler (AI Chat)
+    - [ ] User Linking (Telegram <-> App User)

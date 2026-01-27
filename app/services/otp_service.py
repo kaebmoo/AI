@@ -14,6 +14,7 @@ from app.core.exceptions import (
     CooldownError
 )
 from app.core.logging import logging
+from app.workers.email_worker import send_otp_email
 
 logger = logging.getLogger(__name__)
 
@@ -86,13 +87,19 @@ class OTPService:
         self.db.add(otp_request)
         self.db.commit()
         
-        # Send email
-        await self.email_service.send_otp_email(
-            to_email=email,
-            otp_code=otp,
-            platform=platform,
-            expiry_minutes=settings.OTP_EXPIRY_MINUTES
-        )
+        # Send email asynchronously via Celery
+        try:
+            send_otp_email.delay(
+                to_email=email,
+                otp_code=otp,
+                platform=platform,
+                expiry_minutes=settings.OTP_EXPIRY_MINUTES
+            )
+            logger.info(f"Queued OTP email for {email}")
+        except Exception as e:
+            logger.error(f"Failed to queue OTP email task: {e}")
+            # In a real system, you might revert the DB transaction or return an error,
+            # but for now we proceed as if sent (client might retry).
         
         return True, "OTP sent to your email"
     

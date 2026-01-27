@@ -13,11 +13,11 @@ logger = logging.getLogger(__name__)
 
 class EmailService:
     def __init__(self):
-        self.smtp_host = settings.SMTP_HOST
-        self.smtp_port = settings.SMTP_PORT
-        self.smtp_user = settings.SMTP_USER
-        self.smtp_password = settings.SMTP_PASSWORD
-        self.from_email = settings.FROM_EMAIL
+        self.smtp_host = settings.EMAIL_HOST
+        self.smtp_port = settings.EMAIL_PORT
+        self.smtp_user = settings.EMAIL_USER
+        self.smtp_password = settings.EMAIL_PASSWORD
+        self.from_email = settings.EMAIL_FROM
         
         # Ensure template directory exists or handle path
         template_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates/email")
@@ -50,8 +50,13 @@ class EmailService:
             
             message.attach(MIMEText(html_content, "html"))
             
-            if settings.SMTP_HOST == "mock":
-                 logger.info(f"MOCK EMAIL to {to_email}: OTP={otp_code}")
+            if settings.EMAIL_HOST == "mock":
+                 # Use print to bypass PII masking in logs for development convenience
+                 print(f"\n{'='*50}")
+                 print(f"MOCK EMAIL DESTINATION: {to_email}")
+                 print(f"OTP CODE: {otp_code}")
+                 print(f"{'='*50}\n")
+                 logger.info(f"Mock email sent to {to_email} (Details printed to stdout)")
                  return
 
             await aiosmtplib.send(

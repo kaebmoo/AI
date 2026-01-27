@@ -6,6 +6,8 @@ from fastapi.security import APIKeyHeader
 from app.db.session import SessionLocal
 from app.services.auth_service import AuthService
 from app.models.user import User
+from app.config import settings
+from app.services.ai_service import AIService, create_gemini_service, create_claude_service
 
 # Header scheme for session token
 header_scheme = APIKeyHeader(name="X-Session-Token", auto_error=False)
@@ -42,3 +44,62 @@ def get_current_user(
         )
         
     return session.user
+
+from app.services.prompt_manager import PromptManager
+
+def get_ai_service(db: Session = Depends(get_db)) -> AIService:
+    """
+    Dependency to get initialized AIService based on config.
+    """
+    # Parse DB path from connection string (assuming sqlite:///./path)
+    if "sqlite" in settings.DATABASE_URL:
+        db_path = settings.DATABASE_URL.replace("sqlite:///", "")
+    else:
+        # For Postgres, we might need a different approach or connection string
+        # For now, this service expects a path for SQLiteSchema inspection
+        db_path = "nt_revenue.sqlite" 
+
+    prompt_manager = PromptManager(db)
+
+    if settings.AI_PROVIDER == "gemini":
+        if not settings.GOOGLE_AI_API_KEY:
+             raise HTTPException(status_code=500, detail="GOOGLE_AI_API_KEY not configured")
+        return create_gemini_service(
+            settings.GOOGLE_AI_API_KEY, 
+            db_path=db_path,
+            model=settings.GEMINI_MODEL,
+            prompt_manager=prompt_manager
+        )
+    elif settings.AI_PROVIDER == "claude":
+        if not settings.ANTHROPIC_API_KEY:
+             raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
+        return create_claude_service(
+            settings.ANTHROPIC_API_KEY, 
+            db_path=db_path,
+            model=settings.CLAUDE_MODEL,
+            prompt_manager=prompt_manager
+        )
+    else:
+        raise HTTPException(status_code=500, detail=f"Unknown AI Provider: {settings.AI_PROVIDER}")
+
+def require_admin(current_user: User = Depends(get_current_user)) -> User:
+    """
+    Dependency to require admin role
+    """
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privileges required"
+        )
+    return current_user
+
+def require_viewer(current_user: User = Depends(get_current_user)) -> User:
+    """
+    Dependency to require viewer role or higher
+    """
+    if current_user.role not in ["admin", "viewer"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Viewer privileges required"
+        )
+    return current_user
