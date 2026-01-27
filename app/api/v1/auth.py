@@ -11,7 +11,7 @@ from app.core.exceptions import AppError
 router = APIRouter()
 
 @router.post("/login", status_code=200)
-async def login(
+def login(
     login_data: LoginRequest,
     request: Request,
     db: Session = Depends(deps.get_db)
@@ -24,7 +24,7 @@ async def login(
     
     try:
         ip_address = request.client.host if request.client else "unknown"
-        success, message = await otp_service.request_otp(
+        success, message = otp_service.request_otp(
             email=login_data.email,
             platform=login_data.platform,
             ip_address=ip_address
