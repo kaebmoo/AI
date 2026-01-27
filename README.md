@@ -4,8 +4,8 @@
 
 ## Project Status
 
-**Phase:** 2 (Authentication & Security)
-**Current Version:** 0.1.0-alpha
+**Phase:** 3.5 (Core Features & Feedback Loop)
+**Current Version:** 0.3.0-beta
 
 ## Features Implemented
 
@@ -18,6 +18,18 @@
 - **Services:**
   - OTP Service (using `pyotp`)
   - Email Service (using `aiosmtplib` + `jinja2`)
+  - **AI Service (Core):**
+    - Support for **Claude** and **Gemini** models
+    - **Multi-turn Chat:** Context-aware conversations
+    - **Tool Use:** Auto-generates and executes SQL
+    - **Robustness:** Automatic retry mechanism for API failures
+  - **Schema & Rules:**
+    - `revenue_search` View for clean English schema
+    - **Flexible Business Rules:** Admin-configurable SQL constraints via `schema_business_rules` table
+  - **Feedback System:**
+    - Collect user feedback (Thumbs Up/Down, Categories)
+    - **Admin Dashboard:** Stats, Pending Reviews, Trending Queries
+    - **Golden Examples:** Auto-learning from reviewed feedback
 
 ## Requirements
 
@@ -81,7 +93,9 @@ Once running, visit:
 ## Testing
 
 - Run auth flow test: `python scripts/test_auth_flow.py`
+- Run multi-turn chat test: `python scripts/test_multiturn_chat.py`
+- Run filtering rules test: `python scripts/test_filtering_rules.py`
 
 ---
 
-*Last Updated: 2026-01-26*
+*Last Updated: 2026-01-27*

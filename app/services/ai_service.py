@@ -23,6 +23,51 @@ import re
 from typing import Dict, List, Optional, Any, Callable
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
+import httpx
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, before_sleep_log
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Retry Configuration
+def create_retry_decorator():
+    """Create retry decorator with standard configuration"""
+    # Import provider exceptions locally to avoid hard dependencies if not installed
+    exceptions_to_retry = [
+        httpx.TimeoutException, 
+        httpx.ConnectError,
+        httpx.ReadTimeout
+    ]
+    
+    try:
+        import anthropic
+        exceptions_to_retry.extend([
+            anthropic.RateLimitError, 
+            anthropic.APIError,
+            anthropic.APIConnectionError
+        ])
+    except ImportError:
+        pass
+        
+    try:
+        from google.api_core import exceptions as google_exceptions
+        exceptions_to_retry.extend([
+            google_exceptions.ResourceExhausted,
+            google_exceptions.ServiceUnavailable,
+            google_exceptions.DeadlineExceeded,
+            google_exceptions.InternalServerError
+        ])
+    except ImportError:
+        pass
+
+    return retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type(tuple(exceptions_to_retry)),
+        reraise=True
+    )
+
+ai_retry = create_retry_decorator()
 
 from .schema_service import SchemaService
 from app.services.prompt_manager import PromptManager
@@ -73,6 +118,7 @@ class ClaudeProvider(AIProvider):
                 raise ImportError("Please install anthropic: pip install anthropic")
         return self._client
     
+    @ai_retry
     def generate_sql(self, question: str, system_prompt: str, history: List[Dict] = []) -> Dict[str, Any]:
         """Generate SQL using Claude API with Tool Use"""
         
@@ -141,6 +187,7 @@ class ClaudeProvider(AIProvider):
             "raw_response": str(response.content)
         }
     
+    @ai_retry
     def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str) -> str:
         """Explain query result using Claude"""
         
@@ -191,6 +238,7 @@ class GeminiProvider(AIProvider):
                 raise ImportError("Please install google-genai: pip install google-genai")
         return self._client
     
+    @ai_retry
     def generate_sql(self, question: str, system_prompt: str, history: List[Dict] = []) -> Dict[str, Any]:
         """Generate SQL using Gemini API with Tool Use"""
         
@@ -265,6 +313,9 @@ class GeminiProvider(AIProvider):
                 if sql_match:
                     sql_query = sql_match.group(1).strip()
                 explanation = response.text
+            
+            if not sql_query:
+                logger.warning(f"Gemini failed to generate SQL. Raw response: {response.text}")
 
             # Get token count if available
             tokens_used = 0
@@ -320,6 +371,7 @@ class GeminiProvider(AIProvider):
             "raw_response": text
         }
     
+    @ai_retry
     def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str) -> str:
         """Explain query result using Gemini"""
         

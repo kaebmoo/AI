@@ -19,4 +19,9 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="Asia/Bangkok",
     enable_utc=True,
+    # Ensure imports happen at startup
+    include=["app.workers.email_worker"]
 )
+
+# Auto-discover tasks in packages
+celery_app.autodiscover_tasks(['app.workers'])
