@@ -137,8 +137,8 @@ class SchemaService:
                 SELECT 
                     MIN(year) as min_year,
                     MAX(year) as max_year,
-                    MIN(month) as min_month,
-                    MAX(month) as max_month
+                    MIN(CAST(month AS INTEGER)) as min_month,
+                    MAX(CAST(month AS INTEGER)) as max_month
                 FROM {table_name}
             """)
             row = cursor.fetchone()
@@ -383,6 +383,10 @@ DIVISION → GROUP → DEPARTMENT → SECTION → COST_CENTER
 5. ใช้ `year` และ `month` สำหรับ filter เวลา
 6. หน่วยรายได้เป็น **บาท**
 7. SELECT query เท่านั้น
+8. **ระวัง!** Column `YEAR` และ `MONTH` เป็นประเภท Text/String
+   - เวลาเปรียบเทียบหรือหาค่ามากสุด ต้องแปลงเป็นตัวเลขเสมอ
+   - เช่น: `MAX(CAST(MONTH AS INTEGER))` หรือ `ORDER BY CAST(YEAR AS INTEGER) DESC`
+   - ห้ามใช้ `MAX(MONTH)` เฉยๆ เพราะ "9" จะมากกว่า "10" (Text sort)
 
 ## รูปแบบการตอบ
 1. แสดง SQL query ที่ใช้
@@ -412,6 +416,10 @@ DIVISION → GROUP → DEPARTMENT → SECTION → COST_CENTER
 5. Use `year` and `month` for time filtering
 6. Revenue unit is **Baht**
 7. SELECT queries only
+8. **WARNING!** Columns `YEAR` and `MONTH` are Text/String types
+   - Always cast to integer for comparisons, sorting, or max/min
+   - Example: `MAX(CAST(MONTH AS INTEGER))` or `ORDER BY CAST(YEAR AS INTEGER) DESC`
+   - Do NOT use plain `MAX(MONTH)` because "9" > "10" in text sorting
 
 ## Response Format
 1. Show the SQL query used

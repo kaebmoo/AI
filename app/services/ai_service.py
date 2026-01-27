@@ -206,7 +206,7 @@ SQL ที่ใช้:
 {json.dumps(data_sample, ensure_ascii=False, indent=2)}
 ```
 
-กรุณาอธิบายผลลัพธ์นี้เป็นภาษาไทยที่เข้าใจง่าย พร้อม format ตัวเลขให้อ่านง่าย"""
+กรุณาอธิบายผลลัพธ์นี้เป็นภาษาไทยที่เข้าใจง่าย พร้อม format ตัวเลขให้อ่านง่าย และไม่ใช้ emoji icon"""
         
         response = self.client.messages.create(
             model=self.model,
@@ -283,15 +283,23 @@ class GeminiProvider(AIProvider):
                 parts=[types.Part(text=question)]
             ))
 
+            logger.info(f"Gemini: Sending request for '{question}' with {len(history)} history items.")
+            import time
+            t_start = time.time()
+
             response = self.client.models.generate_content(
                 model=self.model,
                 contents=contents,
                 config=types.GenerateContentConfig(
                     system_instruction=system_prompt,
                     tools=tools,
-                    temperature=0.0
+                    temperature=0.0,
+                    # Explicitly disable AFC to strictly return tool calls
+                    automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True) 
                 )
             )
+            
+            logger.info(f"Gemini: Received response in {time.time() - t_start:.2f}s")
             
             # Extract SQL from tool call
             sql_query = None
@@ -521,7 +529,13 @@ class AIService:
         """
         
         # Generate SQL
+        logger.info(f"AIService: Querying {self.provider_name} for '{question}'")
+        import time
+        t_start = time.time()
+        
         ai_result = self.provider.generate_sql(question, self.system_prompt, history)
+        
+        logger.info(f"AIService: Generated SQL in {time.time() - t_start:.2f}s")
         
         sql_query = ai_result.get("sql")
         tokens_used = ai_result.get("tokens_used", 0)

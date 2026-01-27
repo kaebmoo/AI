@@ -12,7 +12,7 @@ from app.services.ai_service import AIService
 router = APIRouter()
 
 @router.post("/", response_model=ChatResponse)
-async def chat(
+def chat(
     request: ChatRequest,
     current_user: User = Depends(deps.get_current_user),
     db: Session = Depends(deps.get_db),

@@ -44,7 +44,7 @@ class OTPService:
         """Hash OTP for storage"""
         return hashlib.sha256(otp.encode()).hexdigest()
     
-    async def request_otp(
+    def request_otp(
         self, 
         email: str, 
         platform: str,
