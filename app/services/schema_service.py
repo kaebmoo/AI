@@ -549,8 +549,10 @@ DIVISION → GROUP → DEPARTMENT → SECTION → COST_CENTER
 5. ใช้ `year` และ `month` สำหรับ filter เวลา
 6. หน่วยรายได้เป็น **บาท**
    - เวลาเปรียบเทียบหรือหาค่ามากสุด ต้องแปลงเป็นตัวเลขเสมอ
-   - เช่น: `MAX(CAST(MONTH AS INTEGER))` หรือ `ORDER BY CAST(YEAR AS INTEGER) DESC`
-   - ห้ามใช้ `MAX(MONTH)` เฉยๆ เพราะ "9" จะมากกว่า "10" (Text sort)
+   - **กฎเหล็กสำหรับ YEAR และ MONTH:** ต้องใช้ `CAST(YEAR AS INTEGER)` และ `CAST(MONTH AS INTEGER)` เสมอสำหรับการเปรียบเทียบ!
+   - ❌ ผิด: `WHERE MONTH <= '11'` (จะได้แค่เดือน 1, 10, 11 เพราะเป็น String)
+   - ✅ ถูกต้อง: `WHERE CAST(MONTH AS INTEGER) <= 11`
+   - เช่นเดียวกันกับ `ORDER BY` และ `MAX()` ห้ามใช้ Text sort
 7. SELECT query เท่านั้น (ห้ามมี semicolon คั่นหลาย query)
    - **กฎเหล็ก UNION + ORDER BY/LIMIT:** ต้องครอบ **ทั้งสองส่วน** ด้วย subquery!
    - ❌ ผิด: `SELECT ... ORDER BY ... LIMIT 5 UNION ALL SELECT ...` (ไม่มี subquery ครอบส่วนแรก)
@@ -626,11 +628,10 @@ DIVISION → GROUP → DEPARTMENT → SECTION → COST_CENTER
    - `year`, `month`
 5. Use `year` and `month` for time filtering
 6. Revenue unit is **Baht**
-7. SELECT queries only
-8. **WARNING!** Columns `YEAR` and `MONTH` are Text/String types
-   - Always cast to integer for comparisons, sorting, or max/min
-   - Example: `MAX(CAST(MONTH AS INTEGER))` or `ORDER BY CAST(YEAR AS INTEGER) DESC`
-   - Do NOT use plain `MAX(MONTH)` because "9" > "10" in text sorting
+   - **CRITICAL RULE for YEAR and MONTH:** ALWAYS cast to INTEGER for comparisons!
+   - ❌ WRONG: `WHERE MONTH <= '11'` (Returns only 1, 10, 11 due to string sort)
+   - ✅ CORRECT: `WHERE CAST(MONTH AS INTEGER) <= 11`
+   - Also applies to `ORDER BY` and `MAX()`. Do NOT use text sort.
 9. **Abbreviations:**
    - E.g. `department_abbr`, `division_abbr`, `organization_group_abbr`, `section_abbr`
    - E.g. `WHERE department_abbr = 'บชง.'`
