@@ -17,10 +17,15 @@
   - Session Management (Token-based)
 - **Services:**
   - **AI Service (Core):**
-    - Support for **Claude 3.5 Sonnet** and **Gemini 2.0 Flash**
-    - **Dynamic SQL Generation:** Auto-detects DB engine (SQLite/Postgres/MSSQL) and adjusts syntax rules (e.g. `||` vs `CONCAT`, `strftime` vs `FORMAT`)
-    - **Business Rules:** Admin-configurable SQL constraints via `schema_business_rules` table
-    - **Abbreviation Handling:** Auto-resolves organization/product abbreviations
+    - Support for **Claude 3.5 Sonnet**, **Gemini 2.0 Flash**, and **Matcha (OpenAI Compatible)**
+    - **Self-Correcting Logic:** Implements an Agentic Loop (Generate → Validate → Execute → Self-Correct) to handle SQL errors and zero-result queries automatically.
+    - **Dynamic SQL Generation:** Auto-detects DB engine (SQLite/Postgres/MSSQL) and adjusts syntax rules.
+  - **Metadata-Driven Architecture:**
+    - **Dynamic Context:** Builds system prompts from database metadata (`schema_metadata`) rather than hardcoded text.
+    - **Semantic Mapping:** Maps user terms (e.g., "นป.", "อสังหา") to SQL conditions via `schema_semantic_mapping`.
+    - **Business Rules:** Admin-configurable constraints via `schema_business_rules`.
+  - **Admin Management:**
+    - Full CRUD API for managing schema metadata, mappings, and rules without code deployment.
   - **Task Queue:** Celery + Redis for async tasks (Email, Long-running queries)
 - **Feedback System:**
   - Collect user feedback (Thumbs Up/Down)
