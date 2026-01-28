@@ -1,96 +1,339 @@
-Excellent! Everything is working. Let me provide a summary of what was implemented.
+# NT Revenue Assistant - Implementation Summary
 
-  Implementation Summary
+## Overview
 
-  I have successfully implemented all 5 phases of the NT Revenue Assistant AI Improvement Plan:
+AI Revenue Query Assistant สำหรับ NT (National Telecom) ที่ใช้ AI แปลงคำถามภาษาไทยเป็น SQL
 
-  Phase 1: Schema Metadata System
+---
 
-  1. Migration file (database/migrations/003_schema_metadata.sql):
-    - schema_metadata table - stores column information for AI context
-    - schema_semantic_mapping table - maps abbreviations and business terms to SQL conditions
-    - schema_business_rules table - SQL generation rules for AI
-    - Views for AI prompt building
-  2. SQLAlchemy models (app/models/schema_models.py):
-    - SchemaMetadata - column metadata with Thai/English names, data types, notes
-    - SchemaSemanticMapping - keyword to SQL condition mapping
-    - SchemaBusinessRule - SQL generation rules
-  3. Populate script (scripts/populate_schema_metadata.py):
-    - Populates 22 schema metadata records
-    - Populates 33 semantic mappings (8 abbreviations + 25 business terms)
-    - Populates 10 business rules
+## Phase 1: Schema Metadata System
 
-  Phase 2: Admin API for Context Management
+### 1.1 Migration File
+**File:** `database/migrations/003_schema_metadata.sql`
 
-  API endpoints (app/api/v1/admin.py + app/schemas/admin_schemas.py):
-  - Schema columns: GET/POST/PUT/DELETE /api/v1/admin/schema/columns
-  - Semantic mappings: GET/POST/PUT/DELETE /api/v1/admin/mappings
-  - Business rules: GET/POST/PUT/DELETE /api/v1/admin/rules
-  - Golden examples: GET/POST/PUT/DELETE /api/v1/admin/golden-examples
-  - Cache refresh: POST /api/v1/admin/refresh-cache
+| Table | Description |
+|-------|-------------|
+| `schema_metadata` | เก็บข้อมูล columns สำหรับ AI context |
+| `schema_semantic_mapping` | map คำย่อ/business terms → SQL conditions |
+| `schema_business_rules` | กฎการสร้าง SQL สำหรับ AI |
+| Views | สำหรับ AI prompt building |
 
-  Phase 3: Enhanced Schema Service
+### 1.2 SQLAlchemy Models
+**File:** `app/models/schema_models.py`
 
-  Updated app/services/schema_service.py:
-  - get_semantic_mappings() - reads from database
-  - get_abbreviation_mappings() / get_term_mappings() - filtered methods
-  - build_semantic_mapping_text() - builds prompt section for AI
-  - get_schema_context() - now includes semantic mappings
+- `SchemaMetadata` - column metadata พร้อมชื่อไทย/อังกฤษ, data types, notes
+- `SchemaSemanticMapping` - keyword → SQL condition mapping
+- `SchemaBusinessRule` - กฎการสร้าง SQL
 
-  Phase 4: Database Abstraction Layer
+### 1.3 Populate Script
+**File:** `scripts/populate_schema_metadata.py`
 
-  Created app/services/database_adapter.py:
-  - DatabaseAdapter - abstract base class
-  - SQLiteAdapter - SQLite implementation
-  - PostgreSQLAdapter - PostgreSQL implementation
-  - MSSQLAdapter - SQL Server implementation
-  - create_adapter() - factory function
+- 22 schema metadata records
+- 38 semantic mappings (8 abbreviations + 25 business terms + 5 province mappings)
+- 12 business rules
 
-  Added DB_ENGINE setting to app/config.py.
+---
 
-  Phase 5: Golden Examples Enhancement
+## Phase 2: Admin API for Context Management
 
-  Updated app/services/prompt_manager.py:
-  - detect_categories() - keyword-based category detection
-  - auto_categorize() - automatic categorization of examples
-  - get_relevant_examples() - context-aware example selection
-  - get_category_counts() - statistics method
-  - Enhanced compose_system_prompt() with question-aware example selection
+**Files:** `app/api/v1/admin.py`, `app/schemas/admin_schemas.py`
 
-  Files Created/Modified
-  ┌─────────────────────────────────────────────┬──────────┐
-  │                    File                     │   Type   │
-  ├─────────────────────────────────────────────┼──────────┤
-  │ database/migrations/003_schema_metadata.sql │ New      │
-  ├─────────────────────────────────────────────┼──────────┤
-  │ app/models/schema_models.py                 │ New      │
-  ├─────────────────────────────────────────────┼──────────┤
-  │ app/api/v1/admin.py                         │ New      │
-  ├─────────────────────────────────────────────┼──────────┤
-  │ app/schemas/admin_schemas.py                │ New      │
-  ├─────────────────────────────────────────────┼──────────┤
-  │ app/services/database_adapter.py            │ New      │
-  ├─────────────────────────────────────────────┼──────────┤
-  │ scripts/populate_schema_metadata.py         │ New      │
-  ├─────────────────────────────────────────────┼──────────┤
-  │ app/services/schema_service.py              │ Modified │
-  ├─────────────────────────────────────────────┼──────────┤
-  │ app/services/prompt_manager.py              │ Modified │
-  ├─────────────────────────────────────────────┼──────────┤
-  │ app/config.py                               │ Modified │
-  ├─────────────────────────────────────────────┼──────────┤
-  │ app/main.py                                 │ Modified │
-  ├─────────────────────────────────────────────┼──────────┤
-  │ app/db/base.py                              │ Modified │
-  └─────────────────────────────────────────────┴──────────┘
-  Expected Improvements
-  ┌──────────────────┬─────────────────────────────────┬───────────────────────────────────────────────┐
-  │      Query       │             Before              │                     After                     │
-  ├──────────────────┼─────────────────────────────────┼───────────────────────────────────────────────┤
-  │ "รยได้ นป."       │ AI doesn't understand           │ Uses WHERE organization_group_abbr = 'นป.'    │
-  ├──────────────────┼─────────────────────────────────┼───────────────────────────────────────────────┤
-  │ "รยได้อสังหริมทรัพย์" │ Can't find column               │ Uses WHERE SERVICE_GROUP =                    │
-  │                  │                                 │ 'กลุ่มบริกรพัฒนสินทรัพย์'                            │
-  ├──────────────────┼─────────────────────────────────┼───────────────────────────────────────────────┤
-  │ "revenue by BU"  │ May confuse with BUSINESS_GROUP │ AI knows business_unit = organization         │
-  └──────────────────┴─────────────────────────────────┴───────────────────────────────────────────────┘
+| Endpoint | Description |
+|----------|-------------|
+| `GET/POST/PUT/DELETE /api/v1/admin/schema/columns` | จัดการ column metadata |
+| `GET/POST/PUT/DELETE /api/v1/admin/mappings` | จัดการ semantic mappings |
+| `GET/POST/PUT/DELETE /api/v1/admin/rules` | จัดการ business rules |
+| `GET/POST/PUT/DELETE /api/v1/admin/golden-examples` | จัดการ few-shot examples |
+| `POST /api/v1/admin/refresh-cache` | Refresh schema cache |
+
+---
+
+## Phase 3: Enhanced Schema Service
+
+**File:** `app/services/schema_service.py`
+
+| Method | Description |
+|--------|-------------|
+| `get_semantic_mappings()` | อ่าน mappings จาก database |
+| `get_abbreviation_mappings()` | กรองเฉพาะคำย่อ |
+| `get_term_mappings()` | กรองเฉพาะ business terms |
+| `build_semantic_mapping_text()` | สร้าง prompt section สำหรับ AI |
+| `get_schema_context()` | รวม semantic mappings ใน context |
+
+---
+
+## Phase 4: Database Abstraction Layer
+
+**File:** `app/services/database_adapter.py`
+
+| Class | Description |
+|-------|-------------|
+| `DatabaseAdapter` | Abstract base class |
+| `SQLiteAdapter` | SQLite implementation |
+| `PostgreSQLAdapter` | PostgreSQL implementation |
+| `MSSQLAdapter` | SQL Server implementation |
+| `create_adapter()` | Factory function |
+
+**Config:** เพิ่ม `DB_ENGINE` setting ใน `app/config.py`
+
+---
+
+## Phase 5: Golden Examples Enhancement
+
+**File:** `app/services/prompt_manager.py`
+
+| Method | Description |
+|--------|-------------|
+| `detect_categories()` | ตรวจจับ category จาก keywords |
+| `auto_categorize()` | จัดหมวดหมู่ examples อัตโนมัติ |
+| `get_relevant_examples()` | เลือก examples ตาม context |
+| `get_category_counts()` | สถิติจำนวน examples ต่อ category |
+| `compose_system_prompt()` | เลือก examples ตามคำถาม |
+
+---
+
+## Phase 6: Self-Correction Retry Mechanism (NEW)
+
+**File:** `app/services/ai_service.py`
+
+### 6.1 New Classes & Methods
+
+```python
+@dataclass
+class RetryStatus:
+    """Status update during retry process"""
+    attempt: int
+    max_attempts: int
+    status: str  # "generating", "executing", "error", "retrying", "success", "failed"
+    message: str
+    sql_query: Optional[str] = None
+    error: Optional[str] = None
+```
+
+| Method | Description |
+|--------|-------------|
+| `query_with_retry()` | Query พร้อม auto-retry เมื่อ SQL ผิด |
+| `_build_retry_prompt()` | สร้าง prompt สำหรับ retry พร้อม error context |
+| `_find_similar_values()` | หาค่าใกล้เคียงใน DB สำหรับ zero results |
+| `_check_zero_results_reason()` | วิเคราะห์สาเหตุที่ได้ 0 rows |
+
+### 6.2 Retry Types
+
+| Error Type | Trigger | Action |
+|------------|---------|--------|
+| `no_sql` | AI ไม่สร้าง SQL | ขอให้ AI สร้างใหม่ |
+| `validation_error` | SQL ไม่ผ่าน validation | ส่ง error กลับให้แก้ |
+| `execution_error` | SQL error (no such column/table) | ส่ง error + hints |
+| `zero_results` | ได้ 0 rows | ส่ง hints ค่าจริงใน DB |
+
+### 6.3 Zero Results Handling
+
+เมื่อ query ได้ 0 rows:
+1. วิเคราะห์ WHERE clause หาค่าที่ใช้
+2. ค้นหาค่าจริงใน database
+3. ส่ง hints กลับให้ AI:
+   ```
+   Column 'PRODUCT_NAME': ค่าที่มีในระบบ เช่น 'บริการ NT Broadband'...
+   Column 'organization_group_abbr': ค่าที่มีในระบบ เช่น 'อป.', 'ขบ.'...
+   ```
+4. AI ปรับ SQL ใหม่ (เช่น ใช้ LIKE แทน =)
+
+### 6.4 Flow Diagram
+
+```
+User Question
+     ↓
+[1] Generate SQL
+     ↓
+[2] Validate SQL
+     ↓
+[3] Execute SQL
+     ↓
+    ┌─── Error? ──────→ Retry with error hints
+    │
+    ├─── 0 rows? ─────→ Retry with value hints
+    │
+    └─── Success ─────→ Return result
+```
+
+---
+
+## Phase 7: Chat API with Retry Support (NEW)
+
+**Files:** `app/api/v1/chat.py`, `app/schemas/chat.py`
+
+### 7.1 Updated Request Schema
+
+```python
+class ChatRequest(BaseModel):
+    question: str
+    conversation_id: Optional[str] = None
+    provider: Optional[str] = "gemini"
+    max_retries: int = Field(default=3, ge=0, le=5)  # NEW
+```
+
+### 7.2 Updated Response Schema
+
+```python
+class ChatResponse(BaseModel):
+    id: int
+    conversation_id: Optional[str] = None
+    question: str
+    answer: str
+    sql_query: Optional[str]
+    data: Optional[List[Dict[str, Any]]] = None
+    execution_time_ms: float
+    retry_count: int = 0  # NEW
+    retry_history: Optional[List[RetryAttempt]] = None  # NEW
+```
+
+### 7.3 API Usage
+
+```bash
+POST /api/v1/chat/
+{
+    "question": "รายได้ nt broadband แยกจังหวัด",
+    "provider": "matcha",
+    "max_retries": 3
+}
+```
+
+Response:
+```json
+{
+    "answer": "...",
+    "sql_query": "SELECT section, SUM(revenue)...",
+    "retry_count": 1,
+    "retry_history": [
+        {
+            "attempt": 1,
+            "error_type": "execution_error",
+            "error": "no such column: province"
+        }
+    ]
+}
+```
+
+---
+
+## Phase 8: Province/Location Semantic Mapping (NEW)
+
+### 8.1 New Semantic Mappings
+
+| Keyword | Target Column | Description |
+|---------|---------------|-------------|
+| `จังหวัด` | `section` | จังหวัดอยู่ในชื่อ section |
+| `รายจังหวัด` | `section` | แยกรายจังหวัด |
+| `แยกจังหวัด` | `section` | แยกตามจังหวัด |
+| `province` | `section` | Province data |
+| `พื้นที่` | `section` | พื้นที่/จังหวัด |
+
+### 8.2 New Business Rules
+
+| Rule Code | Description |
+|-----------|-------------|
+| `PROVINCE_USE_SECTION` | เมื่อถามเรื่องจังหวัด ให้ใช้ `section` ไม่ใช่ `cost_center` |
+| `NO_PROVINCE_COLUMN` | ไม่มี column `province` หรือ `จังหวัด` ในตาราง |
+
+### 8.3 Result
+
+```sql
+-- ก่อน (ผิด)
+SELECT cost_center, SUM(revenue) FROM revenue_search GROUP BY cost_center
+-- Result: "2R30102" (รหัสอ่านไม่รู้เรื่อง)
+
+-- หลัง (ถูก)
+SELECT section, SUM(revenue) FROM revenue_search GROUP BY section
+-- Result: "ส่วนขายและบริการลูกค้า จันทบุรี" ✅
+```
+
+---
+
+## Files Summary
+
+### New Files
+
+| File | Description |
+|------|-------------|
+| `database/migrations/003_schema_metadata.sql` | Migration สำหรับ metadata tables |
+| `app/models/schema_models.py` | SQLAlchemy models |
+| `app/api/v1/admin.py` | Admin API endpoints |
+| `app/schemas/admin_schemas.py` | Pydantic schemas for admin API |
+| `app/services/database_adapter.py` | Database abstraction layer |
+| `scripts/populate_schema_metadata.py` | Populate initial data |
+| `scripts/test_retry_mechanism.py` | Test script for retry mechanism |
+
+### Modified Files
+
+| File | Changes |
+|------|---------|
+| `app/services/schema_service.py` | Semantic mappings, DB integration |
+| `app/services/prompt_manager.py` | Category-aware example selection |
+| `app/services/ai_service.py` | Retry mechanism, zero results handling |
+| `app/api/v1/chat.py` | Use `query_with_retry`, retry response |
+| `app/schemas/chat.py` | `max_retries`, `retry_count`, `retry_history` |
+| `app/config.py` | `DB_ENGINE` setting |
+| `app/main.py` | Include admin router |
+| `app/db/base.py` | Import schema models |
+
+---
+
+## Expected Improvements
+
+| Query | Before | After |
+|-------|--------|-------|
+| "รายได้ นป." | AI ไม่เข้าใจ | `WHERE organization_group_abbr = 'นป.'` |
+| "รายได้อสังหาริมทรัพย์" | หา column ไม่เจอ | `WHERE SERVICE_GROUP = 'กลุ่มบริการพัฒนาสินทรัพย์'` |
+| "revenue by BU" | สับสนกับ BUSINESS_GROUP | AI เข้าใจ business_unit = organization |
+| "แยกรายจังหวัด" | ใช้ `cost_center` (รหัส) | ใช้ `section` (ชื่อจังหวัด) |
+| "ผลิตภัณฑ์ Super Fiber" | 0 rows, ไม่มี retry | Retry พร้อม hints → ได้ข้อมูล |
+| SQL error: no such column | Error ทันที | Retry 3 ครั้งพร้อมแก้ไข |
+
+---
+
+## AI Providers Supported
+
+| Provider | Model | Status |
+|----------|-------|--------|
+| Claude | claude-sonnet-4-20250514 | ✅ Supported |
+| Gemini | gemini-2.0-flash-exp | ✅ Supported |
+| Matcha | gpt-4o (internal gateway) | ✅ Supported |
+
+---
+
+## Quick Test
+
+```bash
+# Test retry mechanism
+python scripts/test_retry_mechanism.py
+
+# Test specific query
+python -c "
+from app.config import settings
+from app.services.ai_service import create_matcha_service
+
+service = create_matcha_service(
+    api_key=settings.MATCHA_AI_API_KEY,
+    api_url=settings.MATCHA_API_URL,
+    db_path='./nt_revenue.sqlite',
+    model=settings.MATCHA_MODEL
+)
+service.refresh_schema()
+
+result = service.query_with_retry(
+    question='รายได้ nt broadband ของ อป.1 แยกเป็นรายจังหวัด',
+    max_retries=3
+)
+print(f'Rows: {len(result.data)}, Retries: {result.retry_count}')
+print(f'SQL: {result.sql_query}')
+"
+```
+
+---
+
+## Version History
+
+| Date | Version | Changes |
+|------|---------|---------|
+| 2025-01-27 | 1.0 | Phase 1-5: Schema metadata, Admin API, Database abstraction |
+| 2025-01-28 | 2.0 | Phase 6-8: Self-correction retry, Zero results handling, Province mapping |

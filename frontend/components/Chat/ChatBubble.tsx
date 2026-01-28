@@ -4,12 +4,19 @@ import Markdown from 'react-native-markdown-display';
 import { TechnicalAccordion } from './TechnicalAccordion';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
+export interface DataWarning {
+    code: string;
+    message: string;
+    severity: 'info' | 'warning' | 'important';
+}
+
 export interface Message {
     id: string | number;
     role: 'user' | 'assistant';
     content: string;
     sql?: string;
     executionTime?: number;
+    warnings?: DataWarning[];
 }
 
 interface ChatBubbleProps {
@@ -45,6 +52,39 @@ export const ChatBubble = ({ message }: ChatBubbleProps) => {
                         >
                             {message.content}
                         </Markdown>
+
+                        {/* Data Warnings */}
+                        {message.warnings && message.warnings.length > 0 && (
+                            <View className="mt-3 border-t border-gray-200 dark:border-gray-600 pt-3">
+                                {message.warnings.map((warning, index) => (
+                                    <View
+                                        key={index}
+                                        className={`flex-row items-start p-2 rounded-lg mb-2 ${
+                                            warning.severity === 'important'
+                                                ? 'bg-red-50 dark:bg-red-900/20'
+                                                : warning.severity === 'warning'
+                                                ? 'bg-amber-50 dark:bg-amber-900/20'
+                                                : 'bg-blue-50 dark:bg-blue-900/20'
+                                        }`}
+                                    >
+                                        <Text className="mr-2">
+                                            {warning.severity === 'important' ? '⚠️' : warning.severity === 'warning' ? '📝' : 'ℹ️'}
+                                        </Text>
+                                        <Text
+                                            className={`flex-1 text-sm ${
+                                                warning.severity === 'important'
+                                                    ? 'text-red-700 dark:text-red-300'
+                                                    : warning.severity === 'warning'
+                                                    ? 'text-amber-700 dark:text-amber-300'
+                                                    : 'text-blue-700 dark:text-blue-300'
+                                            }`}
+                                        >
+                                            {warning.message}
+                                        </Text>
+                                    </View>
+                                ))}
+                            </View>
+                        )}
 
                         {/* Technical Details Accordion */}
                         {message.sql && (
