@@ -7,12 +7,19 @@ Service สำหรับจัดการ schema metadata และสร้�
 - Claude API (Anthropic)
 - Google AI / Gemini API
 
+Enhanced Features (v2.0):
+- Schema metadata from database
+- Semantic mapping for abbreviations and business terms
+- Business rules from database
+- Database abstraction layer support
+
 Usage:
     schema_service = SchemaService(db_path="revenue.db")
     prompt = schema_service.build_system_prompt()
 """
 
 import sqlite3
+import json
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 from pathlib import Path
@@ -21,16 +28,18 @@ from pathlib import Path
 class SchemaService:
     """Service สำหรับจัดการ schema metadata"""
     
-    def __init__(self, db_path: str, metadata_db_path: Optional[str] = None):
+    def __init__(self, db_path: str = "nt_revenue.sqlite", metadata_db_path: Optional[str] = None, db_engine: str = "sqlite"):
         """
         Initialize SchemaService
         
         Args:
             db_path: Path to main database (revenue.db)
             metadata_db_path: Path to metadata database (default: same as db_path)
+            db_engine: Database engine type (e.g., "sqlite", "postgres")
         """
         self.db_path = db_path
         self.metadata_db_path = metadata_db_path or db_path
+        self.db_engine = db_engine.lower()
         self._cache: Dict[str, Any] = {}
     
     def _get_connection(self, path: str) -> sqlite3.Connection:
@@ -83,18 +92,18 @@ class SchemaService:
         """Get business rules from schema_business_rules table"""
         conn = self._get_connection(self.db_path)
         cursor = conn.cursor()
-        
+
         try:
             # Get rules for specific table or global rules (table_name IS NULL or 'ALL')
             cursor.execute("""
-                SELECT * FROM schema_business_rules 
-                WHERE is_active = 1 
+                SELECT * FROM schema_business_rules
+                WHERE is_active = 1
                 AND (table_name = ? OR table_name = 'ALL' OR table_name IS NULL)
-                ORDER BY 
-                    CASE severity 
-                        WHEN 'error' THEN 1 
-                        WHEN 'warning' THEN 2 
-                        ELSE 3 
+                ORDER BY
+                    CASE severity
+                        WHEN 'error' THEN 1
+                        WHEN 'warning' THEN 2
+                        ELSE 3
                     END
             """, (table_name,))
             return [dict(row) for row in cursor.fetchall()]
@@ -102,6 +111,38 @@ class SchemaService:
             return []
         finally:
             conn.close()
+
+    def get_semantic_mappings(self, keyword_type: Optional[str] = None) -> List[Dict]:
+        """Get semantic mappings from schema_semantic_mapping table"""
+        conn = self._get_connection(self.db_path)
+        cursor = conn.cursor()
+
+        try:
+            if keyword_type:
+                cursor.execute("""
+                    SELECT * FROM schema_semantic_mapping
+                    WHERE is_active = 1 AND keyword_type = ?
+                    ORDER BY priority DESC, keyword
+                """, (keyword_type,))
+            else:
+                cursor.execute("""
+                    SELECT * FROM schema_semantic_mapping
+                    WHERE is_active = 1
+                    ORDER BY priority DESC, keyword
+                """)
+            return [dict(row) for row in cursor.fetchall()]
+        except sqlite3.OperationalError:
+            return []
+        finally:
+            conn.close()
+
+    def get_abbreviation_mappings(self) -> List[Dict]:
+        """Get abbreviation mappings only"""
+        return self.get_semantic_mappings(keyword_type='abbreviation')
+
+    def get_term_mappings(self) -> List[Dict]:
+        """Get business term mappings only"""
+        return self.get_semantic_mappings(keyword_type='term')
     
     def get_sample_values(self, table_name: str = "revenue_search") -> Dict[str, List[str]]:
         """Get sample values for important columns"""
@@ -117,6 +158,8 @@ class SchemaService:
             ('department', 'department'),
             ('SERVICE_GROUP', 'SERVICE_GROUP'),
             ('BUSINESS_GROUP', 'BUSINESS_GROUP'),
+            ('PRODUCT_NAME', 'PRODUCT_NAME'),
+            ('PRODUCT_KEY', 'PRODUCT_KEY'),
         ]
         
         for col_name, col_sql in columns_to_sample:
@@ -276,19 +319,24 @@ REVENUE_VALUE และ AMOUNT มีหน่วยเป็น **บาท** (
 
 ### ℹ️ Organization Hierarchy
 DIVISION → GROUP → DEPARTMENT → SECTION → COST_CENTER
+
+### ℹ️ Common Abbreviations (คำย่อหน่วยงาน)
+- **นป.** = `กลุ่มขายและปฏิบัติการลูกค้า ภาคเหนือ` (ใช้ column `organization_group` หรือ `group`)
+- **บชง.** = `ฝ่ายบัญชีบริหารและกรอบอัตราค่าบริการ` (ใช้ column `department` หรือ `department_abbr`)
+
 """
     
     def build_sample_values_text(self, table_name: str = "revenue") -> str:
         """Build sample values text for AI prompt"""
-        
+
         samples = self.get_sample_values(table_name)
-        
+
         text = "## Available Values\n\n"
-        
+
         if 'DATA_RANGE' in samples:
             dr = samples['DATA_RANGE']
             text += f"**Data Range:** {dr.get('min_year')}/{dr.get('min_month')} - {dr.get('max_year')}/{dr.get('max_month')}\n\n"
-        
+
         for col, values in samples.items():
             if col == 'DATA_RANGE':
                 continue
@@ -299,25 +347,95 @@ DIVISION → GROUP → DEPARTMENT → SECTION → COST_CENTER
                 if len(values) > 10:
                     text += f"- ... และอื่นๆ อีก {len(values) - 10} รายการ\n"
                 text += "\n"
-        
+
         return text
+
+    def build_semantic_mapping_text(self) -> str:
+        """Build semantic mapping text for AI prompt"""
+
+        mappings = self.get_semantic_mappings()
+
+        if not mappings:
+            return self._get_default_semantic_mappings()
+
+        text = "## Semantic Mappings (การแปลงความหมาย)\n\n"
+
+        # Group by keyword_type
+        abbreviations = [m for m in mappings if m.get('keyword_type') == 'abbreviation']
+        terms = [m for m in mappings if m.get('keyword_type') == 'term']
+        synonyms = [m for m in mappings if m.get('keyword_type') == 'synonym']
+
+        if abbreviations:
+            text += "### คำย่อหน่วยงาน (Abbreviations)\n"
+            text += "| คำย่อ | Column | Condition | ความหมาย |\n"
+            text += "|-------|--------|-----------|----------|\n"
+            for m in abbreviations:
+                text += f"| {m['keyword']} | {m['target_column']} | {m['target_condition']} | {m.get('description', '')} |\n"
+            text += "\n"
+
+        if terms:
+            text += "### คำศัพท์ธุรกิจ (Business Terms)\n"
+            text += "| คำค้น | Column | Condition | ความหมาย |\n"
+            text += "|-------|--------|-----------|----------|\n"
+            for m in terms:
+                text += f"| {m['keyword']} | {m['target_column']} | {m['target_condition']} | {m.get('description', '')} |\n"
+            text += "\n"
+
+        if synonyms:
+            text += "### คำพ้องความหมาย (Synonyms)\n"
+            for m in synonyms:
+                text += f"- **{m['keyword']}** → `{m['target_column']} {m['target_condition']}`"
+                if m.get('description'):
+                    text += f" ({m['description']})"
+                text += "\n"
+            text += "\n"
+
+        text += """### วิธีใช้ Semantic Mappings
+เมื่อพบคำใน query ให้ใช้ condition ที่กำหนด เช่น:
+- "รายได้ นป." → `WHERE organization_group_abbr = 'นป.'`
+- "รายได้อสังหาริมทรัพย์" → `WHERE SERVICE_GROUP = 'กลุ่มบริการพัฒนาสินทรัพย์'`
+"""
+        return text
+
+    def _get_default_semantic_mappings(self) -> str:
+        """Get default semantic mappings if table doesn't exist"""
+        return """## Semantic Mappings (การแปลงความหมาย)
+
+### คำย่อหน่วยงาน (Abbreviations)
+- **นป.** → `organization_group_abbr = 'นป.'` (กลุ่มขายและปฏิบัติการลูกค้า ภาคเหนือ)
+- **บชง.** → `department_abbr = 'บชง.'` (ฝ่ายบัญชีบริหารและกรอบอัตราค่าบริการ)
+- **สญ.** → `division_abbr = 'สญ.'` (สายงานขายและบริการ)
+
+### คำศัพท์ธุรกิจ (Business Terms)
+- **อสังหาริมทรัพย์** → `SERVICE_GROUP = 'กลุ่มบริการพัฒนาสินทรัพย์'`
+- **ทรัพย์สิน** → `SERVICE_GROUP = 'กลุ่มบริการพัฒนาสินทรัพย์'`
+- **มือถือ** → `BUSINESS_GROUP = 'Mobile'`
+- **โทรศัพท์บ้าน** → `BUSINESS_GROUP = 'Fixed Line'`
+
+### วิธีใช้ Semantic Mappings
+เมื่อพบคำใน query ให้ใช้ condition ที่กำหนด
+"""
     
-    def get_schema_context(self, include_samples: bool = True) -> str:
-        """Get schema context (Schema + Rules + Samples + Date Info) without persona instructions"""
+    def get_schema_context(self, include_samples: bool = True, include_semantic_mappings: bool = True) -> str:
+        """Get schema context (Schema + Rules + Semantic Mappings + Samples + Date Info) without persona instructions"""
         date_format = self.get_date_format()
-        
-        context = self.build_schema_text(table_name="revenue_search") # Default to revenue_search
+
+        context = self.build_schema_text(table_name="revenue_search")  # Default to revenue_search
         context += "\n\n" + self.build_business_rules_text(table_name="revenue_search")
-        
+
+        # Add semantic mappings (abbreviations and business terms)
+        if include_semantic_mappings:
+            context += "\n\n" + self.build_semantic_mapping_text()
+
         if include_samples:
             context += "\n\n" + self.build_sample_values_text()
-            
+
         context += "\n\n" + self._get_date_instructions(date_format)
-        
+
         # Add current date
         context += f"\n\n## Current Date\nวันที่ปัจจุบัน: {datetime.now().strftime('%Y-%m-%d')}\n"
         context += f"ปี พ.ศ. ปัจจุบัน: {datetime.now().year + 543}\n"
-        
+
         return context
 
     def build_system_prompt(
@@ -360,8 +478,52 @@ DIVISION → GROUP → DEPARTMENT → SECTION → COST_CENTER
         else:
             return self._build_english_prompt(ai_provider, date_format)
             
+    def _get_syntax_rules(self, language: str = "thai") -> str:
+        """Get database-specific syntax rules"""
+        if self.db_engine == "postgresql":
+            if language == "thai":
+                return """   10. **Syntax สำหรับ PostgreSQL:**
+       - ใช้ `CONCAT(a, b)` หรือ `a || b` ได้
+       - การจัดรูปแบบวันที่ใช้ `to_char(date, 'YYYY-MM')`
+       - การแปลงชนิดข้อมูลใช้ `::integer` หรือ `CAST(col AS INTEGER)`
+       - ห้ามใช้ `strftime` (ของ SQLite)"""
+            else:
+                return """   10. **PostgreSQL Syntax:**
+       - Use `CONCAT(a, b)` or `a || b`
+       - Date formatting: `to_char(date, 'YYYY-MM')`
+       - Type casting: `::integer` or `CAST(col AS INTEGER)`
+       - NO `strftime` (SQLite specific)"""
+        
+        elif self.db_engine == "mssql":
+            if language == "thai":
+                return """   10. **Syntax สำหรับ MSSQL (SQL Server):**
+       - การต่อสตริงใช้ `+` เช่น `col1 + '-' + col2` (ห้ามใช้ `||`)
+       - การจัดรูปแบบวันที่ใช้ `FORMAT(date, 'yyyy-MM')`
+       - การแปลงชนิดข้อมูลใช้ `CONVERT(INT, col)` หรือ `CAST(col AS INT)`
+       - ห้ามใช้ `strftime`, `printf`, `LIMIT` (ใช้ `TOP` แทน)"""
+            else:
+                return """   10. **MSSQL Syntax:**
+       - String concatenation: Use `+` e.g. `col1 + '-' + col2` (NO `||`)
+       - Date formatting: `FORMAT(date, 'yyyy-MM')`
+       - Type casting: `CONVERT(INT, col)` or `CAST(col AS INT)`
+       - NO `strftime`, `printf`, `LIMIT` (Use `TOP` instead)"""
+               
+        else: # Default to sqlite
+            if language == "thai":
+                return """   10. **Syntax สำหรับ SQLite:**
+       - ห้ามใช้ `CONCAT(a, b)` -> ให้ใช้ `a || b` แทน
+       - ห้ามใช้ `LPAD` -> ให้ใช้ `printf('%02d', CAST(col AS INTEGER))`
+       - ห้ามใช้ `DATE_FORMAT` -> ให้ใช้ `strftime`"""
+            else:
+                return """   10. **SQLite Syntax:**
+       - NO `CONCAT(a, b)` -> Use `a || b` instead
+       - NO `LPAD` -> Use `printf('%02d', CAST(col AS INTEGER))`
+       - NO `DATE_FORMAT` -> Use `strftime`"""
+
     def _build_thai_prompt(self, ai_provider: str, date_format: str) -> str:
         """Build Thai language system prompt"""
+        
+        syntax_rules = self._get_syntax_rules("thai")
         
         return f"""คุณเป็น AI Assistant สำหรับวิเคราะห์ข้อมูลรายได้ของ NT (National Telecom)
 
@@ -378,15 +540,41 @@ DIVISION → GROUP → DEPARTMENT → SECTION → COST_CENTER
    - `business_unit` = **โครงสร้างหน่วยงาน/BU** (เช่น กลุ่มขายและตลาด, กลุ่มธุรกิจสื่อสารไร้สาย) **ไม่ใช่**กลุ่มผลิตภัณฑ์
    - `BUSINESS_GROUP` = **กลุ่มผลิตภัณฑ์** (เช่น Mobile, Fixed Line, Digital)
    - `SERVICE_GROUP` = กลุ่มบริการ (Service Group)
+   - `PRODUCT_NAME` = ชื่อผลิตภัณฑ์
+   - `SUB_PRODUCT_NAME` = ชื่อผลิตภัณฑ์ย่อย
+   - `PRODUCT_KEY` = รหัสผลิตภัณฑ์
+   - `PRODUCT` = รหัสผลิตภัณฑ์ + ชื่อผลิตภัณฑ์
    - `account_category` = หมวดบัญชี
    - `year`, `month` = ปี, เดือน
 5. ใช้ `year` และ `month` สำหรับ filter เวลา
 6. หน่วยรายได้เป็น **บาท**
-7. SELECT query เท่านั้น
-8. **ระวัง!** Column `YEAR` และ `MONTH` เป็นประเภท Text/String
    - เวลาเปรียบเทียบหรือหาค่ามากสุด ต้องแปลงเป็นตัวเลขเสมอ
    - เช่น: `MAX(CAST(MONTH AS INTEGER))` หรือ `ORDER BY CAST(YEAR AS INTEGER) DESC`
    - ห้ามใช้ `MAX(MONTH)` เฉยๆ เพราะ "9" จะมากกว่า "10" (Text sort)
+7. SELECT query เท่านั้น (ห้ามมี semicolon คั่นหลาย query)
+   - **กฎเหล็ก UNION + ORDER BY/LIMIT:** ต้องครอบ **ทั้งสองส่วน** ด้วย subquery!
+   - ❌ ผิด: `SELECT ... ORDER BY ... LIMIT 5 UNION ALL SELECT ...` (ไม่มี subquery ครอบส่วนแรก)
+   - ✅ ถูกต้อง: ครอบ **ทุกส่วน** ที่มี ORDER BY/LIMIT ด้วย `SELECT * FROM (...)`
+
+   **ตัวอย่าง Top 5 และ Bottom 5:**
+   ```sql
+   SELECT 'มากสุด' as category, col, total FROM (
+       SELECT col, SUM(revenue) as total FROM revenue_search GROUP BY col ORDER BY total DESC LIMIT 5
+   )
+   UNION ALL
+   SELECT 'น้อยสุด' as category, col, total FROM (
+       SELECT col, SUM(revenue) as total FROM revenue_search GROUP BY col ORDER BY total ASC LIMIT 5
+   )
+   ```
+8. **ห้าม** ใช้ table `revenue` โดยตรง ต้องใช้ view `revenue_search` เท่านั้น
+9. **คำย่อ (Abbreviations):**
+   - คำย่อหน่วยงานใช้ column: `department_abbr`, `division_abbr`, `organization_group_abbr`, `section_abbr`
+   - ตัวอย่าง: `WHERE department_abbr = 'บชง.'`
+10. **การแปลงความหมาย (Semantic Mapping):**
+   - "อสังหาริมทรัพย์" หรือ "ทรัพย์สิน" → `SERVICE_GROUP = 'กลุ่มบริการพัฒนาสินทรัพย์'`
+   - "มือถือ" → `BUSINESS_GROUP = 'Mobile'`
+   - "โทรศัพท์บ้าน" → `BUSINESS_GROUP = 'Fixed Line'`
+{syntax_rules}
 
 ## รูปแบบการตอบ
 1. แสดง SQL query ที่ใช้
@@ -395,6 +583,8 @@ DIVISION → GROUP → DEPARTMENT → SECTION → COST_CENTER
     
     def _build_english_prompt(self, ai_provider: str, date_format: str) -> str:
         """Build English language system prompt"""
+        
+        syntax_rules = self._get_syntax_rules("english")
         
         return f"""You are an AI Assistant for analyzing NT (National Telecom) revenue data.
 
@@ -407,11 +597,32 @@ DIVISION → GROUP → DEPARTMENT → SECTION → COST_CENTER
 1. Use SQLite syntax only
 2. Query from table/view: **revenue_search**
 3. Use `SUM(revenue)` for total revenue
+   - **IMPORTANT:** Generate only ONE SQL statement. Do not separate multiple queries with `;`.
+   - **CRITICAL RULE for UNION + ORDER BY/LIMIT:** Wrap **BOTH parts** in subqueries!
+   - ❌ WRONG: `SELECT ... ORDER BY ... LIMIT 5 UNION ALL SELECT ...` (first part not wrapped)
+   - ✅ CORRECT: Wrap **EVERY part** that has ORDER BY/LIMIT with `SELECT * FROM (...)`
+
+   **Example for Top 5 AND Bottom 5:**
+   ```sql
+   SELECT 'Top' as category, col, total FROM (
+       SELECT col, SUM(revenue) as total FROM revenue_search GROUP BY col ORDER BY total DESC LIMIT 5
+   )
+   UNION ALL
+   SELECT 'Bottom' as category, col, total FROM (
+       SELECT col, SUM(revenue) as total FROM revenue_search GROUP BY col ORDER BY total ASC LIMIT 5
+   )
+   ```
 4. All columns are in English (no Thai quotes needed)
    - `business_unit` = **Organization/BU** (e.g. Sales Group, Wireless Group) - NOT Product
    - `BUSINESS_GROUP` = **Product Line** (e.g. Mobile, Fixed Line)
    - `SERVICE_GROUP` = Service Group
+   - `PRODUCT_NAME` = Product Name
+   - `PRODUCT_KEY` = Product Key
+   - `PRODUCT` = Product Key + Product Name
    - `account_category` = Account Category
+   - **Semantic Mapping:**
+     - "Real Estate" or "Property" -> Use `SERVICE_GROUP = 'กลุ่มบริการพัฒนาสินทรัพย์'`
+     - "Retail" -> Use `service_group` containing "Retail" or "ค้าปลีก"
    - `year`, `month`
 5. Use `year` and `month` for time filtering
 6. Revenue unit is **Baht**
@@ -420,6 +631,10 @@ DIVISION → GROUP → DEPARTMENT → SECTION → COST_CENTER
    - Always cast to integer for comparisons, sorting, or max/min
    - Example: `MAX(CAST(MONTH AS INTEGER))` or `ORDER BY CAST(YEAR AS INTEGER) DESC`
    - Do NOT use plain `MAX(MONTH)` because "9" > "10" in text sorting
+9. **Abbreviations:**
+   - E.g. `department_abbr`, `division_abbr`, `organization_group_abbr`, `section_abbr`
+   - E.g. `WHERE department_abbr = 'บชง.'`
+{syntax_rules}
 
 ## Response Format
 1. Show the SQL query used

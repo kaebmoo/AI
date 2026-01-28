@@ -51,7 +51,7 @@ def chat(
                 history.append({"role": "assistant", "content": chat.ai_response})
     
     # 3. Instantiate AI Service based on provider
-    from app.services.ai_service import create_gemini_service, create_claude_service
+    from app.services.ai_service import create_gemini_service, create_claude_service, create_matcha_service
     from app.config import settings
     from app.services.prompt_manager import PromptManager
     
@@ -79,7 +79,7 @@ def chat(
         if not settings.GOOGLE_AI_API_KEY:
              raise HTTPException(status_code=500, detail="GOOGLE_AI_API_KEY not configured")
              
-        # Get DB path
+        # Get DB path (helper could be extracted)
         if "sqlite" in settings.DATABASE_URL:
             db_path = settings.DATABASE_URL.replace("sqlite:///", "")
         else:
@@ -89,6 +89,23 @@ def chat(
             api_key=settings.GOOGLE_AI_API_KEY,
             db_path=db_path,
             model=settings.GEMINI_MODEL,
+            prompt_manager=prompt_manager
+        )
+    elif provider == "matcha":
+        if not settings.MATCHA_AI_API_KEY or not settings.MATCHA_API_URL:
+             raise HTTPException(status_code=500, detail="MATCHA configuration missing (KEY or URL)")
+             
+        # Get DB path
+        if "sqlite" in settings.DATABASE_URL:
+            db_path = settings.DATABASE_URL.replace("sqlite:///", "")
+        else:
+            db_path = "nt_revenue.sqlite"
+            
+        ai_service = create_matcha_service(
+            api_key=settings.MATCHA_AI_API_KEY,
+            api_url=settings.MATCHA_API_URL,
+            db_path=db_path,
+            model=settings.MATCHA_MODEL,
             prompt_manager=prompt_manager
         )
     else:
