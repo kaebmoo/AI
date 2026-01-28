@@ -13,14 +13,14 @@
 | Phase 2: Authentication  | 90%   | Auth & OTP & Rate Limit เสร็จ, ขาด RBAC เต็มรูปแบบ |
 | Phase 3: Core Features   | 85%   | AI Integration เสร็จแล้ว (Claude + Gemini)      |
 | Phase 3.5: Feedback Loop | 80%   | Models & Services มี, ขาด admin endpoints       |
-| Phase 4: Frontend (Expo) | 0%    | ยังไม่เริ่ม                                     |
+| Phase 4: Frontend (Expo) | 30%   | เริ่มแล้ว: Chat UI & Auth basic functioning     |
 | Phase 4.5: Telegram Bot  | 0%    | ยังไม่เริ่ม                                     |
 | Phase 5-6: Reports       | 0%    | ยังไม่เริ่ม                                     |
 | Phase 7: Testing         | 10%   | มี scripts แต่ยังไม่เป็น pytest                 |
 | Phase 7.5: DR & Backup   | 0%    | ยังไม่เริ่ม                                     |
 | Phase 8: Deployment      | 0%    | ยังไม่เริ่ม                                     |
 
-**รวม: ~60%**
+**รวม: ~65%**
 
 ---
 
@@ -161,25 +161,31 @@
 
 ---
 
-## Phase 4: Universal Frontend (Expo) ❌ 0%
+## Phase 4: Universal Frontend (Expo) ⚠️ 30%
+
+### ทำเสร็จแล้ว
+
+- [x] Expo project setup (`frontend/`)
+- [x] NativeWind (TailwindCSS) configuration
+- [x] Expo Router setup (`app/(app)`, `app/(auth)`)
+- [x] Authentication screens
+  - [x] Login page (`login.tsx`)
+  - [x] OTP verification page (`verify.tsx`)
+- [x] Main app tabs
+  - [x] Chat interface (`index.tsx`)
+  - [ ] History list
+  - [ ] Settings page
+- [x] API client (`services/chat.ts`, `services/auth.ts`)
+- [x] Auth Context (`context/AuthContext.tsx`)
+- [x] Model Selector UI
 
 ### ยังไม่ได้ทำ
 
-- [ ] `frontend/` directory structure
-- [ ] Expo project setup
-- [ ] NativeWind (TailwindCSS) configuration
-- [ ] Expo Router setup
-- [ ] Authentication screens
-  - [ ] Login page
-  - [ ] OTP verification page
-- [ ] Main app tabs
-  - [ ] Chat interface
-  - [ ] History list
-  - [ ] Settings page
-- [ ] API client (TanStack Query + Axios)
-- [ ] Theme toggle (light/dark)
-- [ ] Markdown rendering
+- [ ] History list screen
+- [ ] Settings screen (Theme, Language)
+- [ ] Markdown rendering in Chat (currently basic text)
 - [ ] Copy SQL/Result buttons
+- [ ] Mobile-specific optimizations
 
 ---
 
