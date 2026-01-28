@@ -1,13 +1,29 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, List, Any, Dict
+
 
 class ChatRequest(BaseModel):
     question: str
-    session_id: Optional[str] = None
-    session_id: Optional[str] = None
     conversation_id: Optional[str] = None
-    provider: Optional[str] = "gemini" # 'claude' or 'gemini', default to gemini or settings
-    
+    provider: Optional[str] = "gemini"  # 'claude', 'gemini', or 'matcha'
+    max_retries: int = Field(default=3, ge=0, le=5, description="Max retry attempts when SQL fails (0-5)")
+
+
+class RetryAttempt(BaseModel):
+    """Single retry attempt info"""
+    attempt: int
+    error_type: str
+    error: str
+    sql: Optional[str] = None
+
+
+class DataWarning(BaseModel):
+    """Warning message about data interpretation"""
+    code: str
+    message: str
+    severity: str = "info"  # info, warning, important
+
+
 class ChatResponse(BaseModel):
     id: int
     conversation_id: Optional[str] = None
@@ -16,3 +32,6 @@ class ChatResponse(BaseModel):
     sql_query: Optional[str]
     data: Optional[List[Dict[str, Any]]] = None
     execution_time_ms: float
+    retry_count: int = Field(default=0, description="Number of retries performed")
+    retry_history: Optional[List[RetryAttempt]] = Field(default=None, description="Retry attempt details")
+    warnings: Optional[List[DataWarning]] = Field(default=None, description="Data interpretation warnings")

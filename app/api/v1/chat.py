@@ -1,15 +1,82 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Dict, Any
 import time
 
 from app.api import deps
 from app.models.user import User
 from app.models.chat import ChatHistory
-from app.schemas.chat import ChatRequest, ChatResponse
+from app.schemas.chat import ChatRequest, ChatResponse, DataWarning
 from app.services.ai_service import AIService
 
 router = APIRouter()
+
+
+# =============================================================================
+# Data Warning Detection
+# =============================================================================
+
+# Warning definitions - can be moved to database for admin management
+DATA_WARNINGS = [
+    {
+        "code": "OTHER_REVENUE_NOT_NET",
+        "keywords": ["รายได้อื่น"],
+        "exclude_keywords": ["ผลตอบแทนทางการเงิน"],
+        "columns_to_check": ["BUSINESS_GROUP", "SERVICE_GROUP", "PRODUCT_NAME", "gl_group"],
+        "message": "หมายเหตุ: 'รายได้อื่น' เป็นรายได้ที่ยังไม่สุทธิ",
+        "severity": "warning"
+    },
+]
+
+
+def detect_data_warnings(data: List[Dict[str, Any]], sql_query: str = None) -> List[DataWarning]:
+    """
+    Detect warnings based on data content.
+
+    Args:
+        data: Query result data
+        sql_query: The SQL query used (for additional context)
+
+    Returns:
+        List of DataWarning objects
+    """
+    warnings = []
+
+    if not data:
+        return warnings
+
+    # Convert data to searchable string for each row
+    for warning_def in DATA_WARNINGS:
+        warning_triggered = False
+        has_exclude = False
+
+        for row in data:
+            row_str = str(row.values()).lower()
+
+            # Check if any keyword matches
+            for keyword in warning_def["keywords"]:
+                if keyword.lower() in row_str:
+                    warning_triggered = True
+                    break
+
+            # Check if exclude keyword exists (means this is an exception)
+            for exclude in warning_def.get("exclude_keywords", []):
+                if exclude.lower() in row_str:
+                    has_exclude = True
+                    break
+
+            if warning_triggered:
+                break
+
+        # Add warning if triggered (even if some rows have exclude, still warn)
+        if warning_triggered:
+            warnings.append(DataWarning(
+                code=warning_def["code"],
+                message=warning_def["message"],
+                severity=warning_def["severity"]
+            ))
+
+    return warnings
 
 @router.post("/", response_model=ChatResponse)
 def chat(
@@ -111,11 +178,28 @@ def chat(
     else:
         raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
 
-    # 4. Call AI Service with history
-    result = ai_service.query(request.question, history=history)
-    
+    # 4. Call AI Service with retry mechanism
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # Use query_with_retry for automatic self-correction
+    result = ai_service.query_with_retry(
+        question=request.question,
+        max_retries=request.max_retries,
+        history=history,
+        on_status=lambda status: logger.info(
+            f"Retry status: attempt={status.attempt}/{status.max_attempts}, "
+            f"status={status.status}, message={status.message}"
+        ),
+        explain=True
+    )
+
     execution_time = (time.time() - start_time) * 1000
-    
+
+    # Log retry info
+    if result.retry_count > 0:
+        logger.info(f"Query succeeded after {result.retry_count} retries for question: {request.question[:50]}...")
+
     # Save History
     chat_entry = ChatHistory(
         user_id=current_user.id,
@@ -130,10 +214,29 @@ def chat(
     db.add(chat_entry)
     db.commit()
     db.refresh(chat_entry)
-    
-    if result.error:
-         # Depending on requirement, might want to return 400 or just the error message in answer
-         pass
+
+    # Prepare retry history for response
+    retry_history_response = None
+    if result.retry_history:
+        retry_history_response = [
+            {
+                "attempt": r.get("attempt", 0),
+                "error_type": r.get("error_type", "unknown"),
+                "error": r.get("error", ""),
+                "sql": r.get("sql")
+            }
+            for r in result.retry_history
+        ]
+
+    # Detect data warnings
+    warnings_response = None
+    if result.data:
+        detected_warnings = detect_data_warnings(result.data, result.sql_query)
+        if detected_warnings:
+            warnings_response = [
+                {"code": w.code, "message": w.message, "severity": w.severity}
+                for w in detected_warnings
+            ]
 
     return {
         "id": chat_entry.id,
@@ -142,7 +245,10 @@ def chat(
         "answer": chat_entry.ai_response,
         "sql_query": result.sql_query,
         "data": result.data,
-        "execution_time_ms": execution_time
+        "execution_time_ms": execution_time,
+        "retry_count": result.retry_count,
+        "retry_history": retry_history_response,
+        "warnings": warnings_response
     }
 
 @router.get("/history", response_model=List[ChatResponse])

@@ -84,6 +84,19 @@ class QueryResult:
     provider: str
     raw_response: Optional[str] = None
     error: Optional[str] = None
+    retry_count: int = 0  # จำนวนครั้งที่ retry
+    retry_history: Optional[List[Dict]] = None  # ประวัติการ retry
+
+
+@dataclass
+class RetryStatus:
+    """Status update during retry process"""
+    attempt: int
+    max_attempts: int
+    status: str  # "generating", "executing", "error", "retrying", "success", "failed"
+    message: str
+    sql_query: Optional[str] = None
+    error: Optional[str] = None
 
 
 class AIProvider(ABC):
@@ -647,17 +660,112 @@ class AIService:
     
     def execute_sql(self, sql: str) -> List[Dict]:
         """Execute SQL query and return results"""
-        
+
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        
+
         try:
             cursor.execute(sql)
             rows = cursor.fetchall()
             return [dict(row) for row in rows]
         finally:
             conn.close()
+
+    def _find_similar_values(self, sql: str, limit: int = 5) -> Dict[str, List[str]]:
+        """
+        Find actual values in database for columns used in WHERE clause.
+        Helps AI understand what values exist when query returns 0 rows.
+
+        Returns:
+            Dict mapping column names to sample values found in DB
+        """
+        import re
+        suggestions = {}
+
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            # Extract column conditions from WHERE clause
+            # Patterns: column = 'value', column LIKE '%value%', column IN (...)
+            where_match = re.search(r'WHERE\s+(.+?)(?:GROUP BY|ORDER BY|LIMIT|$)', sql, re.IGNORECASE | re.DOTALL)
+            if not where_match:
+                return suggestions
+
+            where_clause = where_match.group(1)
+
+            # Find column = 'value' patterns
+            eq_patterns = re.findall(r"(\w+)\s*=\s*'([^']+)'", where_clause, re.IGNORECASE)
+            like_patterns = re.findall(r"(\w+)\s+LIKE\s+'%?([^%']+)%?'", where_clause, re.IGNORECASE)
+
+            all_patterns = eq_patterns + like_patterns
+
+            for column, value in all_patterns:
+                # Skip common columns that don't need suggestions
+                if column.lower() in ('year', 'month', 'date'):
+                    continue
+
+                try:
+                    # Find distinct values that might match
+                    # First try exact table
+                    query = f"""
+                        SELECT DISTINCT "{column}"
+                        FROM revenue_search
+                        WHERE "{column}" IS NOT NULL
+                        LIMIT {limit * 2}
+                    """
+                    cursor.execute(query)
+                    all_values = [row[0] for row in cursor.fetchall() if row[0]]
+
+                    # Find similar values (containing search term or similar)
+                    search_term = value.lower()
+                    similar = []
+                    exact_exists = False
+
+                    for v in all_values:
+                        v_lower = str(v).lower()
+                        if v_lower == search_term:
+                            exact_exists = True
+                        elif search_term in v_lower or v_lower in search_term:
+                            similar.append(str(v))
+
+                    # If exact value doesn't exist, provide suggestions
+                    if not exact_exists:
+                        if similar:
+                            suggestions[column] = similar[:limit]
+                        else:
+                            # No similar found, show sample values
+                            suggestions[column] = [str(v) for v in all_values[:limit]]
+
+                except Exception as e:
+                    logger.debug(f"Could not find values for column {column}: {e}")
+                    continue
+
+            conn.close()
+
+        except Exception as e:
+            logger.warning(f"Error finding similar values: {e}")
+
+        return suggestions
+
+    def _check_zero_results_reason(self, sql: str) -> Optional[str]:
+        """
+        Analyze why a query might return 0 results.
+        Returns hint text if issues found.
+        """
+        suggestions = self._find_similar_values(sql)
+
+        if not suggestions:
+            return None
+
+        hint_parts = ["ค่าที่ใช้ใน WHERE clause อาจไม่ตรงกับข้อมูลจริง:"]
+
+        for column, values in suggestions.items():
+            values_str = ", ".join([f"'{v}'" for v in values[:5]])
+            hint_parts.append(f"  - Column '{column}': ค่าที่มีในระบบ เช่น {values_str}")
+
+        return "\n".join(hint_parts)
     
     def query(self, question: str, explain: bool = True, history: List[Dict] = []) -> QueryResult:
         """
@@ -730,6 +838,296 @@ class AIService:
             provider=self.provider_name
         )
     
+    def query_with_retry(
+        self,
+        question: str,
+        max_retries: int = 3,
+        history: List[Dict] = [],
+        on_status: Optional[Callable[[RetryStatus], None]] = None,
+        explain: bool = True
+    ) -> QueryResult:
+        """
+        Process question with automatic retry on SQL errors.
+
+        When SQL generation or execution fails, sends the error back to AI
+        to self-correct and try again.
+
+        Args:
+            question: User's question
+            max_retries: Maximum retry attempts (default 3)
+            history: Conversation history
+            on_status: Callback function for status updates
+            explain: Whether to generate explanation
+
+        Returns:
+            QueryResult with retry information
+        """
+
+        def notify(attempt: int, status: str, message: str, sql: str = None, error: str = None):
+            """Send status notification if callback provided"""
+            if on_status:
+                on_status(RetryStatus(
+                    attempt=attempt,
+                    max_attempts=max_retries + 1,  # +1 for initial attempt
+                    status=status,
+                    message=message,
+                    sql_query=sql,
+                    error=error
+                ))
+
+        retry_history = []
+        total_tokens = 0
+        current_history = list(history)  # Copy to avoid mutation
+
+        for attempt in range(max_retries + 1):  # +1 for initial attempt
+            attempt_num = attempt + 1
+
+            # Status: Generating SQL
+            notify(attempt_num, "generating",
+                   f"กำลังสร้าง SQL... (ครั้งที่ {attempt_num})")
+
+            # Generate SQL
+            try:
+                if attempt == 0:
+                    # First attempt - use original question
+                    ai_result = self.provider.generate_sql(
+                        question, self.system_prompt, current_history
+                    )
+                else:
+                    # Retry attempt - include error context
+                    retry_prompt = self._build_retry_prompt(
+                        question,
+                        retry_history[-1] if retry_history else {}
+                    )
+                    ai_result = self.provider.generate_sql(
+                        retry_prompt, self.system_prompt, current_history
+                    )
+
+            except Exception as e:
+                logger.error(f"AI generation error on attempt {attempt_num}: {str(e)}")
+                notify(attempt_num, "error",
+                       f"เกิดข้อผิดพลาดในการติดต่อ AI: {str(e)}")
+
+                retry_history.append({
+                    "attempt": attempt_num,
+                    "error_type": "generation_error",
+                    "error": str(e)
+                })
+                continue
+
+            sql_query = ai_result.get("sql")
+            total_tokens += ai_result.get("tokens_used", 0)
+
+            # Check if SQL was generated
+            if not sql_query:
+                logger.warning(f"No SQL generated on attempt {attempt_num}")
+                notify(attempt_num, "error",
+                       "AI ไม่สามารถสร้าง SQL ได้ กำลังลองใหม่...")
+
+                retry_history.append({
+                    "attempt": attempt_num,
+                    "error_type": "no_sql",
+                    "error": "AI did not generate SQL query",
+                    "raw_response": ai_result.get("raw_response", "")[:500]
+                })
+                continue
+
+            # Validate SQL
+            notify(attempt_num, "executing",
+                   f"กำลังตรวจสอบและ execute SQL...", sql=sql_query)
+
+            is_valid, validation_error = self.validate_sql(sql_query)
+
+            if not is_valid:
+                logger.warning(f"SQL validation failed on attempt {attempt_num}: {validation_error}")
+                notify(attempt_num, "error",
+                       f"SQL ไม่ถูกต้อง: {validation_error}",
+                       sql=sql_query, error=validation_error)
+
+                retry_history.append({
+                    "attempt": attempt_num,
+                    "error_type": "validation_error",
+                    "sql": sql_query,
+                    "error": validation_error
+                })
+                continue
+
+            # Execute SQL
+            try:
+                data = self.execute_sql(sql_query)
+
+                # Check for zero results - might need retry with better conditions
+                if len(data) == 0 and attempt < max_retries:
+                    # Analyze why we got 0 results
+                    zero_hint = self._check_zero_results_reason(sql_query)
+
+                    if zero_hint:
+                        logger.info(f"Query returned 0 rows on attempt {attempt_num}, will retry with hints")
+                        notify(attempt_num, "retrying",
+                               f"ได้ 0 แถว - กำลังตรวจสอบเงื่อนไขและลองใหม่...",
+                               sql=sql_query, error="Zero results - conditions may not match data")
+
+                        retry_history.append({
+                            "attempt": attempt_num,
+                            "error_type": "zero_results",
+                            "sql": sql_query,
+                            "error": "Query returned 0 rows",
+                            "hint": zero_hint
+                        })
+                        continue  # Try again with hints
+
+                # Success! (either has data, or 0 rows but no hints to improve)
+                notify(attempt_num, "success",
+                       f"สำเร็จ! ได้ข้อมูล {len(data)} แถว", sql=sql_query)
+
+                # Generate explanation
+                explanation = ai_result.get("explanation", "")
+                if explain and data:
+                    try:
+                        explanation = self.provider.explain_result(
+                            question, sql_query, data, self.system_prompt
+                        )
+                    except:
+                        pass
+                elif len(data) == 0:
+                    # No data - provide helpful message
+                    explanation = "ไม่พบข้อมูลที่ตรงกับเงื่อนไขที่ระบุ อาจเป็นเพราะ:\n" \
+                                  "- ชื่อหน่วยงาน/ผลิตภัณฑ์ไม่ตรงกับที่มีในระบบ\n" \
+                                  "- ช่วงเวลาที่ระบุไม่มีข้อมูล\n" \
+                                  "กรุณาตรวจสอบเงื่อนไขหรือลองถามใหม่ด้วยคำอื่น"
+
+                return QueryResult(
+                    question=question,
+                    sql_query=sql_query,
+                    data=data,
+                    explanation=explanation,
+                    tokens_used=total_tokens,
+                    provider=self.provider_name,
+                    retry_count=attempt,
+                    retry_history=retry_history if retry_history else None
+                )
+
+            except Exception as e:
+                error_msg = str(e)
+                logger.warning(f"SQL execution error on attempt {attempt_num}: {error_msg}")
+
+                notify(attempt_num, "retrying" if attempt < max_retries else "failed",
+                       f"SQL Error: {error_msg}", sql=sql_query, error=error_msg)
+
+                retry_history.append({
+                    "attempt": attempt_num,
+                    "error_type": "execution_error",
+                    "sql": sql_query,
+                    "error": error_msg
+                })
+
+        # All retries exhausted
+        notify(max_retries + 1, "failed",
+               f"ไม่สามารถสร้าง SQL ที่ถูกต้องได้หลังจากลอง {max_retries + 1} ครั้ง")
+
+        last_error = retry_history[-1] if retry_history else {}
+
+        return QueryResult(
+            question=question,
+            sql_query=last_error.get("sql", ""),
+            data=[],
+            explanation="",
+            tokens_used=total_tokens,
+            provider=self.provider_name,
+            error=f"ไม่สามารถสร้าง SQL ที่ถูกต้องได้หลังจากลอง {max_retries + 1} ครั้ง: {last_error.get('error', 'Unknown error')}",
+            retry_count=max_retries,
+            retry_history=retry_history
+        )
+
+    def _build_retry_prompt(self, original_question: str, last_error: Dict) -> str:
+        """
+        Build a prompt for retry attempt, including error context.
+        """
+        error_type = last_error.get("error_type", "unknown")
+        error_msg = last_error.get("error", "Unknown error")
+        failed_sql = last_error.get("sql", "")
+
+        if error_type == "no_sql":
+            return f"""คำถามเดิม: {original_question}
+
+ความพยายามก่อนหน้านี้ไม่ได้สร้าง SQL query ออกมา
+กรุณาสร้าง SQL query ให้ถูกต้อง โดยใช้ columns ที่มีอยู่ใน schema เท่านั้น"""
+
+        elif error_type == "validation_error":
+            return f"""คำถามเดิม: {original_question}
+
+SQL ที่สร้างไม่ถูกต้อง:
+```sql
+{failed_sql}
+```
+
+ข้อผิดพลาด: {error_msg}
+
+กรุณาแก้ไข SQL ให้ถูกต้อง"""
+
+        elif error_type == "execution_error":
+            # Extract useful info from error
+            hint = ""
+            if "no such column" in error_msg.lower():
+                # Extract column name
+                import re
+                col_match = re.search(r'no such column:\s*(\w+)', error_msg, re.IGNORECASE)
+                if col_match:
+                    bad_column = col_match.group(1)
+                    hint = f"\n\nหมายเหตุ: Column '{bad_column}' ไม่มีอยู่ในตาราง กรุณาตรวจสอบ schema และใช้ column ที่มีอยู่จริง"
+
+            elif "no such table" in error_msg.lower():
+                hint = "\n\nหมายเหตุ: ตารางที่ระบุไม่มีอยู่ กรุณาใช้ตาราง revenue_search"
+
+            elif "syntax error" in error_msg.lower():
+                hint = "\n\nหมายเหตุ: มี syntax error ใน SQL กรุณาตรวจสอบ syntax ให้ถูกต้อง"
+
+            return f"""คำถามเดิม: {original_question}
+
+SQL ที่ลองแล้วมีปัญหา:
+```sql
+{failed_sql}
+```
+
+Error ที่เกิดขึ้น: {error_msg}
+{hint}
+
+กรุณาแก้ไข SQL โดย:
+1. ใช้เฉพาะ columns ที่มีอยู่ใน schema จริงๆ
+2. ตรวจสอบชื่อ column ให้ถูกต้อง (ใช้ double quotes สำหรับชื่อไทย)
+3. ตรวจสอบ syntax ให้ถูกต้อง
+
+ถ้าไม่มี column ที่ตรงกับคำถาม ให้ใช้ column ที่ใกล้เคียงที่สุดหรืออธิบายว่าข้อมูลนี้ไม่มีในระบบ"""
+
+        elif error_type == "zero_results":
+            # Get hints about actual values in database
+            hint = last_error.get("hint", "")
+
+            return f"""คำถามเดิม: {original_question}
+
+SQL ที่สร้างทำงานได้แต่ไม่พบข้อมูล (0 rows):
+```sql
+{failed_sql}
+```
+
+สาเหตุที่เป็นไปได้:
+{hint}
+
+กรุณาแก้ไข SQL โดย:
+1. ตรวจสอบค่าใน WHERE clause ให้ตรงกับค่าจริงในระบบ (ดูค่าที่แนะนำด้านบน)
+2. ลองใช้ LIKE '%...%' แทน = สำหรับการค้นหาที่ยืดหยุ่นกว่า
+3. ตรวจสอบการสะกดชื่อหน่วยงาน/ผลิตภัณฑ์ให้ถูกต้อง
+4. ถ้าผู้ใช้ถามเรื่อง "จังหวัด" แต่ไม่มี column จังหวัด ให้ใช้ COST_CENTER หรือ organization_group_abbr แทน และอธิบายให้ผู้ใช้ทราบ
+
+สำคัญ: ใช้ค่าที่มีอยู่จริงในระบบตามที่แนะนำด้านบน"""
+
+        else:
+            return f"""คำถามเดิม: {original_question}
+
+เกิดข้อผิดพลาด: {error_msg}
+
+กรุณาสร้าง SQL query ใหม่ที่ถูกต้อง"""
+
     def chat(
         self,
         question: str,

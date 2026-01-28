@@ -53,7 +53,8 @@ export default function ChatScreen() {
         role: 'assistant',
         content: response.answer,
         sql: response.sql_query,
-        executionTime: response.execution_time_ms
+        executionTime: response.execution_time_ms,
+        warnings: response.warnings
       };
 
       setMessages((prev) => [...prev, aiMessage]);
@@ -102,6 +103,13 @@ export default function ChatScreen() {
             contentContainerStyle={{ padding: 16, paddingBottom: 20 }}
             className="flex-1"
           />
+
+          {/* Disclaimer */}
+          <View className="px-4 py-2 bg-amber-50 dark:bg-amber-900/20 border-t border-amber-200 dark:border-amber-800">
+            <Text className="text-xs text-amber-700 dark:text-amber-300 text-center">
+              หมายเหตุ: ข้อมูล "รายได้อื่น" เป็นรายได้ที่ยังไม่สุทธิ"
+            </Text>
+          </View>
 
           {/* Input Area */}
           <View className="p-4 bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-800">
