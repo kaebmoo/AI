@@ -29,6 +29,16 @@ export const ModelSelector = ({ provider, onSelect }: ModelSelectorProps) => {
                     Claude
                 </Text>
             </TouchableOpacity>
+
+            <TouchableOpacity
+                onPress={() => onSelect('matcha')}
+                className={`px-3 py-1.5 rounded-full flex-row items-center gap-1 ${provider === 'matcha' ? 'bg-white dark:bg-gray-600 shadow-sm' : ''}`}
+            >
+                <Ionicons name="leaf" size={14} color={provider === 'matcha' ? '#059669' : '#9CA3AF'} />
+                <Text className={`text-xs font-medium ${provider === 'matcha' ? 'text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'}`}>
+                    Matcha
+                </Text>
+            </TouchableOpacity>
         </View>
     );
 };

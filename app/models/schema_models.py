@@ -1,0 +1,152 @@
+"""
+NT Revenue Assistant - Schema Metadata Models
+==============================================
+SQLAlchemy models for schema metadata, semantic mappings, and business rules.
+Used by Admin API and SchemaService for AI context management.
+"""
+
+from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, Index
+from sqlalchemy.dialects.sqlite import JSON
+from datetime import datetime
+from app.db.base_class import Base
+
+
+class SchemaMetadata(Base):
+    """
+    Stores column metadata for AI context.
+    Contains information about each column in the revenue database.
+    """
+    __tablename__ = "schema_metadata"
+
+    id = Column(Integer, primary_key=True, index=True)
+    table_name = Column(String(100), nullable=False, index=True)
+    column_name = Column(String(100), nullable=False)
+    display_name_th = Column(String(200), nullable=True)  # Thai display name
+    display_name_en = Column(String(200), nullable=True)  # English display name
+    description = Column(Text, nullable=True)
+    data_type = Column(String(50), nullable=True)  # INTEGER, TEXT, REAL
+    format_hint = Column(String(100), nullable=True)  # e.g., 'YYYY-MM-DD', 'Code'
+    example_value = Column(String(500), nullable=True)
+    is_summable = Column(Boolean, default=False)  # Can use SUM()
+    is_groupable = Column(Boolean, default=True)  # Can use GROUP BY
+    hierarchy_level = Column(Integer, nullable=True)  # Org hierarchy level
+    sample_values = Column(JSON, nullable=True)  # JSON array of sample values
+    special_notes = Column(Text, nullable=True)  # Special notes for AI
+    conversion_sql = Column(Text, nullable=True)  # SQL for value conversion
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index('ix_schema_metadata_table_column', 'table_name', 'column_name', unique=True),
+    )
+
+    def to_dict(self):
+        """Convert to dictionary for API response"""
+        return {
+            "id": self.id,
+            "table_name": self.table_name,
+            "column_name": self.column_name,
+            "display_name_th": self.display_name_th,
+            "display_name_en": self.display_name_en,
+            "description": self.description,
+            "data_type": self.data_type,
+            "format_hint": self.format_hint,
+            "example_value": self.example_value,
+            "is_summable": self.is_summable,
+            "is_groupable": self.is_groupable,
+            "hierarchy_level": self.hierarchy_level,
+            "sample_values": self.sample_values,
+            "special_notes": self.special_notes,
+            "conversion_sql": self.conversion_sql,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class SchemaSemanticMapping(Base):
+    """
+    Maps keywords (abbreviations, business terms) to SQL conditions.
+    Enables AI to understand abbreviations like 'นป.' or terms like 'อสังหาริมทรัพย์'.
+    """
+    __tablename__ = "schema_semantic_mapping"
+
+    id = Column(Integer, primary_key=True, index=True)
+    keyword = Column(String(200), nullable=False, unique=True, index=True)  # Search keyword
+    keyword_type = Column(String(50), default='term')  # 'abbreviation', 'term', 'synonym'
+    target_column = Column(String(100), nullable=False)  # Column to use
+    target_condition = Column(String(500), nullable=False)  # SQL condition (e.g., "= 'value'")
+    full_condition = Column(Text, nullable=True)  # Full SQL condition for complex cases
+    description = Column(Text, nullable=True)  # Description for reference
+    priority = Column(Integer, default=0)  # Higher = more priority
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index('ix_semantic_mapping_type', 'keyword_type'),
+        Index('ix_semantic_mapping_active', 'is_active'),
+    )
+
+    def to_dict(self):
+        """Convert to dictionary for API response"""
+        return {
+            "id": self.id,
+            "keyword": self.keyword,
+            "keyword_type": self.keyword_type,
+            "target_column": self.target_column,
+            "target_condition": self.target_condition,
+            "full_condition": self.full_condition,
+            "description": self.description,
+            "priority": self.priority,
+            "is_active": self.is_active,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+    def get_sql_condition(self) -> str:
+        """Get the full SQL condition string"""
+        if self.full_condition:
+            return self.full_condition
+        return f"{self.target_column} {self.target_condition}"
+
+
+class SchemaBusinessRule(Base):
+    """
+    SQL generation rules for AI.
+    Contains rules like 'use || instead of CONCAT in SQLite'.
+    """
+    __tablename__ = "schema_business_rules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    rule_code = Column(String(50), nullable=False, unique=True)
+    rule_name = Column(String(200), nullable=False)
+    rule_description = Column(Text, nullable=False)
+    table_name = Column(String(100), nullable=True)  # Applies to specific table, NULL = ALL
+    applies_to = Column(String(500), nullable=True)  # Comma-separated column names
+    example_correct = Column(Text, nullable=True)
+    example_wrong = Column(Text, nullable=True)
+    severity = Column(String(20), default='warning')  # 'error', 'warning', 'info'
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index('ix_business_rules_active', 'is_active'),
+    )
+
+    def to_dict(self):
+        """Convert to dictionary for API response"""
+        return {
+            "id": self.id,
+            "rule_code": self.rule_code,
+            "rule_name": self.rule_name,
+            "rule_description": self.rule_description,
+            "table_name": self.table_name,
+            "applies_to": self.applies_to,
+            "example_correct": self.example_correct,
+            "example_wrong": self.example_wrong,
+            "severity": self.severity,
+            "is_active": self.is_active,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }

@@ -399,7 +399,7 @@ SQL ที่ใช้:
 {json.dumps(data_sample, ensure_ascii=False, indent=2)}
 ```
 
-กรุณาอธิบายผลลัพธ์นี้เป็นภาษาไทยที่เข้าใจง่าย พร้อม format ตัวเลขให้อ่านง่าย"""
+กรุณาอธิบายผลลัพธ์นี้เป็นภาษาไทยที่เข้าใจง่าย พร้อม format ตัวเลขให้อ่านง่าย และไม่ใช้ emoji icon"""
         
         response = self.client.models.generate_content(
             model=self.model,
@@ -411,6 +411,127 @@ SQL ที่ใช้:
         return response.text if response.text else ""
 
 
+class MatchaProvider(AIProvider):
+    """Matcha AI (Internal Gateway) provider using OpenAI-Compatible API"""
+    
+    def __init__(self, api_key: str, api_url: str, model: str = "gpt-4o"):
+        self.api_key = api_key
+        self.api_url = api_url
+        self.model = model
+        
+    @ai_retry
+    def generate_sql(self, question: str, system_prompt: str, history: List[Dict] = []) -> Dict[str, Any]:
+        """Generate SQL using Matcha API (OpenAI Compatible)"""
+        
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {self.api_key}'
+        }
+
+        # Prepare messages
+        messages = [{"role": "system", "content": system_prompt}]
+        for msg in history:
+            role = msg.get("role")
+            content = msg.get("content")
+            if role and content:
+                messages.append({"role": role, "content": content})
+        
+        messages.append({"role": "user", "content": question})
+
+        payload = {
+            'model': self.model,
+            'messages': messages,
+            'temperature': 0.1, # Low temperature for SQL generation
+            'max_tokens': 1000
+        }
+
+        try:
+            # Use httpx for async/sync compatibility within the service structure
+            # Note: Verify=False is used for internal gateway as requested
+            with httpx.Client(verify=False, timeout=30.0) as client:
+                response = client.post(self.api_url, headers=headers, json=payload)
+                response.raise_for_status()
+                result = response.json()
+                
+            ai_message = result['choices'][0]['message']['content']
+            total_tokens = result.get('usage', {}).get('total_tokens', 0)
+            
+            # extract SQL from code block
+            # Try specific sql block first
+            sql_match = re.search(r'```sql\s*(.*?)\s*```', ai_message, re.DOTALL | re.IGNORECASE)
+            
+            if not sql_match:
+                # Try generic code block
+                sql_match = re.search(r'```\s*(.*?)\s*```', ai_message, re.DOTALL)
+
+            sql_query = sql_match.group(1).strip() if sql_match else None
+            
+            # If still no SQL, try to find raw SQL statement
+            if not sql_query:
+                 # Look for SELECT or WITH pattern
+                 # This regex looks for a string starting with SELECT/WITH and ending with ; or end of string
+                 raw_sql_match = re.search(r'(?:WITH|SELECT)\s+.*?(?:;|$)', ai_message, re.DOTALL | re.IGNORECASE)
+                 if raw_sql_match:
+                     sql_query = raw_sql_match.group(0).strip()
+
+            return {
+                "sql": sql_query,
+                "explanation": ai_message, # Use full message as explanation/context
+                "tokens_used": total_tokens,
+                "raw_response": ai_message
+            }
+
+        except Exception as e:
+            logger.error(f"Matcha API Error: {str(e)}")
+            raise
+
+    @ai_retry
+    def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str) -> str:
+        """Explain query result using Matcha AI"""
+        
+        data_sample = data[:20] if len(data) > 20 else data
+        
+        prompt = f"""คำถามเดิม: {question}
+
+SQL ที่ใช้:
+```sql
+{sql}
+```
+
+ผลลัพธ์ ({len(data)} rows):
+```json
+{json.dumps(data_sample, ensure_ascii=False, indent=2)}
+```
+
+กรุณาอธิบายผลลัพธ์นี้เป็นภาษาไทยที่เข้าใจง่าย พร้อม format ตัวเลขให้อ่านง่าย และไม่ใช้ emoji icon"""
+
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {self.api_key}'
+        }
+
+        payload = {
+            'model': self.model,
+            'messages': [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt}
+            ],
+            'temperature': 0.7,
+            'max_tokens': 1000
+        }
+
+        try:
+            with httpx.Client(verify=False, timeout=30.0) as client:
+                response = client.post(self.api_url, headers=headers, json=payload)
+                response.raise_for_status()
+                result = response.json()
+                
+            return result['choices'][0]['message']['content']
+
+        except Exception as e:
+            logger.error(f"Matcha Explain Error: {str(e)}")
+            return "ไม่สามารถอธิบายผลลัพธ์ได้เนื่องจากเกิดข้อผิดพลาดในการเชื่อมต่อ AI"
+
 class AIService:
     """Main AI Service for NT Revenue Assistant"""
     
@@ -420,24 +541,33 @@ class AIService:
         api_key: str,
         db_path: str = "revenue.db",
         model: Optional[str] = None,
-        prompt_manager: Optional[PromptManager] = None
+        prompt_manager: Optional[PromptManager] = None,
+        **kwargs
     ):
         """
         Initialize AI Service
         
         Args:
-            provider: "claude" or "gemini"
+            provider: "claude", "gemini", or "matcha"
             api_key: API key for the provider
             db_path: Path to SQLite database
             model: Model name (optional, uses default if not specified)
             prompt_manager: PromptManager instance for version control
+            **kwargs: Additional arguments for providers (e.g. api_url)
         """
         self.provider_name = provider
         self.db_path = db_path
         self.prompt_manager = prompt_manager
         
+        # Determine database engine from path/url
+        db_engine = "sqlite"
+        if "postgres" in db_path:
+            db_engine = "postgresql"
+        elif "mssql" in db_path or "sqlserver" in db_path:
+            db_engine = "mssql"
+            
         # Initialize schema service
-        self.schema_service = SchemaService(db_path)
+        self.schema_service = SchemaService(db_path, db_engine=db_engine)
         
         # Initialize AI provider
         if provider == "claude":
@@ -448,10 +578,19 @@ class AIService:
         elif provider == "gemini":
             self.provider = GeminiProvider(
                 api_key=api_key,
-        model=model or "gemini-2.0-flash-exp"
+                model=model or "gemini-2.0-flash-exp"
+            )
+        elif provider == "matcha":
+            api_url = kwargs.get("api_url")
+            if not api_url:
+                raise ValueError("api_url is required for matcha provider")
+            self.provider = MatchaProvider(
+                api_key=api_key,
+                api_url=api_url,
+                model=model or "gpt-4o"
             )
         else:
-            raise ValueError(f"Unknown provider: {provider}. Use 'claude' or 'gemini'")
+            raise ValueError(f"Unknown provider: {provider}. Use 'claude', 'gemini', or 'matcha'")
         
         # Cache system prompt
         self._system_prompt = None
@@ -497,8 +636,12 @@ class AIService:
                 return False, f"SQL contains forbidden keyword: {keyword}"
         
         # Must be SELECT
-        if not sql_upper.startswith('SELECT'):
-            return False, "Only SELECT queries are allowed"
+        # Logic update: Allow (SELECT ... ) which can happen with UNION or subqueries
+        # Also remove any leading parenthesis for the check
+        normalized_sql = sql_upper.lstrip('(').strip()
+        
+        if not (normalized_sql.startswith('SELECT') or normalized_sql.startswith('WITH')):
+            return False, "Only SELECT queries (or Common Table Expressions starting with WITH) are allowed"
         
         return True, ""
     
@@ -637,7 +780,9 @@ def create_claude_service(api_key: str, db_path: str = "revenue.db", model: Opti
 def create_gemini_service(api_key: str, db_path: str = "revenue.db", model: Optional[str] = None, prompt_manager: Optional[PromptManager] = None) -> AIService:
     """Create AI service with Gemini provider"""
     return AIService(provider="gemini", api_key=api_key, db_path=db_path, model=model, prompt_manager=prompt_manager)
-
+def create_matcha_service(api_key: str, api_url: str, db_path: str = "revenue.db", model: Optional[str] = None, prompt_manager: Optional[PromptManager] = None) -> AIService:
+    """Create AI service with Matcha provider"""
+    return AIService(provider="matcha", api_key=api_key, db_path=db_path, model=model, prompt_manager=prompt_manager, api_url=api_url)
 
 # =========================================================
 # Example Usage

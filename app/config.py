@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     # Example SQLite: sqlite:///./sql_app.db
     # Example Postgres: postgresql://user:pass@localhost:5432/db
     DATABASE_URL: str = "sqlite:///./nt_revenue.sqlite"
+
+    # Database Engine - explicit engine type for SQL syntax rules
+    # Options: "sqlite", "postgresql", "mssql"
+    # If not set, will be auto-detected from DATABASE_URL
+    DB_ENGINE: Optional[str] = None
     
     @validator("DATABASE_URL", pre=True)
     def assemble_db_connection(cls, v: Optional[str], values: dict[str, Any]) -> Any:
@@ -42,9 +47,14 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7 # 7 days
     
     # AI Provider Settings
-    AI_PROVIDER: str = "gemini" # claude or gemini
+    AI_PROVIDER: str = "gemini" # claude, gemini, or matcha
     ANTHROPIC_API_KEY: Optional[str] = None
     GOOGLE_AI_API_KEY: Optional[str] = None
+    
+    # Matcha AI (Internal Gateway)
+    MATCHA_API_URL: Optional[str] = None
+    MATCHA_AI_API_KEY: Optional[str] = None
+    MATCHA_MODEL: str = "gpt-4o"
     
     # Model Configuration
     GEMINI_MODEL: str = "gemini-2.0-flash-exp"
