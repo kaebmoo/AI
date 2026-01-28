@@ -4,7 +4,7 @@
 
 ## Project Status
 
-**Phase:** 3.5 (Core Features & Feedback Loop)
+**Phase:** 4.0 (Universal Frontend - In Progress)
 **Current Version:** 0.3.5-beta
 
 ## Features Implemented
