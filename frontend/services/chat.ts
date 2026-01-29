@@ -36,7 +36,8 @@ export interface ChatResponse {
 
 export const chatService = {
     sendMessage: async (payload: ChatRequest) => {
-        const response = await api.post<ChatResponse>('/chat/', payload);
+        console.log('Sending message to chat service:', payload);
+        const response = await api.post<ChatResponse>('/chat', payload);
         return response.data;
     },
 

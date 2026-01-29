@@ -40,6 +40,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
         };
         loadToken();
+
+        // Subscribe to global auth events (e.g. from API interceptor)
+        const { authEvents } = require('../services/authEvent');
+        const unsubscribe = authEvents.subscribe(() => {
+            console.log('[AuthContext] Received signOut event');
+            signOut();
+        });
+
+        return () => {
+            unsubscribe();
+        };
     }, []);
 
     useEffect(() => {

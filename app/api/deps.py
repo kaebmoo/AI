@@ -37,7 +37,7 @@ def get_current_user(
     auth_service = AuthService(db)
     session = auth_service.validate_session(token)
     
-    if not session:
+    if not session or not session.user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired session",
