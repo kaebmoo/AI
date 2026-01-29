@@ -68,6 +68,34 @@ SELECT 'น้อยสุด' as category, department, total FROM (
         "question": "รายได้มือถือ",
         "sql": "SELECT SUM(revenue) as total_revenue FROM revenue_search WHERE BUSINESS_GROUP = 'Mobile'",
         "explanation": "รายได้จากกลุ่มผลิตภัณฑ์มือถือ (Mobile)"
+    },
+    {
+        "question": "สัดส่วนรายได้ของกลุ่มธุรกิจ Fixed Line & Broadband",
+        "sql": """SELECT
+    'Fixed Line & Broadband' as BUSINESS_GROUP,
+    SUM(revenue) as group_revenue,
+    (SELECT SUM(revenue) FROM revenue_search WHERE BUSINESS_GROUP != 'รายได้อื่น') as total_revenue,
+    ROUND(SUM(revenue) * 100.0 / (SELECT SUM(revenue) FROM revenue_search WHERE BUSINESS_GROUP != 'รายได้อื่น'), 2) as percentage
+FROM revenue_search
+WHERE BUSINESS_GROUP = 'Fixed Line & Broadband'""",
+        "explanation": "สัดส่วนรายได้ Fixed Line & Broadband เทียบกับรายได้รวม (ไม่นับรายได้อื่น)"
+    },
+    {
+        "question": "รายได้รวมทั้งหมด (ไม่รวมรายได้อื่น)",
+        "sql": "SELECT SUM(revenue) as total_revenue FROM revenue_search WHERE BUSINESS_GROUP != 'รายได้อื่น'",
+        "explanation": "รายได้รวมจากธุรกิจหลัก ไม่รวมรายได้อื่นและผลตอบแทนทางการเงิน"
+    },
+    {
+        "question": "สัดส่วนรายได้แยกตามกลุ่มธุรกิจ",
+        "sql": """SELECT
+    BUSINESS_GROUP,
+    SUM(revenue) as group_revenue,
+    ROUND(SUM(revenue) * 100.0 / (SELECT SUM(revenue) FROM revenue_search WHERE BUSINESS_GROUP != 'รายได้อื่น'), 2) as percentage
+FROM revenue_search
+WHERE BUSINESS_GROUP != 'รายได้อื่น'
+GROUP BY BUSINESS_GROUP
+ORDER BY group_revenue DESC""",
+        "explanation": "สัดส่วนรายได้แต่ละกลุ่มธุรกิจ (ไม่นับรายได้อื่น)"
     }
 ]
 

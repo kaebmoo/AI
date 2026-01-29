@@ -576,6 +576,22 @@ DIVISION → GROUP → DEPARTMENT → SECTION → COST_CENTER
    - "อสังหาริมทรัพย์" หรือ "ทรัพย์สิน" → `SERVICE_GROUP = 'กลุ่มบริการพัฒนาสินทรัพย์'`
    - "มือถือ" → `BUSINESS_GROUP = 'Mobile'`
    - "โทรศัพท์บ้าน" → `BUSINESS_GROUP = 'Fixed Line'`
+11. **⚠️ กฎสำคัญ: ไม่นับรายได้อื่นในการคำนวณรายได้รวม/สัดส่วน**
+   - เมื่อคำนวณ "รายได้รวม" หรือ "สัดส่วนรายได้" ต้อง **ไม่รวม** `BUSINESS_GROUP = 'รายได้อื่น'`
+   - เพราะ "รายได้อื่น" ประกอบด้วยผลตอบแทนทางการเงินและรายได้ที่ไม่ใช่ธุรกิจหลัก
+   - ✅ ถูกต้อง: `SELECT SUM(revenue) FROM revenue_search WHERE BUSINESS_GROUP != 'รายได้อื่น'`
+   - ❌ ผิด: `SELECT SUM(revenue) FROM revenue_search` (รวมรายได้อื่นด้วย)
+   - **ยกเว้น** ผู้ใช้ระบุชัดเจนว่าต้องการ "รวมรายได้อื่น" หรือ "รวมทุกประเภท"
+   - ตัวอย่างการคำนวณสัดส่วน:
+   ```sql
+   SELECT
+       BUSINESS_GROUP,
+       SUM(revenue) as group_revenue,
+       (SELECT SUM(revenue) FROM revenue_search WHERE BUSINESS_GROUP != 'รายได้อื่น') as total_revenue,
+       ROUND(SUM(revenue) * 100.0 / (SELECT SUM(revenue) FROM revenue_search WHERE BUSINESS_GROUP != 'รายได้อื่น'), 2) as percentage
+   FROM revenue_search
+   WHERE BUSINESS_GROUP = 'Fixed Line & Broadband'
+   ```
 {syntax_rules}
 
 ## รูปแบบการตอบ
@@ -635,6 +651,12 @@ DIVISION → GROUP → DEPARTMENT → SECTION → COST_CENTER
 9. **Abbreviations:**
    - E.g. `department_abbr`, `division_abbr`, `organization_group_abbr`, `section_abbr`
    - E.g. `WHERE department_abbr = 'บชง.'`
+10. **⚠️ IMPORTANT: Exclude "Other Revenue" from total/percentage calculations**
+   - When calculating "total revenue" or "revenue share/percentage", EXCLUDE `BUSINESS_GROUP = 'รายได้อื่น'` (Other Revenue)
+   - This includes financial returns and non-core business revenue
+   - ✅ CORRECT: `SELECT SUM(revenue) FROM revenue_search WHERE BUSINESS_GROUP != 'รายได้อื่น'`
+   - ❌ WRONG: `SELECT SUM(revenue) FROM revenue_search` (includes other revenue)
+   - **Exception:** Only include if user explicitly asks for "all revenue types" or "including other revenue"
 {syntax_rules}
 
 ## Response Format

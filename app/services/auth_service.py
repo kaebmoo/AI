@@ -1,12 +1,13 @@
 import secrets
 from datetime import datetime, timedelta
 from typing import Optional
+import bcrypt
 from sqlalchemy.orm import Session
 
 from app.models.user import User
 from app.models.session import UserSession
 from app.config import settings
-# from app.core.security import create_access_token # Not using JWT for now, using Session Token as per plan
+
 
 class AuthService:
     def __init__(self, db: Session):
@@ -96,3 +97,46 @@ class AuthService:
         if session:
             session.expires_at = datetime.utcnow()
             self.db.commit()
+
+    def verify_password(self, plain_password: str, hashed_password: str) -> bool:
+        """Verify password"""
+        if not hashed_password:
+            return False
+        return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+
+    def get_password_hash(self, password: str) -> str:
+        """Hash password"""
+        return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+    def authenticate_user(self, email: str, password: str) -> Optional[User]:
+        """Authenticate user with email and password"""
+        user = self.db.query(User).filter(User.email == email).first()
+        if not user:
+            return None
+        if not user.hashed_password:
+            return None
+        if not self.verify_password(password, user.hashed_password):
+            return None
+        return user
+
+    def create_admin_user(self, email: str, password: str, display_name: str = "Administrator") -> User:
+        """Create or update admin user"""
+        user = self.db.query(User).filter(User.email == email).first()
+        hashed_password = self.get_password_hash(password)
+        
+        if not user:
+            user = User(
+                email=email,
+                display_name=display_name,
+                hashed_password=hashed_password,
+                is_active=True,
+                role="admin"
+            )
+            self.db.add(user)
+        else:
+            user.hashed_password = hashed_password
+            user.role = "admin"
+            
+        self.db.commit()
+        self.db.refresh(user)
+        return user

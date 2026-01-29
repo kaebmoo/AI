@@ -112,6 +112,11 @@ class AIProvider(ABC):
         """Explain query result"""
         pass
 
+    @abstractmethod
+    def generate_content(self, prompt: str, system_prompt: Optional[str] = None) -> str:
+        """Generate generic content"""
+        pass
+
 
 class ClaudeProvider(AIProvider):
     """Claude API provider"""
@@ -236,6 +241,19 @@ SQL ที่ใช้:
             ]
         )
 
+        return response.content[0].text
+
+    @ai_retry
+    def generate_content(self, prompt: str, system_prompt: Optional[str] = None) -> str:
+        """Generate content using Claude"""
+        messages = [{"role": "user", "content": prompt}]
+        
+        response = self.client.messages.create(
+            model=self.model,
+            max_tokens=4000,
+            system=system_prompt or "",
+            messages=messages
+        )
         return response.content[0].text
 
 
@@ -434,6 +452,23 @@ SQL ที่ใช้:
                 system_instruction=system_prompt,
                 max_output_tokens=estimated_tokens
             )
+        )
+        return response.text if response.text else ""
+
+    @ai_retry
+    def generate_content(self, prompt: str, system_prompt: Optional[str] = None) -> str:
+        """Generate content using Gemini"""
+        from google.genai import types
+        
+        config = types.GenerateContentConfig(
+            system_instruction=system_prompt,
+            max_output_tokens=4000
+        ) if system_prompt else None
+
+        response = self.client.models.generate_content(
+            model=self.model,
+            contents=prompt,
+            config=config
         )
         return response.text if response.text else ""
 
@@ -681,6 +716,33 @@ SQL ที่ใช้:
             logger.error(f"Matcha Explain Error: {str(e)}")
             return "ไม่สามารถอธิบายผลลัพธ์ได้เนื่องจากเกิดข้อผิดพลาดในการเชื่อมต่อ AI"
 
+    @ai_retry
+    def generate_content(self, prompt: str, system_prompt: Optional[str] = None) -> str:
+        """Generate content using Matcha AI"""
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {self.api_key}'
+        }
+
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        payload = {
+            'model': self.model,
+            'messages': messages,
+            'temperature': 0.7,
+            'max_tokens': 4000
+        }
+
+        with httpx.Client(verify=False, timeout=60.0) as client:
+            response = client.post(self.api_url, headers=headers, json=payload)
+            response.raise_for_status()
+            result = response.json()
+            
+        return result['choices'][0]['message']['content']
+
 class AIService:
     """Main AI Service for NT Revenue Assistant"""
     
@@ -797,6 +859,10 @@ class AIService:
     
     def execute_sql(self, sql: str) -> List[Dict]:
         """Execute SQL query and return results"""
+        
+    def generate_content(self, prompt: str) -> str:
+        """Generate generic content using the configured provider"""
+        return self.provider.generate_content(prompt, system_prompt=self.system_prompt)
 
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row

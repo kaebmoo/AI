@@ -17,8 +17,36 @@ def login(
     db: Session = Depends(deps.get_db)
 ):
     """
-    Initiate login process by requesting OTP.
+    Initiate login process. 
+    If password is provided, try to authenticate directly.
+    Otherwise, request OTP.
     """
+    auth_service = AuthService(db)
+    
+    # Try password auth if provided
+    if login_data.password:
+        user = auth_service.authenticate_user(login_data.email, login_data.password)
+        if user:
+            # Create Session
+            ip_address = request.client.host if request.client else "unknown"
+            session = auth_service.create_session(
+                user=user,
+                platform=login_data.platform,
+                ip_address=ip_address,
+                user_agent=request.headers.get("user-agent")
+            )
+            return {
+                "access_token": session.session_token,
+                "token_type": "bearer",
+                "user_email": user.email,
+                "display_name": user.display_name,
+                "role": user.role,
+                "force_password_change": user.force_password_change
+            }
+        else:
+             raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    # Fallback to OTP
     email_service = EmailService()
     otp_service = OTPService(db, email_service)
     
