@@ -29,8 +29,8 @@ AI Revenue Query Assistant สำหรับ NT (National Telecom) ที่ใ
 **File:** `scripts/populate_schema_metadata.py`
 
 - 22 schema metadata records
-- 38 semantic mappings (8 abbreviations + 25 business terms + 5 province mappings)
-- 12 business rules
+- 47 semantic mappings (คำย่อหน่วยงาน + business terms + province/department mappings)
+- 16 business rules
 
 ---
 
@@ -249,6 +249,108 @@ SELECT section, SUM(revenue) FROM revenue_search GROUP BY section
 
 ---
 
+## Phase 9: Data Warning System (NEW)
+
+**ระบบแจ้งเตือนผู้ใช้เมื่อข้อมูลต้องการการตีความพิเศษ**
+
+### 9.1 Backend - Warning Detection
+
+**File:** `app/api/v1/chat.py`
+
+```python
+DATA_WARNINGS = [
+    {
+        "code": "OTHER_REVENUE_NOT_NET",
+        "keywords": ["รายได้อื่น"],
+        "exclude_keywords": ["ผลตอบแทนทางการเงิน"],
+        "message": "หมายเหตุ: 'รายได้อื่น' เป็นรายได้ที่ยังไม่สุทธิ",
+        "severity": "warning"
+    },
+]
+```
+
+| Function | Description |
+|----------|-------------|
+| `detect_data_warnings()` | ตรวจสอบ data และ return warnings ที่เกี่ยวข้อง |
+
+### 9.2 Schema Updates
+
+**File:** `app/schemas/chat.py`
+
+```python
+class DataWarning(BaseModel):
+    code: str
+    message: str
+    severity: str  # info, warning, important
+
+class ChatResponse(BaseModel):
+    # ... existing fields ...
+    warnings: Optional[List[DataWarning]] = None  # NEW
+```
+
+### 9.3 Frontend - Warning Display
+
+**File:** `frontend/components/Chat/ChatBubble.tsx`
+
+- เพิ่ม `DataWarning` interface
+- แสดงกล่อง warning ใต้ AI response
+- สีตาม severity:
+  - `info` → ฟ้า + ℹ️
+  - `warning` → เหลือง + 📝
+  - `important` → แดง + ⚠️
+
+**File:** `frontend/app/(app)/index.tsx`
+
+- เพิ่ม Disclaimer ถาวรด้านล่างหน้า Chat
+- แถบสีเหลืองแสดงข้อความหมายเหตุ
+
+### 9.4 API Response with Warnings
+
+```json
+{
+    "answer": "รายได้รวมแยกตามกลุ่มธุรกิจ...",
+    "data": [
+        {"BUSINESS_GROUP": "Mobile", "total_revenue": 5000000000},
+        {"BUSINESS_GROUP": "รายได้อื่น", "total_revenue": 1200000000}
+    ],
+    "warnings": [
+        {
+            "code": "OTHER_REVENUE_NOT_NET",
+            "message": "หมายเหตุ: 'รายได้อื่น' เป็นรายได้ที่ยังไม่สุทธิ",
+            "severity": "warning"
+        }
+    ]
+}
+```
+
+### 9.5 Warning Trigger Logic
+
+| Condition | Warning Triggered? |
+|-----------|-------------------|
+| Data contains "รายได้อื่น" | ✅ Yes |
+| Data contains only "ผลตอบแทนทางการเงิน" | ❌ No |
+| Data contains "Mobile", "Fixed Line" | ❌ No |
+
+### 9.6 UI Preview
+
+```
+┌─────────────────────────────────────┐
+│  [AI Response with data]            │
+│                                     │
+│  ┌─────────────────────────────────┐│
+│  │ 📝 หมายเหตุ: 'รายได้อื่น'...    ││  ← Context-aware warning
+│  └─────────────────────────────────┘│
+└─────────────────────────────────────┘
+┌─────────────────────────────────────┐
+│ หมายเหตุ: ข้อมูล "รายได้อื่น"...    │  ← Permanent disclaimer
+└─────────────────────────────────────┘
+┌─────────────────────────────────────┐
+│ [Input Area]                   [📤]│
+└─────────────────────────────────────┘
+```
+
+---
+
 ## Files Summary
 
 ### New Files
@@ -270,11 +372,14 @@ SELECT section, SUM(revenue) FROM revenue_search GROUP BY section
 | `app/services/schema_service.py` | Semantic mappings, DB integration |
 | `app/services/prompt_manager.py` | Category-aware example selection |
 | `app/services/ai_service.py` | Retry mechanism, zero results handling |
-| `app/api/v1/chat.py` | Use `query_with_retry`, retry response |
-| `app/schemas/chat.py` | `max_retries`, `retry_count`, `retry_history` |
+| `app/api/v1/chat.py` | Retry, warnings detection, `DATA_WARNINGS` config |
+| `app/schemas/chat.py` | `max_retries`, `retry_count`, `retry_history`, `DataWarning`, `warnings` |
 | `app/config.py` | `DB_ENGINE` setting |
 | `app/main.py` | Include admin router |
 | `app/db/base.py` | Import schema models |
+| `frontend/components/Chat/ChatBubble.tsx` | Warning display component |
+| `frontend/services/chat.ts` | `DataWarning`, `warnings` in response |
+| `frontend/app/(app)/index.tsx` | Disclaimer bar, warnings mapping |
 
 ---
 
@@ -286,8 +391,10 @@ SELECT section, SUM(revenue) FROM revenue_search GROUP BY section
 | "รายได้อสังหาริมทรัพย์" | หา column ไม่เจอ | `WHERE SERVICE_GROUP = 'กลุ่มบริการพัฒนาสินทรัพย์'` |
 | "revenue by BU" | สับสนกับ BUSINESS_GROUP | AI เข้าใจ business_unit = organization |
 | "แยกรายจังหวัด" | ใช้ `cost_center` (รหัส) | ใช้ `section` (ชื่อจังหวัด) |
+| "รายได้ อป.1" | ใช้ผิด column | ใช้ `department_abbr = 'อป.1'` |
 | "ผลิตภัณฑ์ Super Fiber" | 0 rows, ไม่มี retry | Retry พร้อม hints → ได้ข้อมูล |
 | SQL error: no such column | Error ทันที | Retry 3 ครั้งพร้อมแก้ไข |
+| ผลลัพธ์มี "รายได้อื่น" | ไม่มีคำเตือน | แสดง warning ให้ user ทราบ |
 
 ---
 
@@ -337,3 +444,4 @@ print(f'SQL: {result.sql_query}')
 |------|---------|---------|
 | 2025-01-27 | 1.0 | Phase 1-5: Schema metadata, Admin API, Database abstraction |
 | 2025-01-28 | 2.0 | Phase 6-8: Self-correction retry, Zero results handling, Province mapping |
+| 2025-01-29 | 2.1 | Phase 9: Data Warning System (Backend + Frontend) |
