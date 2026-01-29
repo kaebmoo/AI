@@ -44,7 +44,7 @@ class EmailService:
             )
             
             message = MIMEMultipart("alternative")
-            message["Subject"] = f"[NT Revenue Assistant] Your verification code: {otp_code}"
+            message["Subject"] = f"[NT AI Assistant] Your verification code: {otp_code}"
             message["From"] = self.from_email
             message["To"] = to_email
             

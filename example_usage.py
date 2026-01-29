@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NT Revenue Assistant - Example Usage
+NT AI Assistant - Example Usage
 =====================================
 
 ตัวอย่างการใช้งาน AI Service ทั้ง Claude และ Gemini
@@ -156,7 +156,7 @@ def main():
     
     print("""
     ╔═══════════════════════════════════════════════════════════╗
-    ║         NT Revenue Assistant - Example Usage              ║
+    ║         NT AI Assistant - Example Usage              ║
     ╠═══════════════════════════════════════════════════════════╣
     ║  This script demonstrates how to use the AI services      ║
     ║  with both Claude (Anthropic) and Gemini (Google) APIs    ║

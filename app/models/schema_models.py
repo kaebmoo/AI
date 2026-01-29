@@ -1,5 +1,5 @@
 """
-NT Revenue Assistant - Schema Metadata Models
+NT AI Assistant - Schema Metadata Models
 ==============================================
 SQLAlchemy models for schema metadata, semantic mappings, and business rules.
 Used by Admin API and SchemaService for AI context management.

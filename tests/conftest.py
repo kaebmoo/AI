@@ -1,5 +1,5 @@
 """
-NT Revenue Assistant - Test Configuration
+NT AI Assistant - Test Configuration
 ==========================================
 Pytest fixtures and configuration for testing
 """

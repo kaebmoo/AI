@@ -1,5 +1,5 @@
 """
-NT Revenue Assistant - Database Adapter
+NT AI Assistant - Database Adapter
 ========================================
 Abstraction layer for database operations to support multiple database engines.
 

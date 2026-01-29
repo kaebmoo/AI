@@ -1,4 +1,4 @@
-# NT Revenue Assistant - Implementation Summary
+# NT AI Assistant - Implementation Summary
 
 ## Overview
 

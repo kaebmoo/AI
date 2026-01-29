@@ -33,7 +33,7 @@ app.add_middleware(RequestIDMiddleware)
 
 @app.get("/")
 def root():
-    return {"message": "Welcome to NT Revenue Assistant API", "version": "1.0.0"}
+    return {"message": "Welcome to NT AI Assistant API", "version": "1.0.0"}
 
 # Note: Routers will be included here as they are implemented
 from app.api.v1.auth import router as auth_router

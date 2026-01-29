@@ -1,5 +1,5 @@
 """
-NT Revenue Assistant - AI Service
+NT AI Assistant - AI Service
 ==================================
 Service สำหรับเรียก AI API เพื่อแปลงคำถามเป็น SQL
 
@@ -744,7 +744,7 @@ SQL ที่ใช้:
         return result['choices'][0]['message']['content']
 
 class AIService:
-    """Main AI Service for NT Revenue Assistant"""
+    """Main AI Service for NT AI Assistant"""
     
     def __init__(
         self,

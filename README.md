@@ -1,4 +1,4 @@
-# NT Revenue Assistant
+# NT AI Assistant
 
 โครงการพัฒนาระบบ AI Assistant สำหรับสอบถามข้อมูลรายได้และยอดขายของหน่วยงาน ผ่าน Web Application (React Native) และ API Backend (FastAPI) โดยใช้ GenAI (Claude/Gemini) เป็นตัวประมวลผลคำถามและสร้าง SQL Query อัตโนมัติ
 
