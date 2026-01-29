@@ -203,10 +203,15 @@ class ClaudeProvider(AIProvider):
     @ai_retry
     def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str) -> str:
         """Explain query result using Claude"""
-        
-        # Limit data for context
-        data_sample = data[:20] if len(data) > 20 else data
-        
+
+        # Determine sample size based on data complexity
+        is_crosstab = any(keyword in question.lower() for keyword in ['crosstab', 'pivot', 'ตาราง', 'แยกตาม'])
+        sample_limit = 50 if is_crosstab else 30
+        data_sample = data[:sample_limit] if len(data) > sample_limit else data
+
+        # Estimate tokens needed
+        estimated_tokens = 2500 if len(data) > 20 else 1500
+
         prompt = f"""คำถามเดิม: {question}
 
 SQL ที่ใช้:
@@ -219,17 +224,18 @@ SQL ที่ใช้:
 {json.dumps(data_sample, ensure_ascii=False, indent=2)}
 ```
 
-กรุณาอธิบายผลลัพธ์นี้เป็นภาษาไทยที่เข้าใจง่าย พร้อม format ตัวเลขให้อ่านง่าย และไม่ใช้ emoji icon"""
-        
+กรุณาอธิบายผลลัพธ์นี้เป็นภาษาไทยที่เข้าใจง่าย พร้อม format ตัวเลขให้อ่านง่าย และไม่ใช้ emoji icon
+หากมีข้อมูลหลายแถว ให้สรุปเป็นภาพรวมและไฮไลท์ข้อมูลสำคัญ"""
+
         response = self.client.messages.create(
             model=self.model,
-            max_tokens=1024,
+            max_tokens=estimated_tokens,
             system=system_prompt,
             messages=[
                 {"role": "user", "content": prompt}
             ]
         )
-        
+
         return response.content[0].text
 
 
@@ -395,11 +401,17 @@ class GeminiProvider(AIProvider):
     @ai_retry
     def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str) -> str:
         """Explain query result using Gemini"""
-        
+
         from google.genai import types
 
-        data_sample = data[:20] if len(data) > 20 else data
-        
+        # Determine sample size based on data complexity
+        is_crosstab = any(keyword in question.lower() for keyword in ['crosstab', 'pivot', 'ตาราง', 'แยกตาม'])
+        sample_limit = 50 if is_crosstab else 30
+        data_sample = data[:sample_limit] if len(data) > sample_limit else data
+
+        # Estimate tokens needed
+        estimated_tokens = 2500 if len(data) > 20 else 1500
+
         prompt = f"""คำถามเดิม: {question}
 
 SQL ที่ใช้:
@@ -412,13 +424,15 @@ SQL ที่ใช้:
 {json.dumps(data_sample, ensure_ascii=False, indent=2)}
 ```
 
-กรุณาอธิบายผลลัพธ์นี้เป็นภาษาไทยที่เข้าใจง่าย พร้อม format ตัวเลขให้อ่านง่าย และไม่ใช้ emoji icon"""
-        
+กรุณาอธิบายผลลัพธ์นี้เป็นภาษาไทยที่เข้าใจง่าย พร้อม format ตัวเลขให้อ่านง่าย และไม่ใช้ emoji icon
+หากมีข้อมูลหลายแถว ให้สรุปเป็นภาพรวมและไฮไลท์ข้อมูลสำคัญ"""
+
         response = self.client.models.generate_content(
             model=self.model,
             contents=prompt,
             config=types.GenerateContentConfig(
-                system_instruction=system_prompt
+                system_instruction=system_prompt,
+                max_output_tokens=estimated_tokens
             )
         )
         return response.text if response.text else ""
@@ -606,9 +620,17 @@ class MatchaProvider(AIProvider):
     @ai_retry
     def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str) -> str:
         """Explain query result using Matcha AI"""
-        
-        data_sample = data[:20] if len(data) > 20 else data
-        
+
+        # Determine sample size based on data complexity
+        # For crosstab/pivot queries, include more rows
+        is_crosstab = any(keyword in question.lower() for keyword in ['crosstab', 'pivot', 'ตาราง', 'แยกตาม'])
+        sample_limit = 50 if is_crosstab else 30
+        data_sample = data[:sample_limit] if len(data) > sample_limit else data
+
+        # Estimate response length needed
+        # More data = need more tokens for explanation
+        estimated_tokens = 2000 if len(data) > 20 else 1500
+
         prompt = f"""คำถามเดิม: {question}
 
 SQL ที่ใช้:
@@ -621,7 +643,8 @@ SQL ที่ใช้:
 {json.dumps(data_sample, ensure_ascii=False, indent=2)}
 ```
 
-กรุณาอธิบายผลลัพธ์นี้เป็นภาษาไทยที่เข้าใจง่าย พร้อม format ตัวเลขให้อ่านง่าย และไม่ใช้ emoji icon"""
+กรุณาอธิบายผลลัพธ์นี้เป็นภาษาไทยที่เข้าใจง่าย พร้อม format ตัวเลขให้อ่านง่าย และไม่ใช้ emoji icon
+หากมีข้อมูลหลายแถว ให้สรุปเป็นภาพรวมและไฮไลท์ข้อมูลสำคัญ"""
 
         headers = {
             'Content-Type': 'application/json',
@@ -634,17 +657,25 @@ SQL ที่ใช้:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
             ],
-            'temperature': 0.7,
-            'max_tokens': 1000
+            'temperature': 0.5,  # Lower for more consistent output
+            'max_tokens': estimated_tokens
         }
 
         try:
-            with httpx.Client(verify=False, timeout=30.0) as client:
+            with httpx.Client(verify=False, timeout=90.0) as client:  # Increased timeout
                 response = client.post(self.api_url, headers=headers, json=payload)
                 response.raise_for_status()
                 result = response.json()
-                
-            return result['choices'][0]['message']['content']
+
+            content = result['choices'][0]['message']['content']
+
+            # Check if response was truncated (ended mid-sentence)
+            finish_reason = result['choices'][0].get('finish_reason', '')
+            if finish_reason == 'length':
+                logger.warning("Matcha response was truncated due to max_tokens limit")
+                content += "\n\n(หมายเหตุ: คำอธิบายถูกตัดทอนเนื่องจากความยาวเกินกำหนด)"
+
+            return content
 
         except Exception as e:
             logger.error(f"Matcha Explain Error: {str(e)}")
