@@ -1,6 +1,6 @@
 # Instructions for AI Coding Assistants
 
-## Project: NT Revenue Assistant
+## Project: NT AI Assistant
 
 AI Revenue Query Assistant สำหรับ NT (National Telecom)
 ใช้ Claude API หรือ Google AI (Gemini) ในการแปลงคำถามภาษาไทยเป็น SQL
@@ -285,5 +285,5 @@ google-genai  # Gemini API
 ## Contact
 
 - **Department**: Finance (บชง.)
-- **Project**: NT Revenue Assistant
+- **Project**: NT AI Assistant
 - **Classification**: Internal Use Only

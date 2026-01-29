@@ -1,4 +1,4 @@
-# NT Revenue Assistant - Implementation Status
+# NT AI Assistant - Implementation Status
 
 > สถานะการพัฒนาเทียบกับ Plan v2.0
 > อัปเดตล่าสุด: 2025-01-27 (ตรวจสอบจาก code จริง)

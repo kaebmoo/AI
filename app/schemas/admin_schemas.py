@@ -1,5 +1,5 @@
 """
-NT Revenue Assistant - Admin API Schemas
+NT AI Assistant - Admin API Schemas
 =========================================
 Pydantic schemas for Admin API endpoints.
 """

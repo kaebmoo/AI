@@ -1,5 +1,5 @@
 """
-NT Revenue Assistant - Matcha Examples
+NT AI Assistant - Matcha Examples
 =======================================
 Few-shot examples และ semantic mappings สำหรับ Matcha AI model
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NT Revenue Assistant - Populate Schema Metadata
+NT AI Assistant - Populate Schema Metadata
 ================================================
 Script to populate initial schema metadata, semantic mappings, and business rules.
 

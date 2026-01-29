@@ -1,4 +1,4 @@
-# NT Revenue Assistant - Data Dictionary
+# NT AI Assistant - Data Dictionary
 
 ## Document Information
 

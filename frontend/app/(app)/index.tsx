@@ -79,7 +79,7 @@ export default function ChatScreen() {
         {/* Header */}
         <View className="px-4 py-3 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex-row items-center justify-between shadow-sm z-10 w-full">
           <View>
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">NT Revenue Assistant</Text>
+            <Text className="text-lg font-bold text-gray-900 dark:text-white">NT AI Assistant</Text>
             <Text className="text-xs text-gray-500 dark:text-gray-400">Powered by Agentic AI</Text>
           </View>
           <View className="flex-row items-center gap-3">

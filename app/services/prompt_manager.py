@@ -1,5 +1,5 @@
 """
-NT Revenue Assistant - Prompt Manager
+NT AI Assistant - Prompt Manager
 ======================================
 Manages prompt versions and few-shot examples for AI context.
 

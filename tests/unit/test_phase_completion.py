@@ -19,7 +19,7 @@ class TestPhase1Infrastructure:
         """Test FastAPI app is properly configured"""
         from app.main import app
         assert app is not None
-        assert app.title.startswith("NT Revenue Assistant")
+        assert app.title.startswith("NT AI Assistant")
 
     def test_config_exists(self):
         """Test configuration is properly set up"""

@@ -1,5 +1,5 @@
 """
-NT Revenue Assistant - Schema Service
+NT AI Assistant - Schema Service
 ======================================
 Service สำหรับจัดการ schema metadata และสร้าง system prompt สำหรับ AI
 

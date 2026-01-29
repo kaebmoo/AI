@@ -1,5 +1,5 @@
 """
-NT Revenue Assistant - Admin API
+NT AI Assistant - Admin API
 =================================
 Admin API endpoints for schema metadata, semantic mappings, business rules,
 and golden examples management.

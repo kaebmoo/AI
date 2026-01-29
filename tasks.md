@@ -1,4 +1,4 @@
-# NT Revenue Assistant Tasks
+# NT AI Assistant Tasks
 
 - [/] Project Initialization
     - [x] Create `tasks.md`
