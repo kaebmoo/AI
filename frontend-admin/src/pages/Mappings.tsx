@@ -240,16 +240,18 @@ const Mappings: React.FC = () => {
                     <Form.Item
                         name="target_column"
                         label="Target Column"
+                        rules={[{ required: true, message: 'Please enter target column' }]}
                     >
-                        <Input placeholder="e.g. department_id" />
+                        <Input placeholder="e.g. DIVISION, BUSINESS" />
                     </Form.Item>
 
                     <Form.Item
                         name="target_condition"
                         label="SQL Condition"
-                        tooltip="Optional condition, e.g. = 'IT'"
+                        rules={[{ required: true, message: 'Please enter SQL condition' }]}
+                        tooltip="The condition part, e.g. = 'IT' or LIKE '%value%'"
                     >
-                        <Input placeholder="e.g. = 'IT'" />
+                        <Input placeholder="e.g. = 'สายงานขาย'" />
                     </Form.Item>
 
                     <Form.Item

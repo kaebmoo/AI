@@ -12,7 +12,7 @@
 | Phase 1: Infrastructure  | 95%   | เสร็จเกือบหมด, ขาด docker-compose.prod.yml      |
 | Phase 2: Authentication  | 90%   | Auth & OTP & Rate Limit เสร็จ, ขาด RBAC เต็มรูปแบบ |
 | Phase 3: Core Features   | 85%   | AI Integration เสร็จแล้ว (Claude + Gemini)      |
-| Phase 3.5: Feedback Loop | 80%   | Models & Services มี, ขาด admin endpoints       |
+| Phase 3.5: Feedback Loop | 90%   | Models & Services มี, Admin UI เสร็จเฟสแรก       |
 | Phase 4: Frontend (Expo) | 30%   | เริ่มแล้ว: Chat UI & Auth basic functioning     |
 | Phase 4.5: Telegram Bot  | 0%    | ยังไม่เริ่ม                                     |
 | Phase 5-6: Reports       | 0%    | ยังไม่เริ่ม                                     |
@@ -153,6 +153,17 @@
   - [x] POST `/{feedback_id}/review` - admin review & golden example
   - [x] GET `/admin/dashboard` - consolidated admin view
   - [x] **Golden Example Logic** (Auto-add to few-shot training)
+  - [x] **Admin Web UI (React + Ant Design)**
+    - [x] Login & Auth
+    - [x] User Management (CRUD)
+    - [x] Dashboard with Real-time Stats
+    - [x] Schema/Mappings/Rules Management UI
+    - [ ] Schema Analyzer UI (Phase 2 - In Progress)
+  - [x] **Schema Analyzer Backend**
+    - [x] File Upload & Parsing (Excel/CSV)
+    - [x] Database Introspection
+    - [x] AI Verification Service
+    - [x] Import/Export Suggestions
 
 ### ยังไม่ได้ทำ
 

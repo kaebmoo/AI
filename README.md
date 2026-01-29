@@ -26,6 +26,10 @@
     - **Business Rules:** Admin-configurable constraints via `schema_business_rules`.
   - **Admin Management:**
     - Full CRUD API for managing schema metadata, mappings, and rules without code deployment.
+    - **Web Admin Interface:**
+      - Built with React + Ant Design (TypeScript).
+      - Visual management for Users, Schemas, Rules, and Golden Examples.
+      - Schema Analyzer tool for importing and verifying metadata from Excel/CSV (Backend ready).
   - **Task Queue:** Celery + Redis for async tasks (Email, Long-running queries)
 - **Feedback System:**
   - Collect user feedback (Thumbs Up/Down)
@@ -84,9 +88,21 @@ npm run web
 # npm run ios
 ```
 
-### 3. Start Services
+### 3. Admin Web UI Setup
 
-You need to run these 3 processes in parallel (separate terminals):
+```bash
+cd frontend-admin
+
+# Install Dependencies
+npm install
+
+# Run Admin Interface
+npm run dev
+```
+
+### 4. Start Services
+
+You need to run these 4 processes in parallel (separate terminals):
 
 **Terminal 1: Backend API**
 ```bash
@@ -100,10 +116,16 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 celery -A app.celery worker -Q email-queue,celery --loglevel=info
 ```
 
-**Terminal 3: Frontend**
+**Terminal 3: User Frontend (Expo)**
 ```bash
 cd frontend
 npm run web
+```
+
+**Terminal 4: Admin Web UI**
+```bash
+cd frontend-admin
+npm run dev
 ```
 
 ---
