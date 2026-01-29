@@ -1,93 +1,352 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
-from typing import Optional, List, Dict, Any
+import logging
+import json
+import pandas as pd
+import io
+from typing import List, Dict, Any, Optional
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
 from sqlalchemy.orm import Session
-from app.api import deps
-from app.services.ai_service import AIService
-from app.services.analyzer_service import AnalyzerService
 from pydantic import BaseModel
 
+from app.api import deps
+from app.models.user import User
+from app.models.schema_models import SchemaMetadata, SchemaSemanticMapping, SchemaBusinessRule
+from app.services.ai_service import AIService
+from app.services.schema_service import SchemaService
+
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
-class AnalysisResponse(BaseModel):
-    source: str
-    columns: List[Dict[str, Any]]
-    suggestions: Optional[Dict[str, Any]] = None
+# Pydantic Models for Analysis
+class ColumnInfo(BaseModel):
+    name: str
+    sample_values: List[Any]
+    dtype: str
 
-@router.post("/analyze/file", response_model=AnalysisResponse)
-async def analyze_file(
+class AnalysisRequest(BaseModel):
+    columns: List[ColumnInfo]
+    db_type: str = "generic"
+
+class SuggestedMetadata(BaseModel):
+    column_name: str
+    display_name_th: str
+    display_name_en: str
+    description: Optional[str] = None
+    data_type: str
+    is_summable: bool
+    is_groupable: bool
+    special_notes: Optional[str] = None
+
+class SuggestedMapping(BaseModel):
+    keyword: str
+    keyword_type: str
+    target_column: str
+    target_condition: Optional[str] = ""  # Can be empty for term/synonym types
+    full_condition: Optional[str] = None  # For complex conditions
+    description: Optional[str] = None
+
+class SuggestedRule(BaseModel):
+    rule_code: str
+    rule_name: str
+    rule_description: str
+    example_correct: Optional[str] = ""
+    example_wrong: Optional[str] = ""
+    severity: str = "warning"
+
+class AnalysisResult(BaseModel):
+    metadata: List[SuggestedMetadata]
+    mappings: List[SuggestedMapping]
+    rules: List[SuggestedRule]
+
+class ImportRequest(BaseModel):
+    table_name: str
+    metadata: List[SuggestedMetadata]
+    mappings: List[SuggestedMapping]
+    rules: List[SuggestedRule]
+
+# --- Endpoints ---
+
+@router.post("/analyze/upload", response_model=AnalysisRequest)
+async def upload_for_analysis(
     file: UploadFile = File(...),
-    db: Session = Depends(deps.get_db),
-    # Assuming we get provider from settings or request
+    current_user: User = Depends(deps.require_admin)
 ):
     """
-    Upload a CSV/Excel file and get schema analysis + AI suggestions.
+    Upload a CSV or Excel file to parse columns and sample data.
+    Returns: A structured object ready for AI analysis step.
     """
-    # Initialize services
-    # For now, we use default provider from settings (handled inside AIService init if not passed)
-    # Ideally should come from dependency injection or settings
-    from app.config import settings
-    
     try:
-        ai_service = AIService(
-            provider=settings.AI_PROVIDER,
-            api_key=settings.AI_API_KEY,  # This might need better handling if keys are per user or rotated
-            db_path=settings.DB_PATH,  # Or logic to pick correct DB
-            api_url=settings.MATCHA_API_URL if settings.AI_PROVIDER == 'matcha' else None
-        )
-        
-        analyzer = AnalyzerService(db, ai_service)
-        
-        # Read file content
         content = await file.read()
+        file_ext = file.filename.split('.')[-1].lower()
         
-        # 1. Basic Analysis
-        basic_info = analyzer.analyze_file(content, file.filename)
+        if file_ext == 'csv':
+            df = pd.read_csv(io.BytesIO(content), nrows=20) # Read only sample
+        elif file_ext in ['xlsx', 'xls']:
+            df = pd.read_excel(io.BytesIO(content), nrows=20)
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported file format. Use CSV or Excel.")
         
-        # 2. AI Suggestions
-        ai_suggestions = await analyzer.get_ai_suggestions(basic_info)
-        
-        # Merge results logic if needed, or just return them structured
-        # The analyzer.get_ai_suggestions returns the JSON structure we want
-        
-        return {
-            "source": basic_info['source'],
-            "columns": basic_info['columns'],
-            "suggestions": ai_suggestions
-        }
+        # Parse columns
+        columns = []
+        for col in df.columns:
+            # Get non-null samples
+            samples = df[col].dropna().head(5).tolist()
+            # Convert numpy types to native python
+            samples = [
+                int(x) if isinstance(x, (int, pd.Int64Dtype)) else 
+                float(x) if isinstance(x, float) else 
+                str(x) 
+                for x in samples
+            ]
+            
+            columns.append(ColumnInfo(
+                name=col,
+                sample_values=samples,
+                dtype=str(df[col].dtype)
+            ))
+            
+        return AnalysisRequest(columns=columns, db_type="file_upload")
+        return AnalysisRequest(columns=columns, db_type="file_upload")
 
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error(f"Error parsing file: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Failed to parse file: {str(e)}")
 
-@router.post("/analyze/table", response_model=AnalysisResponse)
-async def analyze_table(
-    table_name: str = Form(...),
-    db: Session = Depends(deps.get_db)
+
+class TextAnalysisRequest(BaseModel):
+    content: str
+    table_name: str
+
+@router.post("/analyze/text", response_model=AnalysisRequest)
+async def analyze_text_input(
+    request: TextAnalysisRequest,
+    current_user: User = Depends(deps.require_admin)
 ):
     """
-    Analyze an existing database table.
+    Parse raw CSV text input for analysis.
     """
-    from app.config import settings
     try:
-        ai_service = AIService(
-            provider=settings.AI_PROVIDER,
-            api_key=settings.AI_API_KEY,
-            db_path=settings.DB_PATH,
-             api_url=settings.MATCHA_API_URL if settings.AI_PROVIDER == 'matcha' else None
-        )
+        if not request.content.strip():
+             raise HTTPException(status_code=400, detail="Empty content")
+
+        # Use io.StringIO to treat string as file-like for pandas
+        df = pd.read_csv(io.StringIO(request.content), nrows=20)
         
-        analyzer = AnalyzerService(db, ai_service)
-        
-        # 1. Basic Analysis
-        basic_info = analyzer.analyze_database_table(table_name)
-        
-        # 2. AI Suggestions
-        ai_suggestions = await analyzer.get_ai_suggestions(basic_info)
-        
-        return {
-            "source": basic_info['source'],
-            "columns": basic_info['columns'],
-            "suggestions": ai_suggestions
-        }
+        columns = []
+        for col in df.columns:
+            samples = df[col].dropna().head(5).tolist()
+            samples = [
+                int(x) if isinstance(x, (int, pd.Int64Dtype)) else 
+                float(x) if isinstance(x, float) else 
+                str(x) 
+                for x in samples
+            ]
+            
+            columns.append(ColumnInfo(
+                name=col,
+                sample_values=samples,
+                dtype=str(df[col].dtype)
+            ))
+            
+        return AnalysisRequest(columns=columns, db_type="text_input")
 
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error(f"Error parsing text: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Failed to parse text: {str(e)}")
+
+
+@router.post("/analyze/ai-suggest", response_model=AnalysisResult)
+async def get_ai_suggestions(
+    request: AnalysisRequest,
+    current_user: User = Depends(deps.require_admin),
+    ai_service: AIService = Depends(deps.get_ai_service)
+):
+    """
+    Send column info and samples to AI to generate metadata, mappings, and rules.
+    """
+    try:
+        # Construct Prompt
+        prompt = "Analyze the following database columns and suggest metadata, semantic mappings, and business rules.\n\n"
+        prompt += "Columns:\n"
+        for col in request.columns:
+            prompt += f"- Name: {col.name}, Type: {col.dtype}, Samples: {col.sample_values}\n"
+        
+        prompt += """
+
+        Output JSON format (all fields are required unless noted):
+        {
+            "metadata": [
+                {
+                    "column_name": "exact column name",
+                    "display_name_th": "Thai display name",
+                    "display_name_en": "English display name",
+                    "description": "brief description",
+                    "data_type": "INTEGER|TEXT|REAL|DATE",
+                    "is_summable": true/false,
+                    "is_groupable": true/false,
+                    "special_notes": "any special notes for SQL generation"
+                }
+            ],
+            "mappings": [
+                {
+                    "keyword": "the abbreviation or term users might use",
+                    "keyword_type": "abbreviation" or "term" or "synonym",
+                    "target_column": "which column this maps to",
+                    "target_condition": "SQL condition like \"= 'value'\" or \"LIKE '%text%'\" (use empty string '' if just column reference)",
+                    "description": "explanation of this mapping"
+                }
+            ],
+            "rules": [
+                {
+                    "rule_code": "UNIQUE_CODE",
+                    "rule_name": "Short name",
+                    "rule_description": "Full description of the rule",
+                    "example_correct": "SELECT ... correct SQL",
+                    "example_wrong": "SELECT ... incorrect SQL",
+                    "severity": "error" or "warning" or "info"
+                }
+            ]
+        }
+
+        Guidelines:
+        1. Metadata: Suggest Thai names for all columns. Identify if numeric columns are IDs/codes (not summable) or metrics/amounts (summable).
+        2. Mappings: Look for abbreviations in sample values (like "ททค.", "บดจ.", etc.) and map them to full names. IMPORTANT: target_condition must always be a string (use empty string "" if no condition).
+        3. Rules: If a column usually requires specific filters or has special handling, suggest a rule.
+        4. Return ONLY valid JSON, no markdown formatting.
+        """
+
+        # Call AI (using a utility method or direct call if exposed)
+        # Since ai_service.generate_response is for chat, we might need a simpler generation method
+        # or reuse the generate_response with a specific system prompt.
+        
+        # For simplicity, assuming we can use the configured provider to generate text
+        # If ai_service doesn't expose raw generation, we might need to add it or use internal provider.
+        
+        # Let's use the provider directly if possible, or wrap in a system message
+        system_prompt = "You are an expert Data Analyst and Database Administrator."
+        
+        # We need to access the provider. AIService has `provider` attribute.
+        response_text = ai_service.provider.generate_content(prompt, system_prompt=system_prompt)
+        
+        # Clean JSON (remove markdown ticks if present)
+        response_text = response_text.strip()
+        if response_text.startswith("```json"):
+            response_text = response_text[7:]
+        if response_text.endswith("```"):
+            response_text = response_text[:-3]
+        
+        data = json.loads(response_text)
+
+        # Post-process to handle None values from AI
+        if 'mappings' in data:
+            for mapping in data['mappings']:
+                # Ensure target_condition is a string, not None
+                if mapping.get('target_condition') is None:
+                    mapping['target_condition'] = ""
+                # Ensure required string fields are not None
+                if mapping.get('keyword') is None:
+                    mapping['keyword'] = ""
+                if mapping.get('target_column') is None:
+                    mapping['target_column'] = ""
+
+        if 'rules' in data:
+            for rule in data['rules']:
+                # Ensure required string fields have defaults
+                if rule.get('example_correct') is None:
+                    rule['example_correct'] = ""
+                if rule.get('example_wrong') is None:
+                    rule['example_wrong'] = ""
+
+        return AnalysisResult(**data)
+
+    except Exception as e:
+        logger.error(f"AI Analysis failed: {str(e)}")
+        # Return empty result with error logged, or mock data for testing if AI fails
+        raise HTTPException(status_code=500, detail=f"AI Analysis failed: {str(e)}")
+
+
+@router.post("/analyze/import", response_model=dict)
+def import_schema_suggestions(
+    request: ImportRequest,
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db),
+    schema_service: SchemaService = Depends(deps.get_schema_service)
+):
+    """
+    Import the approved suggestions into the database.
+    """
+    try:
+        # 1. Import Metadata
+        for meta in request.metadata:
+            # Check if exists
+            existing = db.query(SchemaMetadata).filter(
+                SchemaMetadata.table_name == request.table_name,
+                SchemaMetadata.column_name == meta.column_name
+            ).first()
+            
+            if existing:
+                # Update
+                existing.display_name_th = meta.display_name_th
+                existing.display_name_en = meta.display_name_en
+                existing.is_summable = meta.is_summable
+                existing.is_groupable = meta.is_groupable
+                existing.description = meta.description
+            else:
+                # Create
+                new_meta = SchemaMetadata(
+                    table_name=request.table_name,
+                    column_name=meta.column_name,
+                    display_name_th=meta.display_name_th,
+                    display_name_en=meta.display_name_en,
+                    description=meta.description,
+                    data_type=meta.data_type,
+                    is_summable=meta.is_summable,
+                    is_groupable=meta.is_groupable,
+                    special_notes=meta.special_notes
+                )
+                db.add(new_meta)
+        
+        # 2. Import Mappings
+        for mapping in request.mappings:
+            # Check for duplicates by keyword
+            existing_map = db.query(SchemaSemanticMapping).filter(
+                SchemaSemanticMapping.keyword == mapping.keyword
+            ).first()
+            
+            if not existing_map:
+                new_map = SchemaSemanticMapping(
+                    keyword=mapping.keyword,
+                    keyword_type=mapping.keyword_type,
+                    target_column=mapping.target_column,
+                    target_condition=mapping.target_condition,
+                    description=mapping.description
+                )
+                db.add(new_map)
+                
+        # 3. Import Rules
+        for rule in request.rules:
+            existing_rule = db.query(SchemaBusinessRule).filter(
+                SchemaBusinessRule.rule_code == rule.rule_code
+            ).first()
+            
+            if not existing_rule:
+                new_rule = SchemaBusinessRule(
+                    rule_code=rule.rule_code,
+                    rule_name=rule.rule_name,
+                    rule_description=rule.rule_description,
+                    example_correct=rule.example_correct,
+                    example_wrong=rule.example_wrong,
+                    severity=rule.severity
+                )
+                db.add(new_rule)
+
+        db.commit()
+        
+        # Refresh Cache
+        schema_service.refresh_cache()
+        
+        return {"status": "success", "message": f"Successfully imported schema for {request.table_name}"}
+
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Import failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Import failed: {str(e)}")

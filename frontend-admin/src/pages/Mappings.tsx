@@ -149,6 +149,16 @@ const Mappings: React.FC = () => {
             dataIndex: 'target_condition',
             key: 'target_condition',
             ellipsis: true,
+            render: (text: string, record: SemanticMapping) => (
+                record.full_condition ? <Tag color="purple">Complex</Tag> : text
+            )
+        },
+        {
+            title: 'Full Condition',
+            dataIndex: 'full_condition',
+            key: 'full_condition',
+            ellipsis: true,
+            width: 200,
         },
         {
             title: 'Active',
@@ -252,6 +262,14 @@ const Mappings: React.FC = () => {
                         tooltip="The condition part, e.g. = 'IT' or LIKE '%value%'"
                     >
                         <Input placeholder="e.g. = 'สายงานขาย'" />
+                    </Form.Item>
+
+                    <Form.Item
+                        name="full_condition"
+                        label="Full SQL Condition (Advanced)"
+                        tooltip="Override target column and condition with a full SQL expression"
+                    >
+                        <TextArea rows={2} placeholder="e.g. (division = 'Sales' OR department = 'Sales')" />
                     </Form.Item>
 
                     <Form.Item

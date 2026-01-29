@@ -6,6 +6,7 @@ export interface SemanticMapping {
     keyword_type: 'abbreviation' | 'term' | 'synonym';
     target_column?: string;
     target_condition?: string;
+    full_condition?: string;
     description?: string;
     is_active: boolean;
     priority: number;
@@ -18,6 +19,7 @@ export interface SemanticMappingCreate {
     keyword_type: 'abbreviation' | 'term' | 'synonym';
     target_column: string;
     target_condition: string;
+    full_condition?: string;
     description?: string;
     is_active?: boolean;
     priority?: number;
@@ -28,6 +30,7 @@ export interface SemanticMappingUpdate {
     keyword_type?: 'abbreviation' | 'term' | 'synonym';
     target_column?: string;
     target_condition?: string;
+    full_condition?: string;
     description?: string;
     is_active?: boolean;
     priority?: number;

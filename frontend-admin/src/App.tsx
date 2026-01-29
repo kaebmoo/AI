@@ -3,6 +3,8 @@ import Login from './pages/Login'
 import AdminLayout from './components/Layout/AdminLayout'
 import Dashboard from './pages/Dashboard'
 import Users from './pages/Users'
+import Schema from './pages/Schema'
+import Analyzer from './pages/Analyzer'
 import Mappings from './pages/Mappings'
 import Rules from './pages/Rules'
 import Examples from './pages/Examples'
@@ -26,7 +28,8 @@ function App() {
           <Route element={<AdminLayout />}>
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/users" element={<Users />} />
-            <Route path="/schema" element={<div>Schema Explorer (Coming Soon)</div>} />
+            <Route path="/schema" element={<Schema />} />
+            <Route path="/analyzer" element={<Analyzer />} />
             <Route path="/mappings" element={<Mappings />} />
             <Route path="/rules" element={<Rules />} />
             <Route path="/examples" element={<Examples />} />

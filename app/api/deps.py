@@ -115,3 +115,11 @@ def require_viewer(current_user: User = Depends(get_current_user)) -> User:
             detail="Viewer privileges required"
         )
     return current_user
+
+from app.services.schema_service import SchemaService
+
+def get_schema_service(db: Session = Depends(get_db)) -> SchemaService:
+    """
+    Dependency to get SchemaService
+    """
+    return SchemaService(db)

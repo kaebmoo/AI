@@ -5,6 +5,8 @@ export interface BusinessRule {
     rule_code: string;
     rule_name: string;
     rule_description?: string;
+    table_name?: string;
+    applies_to?: string;
     example_correct?: string;
     example_wrong?: string;
     severity: 'error' | 'warning' | 'info';
@@ -17,6 +19,8 @@ export interface BusinessRuleCreate {
     rule_code: string;
     rule_name: string;
     rule_description?: string;
+    table_name?: string;
+    applies_to?: string;
     example_correct?: string;
     example_wrong?: string;
     severity: 'error' | 'warning' | 'info';
@@ -27,6 +31,8 @@ export interface BusinessRuleUpdate {
     rule_code?: string;
     rule_name?: string;
     rule_description?: string;
+    table_name?: string;
+    applies_to?: string;
     example_correct?: string;
     example_wrong?: string;
     severity?: 'error' | 'warning' | 'info';
