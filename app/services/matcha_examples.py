@@ -15,10 +15,27 @@ logger = logging.getLogger(__name__)
 
 # Static few-shot examples สำหรับ Matcha
 MATCHA_EXAMPLES = [
+    # === คำถามตรวจสอบข้อมูล (ไม่ต้อง exclude รายได้อื่น) ===
+    {
+        "question": "มีข้อมูลรายได้ไหม",
+        "sql": "SELECT COUNT(*) as total_records, MIN(year) as min_year, MAX(year) as max_year, MIN(month) as min_month, MAX(month) as max_month FROM revenue_search",
+        "explanation": "ตรวจสอบว่ามีข้อมูลรายได้ในระบบหรือไม่ และช่วงเวลาของข้อมูล"
+    },
+    {
+        "question": "ข้อมูลรายได้มีถึงเดือนอะไร",
+        "sql": "SELECT year, month, COUNT(*) as records FROM revenue_search GROUP BY year, month ORDER BY year DESC, month DESC LIMIT 5",
+        "explanation": "แสดง 5 เดือนล่าสุดที่มีข้อมูลรายได้"
+    },
+    {
+        "question": "มีข้อมูลกี่รายการ",
+        "sql": "SELECT COUNT(*) as total_records FROM revenue_search",
+        "explanation": "นับจำนวนรายการข้อมูลทั้งหมด"
+    },
+    # === คำถามรายได้รวม (ต้อง exclude รายได้อื่น) ===
     {
         "question": "รายได้รวมเดือนมกราคม 2568",
-        "sql": "SELECT SUM(revenue) as total_revenue FROM revenue_search WHERE year = 2025 AND month = 1",
-        "explanation": "รายได้รวมทั้งหมดในเดือนมกราคม 2568 (ค.ศ. 2025)"
+        "sql": "SELECT SUM(revenue) as total_revenue FROM revenue_search WHERE year = 2025 AND month = 1 AND BUSINESS_GROUP != 'รายได้อื่น'",
+        "explanation": "รายได้รวมทั้งหมดในเดือนมกราคม 2568 (ค.ศ. 2025) ไม่รวมรายได้อื่น"
     },
     {
         "question": "รายได้ นป. ปี 2568",
@@ -96,6 +113,42 @@ WHERE BUSINESS_GROUP != 'รายได้อื่น'
 GROUP BY BUSINESS_GROUP
 ORDER BY group_revenue DESC""",
         "explanation": "สัดส่วนรายได้แต่ละกลุ่มธุรกิจ (ไม่นับรายได้อื่น)"
+    },
+    # === คำถามแยกรายได้ตามกลุ่มธุรกิจ (ต้อง exclude รายได้อื่น) ===
+    {
+        "question": "ภาคเหนือมีรายได้จากอะไรบ้าง",
+        "sql": """SELECT
+    BUSINESS_GROUP as กลุ่มธุรกิจ,
+    SUM(revenue) as รายได้,
+    ROUND(SUM(revenue) * 100.0 / (SELECT SUM(revenue) FROM revenue_search WHERE organization_group_abbr = 'นป.' AND BUSINESS_GROUP != 'รายได้อื่น'), 2) as สัดส่วน
+FROM revenue_search
+WHERE organization_group_abbr = 'นป.' AND BUSINESS_GROUP != 'รายได้อื่น'
+GROUP BY BUSINESS_GROUP
+ORDER BY รายได้ DESC""",
+        "explanation": "รายได้ภาคเหนือ (นป.) แยกตามกลุ่มธุรกิจ ไม่รวมรายได้อื่นเพราะไม่ใช่รายได้จากธุรกิจหลัก"
+    },
+    {
+        "question": "รายได้แยกตามกลุ่มธุรกิจ",
+        "sql": """SELECT
+    BUSINESS_GROUP as กลุ่มธุรกิจ,
+    SUM(revenue) as รายได้,
+    ROUND(SUM(revenue) * 100.0 / (SELECT SUM(revenue) FROM revenue_search WHERE BUSINESS_GROUP != 'รายได้อื่น'), 2) as สัดส่วน
+FROM revenue_search
+WHERE BUSINESS_GROUP != 'รายได้อื่น'
+GROUP BY BUSINESS_GROUP
+ORDER BY รายได้ DESC""",
+        "explanation": "รายได้แยกตามกลุ่มธุรกิจ ไม่รวมรายได้อื่นเพราะไม่ใช่รายได้จากธุรกิจหลัก"
+    },
+    {
+        "question": "หน่วยงานนี้มีรายได้จากผลิตภัณฑ์อะไรบ้าง",
+        "sql": """SELECT
+    BUSINESS_GROUP as กลุ่มธุรกิจ,
+    SUM(revenue) as รายได้
+FROM revenue_search
+WHERE department_abbr = 'XXX' AND BUSINESS_GROUP != 'รายได้อื่น'
+GROUP BY BUSINESS_GROUP
+ORDER BY รายได้ DESC""",
+        "explanation": "รายได้หน่วยงานแยกตามกลุ่มธุรกิจ ไม่รวมรายได้อื่น"
     }
 ]
 

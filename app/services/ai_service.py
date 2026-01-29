@@ -859,11 +859,6 @@ class AIService:
     
     def execute_sql(self, sql: str) -> List[Dict]:
         """Execute SQL query and return results"""
-        
-    def generate_content(self, prompt: str) -> str:
-        """Generate generic content using the configured provider"""
-        return self.provider.generate_content(prompt, system_prompt=self.system_prompt)
-
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
@@ -874,6 +869,10 @@ class AIService:
             return [dict(row) for row in rows]
         finally:
             conn.close()
+
+    def generate_content(self, prompt: str) -> str:
+        """Generate generic content using the configured provider"""
+        return self.provider.generate_content(prompt, system_prompt=self.system_prompt)
 
     def _find_similar_values(self, sql: str, limit: int = 5) -> Dict[str, List[str]]:
         """
@@ -1158,6 +1157,8 @@ class AIService:
             # Execute SQL
             try:
                 data = self.execute_sql(sql_query)
+                if data is None:
+                    data = []
 
                 # Check for zero results - might need retry with better conditions
                 if len(data) == 0 and attempt < max_retries:

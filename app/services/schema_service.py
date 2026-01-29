@@ -576,11 +576,18 @@ DIVISION → GROUP → DEPARTMENT → SECTION → COST_CENTER
    - "อสังหาริมทรัพย์" หรือ "ทรัพย์สิน" → `SERVICE_GROUP = 'กลุ่มบริการพัฒนาสินทรัพย์'`
    - "มือถือ" → `BUSINESS_GROUP = 'Mobile'`
    - "โทรศัพท์บ้าน" → `BUSINESS_GROUP = 'Fixed Line'`
-11. **⚠️ กฎสำคัญ: ไม่นับรายได้อื่นในการคำนวณรายได้รวม/สัดส่วน**
-   - เมื่อคำนวณ "รายได้รวม" หรือ "สัดส่วนรายได้" ต้อง **ไม่รวม** `BUSINESS_GROUP = 'รายได้อื่น'`
-   - เพราะ "รายได้อื่น" ประกอบด้วยผลตอบแทนทางการเงินและรายได้ที่ไม่ใช่ธุรกิจหลัก
-   - ✅ ถูกต้อง: `SELECT SUM(revenue) FROM revenue_search WHERE BUSINESS_GROUP != 'รายได้อื่น'`
+11. **⚠️ กฎสำคัญ: ไม่นับรายได้อื่นในการคำนวณรายได้**
+   - **ใช้กฎนี้เมื่อ:**
+     - คำนวณ "รายได้รวม", "รายได้ทั้งหมด" → ต้อง `WHERE BUSINESS_GROUP != 'รายได้อื่น'`
+     - คำนวณ "สัดส่วน", "เปอร์เซ็นต์" → ต้อง exclude จากทั้ง numerator และ denominator
+     - **ถามว่า "รายได้จากอะไรบ้าง", "รายได้แยกตาม..."** → ต้อง exclude เพราะ "รายได้อื่น" ไม่ใช่ธุรกิจหลัก
+   - **ไม่ใช้กฎนี้เมื่อ:** ตรวจสอบว่ามีข้อมูลหรือไม่, COUNT, ดูช่วงเวลา
+   - เพราะ "รายได้อื่น" = ผลตอบแทนทางการเงิน + รายได้ที่ไม่ใช่ธุรกิจหลัก
+   - ✅ รายได้รวม: `SELECT SUM(revenue) FROM revenue_search WHERE BUSINESS_GROUP != 'รายได้อื่น'`
+   - ✅ รายได้แยกตามกลุ่ม: `SELECT BUSINESS_GROUP, SUM(revenue) FROM revenue_search WHERE BUSINESS_GROUP != 'รายได้อื่น' GROUP BY BUSINESS_GROUP`
+   - ✅ ตรวจสอบข้อมูล: `SELECT COUNT(*) FROM revenue_search` (ไม่ต้อง exclude)
    - ❌ ผิด: `SELECT SUM(revenue) FROM revenue_search` (รวมรายได้อื่นด้วย)
+   - ❌ ผิด: `SELECT BUSINESS_GROUP, SUM(revenue) ... GROUP BY BUSINESS_GROUP` โดยไม่ exclude (จะมีรายได้อื่นปนมา)
    - **ยกเว้น** ผู้ใช้ระบุชัดเจนว่าต้องการ "รวมรายได้อื่น" หรือ "รวมทุกประเภท"
    - ตัวอย่างการคำนวณสัดส่วน:
    ```sql
@@ -651,12 +658,19 @@ DIVISION → GROUP → DEPARTMENT → SECTION → COST_CENTER
 9. **Abbreviations:**
    - E.g. `department_abbr`, `division_abbr`, `organization_group_abbr`, `section_abbr`
    - E.g. `WHERE department_abbr = 'บชง.'`
-10. **⚠️ IMPORTANT: Exclude "Other Revenue" from total/percentage calculations**
-   - When calculating "total revenue" or "revenue share/percentage", EXCLUDE `BUSINESS_GROUP = 'รายได้อื่น'` (Other Revenue)
-   - This includes financial returns and non-core business revenue
-   - ✅ CORRECT: `SELECT SUM(revenue) FROM revenue_search WHERE BUSINESS_GROUP != 'รายได้อื่น'`
+10. **⚠️ IMPORTANT: Exclude "Other Revenue" (รายได้อื่น) from revenue calculations**
+   - **Apply this rule when:**
+     - Calculating "total revenue" → `WHERE BUSINESS_GROUP != 'รายได้อื่น'`
+     - Calculating "percentage/share" → exclude from both numerator and denominator
+     - **Asking "what revenue sources", "revenue breakdown by..."** → must exclude because "รายได้อื่น" is not core business
+   - **Do NOT apply when:** Checking if data exists, COUNT, checking date ranges
+   - Because "รายได้อื่น" = financial returns + non-core business revenue
+   - ✅ Total: `SELECT SUM(revenue) FROM revenue_search WHERE BUSINESS_GROUP != 'รายได้อื่น'`
+   - ✅ Breakdown: `SELECT BUSINESS_GROUP, SUM(revenue) FROM revenue_search WHERE BUSINESS_GROUP != 'รายได้อื่น' GROUP BY BUSINESS_GROUP`
+   - ✅ Data check: `SELECT COUNT(*) FROM revenue_search` (no exclude needed)
    - ❌ WRONG: `SELECT SUM(revenue) FROM revenue_search` (includes other revenue)
-   - **Exception:** Only include if user explicitly asks for "all revenue types" or "including other revenue"
+   - ❌ WRONG: `SELECT BUSINESS_GROUP, SUM(...) GROUP BY BUSINESS_GROUP` without exclude (will include "รายได้อื่น")
+   - **Exception:** Only include if user explicitly asks for "all revenue" or "including other revenue"
 {syntax_rules}
 
 ## Response Format
