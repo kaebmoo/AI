@@ -425,71 +425,176 @@ SQL ที่ใช้:
 
 
 class MatchaProvider(AIProvider):
-    """Matcha AI (Internal Gateway) provider using OpenAI-Compatible API"""
-    
-    def __init__(self, api_key: str, api_url: str, model: str = "gpt-4o"):
+    """Matcha AI (Internal Gateway) provider using OpenAI-Compatible API
+
+    Enhanced with:
+    - Few-shot examples for better SQL generation
+    - Semantic mapping hints for Thai abbreviations
+    - Improved SQL extraction
+    """
+
+    def __init__(self, api_key: str, api_url: str, model: str = "gpt-4o", db_path: Optional[str] = None):
         self.api_key = api_key
         self.api_url = api_url
         self.model = model
-        
+        self.db_path = db_path
+        self._examples_service = None
+
+    @property
+    def examples_service(self):
+        """Lazy load examples service"""
+        if self._examples_service is None and self.db_path:
+            try:
+                from app.services.matcha_examples import MatchaExamplesService
+                self._examples_service = MatchaExamplesService(self.db_path)
+            except Exception as e:
+                logger.warning(f"Could not load MatchaExamplesService: {e}")
+        return self._examples_service
+
+    def _get_few_shot_messages(self) -> List[Dict]:
+        """Get few-shot example messages"""
+        try:
+            from app.services.matcha_examples import get_matcha_few_shot_messages
+            return get_matcha_few_shot_messages()
+        except Exception as e:
+            logger.warning(f"Could not load few-shot messages: {e}")
+            return []
+
+    def _enhance_question_with_hints(self, question: str) -> str:
+        """Add semantic hints to question if keywords detected"""
+        if not self.examples_service:
+            return question
+
+        try:
+            hints = self.examples_service.build_semantic_hints(question)
+            if hints:
+                return f"{question}\n\n{hints}"
+        except Exception as e:
+            logger.debug(f"Could not build semantic hints: {e}")
+
+        return question
+
+    def _extract_sql_from_response(self, text: str) -> Optional[str]:
+        """
+        Enhanced SQL extraction with multiple fallback patterns
+
+        Returns:
+            Extracted SQL query or None
+        """
+        # Pattern 1: ```sql ... ```
+        sql_match = re.search(r'```sql\s*(.*?)\s*```', text, re.DOTALL | re.IGNORECASE)
+        if sql_match:
+            return sql_match.group(1).strip()
+
+        # Pattern 2: ``` ... ``` (generic code block)
+        code_match = re.search(r'```\s*(.*?)\s*```', text, re.DOTALL)
+        if code_match:
+            code = code_match.group(1).strip()
+            # Check if it looks like SQL
+            if re.match(r'(?:SELECT|WITH)\s+', code, re.IGNORECASE):
+                return code
+
+        # Pattern 3: Raw SQL starting with SELECT or WITH
+        # Match until we hit a clear ending (double newline, explanation text, or end)
+        raw_patterns = [
+            # SELECT ... until double newline or explanation
+            r'(SELECT\s+[\s\S]*?)(?:\n\n|คำอธิบาย|Explanation|$)',
+            # WITH ... until double newline or explanation
+            r'(WITH\s+[\s\S]*?)(?:\n\n|คำอธิบาย|Explanation|$)',
+            # Fallback: SELECT/WITH until semicolon or end
+            r'((?:WITH|SELECT)\s+.*?)(?:;|$)',
+        ]
+
+        for pattern in raw_patterns:
+            match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
+            if match:
+                sql = match.group(1).strip()
+                # Remove trailing semicolon if present
+                sql = sql.rstrip(';').strip()
+                if sql:
+                    return sql
+
+        return None
+
+    def _extract_explanation(self, text: str, sql: Optional[str] = None) -> str:
+        """Extract explanation from response"""
+        # Try to find explicit explanation
+        patterns = [
+            r'คำอธิบาย[:\s]*(.*?)(?:\n\n|$)',
+            r'Explanation[:\s]*(.*?)(?:\n\n|$)',
+            r'หมายเหตุ[:\s]*(.*?)(?:\n\n|$)',
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
+            if match:
+                return match.group(1).strip()
+
+        # Fallback: text after SQL block
+        if sql and sql in text:
+            idx = text.find(sql) + len(sql)
+            remaining = text[idx:].strip()
+            # Clean up remaining text
+            remaining = re.sub(r'^```\s*', '', remaining)
+            remaining = re.sub(r'^\s*\n', '', remaining)
+            if remaining:
+                return remaining[:500]  # Limit length
+
+        return text[:500] if text else ""
+
     @ai_retry
     def generate_sql(self, question: str, system_prompt: str, history: List[Dict] = []) -> Dict[str, Any]:
-        """Generate SQL using Matcha API (OpenAI Compatible)"""
-        
+        """Generate SQL using Matcha API (OpenAI Compatible) with few-shot examples"""
+
         headers = {
             'Content-Type': 'application/json',
             'Authorization': f'Bearer {self.api_key}'
         }
 
-        # Prepare messages
+        # Prepare messages with few-shot examples
         messages = [{"role": "system", "content": system_prompt}]
+
+        # Add few-shot examples (before history)
+        few_shot = self._get_few_shot_messages()
+        messages.extend(few_shot)
+
+        # Add conversation history
         for msg in history:
             role = msg.get("role")
             content = msg.get("content")
             if role and content:
                 messages.append({"role": role, "content": content})
-        
-        messages.append({"role": "user", "content": question})
+
+        # Enhance question with semantic hints
+        enhanced_question = self._enhance_question_with_hints(question)
+        messages.append({"role": "user", "content": enhanced_question})
+
+        logger.debug(f"Matcha: Sending {len(messages)} messages (including {len(few_shot)} few-shot examples)")
 
         payload = {
             'model': self.model,
             'messages': messages,
-            'temperature': 0.1, # Low temperature for SQL generation
-            'max_tokens': 1000
+            'temperature': 0.1,  # Low temperature for consistent SQL generation
+            'max_tokens': 1200,  # Increased for complex queries
+            'top_p': 0.95
         }
 
         try:
-            # Use httpx for async/sync compatibility within the service structure
-            # Note: Verify=False is used for internal gateway as requested
-            with httpx.Client(verify=False, timeout=30.0) as client:
+            with httpx.Client(verify=False, timeout=60.0) as client:
                 response = client.post(self.api_url, headers=headers, json=payload)
                 response.raise_for_status()
                 result = response.json()
-                
+
             ai_message = result['choices'][0]['message']['content']
             total_tokens = result.get('usage', {}).get('total_tokens', 0)
-            
-            # extract SQL from code block
-            # Try specific sql block first
-            sql_match = re.search(r'```sql\s*(.*?)\s*```', ai_message, re.DOTALL | re.IGNORECASE)
-            
-            if not sql_match:
-                # Try generic code block
-                sql_match = re.search(r'```\s*(.*?)\s*```', ai_message, re.DOTALL)
 
-            sql_query = sql_match.group(1).strip() if sql_match else None
-            
-            # If still no SQL, try to find raw SQL statement
-            if not sql_query:
-                 # Look for SELECT or WITH pattern
-                 # This regex looks for a string starting with SELECT/WITH and ending with ; or end of string
-                 raw_sql_match = re.search(r'(?:WITH|SELECT)\s+.*?(?:;|$)', ai_message, re.DOTALL | re.IGNORECASE)
-                 if raw_sql_match:
-                     sql_query = raw_sql_match.group(0).strip()
+            # Enhanced SQL extraction
+            sql_query = self._extract_sql_from_response(ai_message)
+            explanation = self._extract_explanation(ai_message, sql_query)
 
             return {
                 "sql": sql_query,
-                "explanation": ai_message, # Use full message as explanation/context
+                "explanation": explanation,
                 "tokens_used": total_tokens,
                 "raw_response": ai_message
             }
@@ -600,7 +705,8 @@ class AIService:
             self.provider = MatchaProvider(
                 api_key=api_key,
                 api_url=api_url,
-                model=model or "gpt-4o"
+                model=model or "gpt-4o",
+                db_path=db_path  # Pass db_path for loading few-shot examples
             )
         else:
             raise ValueError(f"Unknown provider: {provider}. Use 'claude', 'gemini', or 'matcha'")
