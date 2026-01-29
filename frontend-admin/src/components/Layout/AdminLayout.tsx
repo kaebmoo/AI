@@ -9,6 +9,7 @@ import {
     LogoutOutlined,
     BulbOutlined,
     SafetyCertificateOutlined,
+    RobotOutlined
 } from '@ant-design/icons';
 import { Layout, Menu, Button, theme, Dropdown, Avatar, Space } from 'antd';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
@@ -46,6 +47,11 @@ const AppLayout: React.FC = () => {
             key: '/schema',
             icon: <TableOutlined />,
             label: 'Schema Explorer',
+        },
+        {
+            key: '/analyzer',
+            icon: <RobotOutlined />,
+            label: 'Schema Analyzer (AI)',
         },
         {
             key: '/mappings',

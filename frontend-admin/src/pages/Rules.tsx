@@ -107,6 +107,19 @@ const Rules: React.FC = () => {
             key: 'rule_name',
         },
         {
+            title: 'Table',
+            dataIndex: 'table_name',
+            key: 'table_name',
+            render: (text: string) => text ? <Tag color="cyan">{text}</Tag> : <Text type="secondary">ALL</Text>
+        },
+        {
+            title: 'Applies To',
+            dataIndex: 'applies_to',
+            key: 'applies_to',
+            ellipsis: true,
+            render: (text: string) => text || '-'
+        },
+        {
             title: 'Severity',
             dataIndex: 'severity',
             key: 'severity',
@@ -239,6 +252,23 @@ const Rules: React.FC = () => {
                         label="Description"
                     >
                         <TextArea rows={3} />
+                    </Form.Item>
+
+                    <Form.Item label="Scope (Optional)" style={{ marginBottom: 0 }}>
+                        <Form.Item
+                            name="table_name"
+                            style={{ display: 'inline-block', width: 'calc(50% - 8px)' }}
+                            tooltip="Specific table name, or leave empty for ALL tables"
+                        >
+                            <Input placeholder="Table Name" />
+                        </Form.Item>
+                        <Form.Item
+                            name="applies_to"
+                            style={{ display: 'inline-block', width: 'calc(50% - 8px)', margin: '0 0 0 16px' }}
+                            tooltip="Comma-separated column names"
+                        >
+                            <Input placeholder="Column(s): col1, col2" />
+                        </Form.Item>
                     </Form.Item>
 
                     <Form.Item
