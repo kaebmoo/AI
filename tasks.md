@@ -31,6 +31,14 @@
     - [x] Middleware (Rate Limit)
     - [x] Multi-turn Chat Support (Context Awareness)
     - [x] Advanced Schema Rules (`schema_business_rules` & `revenue_search`)
+- [/] Admin Web UI (Phase 3.5)
+    - [x] Setup React Admin Project
+    - [x] Authentication (Login/Logout)
+    - [x] User Management UI
+    - [x] Dashboard & Statistics
+    - [x] Schema Management UI
+    - [x] Golden Examples UI with Test Run
+    - [ ] Schema Analyzer UI
 - [ ] Universal Frontend (Expo) (Phase 4)
     - [ ] Init Expo Project (TypeScript + NativeWind)
     - [ ] Setup Navigation (Expo Router)

@@ -177,13 +177,13 @@ const Rules: React.FC = () => {
                                 <div style={{ flex: 1 }}>
                                     <Tag icon={<CheckCircleOutlined />} color="success">Correct SQL Example</Tag>
                                     <pre style={{ marginTop: 8, background: '#f6ffed', border: '1px solid #b7eb8f', padding: 8, borderRadius: 4 }}>
-                                        {record.sql_example_correct || 'None'}
+                                        {record.example_correct || 'None'}
                                     </pre>
                                 </div>
                                 <div style={{ flex: 1 }}>
                                     <Tag icon={<CloseCircleOutlined />} color="error">Wrong SQL Example</Tag>
                                     <pre style={{ marginTop: 8, background: '#fff1f0', border: '1px solid #ffa39e', padding: 8, borderRadius: 4 }}>
-                                        {record.sql_example_wrong || 'None'}
+                                        {record.example_wrong || 'None'}
                                     </pre>
                                 </div>
                             </div>
@@ -242,14 +242,14 @@ const Rules: React.FC = () => {
                     </Form.Item>
 
                     <Form.Item
-                        name="sql_example_correct"
+                        name="example_correct"
                         label="Correct SQL Example"
                     >
                         <TextArea rows={3} style={{ fontFamily: 'monospace' }} placeholder="SELECT ... FROM ... WHERE valid_condition" />
                     </Form.Item>
 
                     <Form.Item
-                        name="sql_example_wrong"
+                        name="example_wrong"
                         label="Wrong SQL Example"
                     >
                         <TextArea rows={3} style={{ fontFamily: 'monospace' }} placeholder="SELECT ... FROM ... WHERE invalid_condition" />

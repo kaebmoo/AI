@@ -16,8 +16,8 @@ export interface SemanticMapping {
 export interface SemanticMappingCreate {
     keyword: string;
     keyword_type: 'abbreviation' | 'term' | 'synonym';
-    target_column?: string;
-    target_condition?: string;
+    target_column: string;
+    target_condition: string;
     description?: string;
     is_active?: boolean;
     priority?: number;
