@@ -213,3 +213,11 @@ class GoldenExampleListResponse(BaseModel):
     examples: List[GoldenExampleResponse]
     total: int
     categories: List[str]
+
+
+class DashboardStatsResponse(BaseModel):
+    """Response for dashboard statistics"""
+    total_users: int
+    total_mappings: int
+    total_rules: int
+    total_columns: int

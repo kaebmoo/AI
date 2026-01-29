@@ -546,6 +546,15 @@ def delete_golden_example(
 # Refresh Cache Endpoint
 # ============================================================
 
+    return {
+        "status": "success",
+        "message": "Schema cache refresh triggered. Changes will take effect on next query."
+    }
+
+# ============================================================
+# Refresh Cache Endpoint
+# ============================================================
+
 @router.post("/refresh-cache", response_model=dict)
 def refresh_schema_cache(
     current_user: User = Depends(deps.require_admin),
@@ -562,3 +571,31 @@ def refresh_schema_cache(
         "status": "success",
         "message": "Schema cache refresh triggered. Changes will take effect on next query."
     }
+
+
+# ============================================================
+# Dashboard Stats Endpoint
+# ============================================================
+
+from app.schemas.admin_schemas import DashboardStatsResponse
+
+@router.get("/stats", response_model=DashboardStatsResponse)
+def get_dashboard_stats(
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db)
+):
+    """
+    Get dashboard statistics.
+    Admin only.
+    """
+    total_users = db.query(User).count()
+    total_mappings = db.query(SchemaSemanticMapping).count()
+    total_rules = db.query(SchemaBusinessRule).count()
+    total_columns = db.query(SchemaMetadata).count()
+
+    return DashboardStatsResponse(
+        total_users=total_users,
+        total_mappings=total_mappings,
+        total_rules=total_rules,
+        total_columns=total_columns
+    )

@@ -40,9 +40,13 @@ from app.api.v1.auth import router as auth_router
 from app.api.v1.chat import router as chat_router
 from app.api.v1.feedback import router as feedback_router
 from app.api.v1.admin import router as admin_router
+from app.api.v1.users import router as users_router
+from app.api.v1.schema_analyzer import router as analyzer_router
 
 app.include_router(auth_router, prefix=f"{settings.API_V1_STR}/auth", tags=["auth"])
 app.include_router(chat_router, prefix=f"{settings.API_V1_STR}/chat", tags=["chat"])
 app.include_router(feedback_router, prefix=f"{settings.API_V1_STR}/feedback", tags=["feedback"])
 app.include_router(admin_router, prefix=f"{settings.API_V1_STR}/admin", tags=["admin"])
+app.include_router(users_router, prefix=f"{settings.API_V1_STR}/users", tags=["users"])
+app.include_router(analyzer_router, prefix=f"{settings.API_V1_STR}/admin/analyzer", tags=["analyzer"])
 

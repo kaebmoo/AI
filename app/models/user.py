@@ -16,6 +16,11 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     role = Column(String, default="user") # user, admin, viewer
     allowed_bu_access = Column(String, nullable=True) 
+    
+    # Password based auth
+    hashed_password = Column(String, nullable=True)
+    force_password_change = Column(Boolean, default=False)
+    
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
