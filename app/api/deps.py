@@ -7,7 +7,7 @@ from app.db.session import SessionLocal
 from app.services.auth_service import AuthService
 from app.models.user import User
 from app.config import settings
-from app.services.ai_service import AIService, create_gemini_service, create_claude_service
+from app.services.ai_service import AIService, create_gemini_service, create_claude_service, create_matcha_service
 
 # Header scheme for session token
 header_scheme = APIKeyHeader(name="X-Session-Token", auto_error=False)
@@ -77,6 +77,18 @@ def get_ai_service(db: Session = Depends(get_db)) -> AIService:
             settings.ANTHROPIC_API_KEY, 
             db_path=db_path,
             model=settings.CLAUDE_MODEL,
+            prompt_manager=prompt_manager
+        )
+    elif settings.AI_PROVIDER == "matcha":
+        if not settings.MATCHA_AI_API_KEY:
+             raise HTTPException(status_code=500, detail="MATCHA_AI_API_KEY not configured")
+        if not settings.MATCHA_API_URL:
+             raise HTTPException(status_code=500, detail="MATCHA_API_URL not configured")
+        return create_matcha_service(
+            api_key=settings.MATCHA_AI_API_KEY,
+            api_url=settings.MATCHA_API_URL,
+            db_path=db_path,
+            model=settings.MATCHA_MODEL,
             prompt_manager=prompt_manager
         )
     else:
