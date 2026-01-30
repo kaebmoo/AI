@@ -2,11 +2,15 @@ from pydantic import BaseModel, Field
 from typing import Optional, List, Any, Dict
 
 
+
+
 class ChatRequest(BaseModel):
     question: str
     conversation_id: Optional[str] = None
     provider: Optional[str] = "gemini"  # 'claude', 'gemini', or 'matcha'
+    context: Optional[str] = None        # None = Auto-detect, or 'revenue', 'expense'
     max_retries: int = Field(default=3, ge=0, le=5, description="Max retry attempts when SQL fails (0-5)")
+
 
 
 class RetryAttempt(BaseModel):
