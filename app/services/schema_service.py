@@ -70,6 +70,12 @@ class SchemaService:
             row = cursor.fetchone()
             if row:
                 context_info = dict(row)
+                if context_info.get('keywords') and isinstance(context_info['keywords'], str):
+                    try:
+                        context_info['keywords'] = json.loads(context_info['keywords'])
+                    except:
+                        context_info['keywords'] = []
+                        
                 self._context_cache[context_name] = context_info
                 return context_info
             
@@ -80,10 +86,11 @@ class SchemaService:
         except sqlite3.OperationalError:
             # Fallback for bootstrapping if table doesn't exist
             if context_name == 'revenue':
-                 return {'name': 'revenue', 'main_view': 'revenue_search', 'display_name': 'รายได้'}
+                 return {'id': 1, 'name': 'revenue', 'main_view': 'revenue_search', 'display_name': 'รายได้', 'created_at': datetime.now(), 'keywords': [], 'is_active': True, 'priority': 0}
             return None
         finally:
             conn.close()
+
 
     def get_all_contexts(self) -> List[Dict]:
         """Get all active contexts"""
@@ -91,11 +98,111 @@ class SchemaService:
         cursor = conn.cursor()
         try:
             cursor.execute("SELECT * FROM schema_contexts WHERE is_active = 1 ORDER BY priority DESC")
-            return [dict(row) for row in cursor.fetchall()]
+            contexts = []
+            for row in cursor.fetchall():
+                ctx = dict(row)
+                if ctx.get('keywords') and isinstance(ctx['keywords'], str):
+                    try:
+                        ctx['keywords'] = json.loads(ctx['keywords'])
+                    except:
+                        ctx['keywords'] = []
+                contexts.append(ctx)
+            return contexts
         except sqlite3.OperationalError:
-            return [{'name': 'revenue', 'main_view': 'revenue_search', 'display_name': 'รายได้'}]
+            return [{'id': 1, 'name': 'revenue', 'main_view': 'revenue_search', 'display_name': 'รายได้', 'created_at': datetime.now(), 'keywords': [], 'is_active': True, 'priority': 0}]
         finally:
             conn.close()
+
+    def create_context(self, data: Dict) -> Dict:
+        """Create new context"""
+        conn = self._get_connection(self.db_path)
+        cursor = conn.cursor()
+        try:
+            # Prepare columns
+            columns = ['name', 'display_name', 'description', 'main_view', 'is_active', 'priority', 'keywords']
+            placeholders = ', '.join(['?'] * len(columns))
+            sql = f"INSERT INTO schema_contexts ({', '.join(columns)}) VALUES ({placeholders})"
+            
+            # Serialize keywords if present
+            values = []
+            for col in columns:
+                val = data.get(col)
+                if col == 'keywords' and val is not None:
+                     val = json.dumps(val, ensure_ascii=False)
+                values.append(val)
+
+            cursor.execute(sql, values)
+            context_id = cursor.lastrowid
+            conn.commit()
+            
+            # Fetch created
+            cursor.execute("SELECT * FROM schema_contexts WHERE id = ?", (context_id,))
+            row = dict(cursor.fetchone())
+            
+            # Load Keywords JSON
+            if row.get('keywords'):
+                try:
+                    row['keywords'] = json.loads(row['keywords'])
+                except:
+                    row['keywords'] = []
+            
+            self.refresh_context_cache()
+            return row
+        finally:
+            conn.close()
+
+    def update_context(self, context_id: int, data: Dict) -> Optional[Dict]:
+        """Update existing context"""
+        conn = self._get_connection(self.db_path)
+        cursor = conn.cursor()
+        try:
+            set_parts = []
+            values = []
+            
+            for key, value in data.items():
+                if key == 'keywords':
+                    value = json.dumps(value, ensure_ascii=False)
+                set_parts.append(f"{key} = ?")
+                values.append(value)
+                
+            values.append(context_id)
+            sql = f"UPDATE schema_contexts SET {', '.join(set_parts)} WHERE id = ?"
+            
+            cursor.execute(sql, values)
+            conn.commit()
+            
+            if cursor.rowcount == 0:
+                return None
+                
+            cursor.execute("SELECT * FROM schema_contexts WHERE id = ?", (context_id,))
+            row = dict(cursor.fetchone())
+            
+            if row.get('keywords'):
+                try:
+                    row['keywords'] = json.loads(row['keywords'])
+                except:
+                    row['keywords'] = []
+            
+            self.refresh_context_cache()
+            return row
+        finally:
+            conn.close()
+            
+    def delete_context(self, context_id: int):
+        """Delete context"""
+        conn = self._get_connection(self.db_path)
+        cursor = conn.cursor()
+        try:
+            cursor.execute("DELETE FROM schema_contexts WHERE id = ?", (context_id,))
+            conn.commit()
+            self.refresh_context_cache()
+        finally:
+            conn.close()
+            
+    def refresh_context_cache(self):
+        """Force reload of context cache"""
+        self._context_cache.clear()
+
 
     # =========================================================
     # Schema Information Methods

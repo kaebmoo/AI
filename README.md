@@ -20,15 +20,20 @@
     - Support for **Claude 3.5 Sonnet**, **Gemini 2.0 Flash**, and **Matcha (OpenAI Compatible)**
     - **Self-Correcting Logic:** Implements an Agentic Loop (Generate → Validate → Execute → Self-Correct) to handle SQL errors and zero-result queries automatically.
     - **Dynamic SQL Generation:** Auto-detects DB engine (SQLite/Postgres/MSSQL) and adjusts syntax rules.
-  - **Metadata-Driven Architecture:**
-    - **Dynamic Context:** Builds system prompts from database metadata (`schema_metadata`) rather than hardcoded text.
-    - **Semantic Mapping:** Maps user terms (e.g., "นป.", "อสังหา") to SQL conditions via `schema_semantic_mapping`.
-    - **Business Rules:** Admin-configurable constraints via `schema_business_rules`.
+    - **Multi-Context Architecture (New):**
+      - Supports multiple data contexts (Revenue, Expense, etc.) with dynamic schema loading.
+      - **Context Router:** Automatically routes user questions to the correct context (e.g., "ค่าใช้จ่าย" -> Expense, "ยอดขาย" -> Revenue).
+      - **Data Marts:** Uses simplified views (e.g., `v_expense_mart`) to provide English-friendly schemas for AI.
+    - **Metadata-Driven Architecture:**
+      - **Dynamic Context:** Builds system prompts from database metadata (`schema_metadata`) rather than hardcoded text.
+      - **Semantic Mapping:** Maps user terms (e.g., "นป.", "อสังหา") to SQL conditions via `schema_semantic_mapping`.
+      - **Business Rules:** Admin-configurable constraints via `schema_business_rules`.
   - **Admin Management:**
     - Full CRUD API for managing schema metadata, mappings, and rules without code deployment.
     - **Web Admin Interface:**
       - Built with React + Ant Design (TypeScript).
       - Visual management for Users, Schemas, Rules, and Golden Examples.
+      - **Context Management:** Create and edit data contexts (Revenue, Expense) and manage routing keywords.
       - Schema Analyzer tool for importing and verifying metadata from Excel/CSV (Backend ready).
   - **Task Queue:** Celery + Redis for async tasks (Email, Long-running queries)
 - **Feedback System:**

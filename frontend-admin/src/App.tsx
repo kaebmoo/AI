@@ -4,6 +4,7 @@ import AdminLayout from './components/Layout/AdminLayout'
 import Dashboard from './pages/Dashboard'
 import Users from './pages/Users'
 import Schema from './pages/Schema'
+import Contexts from './pages/Contexts'
 import Analyzer from './pages/Analyzer'
 import Mappings from './pages/Mappings'
 import Rules from './pages/Rules'
@@ -29,6 +30,7 @@ function App() {
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/users" element={<Users />} />
             <Route path="/schema" element={<Schema />} />
+            <Route path="/contexts" element={<Contexts />} />
             <Route path="/analyzer" element={<Analyzer />} />
             <Route path="/mappings" element={<Mappings />} />
             <Route path="/rules" element={<Rules />} />

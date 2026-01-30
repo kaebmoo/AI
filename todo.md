@@ -200,6 +200,8 @@
 
 ---
 
+---
+
 ## Phase 4.5: Telegram Bot Integration ❌ 0%
 
 ### ยังไม่ได้ทำ
@@ -214,7 +216,29 @@
 
 ---
 
-## Phase 5: Reports & Export ❌ 0%
+## Phase 5: Multi-Context Data Support (New) ⚠️ 50%
+
+### ทำเสร็จแล้ว (Backend) ✅
+
+- [x] **Database Layer**
+  - [x] `schema_contexts` table (Context metadata & keywords)
+  - [x] `v_expense_mart` view (Data Mart for Expenses)
+- [x] **Services**
+  - [x] `ContextRouter` (Keyword-based intent classification)
+  - [x] `AIService` update (Context-aware system prompts)
+  - [x] `SchemaService` update (Dynamic context loading)
+- [x] **API**
+  - [x] Context auto-detection in `/api/v1/chat`
+
+### ยังไม่ได้ทำ (Frontend) ❌
+
+- [x] Admin UI: Context Management Page
+- [x] Admin UI: Edit Context Keywords & Rules
+- [x] Admin UI: Sync Metadata Button
+
+---
+
+## Phase 6: Reports & Export ❌ 0%
 
 ### ยังไม่ได้ทำ
 
