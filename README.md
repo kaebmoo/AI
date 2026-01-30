@@ -62,7 +62,7 @@ pip install -r requirements.txt
 
 # 4. Configuration
 # Copy .env.example to .env (if available) or create one:
-echo "DATABASE_URL=sqlite:///./nt_revenue.sqlite" > .env
+echo "DATABASE_URL=sqlite:///./nt_fi_report.sqlite" > .env
 echo "AI_PROVIDER=gemini" >> .env  # or 'claude'
 echo "GOOGLE_AI_API_KEY=your_gemini_key" >> .env
 # echo "ANTHROPIC_API_KEY=your_claude_key" >> .env

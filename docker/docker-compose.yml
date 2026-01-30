@@ -10,7 +10,7 @@ services:
     volumes:
       - ../:/app
     environment:
-      - DATABASE_URL=sqlite:///./nt_revenue.sqlite # Or postgres in prod
+      - DATABASE_URL=sqlite:///./nt_fi_report.sqlite # Or postgres in prod
       - REDIS_URL=redis://redis:6379/0
       - AI_PROVIDER=gemini
     depends_on:
@@ -44,7 +44,7 @@ services:
     volumes:
       - ../:/app
     environment:
-      - DATABASE_URL=sqlite:///./nt_revenue.sqlite
+      - DATABASE_URL=sqlite:///./nt_fi_report.sqlite
       - REDIS_URL=redis://redis:6379/0
     depends_on:
       - redis

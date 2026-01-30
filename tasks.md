@@ -51,3 +51,12 @@
     - [ ] Command Handlers (/start, /login)
     - [ ] Message Handler (AI Chat)
     - [ ] User Linking (Telegram <-> App User)
+- [ ] Multi-Context Data Support (Phase 5)
+    - [ ] Design Schema Registry (Context Definitions)
+    - [ ] Implement Context Router (Intent Classification)
+    - [ ] Create Mixed-Granularity Views (Expenses, Performance)
+    - [ ] Update SchemaService for Dynamic Context Loading
+    - [ ] **Admin UI: Context Management**
+        - [ ] List/Create/Edit Contexts Page
+        - [ ] "Sync Metadata" Button (Trigger extraction)
+        - [ ] Context-specific Rules & Mappings Editor

@@ -8,7 +8,7 @@ Usage:
     python scripts/populate_schema_metadata.py [--db-path PATH] [--reset]
 
 Options:
-    --db-path PATH    Path to SQLite database (default: nt_revenue.sqlite)
+    --db-path PATH    Path to SQLite database (default: nt_fi_report.sqlite)
     --reset           Drop and recreate tables before populating
 """
 
@@ -408,7 +408,7 @@ def create_views(conn: sqlite3.Connection):
 
 def main():
     parser = argparse.ArgumentParser(description='Populate schema metadata tables')
-    parser.add_argument('--db-path', type=str, default='nt_revenue.sqlite',
+    parser.add_argument('--db-path', type=str, default='nt_fi_report.sqlite',
                         help='Path to SQLite database')
     parser.add_argument('--reset', action='store_true',
                         help='Drop and recreate tables before populating')

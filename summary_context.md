@@ -422,7 +422,7 @@ from app.services.ai_service import create_matcha_service
 service = create_matcha_service(
     api_key=settings.MATCHA_AI_API_KEY,
     api_url=settings.MATCHA_API_URL,
-    db_path='./nt_revenue.sqlite',
+    db_path='./nt_fi_report.sqlite',
     model=settings.MATCHA_MODEL
 )
 service.refresh_schema()

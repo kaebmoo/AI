@@ -1,7 +1,7 @@
 import sqlite3
 
 def migrate():
-    conn = sqlite3.connect("nt_revenue.sqlite")
+    conn = sqlite3.connect("nt_fi_report.sqlite")
     cursor = conn.cursor()
     
     try:

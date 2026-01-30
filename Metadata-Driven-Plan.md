@@ -667,7 +667,7 @@ class EnhancedAIService:
 service = EnhancedAIService(
     provider="matcha",
     api_key="your-key",
-    db_path="nt_revenue.sqlite",
+    db_path="nt_fi_report.sqlite",
     api_url="http://your-matcha-endpoint"
 )
 
@@ -756,7 +756,7 @@ async def list_datasets(current_user=Depends(get_current_user)):
     
     from app.services.universal_schema_service import UniversalSchemaService
     
-    service = UniversalSchemaService(db_path="nt_revenue.sqlite")
+    service = UniversalSchemaService(db_path="nt_fi_report.sqlite")
     
     datasets = []
     for name, config in service._dataset_configs.items():
@@ -779,7 +779,7 @@ async def get_dataset_schema(
     
     from app.services.universal_schema_service import UniversalSchemaService
     
-    service = UniversalSchemaService(db_path="nt_revenue.sqlite")
+    service = UniversalSchemaService(db_path="nt_fi_report.sqlite")
     
     if dataset_name not in service._dataset_configs:
         raise HTTPException(status_code=404, detail="Dataset not found")

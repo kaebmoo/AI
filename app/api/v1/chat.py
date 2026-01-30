@@ -134,7 +134,7 @@ def chat(
         if "sqlite" in settings.DATABASE_URL:
             db_path = settings.DATABASE_URL.replace("sqlite:///", "")
         else:
-            db_path = "nt_revenue.sqlite"
+            db_path = "nt_fi_report.sqlite"
             
         ai_service = create_claude_service(
             api_key=settings.ANTHROPIC_API_KEY,
@@ -150,7 +150,7 @@ def chat(
         if "sqlite" in settings.DATABASE_URL:
             db_path = settings.DATABASE_URL.replace("sqlite:///", "")
         else:
-            db_path = "nt_revenue.sqlite"
+            db_path = "nt_fi_report.sqlite"
             
         ai_service = create_gemini_service(
             api_key=settings.GOOGLE_AI_API_KEY,
@@ -166,7 +166,7 @@ def chat(
         if "sqlite" in settings.DATABASE_URL:
             db_path = settings.DATABASE_URL.replace("sqlite:///", "")
         else:
-            db_path = "nt_revenue.sqlite"
+            db_path = "nt_fi_report.sqlite"
             
         ai_service = create_matcha_service(
             api_key=settings.MATCHA_AI_API_KEY,

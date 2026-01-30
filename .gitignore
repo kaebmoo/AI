@@ -183,3 +183,4 @@ api_key.conf
 .DS_Store
 nt_revenue.db
 nt_revenue.sqlite
+nt_fi_report.sqlite

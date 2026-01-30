@@ -28,7 +28,7 @@ def test_multiturn_chat():
     # Wait for async task to (hopefully) create the record
     time.sleep(2) 
     
-    conn = sqlite3.connect("nt_revenue.sqlite")
+    conn = sqlite3.connect("nt_fi_report.sqlite")
     cursor = conn.cursor()
     otp_hash = hashlib.sha256("111111".encode()).hexdigest()
     

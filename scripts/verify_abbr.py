@@ -17,7 +17,7 @@ def verify_abbreviations():
     import sqlite3
     import hashlib
     time.sleep(1)
-    conn = sqlite3.connect("nt_revenue.sqlite")
+    conn = sqlite3.connect("nt_fi_report.sqlite")
     cursor = conn.cursor()
     otp_hash = hashlib.sha256("111111".encode()).hexdigest()
     cursor.execute("UPDATE otp_requests SET otp_code = ? WHERE email = ? AND verified_at IS NULL", (otp_hash, EMAIL))

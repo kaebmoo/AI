@@ -1,7 +1,7 @@
 import sqlite3
 
 def fix_abbreviations():
-    conn = sqlite3.connect("nt_revenue.sqlite")
+    conn = sqlite3.connect("nt_fi_report.sqlite")
     cursor = conn.cursor()
     
     # 1. Delete the bad row we just added (id 2)

@@ -85,6 +85,6 @@ def check_semantic_mappings(db_path):
     conn.close()
 
 if __name__ == "__main__":
-    db_path = "/Users/seal/Documents/GitHub/AI/nt_revenue.sqlite"
+    db_path = "/Users/seal/Documents/GitHub/AI/nt_fi_report.sqlite"
     check_database_structure(db_path)
     check_semantic_mappings(db_path)
