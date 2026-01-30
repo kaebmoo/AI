@@ -176,7 +176,7 @@ class ClaudeProvider(AIProvider):
         
         response = self.client.messages.create(
             model=self.model,
-            max_tokens=1024,
+            max_tokens=2048,  # Increased for complex SQL queries
             system=system_prompt,
             tools=tools,
             messages=messages
@@ -209,13 +209,28 @@ class ClaudeProvider(AIProvider):
     def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str) -> str:
         """Explain query result using Claude"""
 
-        # Determine sample size based on data complexity
-        is_crosstab = any(keyword in question.lower() for keyword in ['crosstab', 'pivot', 'ตาราง', 'แยกตาม'])
-        sample_limit = 50 if is_crosstab else 30
+        question_lower = question.lower()
+
+        # Detect complex queries that need more tokens
+        complex_keywords = [
+            'crosstab', 'pivot', 'ตาราง', 'แยกตาม',  # Original
+            'เปรียบเทียบ', 'ผลต่าง', 'ไตรมาส', 'quarter',  # Comparison
+            'เทียบ', 'vs', 'versus', 'ต่างกัน',  # vs
+            'แนวโน้ม', 'trend', 'growth', 'การเติบโต',  # Trends
+            'breakdown', 'แจกแจง', 'รายละเอียด',  # Breakdown
+            'ทุกกลุ่ม', 'ทุกหน่วยงาน', 'ทั้งหมด'  # All groups
+        ]
+        is_complex = any(keyword in question_lower for keyword in complex_keywords)
+
+        # Increase sample limit for complex queries
+        sample_limit = 100 if is_complex else (50 if len(data) > 20 else 30)
         data_sample = data[:sample_limit] if len(data) > sample_limit else data
 
-        # Estimate tokens needed
-        estimated_tokens = 2500 if len(data) > 20 else 1500
+        # Estimate tokens needed - higher for complex queries
+        if is_complex:
+            estimated_tokens = 6000 if len(data) > 10 else 4000
+        else:
+            estimated_tokens = 3000 if len(data) > 20 else 2000
 
         prompt = f"""คำถามเดิม: {question}
 
@@ -230,7 +245,8 @@ SQL ที่ใช้:
 ```
 
 กรุณาอธิบายผลลัพธ์นี้เป็นภาษาไทยที่เข้าใจง่าย พร้อม format ตัวเลขให้อ่านง่าย และไม่ใช้ emoji icon
-หากมีข้อมูลหลายแถว ให้สรุปเป็นภาพรวมและไฮไลท์ข้อมูลสำคัญ"""
+หากมีข้อมูลหลายแถว ให้สรุปเป็นภาพรวมและไฮไลท์ข้อมูลสำคัญ
+สำคัญ: ต้องแสดงข้อมูลทุกแถวในตารางให้ครบถ้วน อย่าตัดข้อมูลออก"""
 
         response = self.client.messages.create(
             model=self.model,
@@ -241,7 +257,14 @@ SQL ที่ใช้:
             ]
         )
 
-        return response.content[0].text
+        result_text = response.content[0].text
+
+        # Check for truncation via stop_reason
+        if response.stop_reason == "max_tokens":
+            logger.warning("Claude response truncated due to max_tokens")
+            result_text += "\n\n(หมายเหตุ: คำอธิบายอาจถูกตัดทอนเนื่องจากความยาวเกินกำหนด กรุณาถามแยกเป็นคำถามย่อยๆ)"
+
+        return result_text
 
     @ai_retry
     def generate_content(self, prompt: str, system_prompt: Optional[str] = None) -> str:
@@ -331,8 +354,9 @@ class GeminiProvider(AIProvider):
                     system_instruction=system_prompt,
                     tools=tools,
                     temperature=0.0,
+                    max_output_tokens=2048,  # Increased for complex SQL queries
                     # Explicitly disable AFC to strictly return tool calls
-                    automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True) 
+                    automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
                 )
             )
             
@@ -422,13 +446,30 @@ class GeminiProvider(AIProvider):
 
         from google.genai import types
 
-        # Determine sample size based on data complexity
-        is_crosstab = any(keyword in question.lower() for keyword in ['crosstab', 'pivot', 'ตาราง', 'แยกตาม'])
-        sample_limit = 50 if is_crosstab else 30
+        # Determine sample size and complexity based on query characteristics
+        question_lower = question.lower()
+
+        # Detect complex queries that need more tokens
+        complex_keywords = [
+            'crosstab', 'pivot', 'ตาราง', 'แยกตาม',  # Original
+            'เปรียบเทียบ', 'ผลต่าง', 'ไตรมาส', 'quarter',  # Comparison
+            'เทียบ', 'vs', 'versus', 'ต่างกัน',  # vs
+            'แนวโน้ม', 'trend', 'growth', 'การเติบโต',  # Trends
+            'breakdown', 'แจกแจง', 'รายละเอียด',  # Breakdown
+            'ทุกกลุ่ม', 'ทุกหน่วยงาน', 'ทั้งหมด'  # All groups
+        ]
+        is_complex = any(keyword in question_lower for keyword in complex_keywords)
+
+        # Increase sample limit for complex queries
+        sample_limit = 100 if is_complex else (50 if len(data) > 20 else 30)
         data_sample = data[:sample_limit] if len(data) > sample_limit else data
 
-        # Estimate tokens needed
-        estimated_tokens = 2500 if len(data) > 20 else 1500
+        # Estimate tokens needed - significantly higher for complex queries
+        # Complex comparison tables with multiple columns need ~4000-6000 tokens
+        if is_complex:
+            estimated_tokens = 6000 if len(data) > 10 else 4000
+        else:
+            estimated_tokens = 3000 if len(data) > 20 else 2000
 
         prompt = f"""คำถามเดิม: {question}
 
@@ -443,7 +484,8 @@ SQL ที่ใช้:
 ```
 
 กรุณาอธิบายผลลัพธ์นี้เป็นภาษาไทยที่เข้าใจง่าย พร้อม format ตัวเลขให้อ่านง่าย และไม่ใช้ emoji icon
-หากมีข้อมูลหลายแถว ให้สรุปเป็นภาพรวมและไฮไลท์ข้อมูลสำคัญ"""
+หากมีข้อมูลหลายแถว ให้สรุปเป็นภาพรวมและไฮไลท์ข้อมูลสำคัญ
+สำคัญ: ต้องแสดงข้อมูลทุกแถวในตารางให้ครบถ้วน อย่าตัดข้อมูลออก"""
 
         response = self.client.models.generate_content(
             model=self.model,
@@ -453,7 +495,17 @@ SQL ที่ใช้:
                 max_output_tokens=estimated_tokens
             )
         )
-        return response.text if response.text else ""
+
+        result_text = response.text if response.text else ""
+
+        # Check for truncation by examining finish_reason
+        if response.candidates and response.candidates[0].finish_reason:
+            finish_reason = str(response.candidates[0].finish_reason)
+            if 'MAX_TOKENS' in finish_reason or 'LENGTH' in finish_reason.upper():
+                logger.warning(f"Gemini response truncated: {finish_reason}")
+                result_text += "\n\n(หมายเหตุ: คำอธิบายอาจถูกตัดทอนเนื่องจากความยาวเกินกำหนด กรุณาถามแยกเป็นคำถามย่อยๆ)"
+
+        return result_text
 
     @ai_retry
     def generate_content(self, prompt: str, system_prompt: Optional[str] = None) -> str:
@@ -624,7 +676,7 @@ class MatchaProvider(AIProvider):
             'model': self.model,
             'messages': messages,
             'temperature': 0.1,  # Low temperature for consistent SQL generation
-            'max_tokens': 1200,  # Increased for complex queries
+            'max_tokens': 2048,  # Increased for complex SQL queries
             'top_p': 0.95
         }
 
@@ -656,15 +708,28 @@ class MatchaProvider(AIProvider):
     def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str) -> str:
         """Explain query result using Matcha AI"""
 
-        # Determine sample size based on data complexity
-        # For crosstab/pivot queries, include more rows
-        is_crosstab = any(keyword in question.lower() for keyword in ['crosstab', 'pivot', 'ตาราง', 'แยกตาม'])
-        sample_limit = 50 if is_crosstab else 30
+        question_lower = question.lower()
+
+        # Detect complex queries that need more tokens
+        complex_keywords = [
+            'crosstab', 'pivot', 'ตาราง', 'แยกตาม',  # Original
+            'เปรียบเทียบ', 'ผลต่าง', 'ไตรมาส', 'quarter',  # Comparison
+            'เทียบ', 'vs', 'versus', 'ต่างกัน',  # vs
+            'แนวโน้ม', 'trend', 'growth', 'การเติบโต',  # Trends
+            'breakdown', 'แจกแจง', 'รายละเอียด',  # Breakdown
+            'ทุกกลุ่ม', 'ทุกหน่วยงาน', 'ทั้งหมด'  # All groups
+        ]
+        is_complex = any(keyword in question_lower for keyword in complex_keywords)
+
+        # Increase sample limit for complex queries
+        sample_limit = 100 if is_complex else (50 if len(data) > 20 else 30)
         data_sample = data[:sample_limit] if len(data) > sample_limit else data
 
-        # Estimate response length needed
-        # More data = need more tokens for explanation
-        estimated_tokens = 2000 if len(data) > 20 else 1500
+        # Estimate tokens needed - higher for complex queries
+        if is_complex:
+            estimated_tokens = 6000 if len(data) > 10 else 4000
+        else:
+            estimated_tokens = 3000 if len(data) > 20 else 2000
 
         prompt = f"""คำถามเดิม: {question}
 
@@ -679,7 +744,8 @@ SQL ที่ใช้:
 ```
 
 กรุณาอธิบายผลลัพธ์นี้เป็นภาษาไทยที่เข้าใจง่าย พร้อม format ตัวเลขให้อ่านง่าย และไม่ใช้ emoji icon
-หากมีข้อมูลหลายแถว ให้สรุปเป็นภาพรวมและไฮไลท์ข้อมูลสำคัญ"""
+หากมีข้อมูลหลายแถว ให้สรุปเป็นภาพรวมและไฮไลท์ข้อมูลสำคัญ
+สำคัญ: ต้องแสดงข้อมูลทุกแถวในตารางให้ครบถ้วน อย่าตัดข้อมูลออก"""
 
         headers = {
             'Content-Type': 'application/json',
@@ -697,7 +763,7 @@ SQL ที่ใช้:
         }
 
         try:
-            with httpx.Client(verify=False, timeout=90.0) as client:  # Increased timeout
+            with httpx.Client(verify=False, timeout=120.0) as client:  # Increased timeout for longer responses
                 response = client.post(self.api_url, headers=headers, json=payload)
                 response.raise_for_status()
                 result = response.json()
@@ -708,7 +774,7 @@ SQL ที่ใช้:
             finish_reason = result['choices'][0].get('finish_reason', '')
             if finish_reason == 'length':
                 logger.warning("Matcha response was truncated due to max_tokens limit")
-                content += "\n\n(หมายเหตุ: คำอธิบายถูกตัดทอนเนื่องจากความยาวเกินกำหนด)"
+                content += "\n\n(หมายเหตุ: คำอธิบายอาจถูกตัดทอนเนื่องจากความยาวเกินกำหนด กรุณาถามแยกเป็นคำถามย่อยๆ)"
 
             return content
 
