@@ -179,7 +179,7 @@ class DataDrivenMatchaProvider:
 # ตัวอย่างการใช้งาน
 if __name__ == "__main__":
     provider = DataDrivenMatchaProvider(
-        db_path="/Users/seal/Documents/GitHub/AI/nt_revenue.sqlite",
+        db_path="/Users/seal/Documents/GitHub/AI/nt_fi_report.sqlite",
         api_key="your-matcha-key",
         api_url="http://your-matcha-endpoint"
     )
@@ -260,7 +260,7 @@ class RealMetadataSchemaService:
 
 # 1. สร้าง enhanced provider
 provider = DataDrivenMatchaProvider(
-    db_path="/Users/seal/Documents/GitHub/AI/nt_revenue.sqlite",
+    db_path="/Users/seal/Documents/GitHub/AI/nt_fi_report.sqlite",
     api_key="your-key",
     api_url="http://your-endpoint"
 )

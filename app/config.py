@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     # Support both SQLite and PostgreSQL
     # Example SQLite: sqlite:///./sql_app.db
     # Example Postgres: postgresql://user:pass@localhost:5432/db
-    DATABASE_URL: str = "sqlite:///./nt_revenue.sqlite"
+    DATABASE_URL: str = "sqlite:///./nt_fi_report.sqlite"
 
     # Database Engine - explicit engine type for SQL syntax rules
     # Options: "sqlite", "postgresql", "mssql"

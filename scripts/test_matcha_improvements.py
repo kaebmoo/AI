@@ -284,7 +284,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="Test Matcha improvements")
     parser.add_argument("--live", action="store_true", help="Run live API tests")
-    parser.add_argument("--db", default="nt_revenue.sqlite", help="Database path")
+    parser.add_argument("--db", default="nt_fi_report.sqlite", help="Database path")
     args = parser.parse_args()
 
     db_path = args.db

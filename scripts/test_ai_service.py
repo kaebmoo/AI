@@ -37,7 +37,7 @@ def test_ai():
         print(f"Model: {settings.GEMINI_MODEL}")
         service = create_gemini_service(
             api_key, 
-            db_path="nt_revenue.sqlite",
+            db_path="nt_fi_report.sqlite",
             model=settings.GEMINI_MODEL,
             prompt_manager=prompt_manager
         )
@@ -50,7 +50,7 @@ def test_ai():
         print(f"Model: {settings.CLAUDE_MODEL}")
         service = create_claude_service(
             api_key, 
-            db_path="nt_revenue.sqlite",
+            db_path="nt_fi_report.sqlite",
             model=settings.CLAUDE_MODEL,
             prompt_manager=prompt_manager
         )

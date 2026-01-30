@@ -57,7 +57,7 @@ def get_ai_service(db: Session = Depends(get_db)) -> AIService:
     else:
         # For Postgres, we might need a different approach or connection string
         # For now, this service expects a path for SQLiteSchema inspection
-        db_path = "nt_revenue.sqlite" 
+        db_path = "nt_fi_report.sqlite" 
 
     prompt_manager = PromptManager(db)
 

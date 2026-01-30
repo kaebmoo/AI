@@ -49,7 +49,7 @@ def test_retry_with_matcha():
     if "sqlite" in settings.DATABASE_URL:
         db_path = settings.DATABASE_URL.replace("sqlite:///", "")
     else:
-        db_path = "nt_revenue.sqlite"
+        db_path = "nt_fi_report.sqlite"
     print(f"Using database: {db_path}")
 
     service = create_matcha_service(

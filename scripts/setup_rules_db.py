@@ -1,7 +1,7 @@
 import sqlite3
 import os
 
-DB_PATH = "nt_revenue.sqlite"
+DB_PATH = "nt_fi_report.sqlite"
 
 def setup_database():
     print(f"Connecting to {DB_PATH}...")

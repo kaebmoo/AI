@@ -14,7 +14,7 @@ def setup_user_and_token():
     
     # In DEV: Inject known OTP hash
     time.sleep(1) 
-    conn = sqlite3.connect("nt_revenue.sqlite")
+    conn = sqlite3.connect("nt_fi_report.sqlite")
     cursor = conn.cursor()
     import hashlib
     otp_hash = hashlib.sha256("111111".encode()).hexdigest()

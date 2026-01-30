@@ -28,7 +28,7 @@ from pathlib import Path
 class SchemaService:
     """Service สำหรับจัดการ schema metadata"""
     
-    def __init__(self, db_path: str = "nt_revenue.sqlite", metadata_db_path: Optional[str] = None, db_engine: str = "sqlite"):
+    def __init__(self, db_path: str = "nt_fi_report.sqlite", metadata_db_path: Optional[str] = None, db_engine: str = "sqlite"):
         """
         Initialize SchemaService
         
