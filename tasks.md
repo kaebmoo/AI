@@ -51,12 +51,20 @@
     - [ ] Command Handlers (/start, /login)
     - [ ] Message Handler (AI Chat)
     - [ ] User Linking (Telegram <-> App User)
-- [ ] Multi-Context Data Support (Phase 5)
-    - [ ] Design Schema Registry (Context Definitions)
-    - [ ] Implement Context Router (Intent Classification)
-    - [ ] Create Mixed-Granularity Views (Expenses, Performance)
-    - [ ] Update SchemaService for Dynamic Context Loading
-    - [ ] **Admin UI: Context Management**
-        - [ ] List/Create/Edit Contexts Page
-        - [ ] "Sync Metadata" Button (Trigger extraction)
-        - [ ] Context-specific Rules & Mappings Editor
+- [/] Multi-Context Data Support (Phase 5)
+    - [x] **Phase 1: Foundation (Backend)**
+        - [x] Create `schema_contexts` and `schema_context_tables`
+        - [x] Register 'revenue' and 'expense' contexts
+        - [x] Create `v_expense_mart` view
+        - [x] Update `SchemaService` for dynamic context loading
+    - [x] **Phase 2: Context Router**
+        - [x] Implement `ContextRouter` service
+        - [x] Add `keywords` support to database
+        - [x] Integrate Router into Chat API
+    - [ ] **Phase 3: Data Mart Extension**
+        - [x] Create Expense Mart (v_expense_mart)
+        - [ ] Implement advanced mappings (ongoing)
+    - [ ] **Phase 4: Context Management UI**
+        - [ ] Context List Page/Edit Page
+        - [ ] "Sync Metadata" functionality
+

@@ -870,30 +870,35 @@ class AIService:
         else:
             raise ValueError(f"Unknown provider: {provider}. Use 'claude', 'gemini', or 'matcha'")
         
-        # Cache system prompt
-        self._system_prompt = None
+        # Cache system prompts by context
+        self._system_prompts: Dict[str, str] = {}
     
-    @property
-    def system_prompt(self) -> str:
-        """Get cached system prompt"""
-        if self._system_prompt is None:
+    def get_system_prompt(self, context_name: str = "revenue") -> str:
+        """Get cached system prompt for specific context"""
+        if context_name not in self._system_prompts:
             if self.prompt_manager:
-                base_instruction = self.schema_service.get_default_instruction(self.provider_name)
-                schema_context = self.schema_service.get_schema_context()
-                self._system_prompt = self.prompt_manager.compose_system_prompt(
+                base_instruction = self.schema_service.get_default_instruction(self.provider_name, context_name=context_name)
+                schema_context = self.schema_service.get_schema_context(context_name=context_name)
+                self._system_prompts[context_name] = self.prompt_manager.compose_system_prompt(
                     base_prompt=base_instruction,
                     schema_text=schema_context
                 )
             else:
-                self._system_prompt = self.schema_service.build_system_prompt(
-                    ai_provider=self.provider_name
+                self._system_prompts[context_name] = self.schema_service.build_system_prompt(
+                    ai_provider=self.provider_name,
+                    context_name=context_name
                 )
-        return self._system_prompt
+        return self._system_prompts[context_name]
+    
+    @property
+    def system_prompt(self) -> str:
+        """Legacy property for backward compatibility (defaults to revenue)"""
+        return self.get_system_prompt("revenue")
     
     def refresh_schema(self):
         """Refresh schema cache"""
         self.schema_service.refresh_cache()
-        self._system_prompt = None
+        self._system_prompts.clear()
     
     def validate_sql(self, sql: str) -> tuple[bool, str]:
         """
@@ -925,22 +930,26 @@ class AIService:
     
     def execute_sql(self, sql: str) -> List[Dict]:
         """Execute SQL query and return results"""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-
+        conn = None
         try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
             cursor.execute(sql)
             rows = cursor.fetchall()
             return [dict(row) for row in rows]
+        except Exception as e:
+            # logger.error(f"SQL execution error for query '{sql}': {e}")
+            raise
         finally:
-            conn.close()
+            if conn:
+                conn.close()
 
     def generate_content(self, prompt: str) -> str:
         """Generate generic content using the configured provider"""
         return self.provider.generate_content(prompt, system_prompt=self.system_prompt)
 
-    def _find_similar_values(self, sql: str, limit: int = 5) -> Dict[str, List[str]]:
+    def _find_similar_values(self, sql: str, limit: int = 5, context_name: str = "revenue") -> Dict[str, List[str]]:
         """
         Find actual values in database for columns used in WHERE clause.
         Helps AI understand what values exist when query returns 0 rows.
@@ -950,6 +959,13 @@ class AIService:
         """
         import re
         suggestions = {}
+        
+        # Get table name for context
+        try:
+            context_info = self.schema_service.get_context_info(context_name)
+            table_name = context_info['main_view'] if context_info else 'revenue_search'
+        except:
+            table_name = 'revenue_search'
 
         try:
             conn = sqlite3.connect(self.db_path)
@@ -976,10 +992,9 @@ class AIService:
 
                 try:
                     # Find distinct values that might match
-                    # First try exact table
                     query = f"""
                         SELECT DISTINCT "{column}"
-                        FROM revenue_search
+                        FROM {table_name}
                         WHERE "{column}" IS NOT NULL
                         LIMIT {limit * 2}
                     """
@@ -1007,22 +1022,23 @@ class AIService:
                             suggestions[column] = [str(v) for v in all_values[:limit]]
 
                 except Exception as e:
-                    logger.debug(f"Could not find values for column {column}: {e}")
+                    # logger.debug(f"Could not find values for column {column}: {e}")
                     continue
 
             conn.close()
 
         except Exception as e:
-            logger.warning(f"Error finding similar values: {e}")
+            # logger.warning(f"Error finding similar values: {e}")
+            pass
 
         return suggestions
 
-    def _check_zero_results_reason(self, sql: str) -> Optional[str]:
+    def _check_zero_results_reason(self, sql: str, context_name: str = "revenue") -> Optional[str]:
         """
         Analyze why a query might return 0 results.
         Returns hint text if issues found.
         """
-        suggestions = self._find_similar_values(sql)
+        suggestions = self._find_similar_values(sql, context_name=context_name)
 
         if not suggestions:
             return None
@@ -1035,26 +1051,29 @@ class AIService:
 
         return "\n".join(hint_parts)
     
-    def query(self, question: str, explain: bool = True, history: List[Dict] = []) -> QueryResult:
+    def query(self, question: str, explain: bool = True, history: List[Dict] = [], context_name: str = "revenue") -> QueryResult:
         """
         Process a natural language question
         
         Args:
             question: Question in Thai or English
             explain: Whether to generate explanation
+            context_name: Data scope (revenue, expense, etc.)
         
         Returns:
             QueryResult with SQL, data, and explanation
         """
         
+        system_prompt = self.get_system_prompt(context_name)
+        
         # Generate SQL
-        logger.info(f"AIService: Querying {self.provider_name} for '{question}'")
+        # logger.info(f"AIService: Querying {self.provider_name} [{context_name}] for '{question}'")
         import time
         t_start = time.time()
         
-        ai_result = self.provider.generate_sql(question, self.system_prompt, history)
+        ai_result = self.provider.generate_sql(question, system_prompt, history)
         
-        logger.info(f"AIService: Generated SQL in {time.time() - t_start:.2f}s")
+        # logger.info(f"AIService: Generated SQL in {time.time() - t_start:.2f}s")
         
         sql_query = ai_result.get("sql")
         tokens_used = ai_result.get("tokens_used", 0)
@@ -1092,7 +1111,7 @@ class AIService:
         if explain and data:
             try:
                 explanation = self.provider.explain_result(
-                    question, sql_query, data, self.system_prompt
+                    question, sql_query, data, system_prompt
                 )
             except:
                 pass  # Keep original explanation if API fails
@@ -1112,7 +1131,8 @@ class AIService:
         max_retries: int = 3,
         history: List[Dict] = [],
         on_status: Optional[Callable[[RetryStatus], None]] = None,
-        explain: bool = True
+        explain: bool = True,
+        context_name: str = "revenue"
     ) -> QueryResult:
         """
         Process question with automatic retry on SQL errors.
@@ -1126,6 +1146,7 @@ class AIService:
             history: Conversation history
             on_status: Callback function for status updates
             explain: Whether to generate explanation
+            context_name: Data context (revenue, expense)
 
         Returns:
             QueryResult with retry information
@@ -1146,20 +1167,21 @@ class AIService:
         retry_history = []
         total_tokens = 0
         current_history = list(history)  # Copy to avoid mutation
+        system_prompt = self.get_system_prompt(context_name)
 
         for attempt in range(max_retries + 1):  # +1 for initial attempt
             attempt_num = attempt + 1
 
             # Status: Generating SQL
             notify(attempt_num, "generating",
-                   f"กำลังสร้าง SQL... (ครั้งที่ {attempt_num})")
+                   f"กำลังสร้าง SQL ({context_name})... (ครั้งที่ {attempt_num})")
 
             # Generate SQL
             try:
                 if attempt == 0:
                     # First attempt - use original question
                     ai_result = self.provider.generate_sql(
-                        question, self.system_prompt, current_history
+                        question, system_prompt, current_history
                     )
                 else:
                     # Retry attempt - include error context
@@ -1168,11 +1190,11 @@ class AIService:
                         retry_history[-1] if retry_history else {}
                     )
                     ai_result = self.provider.generate_sql(
-                        retry_prompt, self.system_prompt, current_history
+                        retry_prompt, system_prompt, current_history
                     )
 
             except Exception as e:
-                logger.error(f"AI generation error on attempt {attempt_num}: {str(e)}")
+                # logger.error(f"AI generation error on attempt {attempt_num}: {str(e)}")
                 notify(attempt_num, "error",
                        f"เกิดข้อผิดพลาดในการติดต่อ AI: {str(e)}")
 
@@ -1188,7 +1210,7 @@ class AIService:
 
             # Check if SQL was generated
             if not sql_query:
-                logger.warning(f"No SQL generated on attempt {attempt_num}")
+                # logger.warning(f"No SQL generated on attempt {attempt_num}")
                 notify(attempt_num, "error",
                        "AI ไม่สามารถสร้าง SQL ได้ กำลังลองใหม่...")
 
@@ -1207,7 +1229,7 @@ class AIService:
             is_valid, validation_error = self.validate_sql(sql_query)
 
             if not is_valid:
-                logger.warning(f"SQL validation failed on attempt {attempt_num}: {validation_error}")
+                # logger.warning(f"SQL validation failed on attempt {attempt_num}: {validation_error}")
                 notify(attempt_num, "error",
                        f"SQL ไม่ถูกต้อง: {validation_error}",
                        sql=sql_query, error=validation_error)
@@ -1229,10 +1251,10 @@ class AIService:
                 # Check for zero results - might need retry with better conditions
                 if len(data) == 0 and attempt < max_retries:
                     # Analyze why we got 0 results
-                    zero_hint = self._check_zero_results_reason(sql_query)
+                    zero_hint = self._check_zero_results_reason(sql_query, context_name=context_name)
 
                     if zero_hint:
-                        logger.info(f"Query returned 0 rows on attempt {attempt_num}, will retry with hints")
+                        # logger.info(f"Query returned 0 rows on attempt {attempt_num}, will retry with hints")
                         notify(attempt_num, "retrying",
                                f"ได้ 0 แถว - กำลังตรวจสอบเงื่อนไขและลองใหม่...",
                                sql=sql_query, error="Zero results - conditions may not match data")
@@ -1255,7 +1277,7 @@ class AIService:
                 if explain and data:
                     try:
                         explanation = self.provider.explain_result(
-                            question, sql_query, data, self.system_prompt
+                            question, sql_query, data, system_prompt
                         )
                     except:
                         pass
@@ -1279,7 +1301,7 @@ class AIService:
 
             except Exception as e:
                 error_msg = str(e)
-                logger.warning(f"SQL execution error on attempt {attempt_num}: {error_msg}")
+                # logger.warning(f"SQL execution error on attempt {attempt_num}: {error_msg}")
 
                 notify(attempt_num, "retrying" if attempt < max_retries else "failed",
                        f"SQL Error: {error_msg}", sql=sql_query, error=error_msg)
@@ -1401,7 +1423,8 @@ SQL ที่สร้างทำงานได้แต่ไม่พบข�
     def chat(
         self,
         question: str,
-        history: Optional[List[Dict]] = None
+        history: Optional[List[Dict]] = None,
+        context_name: str = "revenue"
     ) -> Dict[str, Any]:
         """
         Chat interface with conversation history
@@ -1409,12 +1432,13 @@ SQL ที่สร้างทำงานได้แต่ไม่พบข�
         Args:
             question: User's question
             history: List of previous messages [{role: "user/assistant", content: "..."}]
+            context_name: Data scope
         
         Returns:
             Dict with response and updated history
         """
         
-        result = self.query(question, history=history or [])
+        result = self.query(question, history=history or [], context_name=context_name)
         
         response = {
             "question": question,
@@ -1463,16 +1487,7 @@ if __name__ == "__main__":
     claude_key = os.getenv("ANTHROPIC_API_KEY")
     if claude_key:
         service = create_claude_service(claude_key)
-        result = service.query("รายได้รวมเดือนมกราคม 2568")
-        print(f"SQL: {result.sql_query}")
-        print(f"Data: {result.data[:5]}")
-        print(f"Explanation: {result.explanation}")
-    
-    # Example with Gemini
-    gemini_key = os.getenv("GOOGLE_API_KEY")
-    if gemini_key:
-        service = create_gemini_service(gemini_key)
-        result = service.query("รายได้รวมเดือนมกราคม 2568")
-        print(f"SQL: {result.sql_query}")
-        print(f"Data: {result.data[:5]}")
-        print(f"Explanation: {result.explanation}")
+        # result = service.query("รายได้รวมเดือนมกราคม 2568", context_name="revenue") 
+        # print(f"SQL: {result.sql_query}")
+        # print(f"Data: {result.data[:5]}")
+        # print(f"Explanation: {result.explanation}")

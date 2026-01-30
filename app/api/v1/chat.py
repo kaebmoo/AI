@@ -178,9 +178,20 @@ def chat(
     else:
         raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
 
-    # 4. Call AI Service with retry mechanism
+    # 4. Determine Context
     import logging
     logger = logging.getLogger(__name__)
+    
+    context_name = request.context
+    if not context_name:
+        from app.services.context_router import ContextRouter
+        # Use ai_service.db_path which is already resolved
+        router = ContextRouter(ai_service.db_path)
+        context_name = router.route(request.question)
+        logger.info(f"Auto-routed question '{request.question}' to context: {context_name}")
+
+    # 5. Call AI Service with retry mechanism
+    # Use query_with_retry for automatic self-correction
 
     # Use query_with_retry for automatic self-correction
     result = ai_service.query_with_retry(
@@ -191,7 +202,8 @@ def chat(
             f"Retry status: attempt={status.attempt}/{status.max_attempts}, "
             f"status={status.status}, message={status.message}"
         ),
-        explain=True
+        explain=True,
+        context_name=context_name
     )
 
     execution_time = (time.time() - start_time) * 1000
