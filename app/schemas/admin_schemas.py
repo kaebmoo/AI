@@ -221,3 +221,46 @@ class DashboardStatsResponse(BaseModel):
     total_mappings: int
     total_rules: int
     total_columns: int
+
+
+# ==========================
+# Schema Contexts
+# ==========================
+
+class SchemaContextBase(BaseModel):
+    name: str
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    main_view: Optional[str] = None
+    is_active: bool = True
+    priority: int = 0
+    keywords: Optional[List[str]] = None
+
+class SchemaContextCreate(SchemaContextBase):
+    pass
+
+class SchemaContextUpdate(BaseModel):
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    main_view: Optional[str] = None
+    is_active: Optional[bool] = None
+    priority: Optional[int] = None
+    keywords: Optional[List[str]] = None
+
+class SchemaContextResponse(SchemaContextBase):
+    id: int
+    created_at: datetime
+    # Assuming standard fields are present in the response
+    # name: str
+    # display_name: Optional[str]
+    # description: Optional[str]
+    # main_view: Optional[str]
+    # is_active: bool
+    # priority: int
+
+    class Config:
+        from_attributes = True
+
+class SchemaContextListResponse(BaseModel):
+    contexts: List[SchemaContextResponse]
+    total: int

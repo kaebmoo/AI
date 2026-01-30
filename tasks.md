@@ -64,7 +64,7 @@
     - [ ] **Phase 3: Data Mart Extension**
         - [x] Create Expense Mart (v_expense_mart)
         - [ ] Implement advanced mappings (ongoing)
-    - [ ] **Phase 4: Context Management UI**
-        - [ ] Context List Page/Edit Page
-        - [ ] "Sync Metadata" functionality
+    - [x] **Phase 4: Context Management UI**
+        - [x] Context List Page/Edit Page
+        - [x] "Sync Metadata" functionality
 

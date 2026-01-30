@@ -19,6 +19,7 @@ from app.schemas.admin_schemas import (
     SemanticMappingCreate, SemanticMappingUpdate, SemanticMappingResponse, SemanticMappingListResponse,
     BusinessRuleCreate, BusinessRuleUpdate, BusinessRuleResponse, BusinessRuleListResponse,
     GoldenExampleCreate, GoldenExampleUpdate, GoldenExampleResponse, GoldenExampleListResponse,
+    SchemaContextCreate, SchemaContextUpdate, SchemaContextResponse, SchemaContextListResponse,
 )
 
 router = APIRouter()
@@ -542,14 +543,107 @@ def delete_golden_example(
     return None
 
 
+
 # ============================================================
-# Refresh Cache Endpoint
+# Schema Context Endpoints
 # ============================================================
 
-    return {
-        "status": "success",
-        "message": "Schema cache refresh triggered. Changes will take effect on next query."
-    }
+@router.get("/contexts", response_model=SchemaContextListResponse)
+def list_contexts(
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db)
+):
+    """
+    List all schema contexts.
+    Admin only.
+    """
+    from app.services.schema_service import SchemaService
+    from app.config import settings
+    
+    # Init service (use sqlite default)
+    db_path = "nt_fi_report.sqlite"
+    if "sqlite" in settings.DATABASE_URL:
+        db_path = settings.DATABASE_URL.replace("sqlite:///", "")
+        
+    service = SchemaService(db_path)
+    contexts = service.get_all_contexts()
+    
+    return SchemaContextListResponse(
+        contexts=[SchemaContextResponse.model_validate(c) for c in contexts],
+        total=len(contexts)
+    )
+
+@router.post("/contexts", response_model=SchemaContextResponse, status_code=status.HTTP_201_CREATED)
+def create_context(
+    data: SchemaContextCreate,
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db)
+):
+    """
+    Create new schema context.
+    Admin only.
+    """
+    from app.services.schema_service import SchemaService
+    from app.config import settings
+    
+    db_path = "nt_fi_report.sqlite"
+    if "sqlite" in settings.DATABASE_URL:
+        db_path = settings.DATABASE_URL.replace("sqlite:///", "")
+        
+    service = SchemaService(db_path)
+    try:
+        context = service.create_context(data.model_dump())
+        return SchemaContextResponse.model_validate(context)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.put("/contexts/{context_id}", response_model=SchemaContextResponse)
+def update_context(
+    context_id: int,
+    data: SchemaContextUpdate,
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db)
+):
+    """
+    Update schema context.
+    Admin only.
+    """
+    from app.services.schema_service import SchemaService
+    from app.config import settings
+    
+    db_path = "nt_fi_report.sqlite"
+    if "sqlite" in settings.DATABASE_URL:
+        db_path = settings.DATABASE_URL.replace("sqlite:///", "")
+        
+    service = SchemaService(db_path)
+    try:
+        context = service.update_context(context_id, data.model_dump(exclude_unset=True))
+        if not context:
+            raise HTTPException(status_code=404, detail="Context not found")
+        return SchemaContextResponse.model_validate(context)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.delete("/contexts/{context_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_context(
+    context_id: int,
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db)
+):
+    """
+    Delete schema context.
+    Admin only.
+    """
+    from app.services.schema_service import SchemaService
+    from app.config import settings
+    
+    db_path = "nt_fi_report.sqlite"
+    if "sqlite" in settings.DATABASE_URL:
+        db_path = settings.DATABASE_URL.replace("sqlite:///", "")
+        
+    service = SchemaService(db_path)
+    service.delete_context(context_id)
+    return None
 
 # ============================================================
 # Refresh Cache Endpoint

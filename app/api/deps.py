@@ -1,7 +1,8 @@
+from datetime import datetime
 from typing import Generator, Optional
 from fastapi import Depends, HTTPException, status, Request, Header
 from sqlalchemy.orm import Session
-from fastapi.security import APIKeyHeader
+from fastapi.security import APIKeyHeader, OAuth2PasswordBearer
 
 from app.db.session import SessionLocal
 from app.services.auth_service import AuthService
@@ -11,6 +12,7 @@ from app.services.ai_service import AIService, create_gemini_service, create_cla
 
 # Header scheme for session token
 header_scheme = APIKeyHeader(name="X-Session-Token", auto_error=False)
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
 
 def get_db() -> Generator:
     try:
@@ -22,20 +24,28 @@ def get_db() -> Generator:
 def get_current_user(
     request: Request,
     token: Optional[str] = Depends(header_scheme),
+    bearer_token: Optional[str] = Depends(oauth2_scheme),
     db: Session = Depends(get_db)
 ) -> User:
     """
     Get current user from session token.
-    Token can be passed in X-Session-Token header.
+    Token can be passed in X-Session-Token header OR Authorization: Bearer header.
     """
-    if not token:
+    final_token = token or bearer_token
+    
+    if not final_token:
+        # Fallback: Check raw Authorization header manually if schemes fail
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            final_token = auth_header.split(" ")[1]
+    if not final_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",
         )
     
     auth_service = AuthService(db)
-    session = auth_service.validate_session(token)
+    session = auth_service.validate_session(final_token)
     
     if not session or not session.user:
         raise HTTPException(

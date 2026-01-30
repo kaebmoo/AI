@@ -9,7 +9,8 @@ import {
     LogoutOutlined,
     BulbOutlined,
     SafetyCertificateOutlined,
-    RobotOutlined
+    RobotOutlined,
+    DatabaseOutlined
 } from '@ant-design/icons';
 import { Layout, Menu, Button, theme, Dropdown, Avatar, Space } from 'antd';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
@@ -47,6 +48,11 @@ const AppLayout: React.FC = () => {
             key: '/schema',
             icon: <TableOutlined />,
             label: 'Schema Explorer',
+        },
+        {
+            key: '/contexts',
+            icon: <DatabaseOutlined />,
+            label: 'Data Contexts',
         },
         {
             key: '/analyzer',
