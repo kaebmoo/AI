@@ -844,7 +844,7 @@ class AIService:
             db_engine = "mssql"
             
         # Initialize schema service
-        self.schema_service = SchemaService(db_path, db_engine=db_engine)
+        self.schema_service = SchemaService(db_path=db_path, db_engine=None)
         
         # Initialize AI provider
         if provider == "claude":
@@ -1458,6 +1458,73 @@ SQL ที่สร้างทำงานได้แต่ไม่พบข�
             "response": response,
             "history": new_history
         }
+
+    def suggest_mappings(self, columns: List[Dict[str, Any]], sample_values: Dict[str, List[Any]]) -> List[Dict[str, str]]:
+        """
+        Suggest standard column mappings using AI
+        
+        Args:
+            columns: List of column info [{'name': '...', 'type': '...'}]
+            sample_values: Dict of {col_name: [samples...]}
+            
+        Returns:
+            List of directives: [{'col': 'original', 'alias': 'suggested', 'reason': '...'}]
+        """
+        import json
+        
+        # Build prompt
+        col_list_str = "\n".join([f"- {c['name']} ({c['type']})" for c in columns])
+        
+        samples_str = ""
+        samples_str = ""
+        for col, vals in sample_values.items():
+            if isinstance(vals, list):
+                val_str = ", ".join(map(str, vals[:5]))
+                samples_str += f"- {col}: [{val_str}]\n"
+            elif col == 'DATA_RANGE' and isinstance(vals, dict):
+                 samples_str += f"- Data Range: {vals.get('min_year')}-{vals.get('max_year')}\n"
+            
+        prompt = f"""You are a Database Schema Expert.
+I have a raw table with the following columns:
+{col_list_str}
+
+Sample Data:
+{samples_str}
+
+Please suggest standardized English aliases for these columns to make them suitable for a clean SQL View.
+Target Rules:
+1. snake_case only (e.g. `customer_id`, `total_revenue`, `year`, `month`).
+2. Use standard business terms.
+3. If a column is already good, keep it similar but ensure lowercase.
+4. Rename Thai columns to understandable English names.
+
+Return ONLY a JSON array of objects with this format:
+[
+  {{ "col": "original_name", "alias": "suggested_name", "reason": "Explanation" }},
+  ...
+]
+Do not include any markdown formatting or explanation outside the JSON.
+"""
+        try:
+            # Generate content
+            response_text = self.provider.generate_content(prompt)
+            
+            # Clean response (remove markdown code blocks if any)
+            if "```json" in response_text:
+                response_text = response_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in response_text:
+                response_text = response_text.split("```")[1].split("```")[0].strip()
+                
+            suggestions = json.loads(response_text)
+            return suggestions
+            
+        except Exception as e:
+            logger.error(f"Failed to suggest mappings: {e}")
+            # Fallback: simple lowercase
+            return [
+                {"col": c['name'], "alias": c['name'].lower(), "reason": "Fallback: Lowercase"}
+                for c in columns
+            ]
 
 
 # =========================================================

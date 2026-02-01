@@ -9,8 +9,8 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from datetime import datetime
-
 from app.api import deps
+from app.services.ai_service import AIService
 from app.models.user import User
 from app.models.schema_models import SchemaMetadata, SchemaSemanticMapping, SchemaBusinessRule
 from app.models.feedback_models import GoldenExample
@@ -20,7 +20,9 @@ from app.schemas.admin_schemas import (
     BusinessRuleCreate, BusinessRuleUpdate, BusinessRuleResponse, BusinessRuleListResponse,
     GoldenExampleCreate, GoldenExampleUpdate, GoldenExampleResponse, GoldenExampleListResponse,
     SchemaContextCreate, SchemaContextUpdate, SchemaContextResponse, SchemaContextListResponse,
+    ViewCreateRequest, ViewMappingSuggestion
 )
+from app.services.schema_service import SchemaService
 
 router = APIRouter()
 
@@ -551,21 +553,12 @@ def delete_golden_example(
 @router.get("/contexts", response_model=SchemaContextListResponse)
 def list_contexts(
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    service: SchemaService = Depends(deps.get_schema_service)
 ):
     """
     List all schema contexts.
     Admin only.
     """
-    from app.services.schema_service import SchemaService
-    from app.config import settings
-    
-    # Init service (use sqlite default)
-    db_path = "nt_fi_report.sqlite"
-    if "sqlite" in settings.DATABASE_URL:
-        db_path = settings.DATABASE_URL.replace("sqlite:///", "")
-        
-    service = SchemaService(db_path)
     contexts = service.get_all_contexts()
     
     return SchemaContextListResponse(
@@ -577,20 +570,12 @@ def list_contexts(
 def create_context(
     data: SchemaContextCreate,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    service: SchemaService = Depends(deps.get_schema_service)
 ):
     """
     Create new schema context.
     Admin only.
     """
-    from app.services.schema_service import SchemaService
-    from app.config import settings
-    
-    db_path = "nt_fi_report.sqlite"
-    if "sqlite" in settings.DATABASE_URL:
-        db_path = settings.DATABASE_URL.replace("sqlite:///", "")
-        
-    service = SchemaService(db_path)
     try:
         context = service.create_context(data.model_dump())
         return SchemaContextResponse.model_validate(context)
@@ -602,20 +587,12 @@ def update_context(
     context_id: int,
     data: SchemaContextUpdate,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    service: SchemaService = Depends(deps.get_schema_service)
 ):
     """
     Update schema context.
     Admin only.
     """
-    from app.services.schema_service import SchemaService
-    from app.config import settings
-    
-    db_path = "nt_fi_report.sqlite"
-    if "sqlite" in settings.DATABASE_URL:
-        db_path = settings.DATABASE_URL.replace("sqlite:///", "")
-        
-    service = SchemaService(db_path)
     try:
         context = service.update_context(context_id, data.model_dump(exclude_unset=True))
         if not context:
@@ -628,22 +605,93 @@ def update_context(
 def delete_context(
     context_id: int,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    service: SchemaService = Depends(deps.get_schema_service)
 ):
     """
     Delete schema context.
     Admin only.
     """
-    from app.services.schema_service import SchemaService
-    from app.config import settings
-    
-    db_path = "nt_fi_report.sqlite"
-    if "sqlite" in settings.DATABASE_URL:
-        db_path = settings.DATABASE_URL.replace("sqlite:///", "")
-        
-    service = SchemaService(db_path)
     service.delete_context(context_id)
     return None
+
+
+# ============================================================
+# View Builder Endpoints
+# ============================================================
+
+@router.get("/schema/tables", response_model=List[str])
+def list_tables(
+    current_user: User = Depends(deps.require_admin),
+    service: SchemaService = Depends(deps.get_schema_service)
+):
+    """
+    List all tables available for view creation.
+    (Excludes system tables)
+    """
+    return service.get_all_tables()
+
+@router.post("/schema/views", status_code=status.HTTP_201_CREATED)
+def create_view(
+    data: ViewCreateRequest,
+    current_user: User = Depends(deps.require_admin),
+    service: SchemaService = Depends(deps.get_schema_service)
+):
+    """
+    Create a new view from a source table.
+    """
+    try:
+        service.create_custom_view(
+            view_name=data.view_name,
+            source_table=data.source_table,
+            mapping=[m.model_dump() for m in data.mapping]
+        )
+        return {"status": "success", "message": f"View {data.view_name} created successfully"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create view: {str(e)}")
+
+@router.get("/schema/tables/{table_name}/suggest-mapping", response_model=List[ViewMappingSuggestion])
+def suggest_view_mapping(
+    table_name: str,
+    current_user: User = Depends(deps.require_admin),
+    service: SchemaService = Depends(deps.get_schema_service),
+    ai_service: AIService = Depends(deps.get_ai_service)
+):
+    """
+    Get AI-powered mapping suggestions for a table.
+    """
+    try:
+        # 1. Get Schema Info
+        columns = service.get_table_info(table_name)
+        
+        # 2. Get Sample Values (for better context)
+        samples = service.get_sample_values(table_name)
+        
+        # 3. Call AI Service
+        suggestions_data = ai_service.suggest_mappings(columns, samples)
+        
+        # 4. Convert to Response Model
+        suggestions = []
+        for s in suggestions_data:
+            suggestions.append(ViewMappingSuggestion(
+                col=s.get('col'),
+                suggested_alias=s.get('alias'),
+                reason=s.get('reason')
+            ))
+            
+        return suggestions
+        
+    except Exception as e:
+        # Fallback if AI fails (though AI Service handles fallback too)
+        columns = service.get_table_info(table_name)
+        return [
+            ViewMappingSuggestion(
+                col=col['name'],
+                suggested_alias=col['name'].lower(),
+                reason=f"Fallback error: {str(e)}"
+            ) for col in columns
+        ]
 
 # ============================================================
 # Refresh Cache Endpoint

@@ -128,8 +128,10 @@ def require_viewer(current_user: User = Depends(get_current_user)) -> User:
 
 from app.services.schema_service import SchemaService
 
-def get_schema_service(db: Session = Depends(get_db)) -> SchemaService:
+from app.db.session import engine
+
+def get_schema_service() -> SchemaService:
     """
-    Dependency to get SchemaService
+    Dependency to get SchemaService with global engine
     """
-    return SchemaService(db)
+    return SchemaService(db_engine=engine)

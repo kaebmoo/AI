@@ -5,6 +5,7 @@ export interface ChatRequest {
     session_id?: string;
     conversation_id?: string;
     provider?: string;
+    context?: string;  // 'revenue' | 'expense' | undefined (auto-detect)
     max_retries?: number;
 }
 
