@@ -11,49 +11,107 @@ Enhanced Features (v2.0):
 - Schema metadata from database
 - Semantic mapping for abbreviations and business terms
 - Business rules from database
-- Database abstraction layer support
+- Database abstraction layer support (SQLAlchemy)
 - **Multi-Context Support (Revenue, Expense, etc.)**
+- **View Builder Support**: Create simplified SQL Views with AI-powered column mapping
 
 Usage:
     schema_service = SchemaService(db_path="revenue.db")
     prompt = schema_service.build_system_prompt(context_name="expense")
 """
 
+from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.engine import Engine, Connection
+from sqlalchemy.orm import Session
 import sqlite3
 import json
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 from pathlib import Path
 
-
 class SchemaService:
     """Service สำหรับจัดการ schema metadata"""
     
-    def __init__(self, db_path: str = "nt_fi_report.sqlite", metadata_db_path: Optional[str] = None, db_engine: str = "sqlite"):
+    def __init__(self, db_engine: Optional[Engine] = None, db_path: str = "nt_fi_report.sqlite"):
         """
         Initialize SchemaService
         
         Args:
-            db_path: Path to main database (revenue.db)
-            metadata_db_path: Path to metadata database (default: same as db_path)
-            db_engine: Database engine type (e.g., "sqlite", "postgres")
+            db_engine: SQLAlchemy Engine (preferred for cross-db support)
+            db_path: Path to main database (fallback for legacy sqlite3 calls if engine not provided)
         """
         self.db_path = db_path
-        self.metadata_db_path = metadata_db_path or db_path
-        self.db_engine = db_engine.lower()
+        self.engine = db_engine
+        
+        # Fallback engine for SQLite if None provided
+        if not self.engine:
+             self.engine = create_engine(f"sqlite:///{db_path}")
+
+        self.metadata_db_path = db_path # Simplify: Assume metadata is in the same DB for now
         self._cache: Dict[str, Any] = {}
         self._context_cache: Dict[str, Dict] = {}
     
-    def _get_connection(self, path: str) -> sqlite3.Connection:
-        """Get database connection"""
-        try:
-            conn = sqlite3.connect(path)
-            conn.row_factory = sqlite3.Row
-            return conn
-        except Exception as e:
-            print(f"Error connecting to DB {path}: {e}")
-            raise
+    def _get_connection(self) -> Connection:
+        """Get database connection from engine"""
+        return self.engine.connect()
+
     
+    # =========================================================
+    # Schema View Builder (Cross-Database)
+    # =========================================================
+
+    def get_all_tables(self) -> List[str]:
+        """List all tables in the database (excluding system tables)"""
+        inspector = inspect(self.engine)
+        tables = inspector.get_table_names()
+        view_names = inspector.get_view_names()
+        
+        # Filter out system tables/views
+        filtered = []
+        all_objects = tables + view_names
+        
+        for name in all_objects:
+            if name.startswith("sqlite_") or name.startswith("schema_"):
+                continue
+            filtered.append(name)
+            
+        return sorted(filtered)
+
+    def create_custom_view(self, view_name: str, source_table: str, mapping: List[Dict[str, str]]) -> bool:
+        """
+        Create a SQL View from source table with column aliasing.
+        
+        Args:
+            view_name: Name of the view to create (e.g., 'v_sales_2024')
+            source_table: Source table name
+            mapping: List of dicts [{'col': 'original_col', 'alias': 'new_name'}]
+        """
+        # Validate inputs
+        if not view_name.replace("_", "").isalnum():
+             raise ValueError("Invalid view name")
+             
+        # Build SELECT clause
+        select_parts = []
+        for m in mapping:
+            col = m['col']
+            alias = m.get('alias')
+            if alias and alias != col:
+                select_parts.append(f'"{col}" AS "{alias}"')
+            else:
+                select_parts.append(f'"{col}"')
+        
+        select_clause = ", ".join(select_parts)
+        
+        # DDL Execution
+        sql = f"CREATE VIEW {view_name} AS SELECT {select_clause} FROM {source_table}"
+        
+        with self.engine.begin() as conn:
+            # Drop if exists (optional, maybe dangerous? for now lets match implementation plan implies creation)
+            conn.execute(text(f"DROP VIEW IF EXISTS {view_name}")) 
+            conn.execute(text(sql))
+            
+        return True
+
     # =========================================================
     # Context Management
     # =========================================================
@@ -63,81 +121,74 @@ class SchemaService:
         if context_name in self._context_cache:
             return self._context_cache[context_name]
 
-        conn = self._get_connection(self.db_path)
-        cursor = conn.cursor()
-        try:
-            cursor.execute("SELECT * FROM schema_contexts WHERE name = ? AND is_active = 1", (context_name,))
-            row = cursor.fetchone()
-            if row:
-                context_info = dict(row)
-                if context_info.get('keywords') and isinstance(context_info['keywords'], str):
-                    try:
-                        context_info['keywords'] = json.loads(context_info['keywords'])
-                    except:
-                        context_info['keywords'] = []
-                        
-                self._context_cache[context_name] = context_info
-                return context_info
-            
-            # Fallback/Default contexts if table query fails or returns nothing
-            if context_name == 'revenue':
-                 return {'name': 'revenue', 'main_view': 'revenue_search', 'display_name': 'รายได้'}
-            return None
-        except sqlite3.OperationalError:
-            # Fallback for bootstrapping if table doesn't exist
-            if context_name == 'revenue':
-                 return {'id': 1, 'name': 'revenue', 'main_view': 'revenue_search', 'display_name': 'รายได้', 'created_at': datetime.now(), 'keywords': [], 'is_active': True, 'priority': 0}
-            return None
-        finally:
-            conn.close()
+        with self.engine.connect() as conn:
+            try:
+                result = conn.execute(
+                    text("SELECT * FROM schema_contexts WHERE name = :name AND is_active = 1"),
+                    {"name": context_name}
+                )
+                row = result.mappings().fetchone()
+                
+                if row:
+                    context_info = dict(row)
+                    if context_info.get('keywords') and isinstance(context_info['keywords'], str):
+                        try:
+                            context_info['keywords'] = json.loads(context_info['keywords'])
+                        except:
+                            context_info['keywords'] = []
+                            
+                    self._context_cache[context_name] = context_info
+                    return context_info
+                
+                # Fallback
+                if context_name == 'revenue':
+                     return {'name': 'revenue', 'main_view': 'revenue_search', 'display_name': 'รายได้'}
+                return None
+                
+            except Exception as e:
+                # Fallback for bootstrapping
+                if context_name == 'revenue':
+                     return {'id': 1, 'name': 'revenue', 'main_view': 'revenue_search', 'display_name': 'รายได้', 'created_at': datetime.now(), 'keywords': [], 'is_active': True, 'priority': 0}
+                return None
 
 
     def get_all_contexts(self) -> List[Dict]:
         """Get all active contexts"""
-        conn = self._get_connection(self.db_path)
-        cursor = conn.cursor()
-        try:
-            cursor.execute("SELECT * FROM schema_contexts WHERE is_active = 1 ORDER BY priority DESC")
-            contexts = []
-            for row in cursor.fetchall():
-                ctx = dict(row)
-                if ctx.get('keywords') and isinstance(ctx['keywords'], str):
-                    try:
-                        ctx['keywords'] = json.loads(ctx['keywords'])
-                    except:
-                        ctx['keywords'] = []
-                contexts.append(ctx)
-            return contexts
-        except sqlite3.OperationalError:
-            return [{'id': 1, 'name': 'revenue', 'main_view': 'revenue_search', 'display_name': 'รายได้', 'created_at': datetime.now(), 'keywords': [], 'is_active': True, 'priority': 0}]
-        finally:
-            conn.close()
+        with self.engine.connect() as conn:
+            try:
+                result = conn.execute(text("SELECT * FROM schema_contexts WHERE is_active = 1 ORDER BY priority DESC"))
+                contexts = []
+                for row in result.mappings().fetchall():
+                    ctx = dict(row)
+                    if ctx.get('keywords') and isinstance(ctx['keywords'], str):
+                        try:
+                            ctx['keywords'] = json.loads(ctx['keywords'])
+                        except:
+                            ctx['keywords'] = []
+                    contexts.append(ctx)
+                return contexts
+            except Exception:
+                return [{'id': 1, 'name': 'revenue', 'main_view': 'revenue_search', 'display_name': 'รายได้', 'created_at': datetime.now(), 'keywords': [], 'is_active': True, 'priority': 0}]
 
     def create_context(self, data: Dict) -> Dict:
         """Create new context"""
-        conn = self._get_connection(self.db_path)
-        cursor = conn.cursor()
-        try:
+        with self.engine.begin() as conn:
             # Prepare columns
             columns = ['name', 'display_name', 'description', 'main_view', 'is_active', 'priority', 'keywords']
-            placeholders = ', '.join(['?'] * len(columns))
+            placeholders = ', '.join([f":{col}" for col in columns])
             sql = f"INSERT INTO schema_contexts ({', '.join(columns)}) VALUES ({placeholders})"
             
-            # Serialize keywords if present
-            values = []
-            for col in columns:
-                val = data.get(col)
-                if col == 'keywords' and val is not None:
-                     val = json.dumps(val, ensure_ascii=False)
-                values.append(val)
-
-            cursor.execute(sql, values)
+            # Serialize keywords
+            params = data.copy()
+            if params.get('keywords'):
+                params['keywords'] = json.dumps(params['keywords'], ensure_ascii=False)
+                
+            cursor = conn.execute(text(sql), params)
             context_id = cursor.lastrowid
-            conn.commit()
             
             # Fetch created
-            cursor.execute("SELECT * FROM schema_contexts WHERE id = ?", (context_id,))
-            row = dict(cursor.fetchone())
+            result = conn.execute(text("SELECT * FROM schema_contexts WHERE id = :id"), {"id": context_id})
+            row = dict(result.mappings().fetchone())
             
             # Load Keywords JSON
             if row.get('keywords'):
@@ -148,34 +199,28 @@ class SchemaService:
             
             self.refresh_context_cache()
             return row
-        finally:
-            conn.close()
 
     def update_context(self, context_id: int, data: Dict) -> Optional[Dict]:
         """Update existing context"""
-        conn = self._get_connection(self.db_path)
-        cursor = conn.cursor()
-        try:
+        with self.engine.begin() as conn:
             set_parts = []
-            values = []
+            params = data.copy()
+            params['id'] = context_id
             
             for key, value in data.items():
                 if key == 'keywords':
-                    value = json.dumps(value, ensure_ascii=False)
-                set_parts.append(f"{key} = ?")
-                values.append(value)
+                    params['keywords'] = json.dumps(value, ensure_ascii=False)
+                set_parts.append(f"{key} = :{key}")
                 
-            values.append(context_id)
-            sql = f"UPDATE schema_contexts SET {', '.join(set_parts)} WHERE id = ?"
+            sql = f"UPDATE schema_contexts SET {', '.join(set_parts)} WHERE id = :id"
             
-            cursor.execute(sql, values)
-            conn.commit()
+            cursor = conn.execute(text(sql), params)
             
             if cursor.rowcount == 0:
                 return None
                 
-            cursor.execute("SELECT * FROM schema_contexts WHERE id = ?", (context_id,))
-            row = dict(cursor.fetchone())
+            result = conn.execute(text("SELECT * FROM schema_contexts WHERE id = :id"), {"id": context_id})
+            row = dict(result.mappings().fetchone())
             
             if row.get('keywords'):
                 try:
@@ -185,20 +230,13 @@ class SchemaService:
             
             self.refresh_context_cache()
             return row
-        finally:
-            conn.close()
-            
+
     def delete_context(self, context_id: int):
         """Delete context"""
-        conn = self._get_connection(self.db_path)
-        cursor = conn.cursor()
-        try:
-            cursor.execute("DELETE FROM schema_contexts WHERE id = ?", (context_id,))
-            conn.commit()
+        with self.engine.begin() as conn:
+            conn.execute(text("DELETE FROM schema_contexts WHERE id = :id"), {"id": context_id})
             self.refresh_context_cache()
-        finally:
-            conn.close()
-            
+
     def refresh_context_cache(self):
         """Force reload of context cache"""
         self._context_cache.clear()
@@ -209,155 +247,128 @@ class SchemaService:
     # =========================================================
     
     def get_table_info(self, table_name: str) -> List[Dict]:
-        """Get column information from SQLite pragma"""
-        conn = self._get_connection(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute(f"PRAGMA table_info({table_name})")
-        columns = [dict(row) for row in cursor.fetchall()]
-        conn.close()
-        return columns
+        """Get column information from DB Inspector"""
+        inspector = inspect(self.engine)
+        columns = inspector.get_columns(table_name)
+        # Standardize return format {'name': 'x', 'type': 'y'}
+        return [{'name': col['name'], 'type': str(col['type'])} for col in columns]
     
     def get_schema_metadata(self, table_name: str) -> List[Dict]:
         """Get schema metadata from metadata table"""
-        conn = self._get_connection(self.metadata_db_path)
-        cursor = conn.cursor()
-        
-        try:
-            cursor.execute("""
-                SELECT * FROM schema_metadata 
-                WHERE table_name = ?
-                ORDER BY 
-                    CASE column_name
-                        WHEN 'YEAR' THEN 1
-                        WHEN 'MONTH' THEN 2
-                        WHEN 'DATE' THEN 3
-                        WHEN 'REVENUE_VALUE' THEN 4
-                        WHEN 'AMOUNT' THEN 5
-                        WHEN 'expense' THEN 6
-                        ELSE 10
-                    END,
-                    column_name
-            """, (table_name,))
-            return [dict(row) for row in cursor.fetchall()]
-        except sqlite3.OperationalError:
-            # Table doesn't exist, return empty
-            return []
-        finally:
-            conn.close()
+        with self.engine.connect() as conn:
+            try:
+                result = conn.execute(text("""
+                    SELECT * FROM schema_metadata 
+                    WHERE table_name = :table_name
+                    ORDER BY 
+                        CASE column_name
+                            WHEN 'YEAR' THEN 1
+                            WHEN 'MONTH' THEN 2
+                            WHEN 'DATE' THEN 3
+                            WHEN 'REVENUE_VALUE' THEN 4
+                            WHEN 'AMOUNT' THEN 5
+                            WHEN 'expense' THEN 6
+                            ELSE 10
+                        END,
+                        column_name
+                """), {"table_name": table_name})
+                return [dict(row) for row in result.mappings().fetchall()]
+            except Exception:
+                return []
     
     def get_business_rules(self, table_name: str) -> List[Dict]:
         """Get business rules from schema_business_rules table"""
-        conn = self._get_connection(self.db_path)
-        cursor = conn.cursor()
-
-        try:
-            # Get rules for specific table or global rules (table_name IS NULL or 'ALL')
-            cursor.execute("""
-                SELECT * FROM schema_business_rules
-                WHERE is_active = 1
-                AND (table_name = ? OR table_name = 'ALL' OR table_name IS NULL)
-                ORDER BY
-                    CASE severity
-                        WHEN 'error' THEN 1
-                        WHEN 'warning' THEN 2
-                        ELSE 3
-                    END
-            """, (table_name,))
-            return [dict(row) for row in cursor.fetchall()]
-        except sqlite3.OperationalError:
-            return []
-        finally:
-            conn.close()
+        with self.engine.connect() as conn:
+            try:
+                result = conn.execute(text("""
+                    SELECT * FROM schema_business_rules
+                    WHERE is_active = 1
+                    AND (table_name = :table_name OR table_name = 'ALL' OR table_name IS NULL)
+                    ORDER BY
+                        CASE severity
+                            WHEN 'error' THEN 1
+                            WHEN 'warning' THEN 2
+                            ELSE 3
+                        END
+                """), {"table_name": table_name})
+                return [dict(row) for row in result.mappings().fetchall()]
+            except Exception:
+                return []
 
     def get_semantic_mappings(self, keyword_type: Optional[str] = None) -> List[Dict]:
         """Get semantic mappings from schema_semantic_mapping table"""
-        conn = self._get_connection(self.db_path)
-        cursor = conn.cursor()
-
-        try:
-            # TODO: Phase 2 - Filter by context_id if needed
-            if keyword_type:
-                cursor.execute("""
-                    SELECT * FROM schema_semantic_mapping
-                    WHERE is_active = 1 AND keyword_type = ?
-                    ORDER BY priority DESC, keyword
-                """, (keyword_type,))
-            else:
-                cursor.execute("""
-                    SELECT * FROM schema_semantic_mapping
-                    WHERE is_active = 1
-                    ORDER BY priority DESC, keyword
-                """)
-            return [dict(row) for row in cursor.fetchall()]
-        except sqlite3.OperationalError:
-            return []
-        finally:
-            conn.close()
+        with self.engine.connect() as conn:
+            try:
+                if keyword_type:
+                    result = conn.execute(text("""
+                        SELECT * FROM schema_semantic_mapping
+                        WHERE is_active = 1 AND keyword_type = :keyword_type
+                        ORDER BY priority DESC, keyword
+                    """), {"keyword_type": keyword_type})
+                else:
+                    result = conn.execute(text("""
+                        SELECT * FROM schema_semantic_mapping
+                        WHERE is_active = 1
+                        ORDER BY priority DESC, keyword
+                    """))
+                return [dict(row) for row in result.mappings().fetchall()]
+            except Exception:
+                return []
     
     def get_sample_values(self, table_name: str) -> Dict[str, List[str]]:
         """Get sample values for important columns"""
-        conn = self._get_connection(self.db_path)
-        cursor = conn.cursor()
-        
         samples = {}
+        inspector = inspect(self.engine)
         
-        # Determine important columns based on table
-        # Default columns (often present)
+        # Get actual columns first
+        try:
+            actual_cols = set(col['name'] for col in inspector.get_columns(table_name))
+        except:
+            return {}
+
+        # Default columns to try
         columns_to_try = [
-            ('business_unit', 'business_unit'),
-            ('division', 'division'),
-            ('department', 'department'),
-            ('SERVICE_GROUP', 'SERVICE_GROUP'),
-            ('BUSINESS_GROUP', 'business_group'), # case insensitive in SQL usually, but good to match view
-            ('business_group', 'business_group'),
-            ('PRODUCT_NAME', 'PRODUCT_NAME'),
-            ('account_group_name', 'account_group_name'),
-            ('account_name', 'account_name'),
-            ('gl_name', 'gl_name'),
+            'business_unit', 'division', 'department', 'SERVICE_GROUP',
+            'BUSINESS_GROUP', 'business_group', 'PRODUCT_NAME',
+            'account_group_name', 'account_name', 'gl_name'
         ]
         
-        # Get actual columns first to avoid errors
-        try:
-            cursor.execute(f"PRAGMA table_info({table_name})")
-            actual_cols = set(row['name'] for row in cursor.fetchall())
-        except:
-            actual_cols = set()
-
-        for col_name, col_sql in columns_to_try:
-            if col_sql in actual_cols:
-                try:
-                    cursor.execute(f"""
-                        SELECT DISTINCT {col_sql} 
-                        FROM {table_name} 
-                        WHERE {col_sql} IS NOT NULL 
-                        LIMIT 20
-                    """)
-                    samples[col_name] = [row[0] for row in cursor.fetchall()]
-                except sqlite3.OperationalError:
-                    pass
+        with self.engine.connect() as conn:
+            for col_name in columns_to_try:
+                # Find matching column (case-insensitive check might be needed for some DBs)
+                # For now assume exact match or simple case variant
+                matching_col = next((c for c in actual_cols if c.upper() == col_name.upper()), None)
+                
+                if matching_col:
+                    try:
+                        sql = text(f"SELECT DISTINCT {matching_col} FROM {table_name} WHERE {matching_col} IS NOT NULL LIMIT 20")
+                        result = conn.execute(sql)
+                        samples[col_name] = [row[0] for row in result.fetchall()]
+                    except Exception:
+                        pass
         
-        # Get data range
-        try:
-            cursor.execute(f"""
-                SELECT 
-                    MIN(year) as min_year,
-                    MAX(year) as max_year,
-                    MIN(CAST(month AS INTEGER)) as min_month,
-                    MAX(CAST(month AS INTEGER)) as max_month
-                FROM {table_name}
-            """)
-            row = cursor.fetchone()
-            if row:
-                samples['DATA_RANGE'] = {
-                    'min_year': row['min_year'],
-                    'max_year': row['max_year'],
-                    'min_month': row['min_month'],
-                    'max_month': row['max_month']
-                }
-        except:
-            pass
+            # Get data range
+            try:
+                sql = text(f"""
+                    SELECT 
+                        MIN(year) as min_year,
+                        MAX(year) as max_year,
+                        MIN(CAST(month AS INTEGER)) as min_month,
+                        MAX(CAST(month AS INTEGER)) as max_month
+                    FROM {table_name}
+                """)
+                result = conn.execute(sql)
+                row = result.mappings().fetchone()
+                if row:
+                    samples['DATA_RANGE'] = {
+                        'min_year': row['min_year'],
+                        'max_year': row['max_year'],
+                        'min_month': row['min_month'],
+                        'max_month': row['max_month']
+                    }
+            except Exception:
+                pass
         
-        conn.close()
         return samples
     
     def get_date_format(self, table_name: str = "revenue_search") -> str:
@@ -602,7 +613,7 @@ DATE เก็บเป็น Unix Timestamp (milliseconds) ต้องแป�
             
     def _get_syntax_rules(self, language: str = "thai") -> str:
         """Get database-specific syntax rules"""
-        if self.db_engine == "postgresql":
+        if self.engine and self.engine.name == "postgresql":
             if language == "thai":
                 return """   **. PostgreSQL Syntax:**
        - ใช้ `CONCAT(a, b)` หรือ `a || b` ได้
@@ -728,11 +739,11 @@ DATE column is Unix Timestamp (ms). Use YEAR/MONTH columns instead."""
 # =========================================================
 
 def create_claude_prompt(db_path: str, context_name: str = "revenue") -> str:
-    service = SchemaService(db_path)
+    service = SchemaService(db_path=db_path)
     return service.build_system_prompt(ai_provider="claude", context_name=context_name)
 
 def create_gemini_prompt(db_path: str, context_name: str = "revenue") -> str:
-    service = SchemaService(db_path)
+    service = SchemaService(db_path=db_path)
     return service.build_system_prompt(ai_provider="gemini", context_name=context_name)
 
 if __name__ == "__main__":

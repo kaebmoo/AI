@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, FlatList, KeyboardAvoidingView, Platform, ActivityIndicator, Alert, SafeAreaView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ModelSelector } from '../../components/Chat/ModelSelector';
+import { ContextSelector, ContextBadge, DataContext } from '../../components/Chat/ContextSelector';
 import { ChatBubble, Message } from '../../components/Chat/ChatBubble';
 import { chatService } from '../../services/chat';
 import { useAuth } from '../../context/AuthContext';
@@ -11,6 +12,7 @@ export default function ChatScreen() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [provider, setProvider] = useState('gemini'); // Default provider
+  const [context, setContext] = useState<DataContext>('auto'); // Default: auto-detect
   const [conversationId, setConversationId] = useState<string | undefined>(undefined);
   const flatListRef = useRef<FlatList>(null);
   const { signOut } = useAuth();
@@ -21,7 +23,7 @@ export default function ChatScreen() {
       {
         id: 'init',
         role: 'assistant',
-        content: 'สวัสดีครับ ผมคือผู้ช่วยอัจฉริยะสำหรับข้อมูลด้านการเงิน NT\n\nสามารถถามข้อมูลรายได้ ค่าใช้จ่าย หรือเปรียบเทียบข้อมูลต่าง ๆ ได้เลยครับ'
+        content: 'สวัสดีครับ ผมคือผู้ช่วยอัจฉริยะสำหรับข้อมูลด้านการเงิน NT\n\nสามารถถามข้อมูลได้ 2 ประเภท:\n- รายได้ (Revenue): ยอดขาย, รายได้แยกตามกลุ่มธุรกิจ\n- ค่าใช้จ่าย (Expense): งบประมาณ, ต้นทุน\n\nเลือกโหมด Auto เพื่อให้ระบบตรวจจับอัตโนมัติ หรือเลือกประเภทข้อมูลเองได้ครับ'
       }
     ])
   }, []);
@@ -43,7 +45,8 @@ export default function ChatScreen() {
       const response = await chatService.sendMessage({
         question: userMessage.content,
         conversation_id: conversationId,
-        provider: provider
+        provider: provider,
+        context: context === 'auto' ? undefined : context  // undefined = auto-detect on backend
       });
 
       setConversationId(response.conversation_id);
@@ -77,16 +80,23 @@ export default function ChatScreen() {
     <SafeAreaView className="flex-1 bg-gray-50 dark:bg-gray-900">
       <View className="flex-1 w-full max-w-4xl mx-auto">
         {/* Header */}
-        <View className="px-4 py-3 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex-row items-center justify-between shadow-sm z-10 w-full">
-          <View>
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">NT AI Assistant</Text>
-            <Text className="text-xs text-gray-500 dark:text-gray-400">Powered by Agentic AI</Text>
+        <View className="px-4 py-3 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 shadow-sm z-10 w-full">
+          <View className="flex-row items-center justify-between">
+            <View>
+              <Text className="text-lg font-bold text-gray-900 dark:text-white">NT AI Assistant</Text>
+              <Text className="text-xs text-gray-500 dark:text-gray-400">Powered by Agentic AI</Text>
+            </View>
+            <View className="flex-row items-center gap-2">
+              <ContextBadge context={context} />
+              <TouchableOpacity onPress={signOut}>
+                <Ionicons name="log-out-outline" size={24} color="#EF4444" />
+              </TouchableOpacity>
+            </View>
           </View>
-          <View className="flex-row items-center gap-3">
+          {/* Selectors Row */}
+          <View className="flex-row items-center gap-2 mt-2">
+            <ContextSelector context={context} onSelect={setContext} />
             <ModelSelector provider={provider} onSelect={setProvider} />
-            <TouchableOpacity onPress={signOut}>
-              <Ionicons name="log-out-outline" size={24} color="#EF4444" />
-            </TouchableOpacity>
           </View>
         </View>
 
@@ -116,7 +126,7 @@ export default function ChatScreen() {
             <View className="flex-row items-center gap-2">
               <TextInput
                 className="flex-1 bg-gray-100 dark:bg-gray-800 rounded-full px-5 py-3 text-gray-900 dark:text-white max-h-24"
-                placeholder="Ask anything about revenue..."
+                placeholder="ถามข้อมูลรายได้หรือค่าใช้จ่าย..."
                 placeholderTextColor="#9CA3AF"
                 value={input}
                 onChangeText={setInput}

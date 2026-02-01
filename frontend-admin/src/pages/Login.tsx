@@ -50,7 +50,7 @@ const Login: React.FC = () => {
             height: '100vh',
             backgroundColor: '#f0f2f5'
         }}>
-            <Card title="NT Revenue Admin" style={{ width: 400 }}>
+            <Card title="NT AI Assistant Admin" style={{ width: 400 }}>
                 {error && (
                     <Alert
                         message="Login Failed"

@@ -9,6 +9,7 @@ import Analyzer from './pages/Analyzer'
 import Mappings from './pages/Mappings'
 import Rules from './pages/Rules'
 import Examples from './pages/Examples'
+import ViewBuilder from './pages/ViewBuilder'
 
 // Simple Auth Guard
 const ProtectedRoute = () => {
@@ -34,7 +35,9 @@ function App() {
             <Route path="/analyzer" element={<Analyzer />} />
             <Route path="/mappings" element={<Mappings />} />
             <Route path="/rules" element={<Rules />} />
+
             <Route path="/examples" element={<Examples />} />
+            <Route path="/view-builder" element={<ViewBuilder />} />
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
           </Route>
         </Route>

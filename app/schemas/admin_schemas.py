@@ -264,3 +264,23 @@ class SchemaContextResponse(SchemaContextBase):
 class SchemaContextListResponse(BaseModel):
     contexts: List[SchemaContextResponse]
     total: int
+
+
+# ============================================================
+# View Builder Schemas
+# ============================================================
+
+class ViewColumnMapping(BaseModel):
+    col: str = Field(..., description="Original column name")
+    alias: Optional[str] = Field(None, description="New alias for the column")
+
+class ViewCreateRequest(BaseModel):
+    view_name: str = Field(..., description="Name of the view to create")
+    source_table: str = Field(..., description="Source raw table name")
+    mapping: List[ViewColumnMapping] = Field(..., description="List of column mappings")
+
+class ViewMappingSuggestion(BaseModel):
+    col: str
+    suggested_alias: str
+    reason: Optional[str] = None
+
