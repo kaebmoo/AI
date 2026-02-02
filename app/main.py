@@ -1,19 +1,32 @@
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 
 from app.config import settings
 from app.core.logging import setup_logging
 from app.core.middleware import RequestIDMiddleware
 from app.core.rate_limiter import limiter, RateLimitExceeded, _rate_limit_exceeded_handler
+from app.services.mcp_client import MCPClientService
 
 # Setup logging
 setup_logging()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Connect to MCP Servers
+    mcp_client = MCPClientService()
+    async with mcp_client.connected():
+        app.state.mcp_client = mcp_client
+        yield
+        
+    # Shutdown handled by context manager exit
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
     docs_url=f"{settings.API_V1_STR}/docs",
     redoc_url=f"{settings.API_V1_STR}/redoc",
+    lifespan=lifespan
 )
 
 # Initialize Rate Limiter
@@ -49,4 +62,3 @@ app.include_router(feedback_router, prefix=f"{settings.API_V1_STR}/feedback", ta
 app.include_router(admin_router, prefix=f"{settings.API_V1_STR}/admin", tags=["admin"])
 app.include_router(users_router, prefix=f"{settings.API_V1_STR}/users", tags=["users"])
 app.include_router(analyzer_router, prefix=f"{settings.API_V1_STR}/admin/analyzer", tags=["analyzer"])
-

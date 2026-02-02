@@ -9,6 +9,7 @@ from app.services.auth_service import AuthService
 from app.models.user import User
 from app.config import settings
 from app.services.ai_service import AIService, create_gemini_service, create_claude_service, create_matcha_service
+from app.services.mcp_client import MCPClientService
 
 # Header scheme for session token
 header_scheme = APIKeyHeader(name="X-Session-Token", auto_error=False)
@@ -55,39 +56,39 @@ def get_current_user(
         
     return session.user
 
+def get_mcp_client(request: Request) -> MCPClientService:
+    """Get initialized MCP Client from app state"""
+    if not hasattr(request.app.state, "mcp_client"):
+         # For testing or if lifespan failed? 
+         # We shouldn't fallback to creating new one usually as it spawns processes
+         raise HTTPException(status_code=500, detail="MCP Client not initialized")
+    return request.app.state.mcp_client
+
 from app.services.prompt_manager import PromptManager
 
-def get_ai_service(db: Session = Depends(get_db)) -> AIService:
+def get_ai_service(
+    db: Session = Depends(get_db),
+    mcp_client: MCPClientService = Depends(get_mcp_client)
+) -> AIService:
     """
     Dependency to get initialized AIService based on config.
     """
-    # Parse DB path from connection string (assuming sqlite:///./path)
-    if "sqlite" in settings.DATABASE_URL:
-        db_path = settings.DATABASE_URL.replace("sqlite:///", "")
-    else:
-        # For Postgres, we might need a different approach or connection string
-        # For now, this service expects a path for SQLiteSchema inspection
-        db_path = "nt_fi_report.sqlite" 
-
-    prompt_manager = PromptManager(db)
-
+    
     if settings.AI_PROVIDER == "gemini":
         if not settings.GOOGLE_AI_API_KEY:
              raise HTTPException(status_code=500, detail="GOOGLE_AI_API_KEY not configured")
         return create_gemini_service(
             settings.GOOGLE_AI_API_KEY, 
-            db_path=db_path,
-            model=settings.GEMINI_MODEL,
-            prompt_manager=prompt_manager
+            mcp_client=mcp_client,
+            model=settings.GEMINI_MODEL
         )
     elif settings.AI_PROVIDER == "claude":
         if not settings.ANTHROPIC_API_KEY:
              raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
         return create_claude_service(
             settings.ANTHROPIC_API_KEY, 
-            db_path=db_path,
-            model=settings.CLAUDE_MODEL,
-            prompt_manager=prompt_manager
+            mcp_client=mcp_client,
+            model=settings.CLAUDE_MODEL
         )
     elif settings.AI_PROVIDER == "matcha":
         if not settings.MATCHA_AI_API_KEY:
@@ -97,9 +98,8 @@ def get_ai_service(db: Session = Depends(get_db)) -> AIService:
         return create_matcha_service(
             api_key=settings.MATCHA_AI_API_KEY,
             api_url=settings.MATCHA_API_URL,
-            db_path=db_path,
-            model=settings.MATCHA_MODEL,
-            prompt_manager=prompt_manager
+            mcp_client=mcp_client,
+            model=settings.MATCHA_MODEL
         )
     else:
         raise HTTPException(status_code=500, detail=f"Unknown AI Provider: {settings.AI_PROVIDER}")
@@ -127,7 +127,6 @@ def require_viewer(current_user: User = Depends(get_current_user)) -> User:
     return current_user
 
 from app.services.schema_service import SchemaService
-
 from app.db.session import engine
 
 def get_schema_service() -> SchemaService:

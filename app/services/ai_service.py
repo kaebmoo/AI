@@ -1,38 +1,39 @@
+
 """
 NT AI Assistant - AI Service
 ==================================
-Service สำหรับเรียก AI API เพื่อแปลงคำถามเป็น SQL
+Service for interacting with AI API providers via MCP (Model Context Protocol).
 
-รองรับ:
+Supports:
 - Claude API (Anthropic)
 - Google AI / Gemini API
+- Matcha AI (OpenAI Compatible)
 
 Usage:
-    # Claude
-    ai_service = AIService(provider="claude", api_key="sk-ant-...")
-    result = ai_service.query("รายได้รวมเดือนมกราคม 2568")
-    
-    # Gemini
-    ai_service = AIService(provider="gemini", api_key="AIza...")
-    result = ai_service.query("รายได้รวมเดือนมกราคม 2568")
+    # Service should be instantiated with an active MCP Client
+    ai_service = AIService(provider="claude", api_key="...", mcp_client=global_mcp_client)
+    result = await ai_service.query("Request...")
 """
 
 import json
 import sqlite3
 import re
-from typing import Dict, List, Optional, Any, Callable
+import logging
+import asyncio
+from typing import Dict, List, Optional, Any, Callable, Union
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
+
 import httpx
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, before_sleep_log
-import logging
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
+from app.services.mcp_client import MCPClientService
 
 logger = logging.getLogger(__name__)
 
 # Retry Configuration
 def create_retry_decorator():
     """Create retry decorator with standard configuration"""
-    # Import provider exceptions locally to avoid hard dependencies if not installed
     exceptions_to_retry = [
         httpx.TimeoutException, 
         httpx.ConnectError,
@@ -69,10 +70,6 @@ def create_retry_decorator():
 
 ai_retry = create_retry_decorator()
 
-from .schema_service import SchemaService
-from app.services.prompt_manager import PromptManager
-
-
 @dataclass
 class QueryResult:
     """Result from AI query"""
@@ -84,39 +81,36 @@ class QueryResult:
     provider: str
     raw_response: Optional[str] = None
     error: Optional[str] = None
-    retry_count: int = 0  # จำนวนครั้งที่ retry
-    retry_history: Optional[List[Dict]] = None  # ประวัติการ retry
-
+    retry_count: int = 0
+    retry_history: Optional[List[Dict]] = None
 
 @dataclass
 class RetryStatus:
     """Status update during retry process"""
     attempt: int
     max_attempts: int
-    status: str  # "generating", "executing", "error", "retrying", "success", "failed"
+    status: str
     message: str
     sql_query: Optional[str] = None
     error: Optional[str] = None
-
 
 class AIProvider(ABC):
     """Abstract base class for AI providers"""
     
     @abstractmethod
-    def generate_sql(self, question: str, system_prompt: str, history: List[Dict] = []) -> Dict[str, Any]:
-        """Generate SQL from question"""
+    async def generate_sql(self, question: str, system_prompt: str, tools: List[Dict], history: List[Dict] = []) -> Dict[str, Any]:
+        """Generate SQL from question using Tools"""
         pass
     
     @abstractmethod
-    def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str) -> str:
+    async def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str) -> str:
         """Explain query result"""
         pass
 
     @abstractmethod
-    def generate_content(self, prompt: str, system_prompt: Optional[str] = None) -> str:
+    async def generate_content(self, prompt: str, system_prompt: Optional[str] = None) -> str:
         """Generate generic content"""
         pass
-
 
 class ClaudeProvider(AIProvider):
     """Claude API provider"""
@@ -129,159 +123,78 @@ class ClaudeProvider(AIProvider):
     @property
     def client(self):
         if self._client is None:
-            try:
-                import anthropic
-                self._client = anthropic.Anthropic(api_key=self.api_key)
-            except ImportError:
-                raise ImportError("Please install anthropic: pip install anthropic")
+            import anthropic
+            self._client = anthropic.AsyncAnthropic(api_key=self.api_key)
         return self._client
     
     @ai_retry
-    def generate_sql(self, question: str, system_prompt: str, history: List[Dict] = []) -> Dict[str, Any]:
-        """Generate SQL using Claude API with Tool Use"""
+    async def generate_sql(self, question: str, system_prompt: str, tools: List[Dict], history: List[Dict] = []) -> Dict[str, Any]:
         
-        # Prepare messages from history
+        system_prompt += "\nUse the provided tools to fetch database schema, find values, or execute SQL queries. Do not make up schema."
+
         messages = []
         for msg in history:
-            role = msg.get("role")
-            content = msg.get("content")
-            if role and content:
-                messages.append({"role": role, "content": content})
+            if msg.get("role") and msg.get("content"):
+                messages.append({"role": msg.get("role"), "content": msg.get("content")})
         
-        # Add current question
-        messages.append({"role": "user", "content": question})
-        # Add current question
         messages.append({"role": "user", "content": question})
 
-        tools = [
-            {
-                "name": "execute_sql",
-                "description": "Execute a SQL query against the revenue database",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "The SQL SELECT query to execute"
-                        },
-                        "explanation": {
-                            "type": "string",
-                            "description": "Brief explanation of what this query does (in Thai)"
-                        }
-                    },
-                    "required": ["query", "explanation"]
-                }
-            }
-        ]
+        # Convert MCP tools format to Anthropic tools format if needed
+        # MCP tools are already relatively compatible but might need adjustment
+        # Anthropic expects: name, description, input_schema
+        # Sanitizing to permit only these fields to prevent 400 errors (e.g. from extra 'custom' fields)
+        sanitized_tools = []
+        for t in tools:
+            sanitized_tools.append({
+                "name": t["name"],
+                "description": t.get("description", ""),
+                "input_schema": t["input_schema"]
+            })
         
-        response = self.client.messages.create(
+        response = await self.client.messages.create(
             model=self.model,
-            max_tokens=2048,  # Increased for complex SQL queries
+            max_tokens=2048,
             system=system_prompt,
-            tools=tools,
+            tools=sanitized_tools,
             messages=messages
         )
         
-        # Extract SQL from tool use
-        sql_query = None
-        explanation = None
-        
-        for block in response.content:
-            if block.type == "tool_use" and block.name == "execute_sql":
-                sql_query = block.input.get("query")
-                explanation = block.input.get("explanation")
-                break
-            elif block.type == "text":
-                # Try to extract SQL from text response
-                sql_match = re.search(r'```sql\s*(.*?)\s*```', block.text, re.DOTALL)
-                if sql_match:
-                    sql_query = sql_match.group(1).strip()
-                explanation = block.text
-        
         return {
-            "sql": sql_query,
-            "explanation": explanation,
-            "tokens_used": response.usage.input_tokens + response.usage.output_tokens,
-            "raw_response": str(response.content)
+            "response": response, 
+            "tokens_used": response.usage.input_tokens + response.usage.output_tokens
         }
     
     @ai_retry
-    def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str) -> str:
-        """Explain query result using Claude"""
-
-        question_lower = question.lower()
-
-        # Detect complex queries that need more tokens
-        complex_keywords = [
-            'crosstab', 'pivot', 'ตาราง', 'แยกตาม',  # Original
-            'เปรียบเทียบ', 'ผลต่าง', 'ไตรมาส', 'quarter',  # Comparison
-            'เทียบ', 'vs', 'versus', 'ต่างกัน',  # vs
-            'แนวโน้ม', 'trend', 'growth', 'การเติบโต',  # Trends
-            'breakdown', 'แจกแจง', 'รายละเอียด',  # Breakdown
-            'ทุกกลุ่ม', 'ทุกหน่วยงาน', 'ทั้งหมด'  # All groups
-        ]
-        is_complex = any(keyword in question_lower for keyword in complex_keywords)
-
-        # Increase sample limit for complex queries
-        sample_limit = 100 if is_complex else (50 if len(data) > 20 else 30)
-        data_sample = data[:sample_limit] if len(data) > sample_limit else data
-
-        # Estimate tokens needed - higher for complex queries
-        if is_complex:
-            estimated_tokens = 6000 if len(data) > 10 else 4000
-        else:
-            estimated_tokens = 3000 if len(data) > 20 else 2000
-
-        prompt = f"""คำถามเดิม: {question}
-
-SQL ที่ใช้:
-```sql
-{sql}
-```
-
-ผลลัพธ์ ({len(data)} rows):
-```json
+    async def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str) -> str:
+        # Simplified explanation logic without complex token estimation for now
+        data_sample = data[:30]
+        prompt = f"""Question: {question}
+SQL: {sql}
+Results (First 30 rows):
 {json.dumps(data_sample, ensure_ascii=False, indent=2)}
-```
 
-กรุณาอธิบายผลลัพธ์นี้เป็นภาษาไทยที่เข้าใจง่าย พร้อม format ตัวเลขให้อ่านง่าย และไม่ใช้ emoji icon
-หากมีข้อมูลหลายแถว ให้สรุปเป็นภาพรวมและไฮไลท์ข้อมูลสำคัญ
-สำคัญ: ต้องแสดงข้อมูลทุกแถวในตารางให้ครบถ้วน อย่าตัดข้อมูลออก"""
-
-        response = self.client.messages.create(
+Please explain the results in Thai. Format numbers nicely. Summary only if many rows.
+"""
+        response = await self.client.messages.create(
             model=self.model,
-            max_tokens=estimated_tokens,
+            max_tokens=2000,
             system=system_prompt,
-            messages=[
-                {"role": "user", "content": prompt}
-            ]
-        )
-
-        result_text = response.content[0].text
-
-        # Check for truncation via stop_reason
-        if response.stop_reason == "max_tokens":
-            logger.warning("Claude response truncated due to max_tokens")
-            result_text += "\n\n(หมายเหตุ: คำอธิบายอาจถูกตัดทอนเนื่องจากความยาวเกินกำหนด กรุณาถามแยกเป็นคำถามย่อยๆ)"
-
-        return result_text
-
-    @ai_retry
-    def generate_content(self, prompt: str, system_prompt: Optional[str] = None) -> str:
-        """Generate content using Claude"""
-        messages = [{"role": "user", "content": prompt}]
-        
-        response = self.client.messages.create(
-            model=self.model,
-            max_tokens=4000,
-            system=system_prompt or "",
-            messages=messages
+            messages=[{"role": "user", "content": prompt}]
         )
         return response.content[0].text
 
+    @ai_retry
+    async def generate_content(self, prompt: str, system_prompt: Optional[str] = None) -> str:
+        response = await self.client.messages.create(
+            model=self.model,
+            max_tokens=4000,
+            system=system_prompt or "",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return response.content[0].text
 
 class GeminiProvider(AIProvider):
-    """Google Gemini API provider using google-genai SDK"""
+    """Google Gemini API provider"""
     
     def __init__(self, api_key: str, model: str = "gemini-3-flash-preview"):
         self.api_key = api_key
@@ -291,841 +204,343 @@ class GeminiProvider(AIProvider):
     @property
     def client(self):
         if self._client is None:
-            try:
-                from google import genai
-                self._client = genai.Client(api_key=self.api_key)
-            except ImportError:
-                raise ImportError("Please install google-genai: pip install google-genai")
+            # We use the Async client if available, or wrap calls
+            # google.genai 0.5+ has async support?
+            # For safety, let's assuming we might need to run in thread if SDK is sync
+            # checking SDK... google-genai Client is sync? 
+            # Actually, let's use the REST API via httpx for true async if SDK is problematic,
+            # BUT for now let's assume standard google.genai usage.
+            # If standard Client is sync, we wrap in asyncio.to_thread
+            from google import genai
+            self._client = genai.Client(api_key=self.api_key) 
         return self._client
     
+    async def _run_async(self, func, *args, **kwargs):
+        return await asyncio.to_thread(func, *args, **kwargs)
+
     @ai_retry
-    def generate_sql(self, question: str, system_prompt: str, history: List[Dict] = []) -> Dict[str, Any]:
-        """Generate SQL using Gemini API with Tool Use"""
+    async def generate_sql(self, question: str, system_prompt: str, tools: List[Dict], history: List[Dict] = []) -> Dict[str, Any]:
+        from google.genai import types
         
-        # Define tool using google-genai types if possible, or simple dict
-        # The new SDK supports python functions directly or schema dicts
-        
-        def execute_sql(query: str, explanation: str):
-            """Execute a SQL query against the revenue database"""
-            pass
-
-        try:
-            from google.genai import types
-            
-            # Tools config
-            tools = [types.Tool(function_declarations=[
+        # Convert tools to Gemini format
+        gemini_tools = []
+        for t in tools:
+            # MCP input_schema is JSON Schema
+            # Gemini expects specific structure
+            gemini_tools.append(types.Tool(function_declarations=[
                 types.FunctionDeclaration(
-                    name="execute_sql",
-                    description="Execute a SQL query against the revenue database",
-                    parameters=types.Schema(
-                        type="OBJECT",
-                        properties={
-                            "query": types.Schema(type="STRING", description="The SQL SELECT query to execute"),
-                            "explanation": types.Schema(type="STRING", description="Brief explanation of what this query does (in Thai)")
-                        },
-                        required=["query", "explanation"]
-                    )
+                    name=t['name'],
+                    description=t['description'],
+                    parameters=t['input_schema'] 
                 )
-            ])]
+            ]))
+            
+        contents = []
+        contents = []
+        for msg in history:
+            role = msg.get("role")
+            
+            if role == "model":
+                parts = []
+                if "parts_raw" in msg:
+                    # Restore from raw dicts (preserving thought_signature)
+                    for p_dict in msg["parts_raw"]:
+                        # Try from_dict first (preserves all fields including thought_signature)
+                        try:
+                            if hasattr(types.Part, 'from_dict'):
+                                parts.append(types.Part.from_dict(p_dict))
+                                continue
+                        except Exception:
+                            pass
 
-            # Prepare contents with history
-            contents = []
-            for msg in history:
-                role = "user" if msg.get("role") == "user" else "model"
+                        # Fallback: Manual construction
+                        try:
+                            # Try direct instantiation with dict unpacking
+                            parts.append(types.Part(**p_dict))
+                            continue
+                        except Exception:
+                            pass
+
+                        # Last resort: Build Part manually
+                        part = types.Part()
+                        if "text" in p_dict:
+                            part.text = p_dict["text"]
+                        if "function_call" in p_dict:
+                            fc = p_dict["function_call"]
+                            part.function_call = types.FunctionCall(
+                                name=fc["name"],
+                                args=fc.get("args", {})
+                            )
+                        # Try to set thought_signature if the SDK supports it
+                        if "thought_signature" in p_dict:
+                            try:
+                                part.thought_signature = p_dict["thought_signature"]
+                            except AttributeError:
+                                pass
+                        parts.append(part)
+
+                elif "parts" in msg:
+                    # Legacy/Fallback manual construction
+                    for p in msg["parts"]:
+                        if "function_call" in p:
+                            fc = p["function_call"]
+                            parts.append(types.Part(
+                                function_call=types.FunctionCall(
+                                    name=fc["name"],
+                                    args=fc["args"]
+                                )
+                            ))
+                        elif "text" in p:
+                            parts.append(types.Part(text=p["text"]))
+                            
+                contents.append(types.Content(role="model", parts=parts))
+
+            elif role == "function":
+                # Reconstruct Function Response
+                # Must use role='tool' to be recognized as a Function Response Turn
+                # role='user' is treated as User Turn, leaving the previous Call hanging.
+                
+                parts = [types.Part(
+                    function_response=types.FunctionResponse(
+                        name=msg["name"],
+                        response=msg["content"] # Dict
+                    )
+                )]
+                contents.append(types.Content(role="tool", parts=parts))
+                
+            elif role == "user":
                 contents.append(types.Content(
-                    role=role,
+                    role="user",
                     parts=[types.Part(text=msg.get("content", ""))]
                 ))
-            
-            # Add current question
-            contents.append(types.Content(
-                role="user",
-                parts=[types.Part(text=question)]
-            ))
+            elif role == "model":
+                contents.append(types.Content(
+                    role="model",
+                    parts=[types.Part(text=msg.get("content", ""))]
+                ))
 
-            logger.info(f"Gemini: Sending request for '{question}' with {len(history)} history items.")
-            import time
-            t_start = time.time()
+        
+        # Determine if we should append the question
+        # If history already has the user question as the first item, we might not need to append it again if question is None
+        # But our loop logic passes 'working_question' which becomes None.
+        if question:
+             contents.append(types.Content(role="user", parts=[types.Part(text=question)]))
 
-            response = self.client.models.generate_content(
+        def call_api():
+            # Build config with thinking disabled to avoid thought_signature issues
+            config_kwargs = {
+                "system_instruction": system_prompt,
+                "tools": gemini_tools,
+                "temperature": 0.0
+            }
+
+            # Try to disable thinking for models that support it (Gemini 2.5+)
+            # This prevents thought_signature requirements in function calls
+            try:
+                config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
+            except (AttributeError, TypeError):
+                # SDK version doesn't support ThinkingConfig, skip
+                pass
+
+            return self.client.models.generate_content(
                 model=self.model,
                 contents=contents,
-                config=types.GenerateContentConfig(
-                    system_instruction=system_prompt,
-                    tools=tools,
-                    temperature=0.0,
-                    max_output_tokens=2048,  # Increased for complex SQL queries
-                    # Explicitly disable AFC to strictly return tool calls
-                    automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
-                )
+                config=types.GenerateContentConfig(**config_kwargs)
             )
-            
-            logger.info(f"Gemini: Received response in {time.time() - t_start:.2f}s")
-            
-            # Extract SQL from tool call
-            sql_query = None
-            explanation = None
-            raw_response = str(response)
 
-            # Check for function calls in candidates
-            if response.candidates and response.candidates[0].content.parts:
-                for part in response.candidates[0].content.parts:
-                    if part.function_call and part.function_call.name == "execute_sql":
-                        args = part.function_call.args
-                        sql_query = args.get("query")
-                        explanation = args.get("explanation")
-                        break
-            
-            # Fallback text extraction if tool use fails but returns text
-            if not sql_query and response.text:
-                sql_match = re.search(r'```sql\s*(.*?)\s*```', response.text, re.DOTALL)
-                if sql_match:
-                    sql_query = sql_match.group(1).strip()
-                explanation = response.text
-            
-            if not sql_query:
-                logger.warning(f"Gemini failed to generate SQL. Raw response: {response.text}")
-
-            # Get token count if available
-            tokens_used = 0
-            if response.usage_metadata:
-                tokens_used = (
-                    response.usage_metadata.prompt_token_count + 
-                    response.usage_metadata.candidates_token_count
-                )
-                
-            return {
-                "sql": sql_query,
-                "explanation": explanation,
-                "tokens_used": tokens_used,
-                "raw_response": raw_response
-            }
-            
-        except Exception as e:
-            # Fallback to text-only if SDK usage fails
-            return self._generate_sql_text_only(question, system_prompt)
-    
-    def _generate_sql_text_only(self, question: str, system_prompt: str) -> Dict[str, Any]:
-        """Fallback: Generate SQL using text-only mode"""
+        response = await self._run_async(call_api)
         
-        from google.genai import types
+        # Calculate tokens if available
+        tokens = 0
+        if response.usage_metadata:
+            tokens = response.usage_metadata.prompt_token_count + response.usage_metadata.candidates_token_count
 
-        prompt = f"""{system_prompt}
-
-คำถาม: {question}
-
-กรุณาสร้าง SQL query และอธิบายเป็นภาษาไทย
-
-ตอบในรูปแบบ:
-```sql
-[SQL QUERY HERE]
-```
-
-คำอธิบาย: [EXPLANATION IN THAI]"""
-        
-        response = self.client.models.generate_content(
-            model=self.model,
-            contents=prompt
-        )
-        text = response.text if response.text else ""
-        
-        # Extract SQL
-        sql_match = re.search(r'```sql\s*(.*?)\s*```', text, re.DOTALL)
-        sql_query = sql_match.group(1).strip() if sql_match else None
-        
         return {
-            "sql": sql_query,
-            "explanation": text,
-            "tokens_used": 0,
-            "raw_response": text
+            "response": response,
+            "tokens_used": tokens
         }
-    
-    @ai_retry
-    def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str) -> str:
-        """Explain query result using Gemini"""
-
-        from google.genai import types
-
-        # Determine sample size and complexity based on query characteristics
-        question_lower = question.lower()
-
-        # Detect complex queries that need more tokens
-        complex_keywords = [
-            'crosstab', 'pivot', 'ตาราง', 'แยกตาม',  # Original
-            'เปรียบเทียบ', 'ผลต่าง', 'ไตรมาส', 'quarter',  # Comparison
-            'เทียบ', 'vs', 'versus', 'ต่างกัน',  # vs
-            'แนวโน้ม', 'trend', 'growth', 'การเติบโต',  # Trends
-            'breakdown', 'แจกแจง', 'รายละเอียด',  # Breakdown
-            'ทุกกลุ่ม', 'ทุกหน่วยงาน', 'ทั้งหมด'  # All groups
-        ]
-        is_complex = any(keyword in question_lower for keyword in complex_keywords)
-
-        # Increase sample limit for complex queries
-        sample_limit = 100 if is_complex else (50 if len(data) > 20 else 30)
-        data_sample = data[:sample_limit] if len(data) > sample_limit else data
-
-        # Estimate tokens needed - significantly higher for complex queries
-        # Complex comparison tables with multiple columns need ~4000-6000 tokens
-        if is_complex:
-            estimated_tokens = 6000 if len(data) > 10 else 4000
-        else:
-            estimated_tokens = 3000 if len(data) > 20 else 2000
-
-        prompt = f"""คำถามเดิม: {question}
-
-SQL ที่ใช้:
-```sql
-{sql}
-```
-
-ผลลัพธ์ ({len(data)} rows):
-```json
-{json.dumps(data_sample, ensure_ascii=False, indent=2)}
-```
-
-กรุณาอธิบายผลลัพธ์นี้เป็นภาษาไทยที่เข้าใจง่าย พร้อม format ตัวเลขให้อ่านง่าย และไม่ใช้ emoji icon
-หากมีข้อมูลหลายแถว ให้สรุปเป็นภาพรวมและไฮไลท์ข้อมูลสำคัญ
-สำคัญ: ต้องแสดงข้อมูลทุกแถวในตารางให้ครบถ้วน อย่าตัดข้อมูลออก"""
-
-        response = self.client.models.generate_content(
-            model=self.model,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                max_output_tokens=estimated_tokens
-            )
-        )
-
-        result_text = response.text if response.text else ""
-
-        # Check for truncation by examining finish_reason
-        if response.candidates and response.candidates[0].finish_reason:
-            finish_reason = str(response.candidates[0].finish_reason)
-            if 'MAX_TOKENS' in finish_reason or 'LENGTH' in finish_reason.upper():
-                logger.warning(f"Gemini response truncated: {finish_reason}")
-                result_text += "\n\n(หมายเหตุ: คำอธิบายอาจถูกตัดทอนเนื่องจากความยาวเกินกำหนด กรุณาถามแยกเป็นคำถามย่อยๆ)"
-
-        return result_text
 
     @ai_retry
-    def generate_content(self, prompt: str, system_prompt: Optional[str] = None) -> str:
-        """Generate content using Gemini"""
-        from google.genai import types
+    async def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str) -> str:
+        prompt = f"Question: {question}\nSQL: {sql}\nResults: {json.dumps(data[:30], ensure_ascii=False)}\nExplain in Thai."
         
-        config = types.GenerateContentConfig(
-            system_instruction=system_prompt,
-            max_output_tokens=4000
-        ) if system_prompt else None
+        def call_api():
+            return self.client.models.generate_content(
+                model=self.model,
+                contents=prompt,
+                config={"system_instruction": system_prompt}
+            )
+            
+        response = await self._run_async(call_api)
+        return response.text
 
-        response = self.client.models.generate_content(
-            model=self.model,
-            contents=prompt,
-            config=config
-        )
-        return response.text if response.text else ""
+    @ai_retry
+    async def generate_content(self, prompt: str, system_prompt: Optional[str] = None) -> str:
+        """Generate content using Gemini API"""
+        logger.info(f"GeminiProvider.generate_content called")
+        logger.info(f"  - model: {self.model}")
+        logger.info(f"  - prompt length: {len(prompt) if prompt else 0}")
+        logger.info(f"  - system_prompt length: {len(system_prompt) if system_prompt else 0}")
 
+        def call_api():
+            try:
+                from google.genai import types
+                logger.info("GeminiProvider: Creating config...")
+
+                # Build config properly
+                config = types.GenerateContentConfig(
+                    system_instruction=system_prompt
+                ) if system_prompt else None
+
+                logger.info(f"GeminiProvider: Calling API with model={self.model}...")
+                result = self.client.models.generate_content(
+                    model=self.model,
+                    contents=prompt,
+                    config=config
+                )
+
+                response_text = result.text if result and hasattr(result, 'text') else ""
+                logger.info(f"GeminiProvider: API returned, text length={len(response_text)}")
+                return result
+
+            except Exception as e:
+                logger.error(f"GeminiProvider: API call failed: {type(e).__name__}: {e}")
+                raise
+
+        try:
+            response = await self._run_async(call_api)
+            text = response.text if response and hasattr(response, 'text') else ""
+            logger.info(f"GeminiProvider: Returning text length={len(text)}")
+            return text
+        except Exception as e:
+            logger.error(f"GeminiProvider: _run_async failed: {type(e).__name__}: {e}")
+            raise
 
 class MatchaProvider(AIProvider):
-    """Matcha AI (Internal Gateway) provider using OpenAI-Compatible API
-
-    Enhanced with:
-    - Few-shot examples for better SQL generation
-    - Semantic mapping hints for Thai abbreviations
-    - Improved SQL extraction
-    """
-
-    def __init__(self, api_key: str, api_url: str, model: str = "gpt-4o", db_path: Optional[str] = None):
+    """Matcha AI (OpenAI Compatible)"""
+    
+    def __init__(self, api_key: str, api_url: str, model: str = "gpt-4o"):
         self.api_key = api_key
         self.api_url = api_url
         self.model = model
-        self.db_path = db_path
-        self._examples_service = None
-
-    @property
-    def examples_service(self):
-        """Lazy load examples service"""
-        if self._examples_service is None and self.db_path:
-            try:
-                from app.services.matcha_examples import MatchaExamplesService
-                self._examples_service = MatchaExamplesService(self.db_path)
-            except Exception as e:
-                logger.warning(f"Could not load MatchaExamplesService: {e}")
-        return self._examples_service
-
-    def _get_few_shot_messages(self) -> List[Dict]:
-        """Get few-shot example messages"""
-        try:
-            from app.services.matcha_examples import get_matcha_few_shot_messages
-            return get_matcha_few_shot_messages()
-        except Exception as e:
-            logger.warning(f"Could not load few-shot messages: {e}")
-            return []
-
-    def _enhance_question_with_hints(self, question: str) -> str:
-        """Add semantic hints to question if keywords detected"""
-        if not self.examples_service:
-            return question
-
-        try:
-            hints = self.examples_service.build_semantic_hints(question)
-            if hints:
-                return f"{question}\n\n{hints}"
-        except Exception as e:
-            logger.debug(f"Could not build semantic hints: {e}")
-
-        return question
-
-    def _extract_sql_from_response(self, text: str) -> Optional[str]:
-        """
-        Enhanced SQL extraction with multiple fallback patterns
-
-        Returns:
-            Extracted SQL query or None
-        """
-        # Pattern 1: ```sql ... ```
-        sql_match = re.search(r'```sql\s*(.*?)\s*```', text, re.DOTALL | re.IGNORECASE)
-        if sql_match:
-            return sql_match.group(1).strip()
-
-        # Pattern 2: ``` ... ``` (generic code block)
-        code_match = re.search(r'```\s*(.*?)\s*```', text, re.DOTALL)
-        if code_match:
-            code = code_match.group(1).strip()
-            # Check if it looks like SQL
-            if re.match(r'(?:SELECT|WITH)\s+', code, re.IGNORECASE):
-                return code
-
-        # Pattern 3: Raw SQL starting with SELECT or WITH
-        # Match until we hit a clear ending (double newline, explanation text, or end)
-        raw_patterns = [
-            # SELECT ... until double newline or explanation
-            r'(SELECT\s+[\s\S]*?)(?:\n\n|คำอธิบาย|Explanation|$)',
-            # WITH ... until double newline or explanation
-            r'(WITH\s+[\s\S]*?)(?:\n\n|คำอธิบาย|Explanation|$)',
-            # Fallback: SELECT/WITH until semicolon or end
-            r'((?:WITH|SELECT)\s+.*?)(?:;|$)',
-        ]
-
-        for pattern in raw_patterns:
-            match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
-            if match:
-                sql = match.group(1).strip()
-                # Remove trailing semicolon if present
-                sql = sql.rstrip(';').strip()
-                if sql:
-                    return sql
-
-        return None
-
-    def _extract_explanation(self, text: str, sql: Optional[str] = None) -> str:
-        """Extract explanation from response"""
-        # Try to find explicit explanation
-        patterns = [
-            r'คำอธิบาย[:\s]*(.*?)(?:\n\n|$)',
-            r'Explanation[:\s]*(.*?)(?:\n\n|$)',
-            r'หมายเหตุ[:\s]*(.*?)(?:\n\n|$)',
-        ]
-
-        for pattern in patterns:
-            match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
-            if match:
-                return match.group(1).strip()
-
-        # Fallback: text after SQL block
-        if sql and sql in text:
-            idx = text.find(sql) + len(sql)
-            remaining = text[idx:].strip()
-            # Clean up remaining text
-            remaining = re.sub(r'^```\s*', '', remaining)
-            remaining = re.sub(r'^\s*\n', '', remaining)
-            if remaining:
-                return remaining[:500]  # Limit length
-
-        return text[:500] if text else ""
-
+        
     @ai_retry
-    def generate_sql(self, question: str, system_prompt: str, history: List[Dict] = []) -> Dict[str, Any]:
-        """Generate SQL using Matcha API (OpenAI Compatible) with few-shot examples"""
+    async def generate_sql(self, question: Optional[str], system_prompt: str, tools: List[Dict], history: List[Dict] = []) -> Dict[str, Any]:
+        
+        # Convert tools to OpenAI format
+        openai_tools = []
+        for t in tools:
+            openai_tools.append({
+                "type": "function",
+                "function": {
+                    "name": t["name"],
+                    "description": t["description"],
+                    "parameters": t["input_schema"]
+                }
+            })
+
+        messages = [{"role": "system", "content": system_prompt}]
+        for msg in history:
+            # PRESERVE CRITICAL FIELDS for OpenAI/Matcha
+            # Simpler copy to avoid missing fields
+            new_msg = {k: v for k, v in msg.items() if k in ['role', 'content', 'tool_calls', 'tool_call_id', 'name']}
+            messages.append(new_msg)
+            
+        if question:
+            messages.append({"role": "user", "content": question})
 
         headers = {
             'Content-Type': 'application/json',
             'Authorization': f'Bearer {self.api_key}'
         }
-
-        # Prepare messages with few-shot examples
-        messages = [{"role": "system", "content": system_prompt}]
-
-        # Add few-shot examples (before history)
-        few_shot = self._get_few_shot_messages()
-        messages.extend(few_shot)
-
-        # Add conversation history
-        for msg in history:
-            role = msg.get("role")
-            content = msg.get("content")
-            if role and content:
-                messages.append({"role": role, "content": content})
-
-        # Enhance question with semantic hints
-        enhanced_question = self._enhance_question_with_hints(question)
-        messages.append({"role": "user", "content": enhanced_question})
-
-        logger.debug(f"Matcha: Sending {len(messages)} messages (including {len(few_shot)} few-shot examples)")
-
+        
         payload = {
             'model': self.model,
             'messages': messages,
-            'temperature': 0.1,  # Low temperature for consistent SQL generation
-            'max_tokens': 2048,  # Increased for complex SQL queries
-            'top_p': 0.95
+            'tool_choice': 'auto',
+            'temperature': 0.1
+        }
+        
+        if openai_tools:
+            payload['tools'] = openai_tools
+        
+        async with httpx.AsyncClient(verify=False, timeout=60.0) as client:
+            resp = await client.post(self.api_url, headers=headers, json=payload)
+            resp.raise_for_status()
+            result = resp.json()
+            
+        return {
+            "response": result, # Raw OpenAI response dict
+            "tokens_used": result.get('usage', {}).get('total_tokens', 0)
         }
 
-        try:
-            with httpx.Client(verify=False, timeout=60.0) as client:
-                response = client.post(self.api_url, headers=headers, json=payload)
-                response.raise_for_status()
-                result = response.json()
-
-            ai_message = result['choices'][0]['message']['content']
-            total_tokens = result.get('usage', {}).get('total_tokens', 0)
-
-            # Enhanced SQL extraction
-            sql_query = self._extract_sql_from_response(ai_message)
-            explanation = self._extract_explanation(ai_message, sql_query)
-
-            return {
-                "sql": sql_query,
-                "explanation": explanation,
-                "tokens_used": total_tokens,
-                "raw_response": ai_message
-            }
-
-        except Exception as e:
-            logger.error(f"Matcha API Error: {str(e)}")
-            raise
-
-    @ai_retry
-    def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str) -> str:
-        """Explain query result using Matcha AI"""
-
-        question_lower = question.lower()
-
-        # Detect complex queries that need more tokens
-        complex_keywords = [
-            'crosstab', 'pivot', 'ตาราง', 'แยกตาม',  # Original
-            'เปรียบเทียบ', 'ผลต่าง', 'ไตรมาส', 'quarter',  # Comparison
-            'เทียบ', 'vs', 'versus', 'ต่างกัน',  # vs
-            'แนวโน้ม', 'trend', 'growth', 'การเติบโต',  # Trends
-            'breakdown', 'แจกแจง', 'รายละเอียด',  # Breakdown
-            'ทุกกลุ่ม', 'ทุกหน่วยงาน', 'ทั้งหมด'  # All groups
-        ]
-        is_complex = any(keyword in question_lower for keyword in complex_keywords)
-
-        # Increase sample limit for complex queries
-        sample_limit = 100 if is_complex else (50 if len(data) > 20 else 30)
-        data_sample = data[:sample_limit] if len(data) > sample_limit else data
-
-        # Estimate tokens needed - higher for complex queries
-        if is_complex:
-            estimated_tokens = 6000 if len(data) > 10 else 4000
-        else:
-            estimated_tokens = 3000 if len(data) > 20 else 2000
-
-        prompt = f"""คำถามเดิม: {question}
-
-SQL ที่ใช้:
-```sql
-{sql}
-```
-
-ผลลัพธ์ ({len(data)} rows):
-```json
-{json.dumps(data_sample, ensure_ascii=False, indent=2)}
-```
-
-กรุณาอธิบายผลลัพธ์นี้เป็นภาษาไทยที่เข้าใจง่าย พร้อม format ตัวเลขให้อ่านง่าย และไม่ใช้ emoji icon
-หากมีข้อมูลหลายแถว ให้สรุปเป็นภาพรวมและไฮไลท์ข้อมูลสำคัญ
-สำคัญ: ต้องแสดงข้อมูลทุกแถวในตารางให้ครบถ้วน อย่าตัดข้อมูลออก"""
-
-        headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {self.api_key}'
-        }
-
-        payload = {
-            'model': self.model,
-            'messages': [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt}
-            ],
-            'temperature': 0.5,  # Lower for more consistent output
-            'max_tokens': estimated_tokens
-        }
-
-        try:
-            with httpx.Client(verify=False, timeout=120.0) as client:  # Increased timeout for longer responses
-                response = client.post(self.api_url, headers=headers, json=payload)
-                response.raise_for_status()
-                result = response.json()
-
-            content = result['choices'][0]['message']['content']
-
-            # Check if response was truncated (ended mid-sentence)
-            finish_reason = result['choices'][0].get('finish_reason', '')
-            if finish_reason == 'length':
-                logger.warning("Matcha response was truncated due to max_tokens limit")
-                content += "\n\n(หมายเหตุ: คำอธิบายอาจถูกตัดทอนเนื่องจากความยาวเกินกำหนด กรุณาถามแยกเป็นคำถามย่อยๆ)"
-
-            return content
-
-        except Exception as e:
-            logger.error(f"Matcha Explain Error: {str(e)}")
-            return "ไม่สามารถอธิบายผลลัพธ์ได้เนื่องจากเกิดข้อผิดพลาดในการเชื่อมต่อ AI"
-
-    @ai_retry
-    def generate_content(self, prompt: str, system_prompt: Optional[str] = None) -> str:
-        """Generate content using Matcha AI"""
-        headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {self.api_key}'
-        }
+    # ... Implement explain and generate_content similarly using AsyncClient ...
+    async def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str) -> str:
+         # Simplified impl
+         return "Explanation generic placeholder"
+    
+    async def generate_content(self, prompt: str, system_prompt: Optional[str] = None) -> str:
+        """Generate content using Matcha/OpenAI-compatible API"""
+        logger.info(f"MatchaProvider.generate_content called")
+        logger.info(f"  - model: {self.model}")
+        logger.info(f"  - prompt length: {len(prompt) if prompt else 0}")
 
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {self.api_key}'
+        }
+
         payload = {
             'model': self.model,
             'messages': messages,
-            'temperature': 0.7,
-            'max_tokens': 4000
+            'temperature': 0.1
         }
 
-        with httpx.Client(verify=False, timeout=60.0) as client:
-            response = client.post(self.api_url, headers=headers, json=payload)
-            response.raise_for_status()
-            result = response.json()
-            
-        return result['choices'][0]['message']['content']
+        try:
+            async with httpx.AsyncClient(verify=False, timeout=60.0) as client:
+                logger.info(f"MatchaProvider: Calling API at {self.api_url}...")
+                resp = await client.post(self.api_url, headers=headers, json=payload)
+                resp.raise_for_status()
+                result = resp.json()
+
+            content = result['choices'][0]['message']['content']
+            logger.info(f"MatchaProvider: API returned, text length={len(content)}")
+            return content
+
+        except Exception as e:
+            logger.error(f"MatchaProvider: API call failed: {type(e).__name__}: {e}")
+            raise
+
 
 class AIService:
-    """Main AI Service for NT AI Assistant"""
+    """Async AI Service integrating MCP"""
     
     def __init__(
         self,
         provider: str,
         api_key: str,
-        db_path: str = "revenue.db",
+        mcp_client: MCPClientService,
         model: Optional[str] = None,
-        prompt_manager: Optional[PromptManager] = None,
         **kwargs
     ):
-        """
-        Initialize AI Service
-        
-        Args:
-            provider: "claude", "gemini", or "matcha"
-            api_key: API key for the provider
-            db_path: Path to SQLite database
-            model: Model name (optional, uses default if not specified)
-            prompt_manager: PromptManager instance for version control
-            **kwargs: Additional arguments for providers (e.g. api_url)
-        """
         self.provider_name = provider
-        self.db_path = db_path
-        self.prompt_manager = prompt_manager
+        self.mcp_client = mcp_client
         
-        # Determine database engine from path/url
-        db_engine = "sqlite"
-        if "postgres" in db_path:
-            db_engine = "postgresql"
-        elif "mssql" in db_path or "sqlserver" in db_path:
-            db_engine = "mssql"
-            
-        # Initialize schema service
-        self.schema_service = SchemaService(db_path=db_path, db_engine=None)
-        
-        # Initialize AI provider
         if provider == "claude":
-            self.provider = ClaudeProvider(
-                api_key=api_key,
-                model=model or "claude-sonnet-4-20250514"
-            )
+            self.provider = ClaudeProvider(api_key, model) if model else ClaudeProvider(api_key)
         elif provider == "gemini":
-            self.provider = GeminiProvider(
-                api_key=api_key,
-                model=model or "gemini-2.0-flash-exp"
-            )
+            self.provider = GeminiProvider(api_key, model) if model else GeminiProvider(api_key)
         elif provider == "matcha":
-            api_url = kwargs.get("api_url")
-            if not api_url:
-                raise ValueError("api_url is required for matcha provider")
-            self.provider = MatchaProvider(
-                api_key=api_key,
-                api_url=api_url,
-                model=model or "gpt-4o",
-                db_path=db_path  # Pass db_path for loading few-shot examples
-            )
+             self.provider = MatchaProvider(api_key, kwargs.get("api_url"), model) if model else MatchaProvider(api_key, kwargs.get("api_url"))
         else:
-            raise ValueError(f"Unknown provider: {provider}. Use 'claude', 'gemini', or 'matcha'")
-        
-        # Cache system prompts by context
-        self._system_prompts: Dict[str, str] = {}
-    
-    def get_system_prompt(self, context_name: str = "revenue") -> str:
-        """Get cached system prompt for specific context"""
-        if context_name not in self._system_prompts:
-            if self.prompt_manager:
-                base_instruction = self.schema_service.get_default_instruction(self.provider_name, context_name=context_name)
-                schema_context = self.schema_service.get_schema_context(context_name=context_name)
-                self._system_prompts[context_name] = self.prompt_manager.compose_system_prompt(
-                    base_prompt=base_instruction,
-                    schema_text=schema_context
-                )
-            else:
-                self._system_prompts[context_name] = self.schema_service.build_system_prompt(
-                    ai_provider=self.provider_name,
-                    context_name=context_name
-                )
-        return self._system_prompts[context_name]
-    
-    @property
-    def system_prompt(self) -> str:
-        """Legacy property for backward compatibility (defaults to revenue)"""
-        return self.get_system_prompt("revenue")
-    
-    def refresh_schema(self):
-        """Refresh schema cache"""
-        self.schema_service.refresh_cache()
-        self._system_prompts.clear()
-    
-    def validate_sql(self, sql: str) -> tuple[bool, str]:
-        """
-        Validate SQL query for safety
-        
-        Returns:
-            (is_valid, error_message)
-        """
-        if not sql:
-            return False, "SQL query is empty"
-        
-        sql_upper = sql.upper().strip()
-        
-        # Check for dangerous operations
-        dangerous = ['INSERT', 'UPDATE', 'DELETE', 'DROP', 'CREATE', 'ALTER', 'TRUNCATE']
-        for keyword in dangerous:
-            if keyword in sql_upper:
-                return False, f"SQL contains forbidden keyword: {keyword}"
-        
-        # Must be SELECT
-        # Logic update: Allow (SELECT ... ) which can happen with UNION or subqueries
-        # Also remove any leading parenthesis for the check
-        normalized_sql = sql_upper.lstrip('(').strip()
-        
-        if not (normalized_sql.startswith('SELECT') or normalized_sql.startswith('WITH')):
-            return False, "Only SELECT queries (or Common Table Expressions starting with WITH) are allowed"
-        
-        return True, ""
-    
-    def execute_sql(self, sql: str) -> List[Dict]:
-        """Execute SQL query and return results"""
-        conn = None
-        try:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute(sql)
-            rows = cursor.fetchall()
-            return [dict(row) for row in rows]
-        except Exception as e:
-            # logger.error(f"SQL execution error for query '{sql}': {e}")
-            raise
-        finally:
-            if conn:
-                conn.close()
-
-    def generate_content(self, prompt: str) -> str:
-        """Generate generic content using the configured provider"""
-        return self.provider.generate_content(prompt, system_prompt=self.system_prompt)
-
-    def _find_similar_values(self, sql: str, limit: int = 5, context_name: str = "revenue") -> Dict[str, List[str]]:
-        """
-        Find actual values in database for columns used in WHERE clause.
-        Helps AI understand what values exist when query returns 0 rows.
-
-        Returns:
-            Dict mapping column names to sample values found in DB
-        """
-        import re
-        suggestions = {}
-        
-        # Get table name for context
-        try:
-            context_info = self.schema_service.get_context_info(context_name)
-            table_name = context_info['main_view'] if context_info else 'revenue_search'
-        except:
-            table_name = 'revenue_search'
-
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-
-            # Extract column conditions from WHERE clause
-            # Patterns: column = 'value', column LIKE '%value%', column IN (...)
-            where_match = re.search(r'WHERE\s+(.+?)(?:GROUP BY|ORDER BY|LIMIT|$)', sql, re.IGNORECASE | re.DOTALL)
-            if not where_match:
-                return suggestions
-
-            where_clause = where_match.group(1)
-
-            # Find column = 'value' patterns
-            eq_patterns = re.findall(r"(\w+)\s*=\s*'([^']+)'", where_clause, re.IGNORECASE)
-            like_patterns = re.findall(r"(\w+)\s+LIKE\s+'%?([^%']+)%?'", where_clause, re.IGNORECASE)
-
-            all_patterns = eq_patterns + like_patterns
-
-            for column, value in all_patterns:
-                # Skip common columns that don't need suggestions
-                if column.lower() in ('year', 'month', 'date'):
-                    continue
-
-                try:
-                    # Find distinct values that might match
-                    query = f"""
-                        SELECT DISTINCT "{column}"
-                        FROM {table_name}
-                        WHERE "{column}" IS NOT NULL
-                        LIMIT {limit * 2}
-                    """
-                    cursor.execute(query)
-                    all_values = [row[0] for row in cursor.fetchall() if row[0]]
-
-                    # Find similar values (containing search term or similar)
-                    search_term = value.lower()
-                    similar = []
-                    exact_exists = False
-
-                    for v in all_values:
-                        v_lower = str(v).lower()
-                        if v_lower == search_term:
-                            exact_exists = True
-                        elif search_term in v_lower or v_lower in search_term:
-                            similar.append(str(v))
-
-                    # If exact value doesn't exist, provide suggestions
-                    if not exact_exists:
-                        if similar:
-                            suggestions[column] = similar[:limit]
-                        else:
-                            # No similar found, show sample values
-                            suggestions[column] = [str(v) for v in all_values[:limit]]
-
-                except Exception as e:
-                    # logger.debug(f"Could not find values for column {column}: {e}")
-                    continue
-
-            conn.close()
-
-        except Exception as e:
-            # logger.warning(f"Error finding similar values: {e}")
-            pass
-
-        return suggestions
-
-    def _check_zero_results_reason(self, sql: str, context_name: str = "revenue") -> Optional[str]:
-        """
-        Analyze why a query might return 0 results.
-        Returns hint text if issues found.
-        """
-        suggestions = self._find_similar_values(sql, context_name=context_name)
-
-        if not suggestions:
-            return None
-
-        hint_parts = ["ค่าที่ใช้ใน WHERE clause อาจไม่ตรงกับข้อมูลจริง:"]
-
-        for column, values in suggestions.items():
-            values_str = ", ".join([f"'{v}'" for v in values[:5]])
-            hint_parts.append(f"  - Column '{column}': ค่าที่มีในระบบ เช่น {values_str}")
-
-        return "\n".join(hint_parts)
-    
-    def query(self, question: str, explain: bool = True, history: List[Dict] = [], context_name: str = "revenue") -> QueryResult:
-        """
-        Process a natural language question
-        
-        Args:
-            question: Question in Thai or English
-            explain: Whether to generate explanation
-            context_name: Data scope (revenue, expense, etc.)
-        
-        Returns:
-            QueryResult with SQL, data, and explanation
-        """
-        
-        system_prompt = self.get_system_prompt(context_name)
-        
-        # Generate SQL
-        # logger.info(f"AIService: Querying {self.provider_name} [{context_name}] for '{question}'")
-        import time
-        t_start = time.time()
-        
-        ai_result = self.provider.generate_sql(question, system_prompt, history)
-        
-        # logger.info(f"AIService: Generated SQL in {time.time() - t_start:.2f}s")
-        
-        sql_query = ai_result.get("sql")
-        tokens_used = ai_result.get("tokens_used", 0)
-        
-        # Validate SQL
-        is_valid, error_msg = self.validate_sql(sql_query)
-        
-        if not is_valid:
-            return QueryResult(
-                question=question,
-                sql_query=sql_query or "",
-                data=[],
-                explanation="",
-                tokens_used=tokens_used,
-                provider=self.provider_name,
-                error=error_msg
-            )
-        
-        # Execute SQL
-        try:
-            data = self.execute_sql(sql_query)
-        except Exception as e:
-            return QueryResult(
-                question=question,
-                sql_query=sql_query,
-                data=[],
-                explanation="",
-                tokens_used=tokens_used,
-                provider=self.provider_name,
-                error=f"SQL execution error: {str(e)}"
-            )
-        
-        # Generate explanation
-        explanation = ai_result.get("explanation", "")
-        if explain and data:
-            try:
-                explanation = self.provider.explain_result(
-                    question, sql_query, data, system_prompt
-                )
-            except:
-                pass  # Keep original explanation if API fails
-        
-        return QueryResult(
-            question=question,
-            sql_query=sql_query,
-            data=data,
-            explanation=explanation,
-            tokens_used=tokens_used,
-            provider=self.provider_name
-        )
-    
-    def query_with_retry(
+            raise ValueError(f"Unknown provider: {provider}")
+            
+    async def query_with_retry(
         self,
         question: str,
         max_retries: int = 3,
@@ -1134,159 +549,484 @@ class AIService:
         explain: bool = True,
         context_name: str = "revenue"
     ) -> QueryResult:
-        """
-        Process question with automatic retry on SQL errors.
-
-        When SQL generation or execution fails, sends the error back to AI
-        to self-correct and try again.
-
-        Args:
-            question: User's question
-            max_retries: Maximum retry attempts (default 3)
-            history: Conversation history
-            on_status: Callback function for status updates
-            explain: Whether to generate explanation
-            context_name: Data context (revenue, expense)
-
-        Returns:
-            QueryResult with retry information
-        """
-
-        def notify(attempt: int, status: str, message: str, sql: str = None, error: str = None):
-            """Send status notification if callback provided"""
-            if on_status:
-                on_status(RetryStatus(
-                    attempt=attempt,
-                    max_attempts=max_retries + 1,  # +1 for initial attempt
-                    status=status,
-                    message=message,
-                    sql_query=sql,
-                    error=error
-                ))
-
-        retry_history = []
+        
+        # 1. Get Tools
+        tools = await self.mcp_client.get_tools()
+        
+        # 2. Main Loop (Model <-> Tools)
+        # We handle up to max_turns for tool usage (e.g. get_schema -> get_values -> execute_sql)
+        max_turns = 20
+        current_history = list(history)
+        
+        # Initial System Prompt
+        system_prompt = "You are a helpful data assistant. Use the available tools to answer the user's question. Always validate your understanding of the schema first."
+        
+        sql_query = None
+        data = []
+        explanation = ""
         total_tokens = 0
-        current_history = list(history)  # Copy to avoid mutation
-        system_prompt = self.get_system_prompt(context_name)
+        
+        working_question = question
 
-        for attempt in range(max_retries + 1):  # +1 for initial attempt
-            attempt_num = attempt + 1
-
-            # Status: Generating SQL
-            notify(attempt_num, "generating",
-                   f"กำลังสร้าง SQL ({context_name})... (ครั้งที่ {attempt_num})")
-
-            # Generate SQL
-            try:
-                if attempt == 0:
-                    # First attempt - use original question
-                    ai_result = self.provider.generate_sql(
-                        question, system_prompt, current_history
-                    )
-                else:
-                    # Retry attempt - include error context
-                    retry_prompt = self._build_retry_prompt(
-                        question,
-                        retry_history[-1] if retry_history else {}
-                    )
-                    ai_result = self.provider.generate_sql(
-                        retry_prompt, system_prompt, current_history
-                    )
-
-            except Exception as e:
-                # logger.error(f"AI generation error on attempt {attempt_num}: {str(e)}")
-                notify(attempt_num, "error",
-                       f"เกิดข้อผิดพลาดในการติดต่อ AI: {str(e)}")
-
-                retry_history.append({
-                    "attempt": attempt_num,
-                    "error_type": "generation_error",
-                    "error": str(e)
-                })
-                continue
-
-            sql_query = ai_result.get("sql")
-            total_tokens += ai_result.get("tokens_used", 0)
-
-            # Check if SQL was generated
-            if not sql_query:
-                # logger.warning(f"No SQL generated on attempt {attempt_num}")
-                notify(attempt_num, "error",
-                       "AI ไม่สามารถสร้าง SQL ได้ กำลังลองใหม่...")
-
-                retry_history.append({
-                    "attempt": attempt_num,
-                    "error_type": "no_sql",
-                    "error": "AI did not generate SQL query",
-                    "raw_response": ai_result.get("raw_response", "")[:500]
-                })
-                continue
-
-            # Validate SQL
-            notify(attempt_num, "executing",
-                   f"กำลังตรวจสอบและ execute SQL...", sql=sql_query)
-
-            is_valid, validation_error = self.validate_sql(sql_query)
-
-            if not is_valid:
-                # logger.warning(f"SQL validation failed on attempt {attempt_num}: {validation_error}")
-                notify(attempt_num, "error",
-                       f"SQL ไม่ถูกต้อง: {validation_error}",
-                       sql=sql_query, error=validation_error)
-
-                retry_history.append({
-                    "attempt": attempt_num,
-                    "error_type": "validation_error",
-                    "sql": sql_query,
-                    "error": validation_error
-                })
-                continue
-
-            # Execute SQL
-            try:
-                data = self.execute_sql(sql_query)
-                if data is None:
-                    data = []
-
-                # Check for zero results - might need retry with better conditions
-                if len(data) == 0 and attempt < max_retries:
-                    # Analyze why we got 0 results
-                    zero_hint = self._check_zero_results_reason(sql_query, context_name=context_name)
-
-                    if zero_hint:
-                        # logger.info(f"Query returned 0 rows on attempt {attempt_num}, will retry with hints")
-                        notify(attempt_num, "retrying",
-                               f"ได้ 0 แถว - กำลังตรวจสอบเงื่อนไขและลองใหม่...",
-                               sql=sql_query, error="Zero results - conditions may not match data")
-
-                        retry_history.append({
-                            "attempt": attempt_num,
-                            "error_type": "zero_results",
-                            "sql": sql_query,
-                            "error": "Query returned 0 rows",
-                            "hint": zero_hint
+        for turn in range(max_turns):
+            logger.info(f"AIService Turn {turn}/{max_turns} for provider {self.provider_name}")
+            
+            # Call AI
+            result = await self.provider.generate_sql(working_question, system_prompt, tools, current_history)
+            response = result["response"]
+            total_tokens += result["tokens_used"]
+            
+            # Check for tool calls
+            tool_calls = []
+            
+            # Parse response based on provider
+            if self.provider_name == "claude":
+                # Anthropic object
+                for content in response.content:
+                    if content.type == "text" and content.text:
+                         pass # Just thought process
+                    elif content.type == "tool_use":
+                        tool_calls.append({
+                            "id": content.id,
+                            "name": content.name,
+                            "args": content.input
                         })
-                        continue  # Try again with hints
+                
+                # Check if done (no tool calls, just text?) 
+                # Actually Claude stops at tool_use. We must run tool and recurse.
+                if not tool_calls:
+                     # Final answer
+                     text = response.content[0].text if response.content else ""
+                     explanation = text
+                     break
+                     
+            elif self.provider_name == "gemini":
+                # Google object
+                candidate = response.candidates[0]
+                for part in candidate.content.parts:
+                    if part.function_call:
+                        tool_calls.append({
+                            "name": part.function_call.name,
+                            "args": part.function_call.args
+                        })
+                if not tool_calls:
+                     # Final answer
+                     explanation = candidate.content.parts[0].text if candidate.content.parts else ""
+                     break
+            
+            elif self.provider_name == "matcha":
+                # OpenAI Dict
+                msg = response['choices'][0]['message']
+                if msg.get('tool_calls'):
+                    # Ensure User question is in history before tools if it's the first turn
+                    if turn == 0 and working_question:
+                        current_history.append({"role": "user", "content": working_question})
+                        working_question = None
 
-                # Success! (either has data, or 0 rows but no hints to improve)
-                notify(attempt_num, "success",
-                       f"สำเร็จ! ได้ข้อมูล {len(data)} แถว", sql=sql_query)
+                    # Append Assistant Message ONCE containing all tool calls
+                    current_history.append(msg)
+                    
+                    for tc in msg['tool_calls']:
+                        tool_calls.append({
+                            "id": tc['id'],
+                            "name": tc['function']['name'],
+                            "args": json.loads(tc['function']['arguments'])
+                        })
+                else:
+                    explanation = msg.get('content', "")
+                    break
 
-                # Generate explanation
-                explanation = ai_result.get("explanation", "")
-                if explain and data:
-                    try:
-                        explanation = self.provider.explain_result(
-                            question, sql_query, data, system_prompt
-                        )
-                    except:
-                        pass
-                elif len(data) == 0:
-                    # No data - provide helpful message
-                    explanation = "ไม่พบข้อมูลที่ตรงกับเงื่อนไขที่ระบุ อาจเป็นเพราะ:\n" \
-                                  "- ชื่อหน่วยงาน/ผลิตภัณฑ์ไม่ตรงกับที่มีในระบบ\n" \
-                                  "- ช่วงเวลาที่ระบุไม่มีข้อมูล\n" \
-                                  "กรุณาตรวจสอบเงื่อนไขหรือลองถามใหม่ด้วยคำอื่น"
+            # Execute Tools
+            for call in tool_calls:
+                 # Notify status
+                 if on_status:
+                     on_status(RetryStatus(turn, max_turns, "executing", f"Calling tool: {call['name']}"))
+                 
+                 # Capture SQL if this is execution
+                 if call['name'] == 'execute_query':
+                     sql_query = call['args'].get('sql') or call['args'].get('query')
+                     
+                 try:
+                     logger.info(f"Calling tool {call['name']} with args: {call['args']}")
+                     tool_result = await self.mcp_client.call_tool(call['name'], call['args'])
+                     
+                     # If execute query, we got data!
+                     if call['name'] == 'execute_query':
+                         try:
+                             if isinstance(tool_result, str): # Parse JSON if it looks like one
+                                 import ast
+                                 # Or json.loads
+                                 data = json.loads(tool_result)
+                         except:
+                             pass
+                 except Exception as e:
+                     tool_result = f"Error: {str(e)}"
+                     logger.error(f"Tool execution error: {tool_result}")
+
+                 # Add to history for next turn
+                 if self.provider_name == "claude":
+                     current_history.append({"role": "assistant", "content": [
+                         {"type": "tool_use", "id": call['id'], "name": call['name'], "input": call['args']}
+                     ]})
+                     current_history.append({"role": "user", "content": [
+                         {"type": "tool_result", "tool_use_id": call['id'], "content": str(tool_result)}
+                     ]})
+                 
+                 elif self.provider_name == "gemini":
+                     # Gemini uses 'user' role for function responses
+                     # We need to store enough info for generate_sql to reconstruct types.Part
+                     
+                     # 1. Store the Model's Function Call (if not already stored explicitly)
+                     # In Gemini, the 'response' object itself contains the candidate execution.
+                     # We need to make sure we keep track of what the model *just* said.
+                     # But current_history logic is additive.
+                     
+                     # Check if we just added the model's turn?
+                     # Distinct from Matcha/Claude, Gemini SDK often manages history via ChatSession.
+                     # But here we are doing stateless generate_content calls.
+                     
+                     # Ensure User question is the VERY FIRST item in history if this is the first turn
+                     if turn == 0 and working_question:
+                         current_history.append({"role": "user", "content": working_question})
+                         working_question = None
+
+                     # We need to append the MODEL's function call message first if this is the first tool in this turn
+                     # But tool_calls list comes from ONE model response.
+                     # So we should append the model response ONCE.
+                     
+                     # Check if the last message in history is this model response
+                     last_msg = current_history[-1] if current_history else None
+                     model_msg_marker = f"__gemini_model_turn_{turn}__"
+                     
+                     if not last_msg or last_msg.get("internal_id") != model_msg_marker:
+                         # Store the ORIGINAL parts from the candidate to preserve thought_signature
+                         # We can't easily serialize types.Part but we can try to keep it in memory
+                         # or serialize to dict if the SDK supports it.
+                         # Better: Store the whole part if possible, or convert to dict using .to_dict()
+                         
+                         model_parts_data = []
+                         # We iterate through the original response parts to find the function calls
+                         # The 'response' object is available here
+                         # CAUTION: 'response' variable holds the GenerateContentResponse
+                         
+                         matched_parts = []
+                         if response.candidates and response.candidates[0].content:
+                             for p in response.candidates[0].content.parts:
+                                 # We want to keep all parts (thought + function_call)
+                                 # We need to serialize them for history
+                                 # Check if .to_dict() exists
+                                 # Try to serialize using to_dict() first (preserves thought_signature)
+                                 try:
+                                     if hasattr(p, "to_dict"):
+                                         matched_parts.append(p.to_dict())
+                                         continue
+                                 except Exception:
+                                     pass
+
+                                 # Fallback manual construction - include thought_signature if present
+                                 part_dict = {}
+
+                                 if p.function_call:
+                                     part_dict["function_call"] = {
+                                         "name": p.function_call.name,
+                                         "args": dict(p.function_call.args) if p.function_call.args else {}
+                                     }
+
+                                 if hasattr(p, 'text') and p.text:
+                                     part_dict["text"] = p.text
+
+                                 # CRITICAL: Preserve thought_signature if present
+                                 if hasattr(p, 'thought_signature') and p.thought_signature:
+                                     part_dict["thought_signature"] = p.thought_signature
+
+                                 # Also check for thought field
+                                 if hasattr(p, 'thought') and p.thought:
+                                     part_dict["thought"] = p.thought
+
+                                 if part_dict:
+                                     matched_parts.append(part_dict)
+                         
+                         if matched_parts:
+                            current_history.append({
+                                "role": "model",
+                                "parts_raw": matched_parts, # Store raw dicts
+                                "internal_id": model_msg_marker
+                            })
+                     
+                     # 2. Append the Tool Response
+                     # Gemini expects response in 'user' role usually, or specific structure
+                     # Ensure content is a Dict
+                     tool_content = tool_result
+                     if isinstance(tool_result, str):
+                         try:
+                             tool_content = json.loads(tool_result)
+                         except:
+                             pass
+                     
+                     # Check if it is a list or primitive, wrap it
+                     if not isinstance(tool_content, dict):
+                         tool_content = {"result": tool_content}
+
+                     current_history.append({
+                         "role": "function", # Internal marker we process in generate_sql
+                         "name": call['name'],
+                         "content": tool_content
+                     })
+
+                 elif self.provider_name == "matcha":
+                     # For Matcha, we ONLY append the tool output here
+                     # The Assistant message was already appended before the loop
+                     current_history.append({
+                         "role": "tool",
+                         "tool_call_id": call['id'],
+                         "content": str(tool_result)
+                     })
+        
+        # Fallback if loop finished without explanation
+        if not explanation and total_tokens > 0:
+            explanation = "I apologize, but I was unable to complete the analysis within the allowed number of steps. The request required exploring too much schema information."
+
+        return QueryResult(
+            question=question,
+            sql_query=sql_query,
+            data=data if isinstance(data, list) else [],
+            explanation=explanation,
+            tokens_used=total_tokens,
+            provider=self.provider_name
+        )
+
+    async def query_hybrid(
+        self,
+        question: str,
+        system_prompt: str,
+        max_retries: int = 2,
+        history: List[Dict] = None,
+        on_status: Optional[Callable[[RetryStatus], None]] = None,
+        context_name: str = "revenue"
+    ) -> QueryResult:
+        """
+        Hybrid Mode: Static prompt + MCP validation/execution
+
+        Flow:
+        1. AI generates SQL using static schema prompt (1 API call)
+        2. MCP validate_sql checks the SQL
+        3. MCP execute_query runs the SQL
+        4. If error, AI fixes and retries (max 2 retries)
+
+        Cost: 2-4 API calls vs 13+ calls in full MCP mode
+        """
+        sql_query = None
+        data = []
+        explanation = ""
+        total_tokens = 0
+        retry_history = []
+
+        # Verify MCP client is connected
+        if not self.mcp_client.servers:
+            logger.error("Hybrid Mode: MCP client has no connected servers!")
+            return QueryResult(
+                question=question,
+                sql_query="",
+                data=[],
+                explanation="ระบบ MCP ไม่ได้เชื่อมต่อ กรุณาลองใหม่อีกครั้ง",
+                tokens_used=0,
+                provider=self.provider_name,
+                error="MCP client not connected"
+            )
+
+        logger.info(f"Hybrid Mode: MCP connected to {list(self.mcp_client.servers.keys())}")
+
+        for attempt in range(max_retries + 1):
+            if on_status:
+                on_status(RetryStatus(attempt, max_retries, "generating", f"Generating SQL (attempt {attempt + 1})"))
+
+            # Build prompt for AI
+            # Get main table for context
+            context_table = "v_expense_mart" if context_name == "expense" else "revenue_search"
+            context_thai = "ค่าใช้จ่าย" if context_name == "expense" else "รายได้"
+
+            # Build conversation history context
+            history_context = ""
+            if history and len(history) > 0:
+                history_lines = []
+                for i, msg in enumerate(history[-6:]):  # Last 3 pairs (6 messages)
+                    role = msg.get("role", "")
+                    content = msg.get("content", "")
+                    if role == "user":
+                        history_lines.append(f"คำถามก่อนหน้า: {content}")
+                    elif role == "assistant":
+                        # Extract SQL from previous response if available
+                        # Try markdown format first
+                        sql_match = re.search(r'```sql\s*(.*?)\s*```', content, re.DOTALL | re.IGNORECASE)
+                        if sql_match:
+                            sql_preview = sql_match.group(1).strip()
+                            # Show full SQL (truncated if too long) so AI can see filters
+                            history_lines.append(f"SQL ที่ใช้:\n{sql_preview[:500]}")
+                        else:
+                            # Try old format (Context SQL: ...)
+                            old_format = re.search(r'\(Context SQL:\s*(.*?)\)', content, re.DOTALL)
+                            if old_format:
+                                history_lines.append(f"SQL ที่ใช้:\n{old_format.group(1).strip()[:500]}")
+                            else:
+                                # Just show summary of response
+                                history_lines.append(f"คำตอบ: {content[:150]}...")
+
+                if history_lines:
+                    history_context = "\n\n**บริบทจากการสนทนาก่อนหน้า:**\n" + "\n".join(history_lines)
+                    history_context += "\n\n**กฎจัดการ Filter (ดูจาก SQL ก่อนหน้า):**\n"
+                    history_context += "- ถ้า User ระบุค่าใหม่สำหรับ Column เดิม → **REPLACE** filter นั้น\n"
+                    history_context += "- ถ้า User เพิ่มเงื่อนไข Column ใหม่ → **MERGE** (AND) เข้าไป\n"
+                    history_context += "- ถ้า User พูดว่า 'ทั้งหมด/ภาพรวม' → **RESET** filter ทั้งหมด"
+                    logger.info(f"Hybrid Mode: Using conversation history with {len(history_lines)} context items")
+
+            if attempt == 0:
+                user_prompt = f"""คำถาม: {question}
+
+**บริบท:** ข้อมูล{context_thai} (ใช้ตาราง {context_table}){history_context}
+
+สร้าง SQL query และอธิบายผลลัพธ์เป็นภาษาไทย
+สำคัญ: ต้องใช้ตาราง {context_table} เท่านั้น
+
+ตอบในรูปแบบ:
+```sql
+<SQL query here>
+```
+
+**คำอธิบาย:** <explanation here>"""
+            else:
+                # Retry with error context
+                last_error = retry_history[-1] if retry_history else {}
+                user_prompt = f"""คำถาม: {question}
+
+**บริบท:** ข้อมูล{context_thai} (ใช้ตาราง {context_table}){history_context}
+
+SQL ก่อนหน้ามีปัญหา:
+```sql
+{last_error.get('sql', '')}
+```
+Error: {last_error.get('error', '')}
+
+กรุณาแก้ไข SQL และอธิบายผลลัพธ์เป็นภาษาไทย
+สำคัญ: ต้องใช้ตาราง {context_table} เท่านั้น
+
+ตอบในรูปแบบ:
+```sql
+<SQL query ที่แก้ไขแล้ว>
+```
+
+**คำอธิบาย:** <explanation here>"""
+
+            try:
+                # Step 1: AI generates SQL (single call, no tools)
+                logger.info(f"Hybrid Mode: Generating SQL (attempt {attempt + 1})")
+                logger.info(f"Hybrid Mode: Provider={self.provider_name}, user_prompt_len={len(user_prompt)}, system_prompt_len={len(system_prompt) if system_prompt else 0}")
+
+                try:
+                    response_text = await self.provider.generate_content(user_prompt, system_prompt)
+                except Exception as gen_error:
+                    logger.error(f"Hybrid Mode: generate_content raised exception: {type(gen_error).__name__}: {gen_error}")
+                    retry_history.append({"sql": "", "error": f"generate_content error: {str(gen_error)}"})
+                    continue
+
+                logger.info(f"Hybrid Mode: Got response_text (len={len(response_text) if response_text else 0})")
+                if response_text:
+                    logger.info(f"Hybrid Mode: response_text preview: {response_text[:300]}...")
+                total_tokens += 500  # Estimate, actual depends on provider
+
+                # Step 2: Parse SQL from response
+                sql_query = self._extract_sql(response_text)
+                explanation = self._extract_explanation(response_text)
+
+                if not sql_query:
+                    logger.warning("Could not extract SQL from AI response")
+                    retry_history.append({"sql": "", "error": "Could not extract SQL from response"})
+                    continue
+
+                logger.info(f"Extracted SQL: {sql_query[:100]}...")
+
+                # Step 3: Validate SQL using MCP
+                if on_status:
+                    on_status(RetryStatus(attempt, max_retries, "validating", "Validating SQL"))
+
+                try:
+                    validation_result = await self.mcp_client.call_tool("validate_sql", {"sql": sql_query})
+                    logger.info(f"Hybrid Mode: Validation result: {validation_result}")
+
+                    if not validation_result:
+                        logger.warning("Empty validation result from MCP")
+                        retry_history.append({"sql": sql_query, "error": "MCP validation returned empty result"})
+                        continue
+
+                    validation = json.loads(validation_result) if isinstance(validation_result, str) else validation_result
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse validation result: {e}")
+                    retry_history.append({"sql": sql_query, "error": f"Validation parse error: {str(e)}"})
+                    continue
+                except Exception as e:
+                    logger.error(f"Validation tool call failed: {e}")
+                    retry_history.append({"sql": sql_query, "error": f"Validation error: {str(e)}"})
+                    continue
+
+                if not validation.get("valid", False):
+                    issues = validation.get("issues", [])
+                    logger.warning(f"SQL validation failed: {issues}")
+                    retry_history.append({"sql": sql_query, "error": f"Validation failed: {issues}"})
+                    continue
+
+                # Step 4: Execute SQL using MCP
+                if on_status:
+                    on_status(RetryStatus(attempt, max_retries, "executing", "Executing SQL"))
+
+                logger.info(f"Hybrid Mode: Executing SQL: {sql_query}")
+
+                try:
+                    exec_result = await self.mcp_client.call_tool("execute_query", {
+                        "sql": sql_query,
+                        "limit": 100,
+                        "validate_first": False  # Already validated
+                    })
+                    logger.info(f"Hybrid Mode: Execution result length: {len(exec_result) if exec_result else 0}")
+                    logger.info(f"Hybrid Mode: Execution result preview: {exec_result[:500] if exec_result else 'None'}...")
+
+                    if not exec_result:
+                        logger.warning("Empty execution result from MCP")
+                        retry_history.append({"sql": sql_query, "error": "MCP execution returned empty result"})
+                        continue
+
+                    exec_data = json.loads(exec_result) if isinstance(exec_result, str) else exec_result
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse execution result: {e}")
+                    retry_history.append({"sql": sql_query, "error": f"Execution parse error: {str(e)}"})
+                    continue
+                except Exception as e:
+                    logger.error(f"Execution tool call failed: {e}")
+                    retry_history.append({"sql": sql_query, "error": f"Execution error: {str(e)}"})
+                    continue
+
+                if not exec_data.get("success", False):
+                    error_msg = exec_data.get("error", "Unknown execution error")
+                    logger.warning(f"SQL execution failed: {error_msg}")
+                    retry_history.append({"sql": sql_query, "error": f"Execution failed: {error_msg}"})
+                    continue
+
+                # Success!
+                data = exec_data.get("data", [])
+                row_count = exec_data.get("row_count", 0)
+                columns = exec_data.get("columns", [])
+                logger.info(f"Hybrid Mode: Success! Got {len(data)} rows (row_count={row_count}, columns={columns})")
+
+                # Log sample data if available
+                if data:
+                    logger.info(f"Hybrid Mode: First row sample: {data[0]}")
+                else:
+                    logger.warning(f"Hybrid Mode: Query returned 0 rows - SQL may not match any data")
+
+                # Enhance explanation based on actual data
+                if not data:
+                    # No data found - add note to explanation
+                    explanation = f"ไม่พบข้อมูลที่ตรงกับเงื่อนไข\n\nSQL ที่ใช้:\n```sql\n{sql_query}\n```\n\nอาจเป็นเพราะ:\n- ไม่มีข้อมูลที่ตรงกับคำค้นหา\n- ชื่อคอลัมน์หรือค่าที่ใช้ค้นหาอาจไม่ถูกต้อง"
+                elif len(data) > 0 and len(explanation) < 50:
+                    explanation = f"พบข้อมูล {len(data)} รายการ"
 
                 return QueryResult(
                     question=question,
@@ -1300,261 +1040,74 @@ class AIService:
                 )
 
             except Exception as e:
-                error_msg = str(e)
-                # logger.warning(f"SQL execution error on attempt {attempt_num}: {error_msg}")
+                logger.error(f"Hybrid Mode error: {e}")
+                retry_history.append({"sql": sql_query or "", "error": str(e)})
 
-                notify(attempt_num, "retrying" if attempt < max_retries else "failed",
-                       f"SQL Error: {error_msg}", sql=sql_query, error=error_msg)
-
-                retry_history.append({
-                    "attempt": attempt_num,
-                    "error_type": "execution_error",
-                    "sql": sql_query,
-                    "error": error_msg
-                })
-
-        # All retries exhausted
-        notify(max_retries + 1, "failed",
-               f"ไม่สามารถสร้าง SQL ที่ถูกต้องได้หลังจากลอง {max_retries + 1} ครั้ง")
-
-        last_error = retry_history[-1] if retry_history else {}
-
+        # All retries failed
         return QueryResult(
             question=question,
-            sql_query=last_error.get("sql", ""),
+            sql_query=sql_query or "",
             data=[],
-            explanation="",
+            explanation=f"ไม่สามารถสร้าง SQL ที่ถูกต้องได้หลังจากลอง {max_retries + 1} ครั้ง",
             tokens_used=total_tokens,
             provider=self.provider_name,
-            error=f"ไม่สามารถสร้าง SQL ที่ถูกต้องได้หลังจากลอง {max_retries + 1} ครั้ง: {last_error.get('error', 'Unknown error')}",
-            retry_count=max_retries,
+            error="Max retries exceeded",
+            retry_count=max_retries + 1,
             retry_history=retry_history
         )
 
-    def _build_retry_prompt(self, original_question: str, last_error: Dict) -> str:
-        """
-        Build a prompt for retry attempt, including error context.
-        """
-        error_type = last_error.get("error_type", "unknown")
-        error_msg = last_error.get("error", "Unknown error")
-        failed_sql = last_error.get("sql", "")
+    def _extract_sql(self, text: str) -> Optional[str]:
+        """Extract SQL from AI response"""
+        import re
 
-        if error_type == "no_sql":
-            return f"""คำถามเดิม: {original_question}
+        # Try to find SQL in code block
+        sql_match = re.search(r'```sql\s*(.*?)\s*```', text, re.DOTALL | re.IGNORECASE)
+        if sql_match:
+            return sql_match.group(1).strip()
 
-ความพยายามก่อนหน้านี้ไม่ได้สร้าง SQL query ออกมา
-กรุณาสร้าง SQL query ให้ถูกต้อง โดยใช้ columns ที่มีอยู่ใน schema เท่านั้น"""
+        # Try generic code block
+        code_match = re.search(r'```\s*(SELECT.*?)\s*```', text, re.DOTALL | re.IGNORECASE)
+        if code_match:
+            return code_match.group(1).strip()
 
-        elif error_type == "validation_error":
-            return f"""คำถามเดิม: {original_question}
+        # Try to find SELECT statement directly
+        select_match = re.search(r'(SELECT\s+.*?(?:;|$))', text, re.DOTALL | re.IGNORECASE)
+        if select_match:
+            sql = select_match.group(1).strip()
+            # Remove trailing explanation if any
+            if '\n\n' in sql:
+                sql = sql.split('\n\n')[0]
+            return sql.rstrip(';') + '' if not sql.endswith(';') else sql
 
-SQL ที่สร้างไม่ถูกต้อง:
-```sql
-{failed_sql}
-```
+        return None
 
-ข้อผิดพลาด: {error_msg}
+    def _extract_explanation(self, text: str) -> str:
+        """Extract explanation from AI response"""
+        import re
 
-กรุณาแก้ไข SQL ให้ถูกต้อง"""
+        # Remove SQL code blocks
+        text_without_sql = re.sub(r'```sql.*?```', '', text, flags=re.DOTALL | re.IGNORECASE)
+        text_without_sql = re.sub(r'```.*?```', '', text_without_sql, flags=re.DOTALL)
 
-        elif error_type == "execution_error":
-            # Extract useful info from error
-            hint = ""
-            if "no such column" in error_msg.lower():
-                # Extract column name
-                import re
-                col_match = re.search(r'no such column:\s*(\w+)', error_msg, re.IGNORECASE)
-                if col_match:
-                    bad_column = col_match.group(1)
-                    hint = f"\n\nหมายเหตุ: Column '{bad_column}' ไม่มีอยู่ในตาราง กรุณาตรวจสอบ schema และใช้ column ที่มีอยู่จริง"
+        # Look for explanation marker
+        explanation_match = re.search(r'\*\*คำอธิบาย:?\*\*\s*(.*)', text_without_sql, re.DOTALL)
+        if explanation_match:
+            return explanation_match.group(1).strip()
 
-            elif "no such table" in error_msg.lower():
-                hint = "\n\nหมายเหตุ: ตารางที่ระบุไม่มีอยู่ กรุณาใช้ตาราง revenue_search"
+        # Return remaining text as explanation
+        cleaned = text_without_sql.strip()
+        if cleaned:
+            return cleaned
 
-            elif "syntax error" in error_msg.lower():
-                hint = "\n\nหมายเหตุ: มี syntax error ใน SQL กรุณาตรวจสอบ syntax ให้ถูกต้อง"
-
-            return f"""คำถามเดิม: {original_question}
-
-SQL ที่ลองแล้วมีปัญหา:
-```sql
-{failed_sql}
-```
-
-Error ที่เกิดขึ้น: {error_msg}
-{hint}
-
-กรุณาแก้ไข SQL โดย:
-1. ใช้เฉพาะ columns ที่มีอยู่ใน schema จริงๆ
-2. ตรวจสอบชื่อ column ให้ถูกต้อง (ใช้ double quotes สำหรับชื่อไทย)
-3. ตรวจสอบ syntax ให้ถูกต้อง
-
-ถ้าไม่มี column ที่ตรงกับคำถาม ให้ใช้ column ที่ใกล้เคียงที่สุดหรืออธิบายว่าข้อมูลนี้ไม่มีในระบบ"""
-
-        elif error_type == "zero_results":
-            # Get hints about actual values in database
-            hint = last_error.get("hint", "")
-
-            return f"""คำถามเดิม: {original_question}
-
-SQL ที่สร้างทำงานได้แต่ไม่พบข้อมูล (0 rows):
-```sql
-{failed_sql}
-```
-
-สาเหตุที่เป็นไปได้:
-{hint}
-
-กรุณาแก้ไข SQL โดย:
-1. ตรวจสอบค่าใน WHERE clause ให้ตรงกับค่าจริงในระบบ (ดูค่าที่แนะนำด้านบน)
-2. ลองใช้ LIKE '%...%' แทน = สำหรับการค้นหาที่ยืดหยุ่นกว่า
-3. ตรวจสอบการสะกดชื่อหน่วยงาน/ผลิตภัณฑ์ให้ถูกต้อง
-4. ถ้าผู้ใช้ถามเรื่อง "จังหวัด" แต่ไม่มี column จังหวัด ให้ใช้ COST_CENTER หรือ organization_group_abbr แทน และอธิบายให้ผู้ใช้ทราบ
-
-สำคัญ: ใช้ค่าที่มีอยู่จริงในระบบตามที่แนะนำด้านบน"""
-
-        else:
-            return f"""คำถามเดิม: {original_question}
-
-เกิดข้อผิดพลาด: {error_msg}
-
-กรุณาสร้าง SQL query ใหม่ที่ถูกต้อง"""
-
-    def chat(
-        self,
-        question: str,
-        history: Optional[List[Dict]] = None,
-        context_name: str = "revenue"
-    ) -> Dict[str, Any]:
-        """
-        Chat interface with conversation history
-        
-        Args:
-            question: User's question
-            history: List of previous messages [{role: "user/assistant", content: "..."}]
-            context_name: Data scope
-        
-        Returns:
-            Dict with response and updated history
-        """
-        
-        result = self.query(question, history=history or [], context_name=context_name)
-        
-        response = {
-            "question": question,
-            "sql": result.sql_query,
-            "data": result.data,
-            "explanation": result.explanation,
-            "error": result.error,
-            "tokens_used": result.tokens_used
-        }
-        
-        # Update history
-        new_history = history or []
-        new_history.append({"role": "user", "content": question})
-        new_history.append({"role": "assistant", "content": result.explanation or result.error})
-        
-        return {
-            "response": response,
-            "history": new_history
-        }
-
-    def suggest_mappings(self, columns: List[Dict[str, Any]], sample_values: Dict[str, List[Any]]) -> List[Dict[str, str]]:
-        """
-        Suggest standard column mappings using AI
-        
-        Args:
-            columns: List of column info [{'name': '...', 'type': '...'}]
-            sample_values: Dict of {col_name: [samples...]}
-            
-        Returns:
-            List of directives: [{'col': 'original', 'alias': 'suggested', 'reason': '...'}]
-        """
-        import json
-        
-        # Build prompt
-        col_list_str = "\n".join([f"- {c['name']} ({c['type']})" for c in columns])
-        
-        samples_str = ""
-        samples_str = ""
-        for col, vals in sample_values.items():
-            if isinstance(vals, list):
-                val_str = ", ".join(map(str, vals[:5]))
-                samples_str += f"- {col}: [{val_str}]\n"
-            elif col == 'DATA_RANGE' and isinstance(vals, dict):
-                 samples_str += f"- Data Range: {vals.get('min_year')}-{vals.get('max_year')}\n"
-            
-        prompt = f"""You are a Database Schema Expert.
-I have a raw table with the following columns:
-{col_list_str}
-
-Sample Data:
-{samples_str}
-
-Please suggest standardized English aliases for these columns to make them suitable for a clean SQL View.
-Target Rules:
-1. snake_case only (e.g. `customer_id`, `total_revenue`, `year`, `month`).
-2. Use standard business terms.
-3. If a column is already good, keep it similar but ensure lowercase.
-4. Rename Thai columns to understandable English names.
-
-Return ONLY a JSON array of objects with this format:
-[
-  {{ "col": "original_name", "alias": "suggested_name", "reason": "Explanation" }},
-  ...
-]
-Do not include any markdown formatting or explanation outside the JSON.
-"""
-        try:
-            # Generate content
-            response_text = self.provider.generate_content(prompt)
-            
-            # Clean response (remove markdown code blocks if any)
-            if "```json" in response_text:
-                response_text = response_text.split("```json")[1].split("```")[0].strip()
-            elif "```" in response_text:
-                response_text = response_text.split("```")[1].split("```")[0].strip()
-                
-            suggestions = json.loads(response_text)
-            return suggestions
-            
-        except Exception as e:
-            logger.error(f"Failed to suggest mappings: {e}")
-            # Fallback: simple lowercase
-            return [
-                {"col": c['name'], "alias": c['name'].lower(), "reason": "Fallback: Lowercase"}
-                for c in columns
-            ]
+        return "ดำเนินการสำเร็จ"
 
 
-# =========================================================
-# Factory Functions
-# =========================================================
+# Factories
+def create_claude_service(api_key: str, mcp_client: MCPClientService, model: Optional[str] = None) -> AIService:
+    return AIService("claude", api_key, mcp_client, model)
 
-def create_claude_service(api_key: str, db_path: str = "revenue.db", model: Optional[str] = None, prompt_manager: Optional[PromptManager] = None) -> AIService:
-    """Create AI service with Claude provider"""
-    return AIService(provider="claude", api_key=api_key, db_path=db_path, model=model, prompt_manager=prompt_manager)
+def create_gemini_service(api_key: str, mcp_client: MCPClientService, model: Optional[str] = None) -> AIService:
+    return AIService("gemini", api_key, mcp_client, model)
 
-
-def create_gemini_service(api_key: str, db_path: str = "revenue.db", model: Optional[str] = None, prompt_manager: Optional[PromptManager] = None) -> AIService:
-    """Create AI service with Gemini provider"""
-    return AIService(provider="gemini", api_key=api_key, db_path=db_path, model=model, prompt_manager=prompt_manager)
-def create_matcha_service(api_key: str, api_url: str, db_path: str = "revenue.db", model: Optional[str] = None, prompt_manager: Optional[PromptManager] = None) -> AIService:
-    """Create AI service with Matcha provider"""
-    return AIService(provider="matcha", api_key=api_key, db_path=db_path, model=model, prompt_manager=prompt_manager, api_url=api_url)
-
-# =========================================================
-# Example Usage
-# =========================================================
-
-if __name__ == "__main__":
-    import os
-    
-    # Example with Claude
-    claude_key = os.getenv("ANTHROPIC_API_KEY")
-    if claude_key:
-        service = create_claude_service(claude_key)
-        # result = service.query("รายได้รวมเดือนมกราคม 2568", context_name="revenue") 
-        # print(f"SQL: {result.sql_query}")
-        # print(f"Data: {result.data[:5]}")
-        # print(f"Explanation: {result.explanation}")
+def create_matcha_service(api_key: str, api_url: str, mcp_client: MCPClientService, model: Optional[str] = None) -> AIService:
+    return AIService("matcha", api_key, mcp_client, model, api_url=api_url)

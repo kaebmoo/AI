@@ -13,16 +13,19 @@ from app.api import deps
 from app.services.ai_service import AIService
 from app.models.user import User
 from app.models.schema_models import SchemaMetadata, SchemaSemanticMapping, SchemaBusinessRule
-from app.models.feedback_models import GoldenExample
+from app.models.feedback_models import GoldenExample, PromptVersion
 from app.schemas.admin_schemas import (
     SchemaMetadataCreate, SchemaMetadataUpdate, SchemaMetadataResponse, SchemaMetadataListResponse,
     SemanticMappingCreate, SemanticMappingUpdate, SemanticMappingResponse, SemanticMappingListResponse,
     BusinessRuleCreate, BusinessRuleUpdate, BusinessRuleResponse, BusinessRuleListResponse,
     GoldenExampleCreate, GoldenExampleUpdate, GoldenExampleResponse, GoldenExampleListResponse,
     SchemaContextCreate, SchemaContextUpdate, SchemaContextResponse, SchemaContextListResponse,
-    ViewCreateRequest, ViewMappingSuggestion
+    SchemaContextCreate, SchemaContextUpdate, SchemaContextResponse, SchemaContextListResponse,
+    ViewCreateRequest, ViewMappingSuggestion,
+    PromptVersionCreate, PromptVersionResponse, PromptVersionListResponse
 )
 from app.services.schema_service import SchemaService
+from app.services.prompt_manager import PromptManager
 
 router = APIRouter()
 
@@ -741,3 +744,69 @@ def get_dashboard_stats(
         total_rules=total_rules,
         total_columns=total_columns
     )
+
+
+# ============================================================
+# Prompt Management Endpoints
+# ============================================================
+
+@router.get("/prompts", response_model=PromptVersionListResponse)
+def list_prompt_versions(
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db)
+):
+    """
+    List all prompt versions.
+    Admin only.
+    """
+    versions = db.query(PromptVersion).order_by(PromptVersion.version.desc()).all()
+    return PromptVersionListResponse(
+        versions=[PromptVersionResponse.model_validate(v) for v in versions],
+        total=len(versions)
+    )
+
+@router.post("/prompts", response_model=PromptVersionResponse, status_code=status.HTTP_201_CREATED)
+def create_prompt_version(
+    data: PromptVersionCreate,
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db)
+):
+    """
+    Create new prompt version.
+    Admin only.
+    """
+    manager = PromptManager(db)
+    version = manager.create_new_version(
+        system_prompt=data.system_prompt,
+        notes=data.notes,
+        user_id=current_user.id
+    )
+    return PromptVersionResponse.model_validate(version)
+
+@router.get("/prompts/active", response_model=PromptVersionResponse)
+def get_active_prompt(
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db)
+):
+    """
+    Get currently active prompt version.
+    """
+    manager = PromptManager(db)
+    version = manager.get_active_prompt()
+    return PromptVersionResponse.model_validate(version)
+
+@router.post("/prompts/{version_id}/activate", response_model=PromptVersionResponse)
+def activate_prompt_version(
+    version_id: int,
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db)
+):
+    """
+    Activate a specific prompt version.
+    """
+    manager = PromptManager(db)
+    version = manager.activate_version(version_id)
+    if not version:
+        raise HTTPException(status_code=404, detail="Prompt version not found")
+    return PromptVersionResponse.model_validate(version)
+

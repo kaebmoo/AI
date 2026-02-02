@@ -284,3 +284,32 @@ class ViewMappingSuggestion(BaseModel):
     suggested_alias: str
     reason: Optional[str] = None
 
+
+# ============================================================
+# Prompt Version Schemas
+# ============================================================
+
+class PromptVersionBase(BaseModel):
+    """Base schema for prompt version"""
+    system_prompt: str = Field(..., description="System instruction prompt")
+    notes: Optional[str] = Field(None, description="Release notes or description")
+
+class PromptVersionCreate(PromptVersionBase):
+    """Schema for creating prompt version"""
+    pass
+
+class PromptVersionResponse(PromptVersionBase):
+    """Schema for prompt version response"""
+    id: int
+    version: int
+    created_at: datetime
+    created_by: Optional[int] = None
+    is_active: bool = False
+    
+    class Config:
+        from_attributes = True
+
+class PromptVersionListResponse(BaseModel):
+    """Response for list of prompt versions"""
+    versions: List[PromptVersionResponse]
+    total: int

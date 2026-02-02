@@ -140,15 +140,19 @@ class SchemaService:
                     self._context_cache[context_name] = context_info
                     return context_info
                 
-                # Fallback
+                # Fallback for common contexts
                 if context_name == 'revenue':
                      return {'name': 'revenue', 'main_view': 'revenue_search', 'display_name': 'รายได้'}
+                elif context_name == 'expense':
+                     return {'name': 'expense', 'main_view': 'v_expense_mart', 'display_name': 'ค่าใช้จ่าย'}
                 return None
-                
+
             except Exception as e:
                 # Fallback for bootstrapping
                 if context_name == 'revenue':
                      return {'id': 1, 'name': 'revenue', 'main_view': 'revenue_search', 'display_name': 'รายได้', 'created_at': datetime.now(), 'keywords': [], 'is_active': True, 'priority': 0}
+                elif context_name == 'expense':
+                     return {'id': 2, 'name': 'expense', 'main_view': 'v_expense_mart', 'display_name': 'ค่าใช้จ่าย', 'created_at': datetime.now(), 'keywords': [], 'is_active': True, 'priority': 0}
                 return None
 
 
@@ -539,6 +543,8 @@ DATE เก็บเป็น Unix Timestamp (milliseconds) ต้องแป�
         return """## Semantic Mappings
 - **นป.** → `organization_group_abbr = 'นป.'`
 - **บชง.** → `department_abbr = 'บชง.'`
+- **Broadband** → `SERVICE_GROUP = 'กลุ่มบริการ Internet Retail'`
+- **Mobile** → `BUSINESS_GROUP = 'Mobile'`
 """
     
     def get_schema_context(self, context_name: str = "revenue", include_samples: bool = True, include_semantic_mappings: bool = True) -> str:
@@ -586,7 +592,11 @@ DATE เก็บเป็น Unix Timestamp (milliseconds) ต้องแป�
         # 1. Get Context Info
         context_info = self.get_context_info(context_name)
         if not context_info:
-            context_info = {'name': 'revenue', 'main_view': 'revenue_search', 'display_name': 'รายได้'}
+            # Fallback based on requested context
+            if context_name == 'expense':
+                context_info = {'name': 'expense', 'main_view': 'v_expense_mart', 'display_name': 'ค่าใช้จ่าย'}
+            else:
+                context_info = {'name': 'revenue', 'main_view': 'revenue_search', 'display_name': 'รายได้'}
         
         main_view = context_info['main_view']
         
@@ -671,11 +681,39 @@ DATE เก็บเป็น Unix Timestamp (milliseconds) ต้องแป�
 1. ใช้ SQLite syntax เท่านั้น
 2. ใช้ query จาก table/view: **{main_view}**
 3. Column ทั้งหมดเป็นภาษาอังกฤษ (ดู Schema ด้านล่าง)
-4. ใช้ `year` และ `month` สำหรับ filter เวลา
+4. การค้นหาข้อความ (Text Search):
+   - **กฎการค้นหา:** ห้ามใช้ `=` กับชื่อไทย (เช่น account_name, department) ยกเว้นมั่นใจ 100%
+   - **ให้ใช้ `LIKE '%keyword%'` เสมอ** สำหรับคำค้นทั่วไป
+   - ตัวอย่าง: User หา "ค่าล่วงเวลา" -> `WHERE account_name LIKE '%ค่าล่วงเวลา%'`
+5. ใช้ `year` และ `month` สำหรับ filter เวลา
    - **กฎเหล็ก:** ใช้ `CAST(month AS INTEGER)` เสมอ
 5. SELECT query เท่านั้น
    - ถ้ามี ORDER BY + LIMIT + UNION ต้องครอบด้วย Subquery
 6. ห้ามใช้ table จริง ให้ใช้ view ที่กำหนดเท่านั้น
+
+## กฎการรักษาบริบท (Context Retention Rules)
+**หลักการสำคัญ:** แยกระหว่าง REPLACE vs MERGE
+
+1. **REPLACE** - เมื่อ User ระบุค่าใหม่สำหรับ **Column เดียวกัน**:
+   - เดิม: `SERVICE_GROUP LIKE '%IDD%'`
+   - User: "ขอรายได้อสังหาริมทรัพย์"
+   - **ต้องทำ:** `WHERE SERVICE_GROUP LIKE '%อสังหาริมทรัพย์%'` (REPLACE!)
+   - **ห้ามทำ:** `WHERE SERVICE_GROUP LIKE '%IDD%' AND SERVICE_GROUP LIKE '%อสังหาริมทรัพย์%'`
+
+2. **MERGE** - เมื่อ User เพิ่มเงื่อนไขสำหรับ **Column ใหม่**:
+   - เดิม: `account_name LIKE '%ค่าซอฟต์แวร์%'`
+   - User: "ขอเฉพาะฝ่าย Cloud"
+   - **ต้องทำ:** `WHERE account_name LIKE '%ค่าซอฟต์แวร์%' AND department LIKE '%Cloud%'`
+
+3. **RESET** - เมื่อ User ใช้คำว่า "ทั้งหมด", "ภาพรวม", "รวม" หรือถามหัวข้อใหญ่ใหม่:
+   - User: "ขอรายได้กลุ่มธุรกิจทั้งหมด"
+   - **ต้องทำ:** ลบ filter เดิมทั้งหมด
+
+**สรุปง่ายๆ:**
+- Column เดิม + ค่าใหม่ → **REPLACE** filter นั้น
+- Column ใหม่ → **MERGE** (AND) เข้าไป
+- คำว่า "ทั้งหมด/ภาพรวม" → **RESET** ทั้งหมด
+
 
 {context_instructions}
 

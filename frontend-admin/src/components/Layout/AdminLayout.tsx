@@ -11,7 +11,8 @@ import {
     SafetyCertificateOutlined,
     RobotOutlined,
     DatabaseOutlined,
-    BuildOutlined
+    BuildOutlined,
+    FileTextOutlined
 } from '@ant-design/icons';
 import { Layout, Menu, Button, theme, Dropdown, Avatar, Space } from 'antd';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
@@ -74,6 +75,11 @@ const AppLayout: React.FC = () => {
             key: '/rules',
             icon: <SafetyCertificateOutlined />,
             label: 'Business Rules',
+        },
+        {
+            key: '/prompts',
+            icon: <FileTextOutlined />,
+            label: 'Prompt Management',
         },
         {
             key: '/examples',

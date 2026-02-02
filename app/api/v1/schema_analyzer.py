@@ -1,7 +1,9 @@
+
 import logging
 import json
 import pandas as pd
 import io
+import asyncio
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
 from sqlalchemy.orm import Session
@@ -104,7 +106,6 @@ async def upload_for_analysis(
                 dtype=str(df[col].dtype)
             ))
             
-        return AnalysisRequest(columns=columns, db_type="file_upload")
         return AnalysisRequest(columns=columns, db_type="file_upload")
 
     except Exception as e:
@@ -214,18 +215,11 @@ async def get_ai_suggestions(
         4. Return ONLY valid JSON, no markdown formatting.
         """
 
-        # Call AI (using a utility method or direct call if exposed)
-        # Since ai_service.generate_response is for chat, we might need a simpler generation method
-        # or reuse the generate_response with a specific system prompt.
-        
-        # For simplicity, assuming we can use the configured provider to generate text
-        # If ai_service doesn't expose raw generation, we might need to add it or use internal provider.
-        
-        # Let's use the provider directly if possible, or wrap in a system message
+        # Call AI 
         system_prompt = "You are an expert Data Analyst and Database Administrator."
         
-        # We need to access the provider. AIService has `provider` attribute.
-        response_text = ai_service.provider.generate_content(prompt, system_prompt=system_prompt)
+        # Use updated Async AI Service 
+        response_text = await ai_service.provider.generate_content(prompt, system_prompt=system_prompt)
         
         # Clean JSON (remove markdown ticks if present)
         response_text = response_text.strip()
@@ -234,23 +228,25 @@ async def get_ai_suggestions(
         if response_text.endswith("```"):
             response_text = response_text[:-3]
         
-        data = json.loads(response_text)
+        try:
+            data = json.loads(response_text)
+        except json.JSONDecodeError:
+            # Fallback cleanup
+             response_text = response_text.replace("```", "")
+             data = json.loads(response_text)
 
         # Post-process to handle None values from AI
         if 'mappings' in data:
             for mapping in data['mappings']:
-                # Ensure target_condition is a string, not None
                 if mapping.get('target_condition') is None:
                     mapping['target_condition'] = ""
-                # Ensure required string fields are not None
                 if mapping.get('keyword') is None:
-                    mapping['keyword'] = ""
+                     mapping['keyword'] = ""
                 if mapping.get('target_column') is None:
-                    mapping['target_column'] = ""
+                     mapping['target_column'] = ""
 
         if 'rules' in data:
             for rule in data['rules']:
-                # Ensure required string fields have defaults
                 if rule.get('example_correct') is None:
                     rule['example_correct'] = ""
                 if rule.get('example_wrong') is None:
@@ -260,7 +256,6 @@ async def get_ai_suggestions(
 
     except Exception as e:
         logger.error(f"AI Analysis failed: {str(e)}")
-        # Return empty result with error logged, or mock data for testing if AI fails
         raise HTTPException(status_code=500, detail=f"AI Analysis failed: {str(e)}")
 
 
@@ -277,21 +272,18 @@ def import_schema_suggestions(
     try:
         # 1. Import Metadata
         for meta in request.metadata:
-            # Check if exists
             existing = db.query(SchemaMetadata).filter(
                 SchemaMetadata.table_name == request.table_name,
                 SchemaMetadata.column_name == meta.column_name
             ).first()
             
             if existing:
-                # Update
                 existing.display_name_th = meta.display_name_th
                 existing.display_name_en = meta.display_name_en
                 existing.is_summable = meta.is_summable
                 existing.is_groupable = meta.is_groupable
                 existing.description = meta.description
             else:
-                # Create
                 new_meta = SchemaMetadata(
                     table_name=request.table_name,
                     column_name=meta.column_name,
@@ -307,7 +299,6 @@ def import_schema_suggestions(
         
         # 2. Import Mappings
         for mapping in request.mappings:
-            # Check for duplicates by keyword
             existing_map = db.query(SchemaSemanticMapping).filter(
                 SchemaSemanticMapping.keyword == mapping.keyword
             ).first()
@@ -340,8 +331,6 @@ def import_schema_suggestions(
                 db.add(new_rule)
 
         db.commit()
-        
-        # Refresh Cache
         schema_service.refresh_cache()
         
         return {"status": "success", "message": f"Successfully imported schema for {request.table_name}"}

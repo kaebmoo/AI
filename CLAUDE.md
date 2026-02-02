@@ -2,7 +2,7 @@
 
 ## Project: NT AI Assistant
 
-AI Revenue Query Assistant สำหรับ NT (National Telecom)
+AI Query Assistant สำหรับ NT (National Telecom)
 ใช้ Claude API หรือ Google AI (Gemini) ในการแปลงคำถามภาษาไทยเป็น SQL
 
 ---
