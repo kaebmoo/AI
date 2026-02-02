@@ -1,0 +1,728 @@
+"""
+NT Query MCP Server
+Execute and validate SQL queries for NT AI Assistant
+
+Supports: SQLite, PostgreSQL, MSSQL
+
+Usage:
+    python -m mcp_servers.nt_query_mcp
+
+Environment Variables:
+    METADATA_DB_URL: Database connection string (default: sqlite:///nt_fi_report.sqlite)
+"""
+
+import os
+import re
+import logging
+from typing import Dict, List, Any, Optional
+from dataclasses import dataclass
+
+from mcp.server.fastmcp import FastMCP
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("nt_query_mcp")
+
+# =========================================================
+# Reuse Database Components from nt_metadata_mcp
+# =========================================================
+
+@dataclass
+class DatabaseConfig:
+    """Database connection configuration"""
+    engine: str  # sqlite, postgresql, mssql
+    connection_string: str
+
+    @classmethod
+    def from_env(cls) -> "DatabaseConfig":
+        """Create config from environment variables"""
+        db_url = os.getenv(
+            "METADATA_DB_URL",
+            f"sqlite:///{os.path.join(os.path.dirname(os.path.dirname(__file__)), 'nt_fi_report.sqlite')}"
+        )
+
+        if db_url.startswith("sqlite"):
+            engine = "sqlite"
+        elif "postgresql" in db_url or "postgres" in db_url:
+            engine = "postgresql"
+        elif "mssql" in db_url or "sqlserver" in db_url:
+            engine = "mssql"
+        else:
+            engine = os.getenv("DB_ENGINE", "sqlite")
+
+        return cls(engine=engine, connection_string=db_url)
+
+
+class QueryDatabaseAdapter:
+    """Database adapter for query execution"""
+
+    def __init__(self, config: DatabaseConfig):
+        self.config = config
+        self.engine = config.engine
+
+    def _get_connection(self):
+        """Get database connection based on engine"""
+        if self.engine == "sqlite":
+            import sqlite3
+            path = self.config.connection_string.replace("sqlite:///", "").replace("sqlite://", "")
+            conn = sqlite3.connect(path)
+            conn.row_factory = sqlite3.Row
+            return conn
+
+        elif self.engine == "postgresql":
+            try:
+                import psycopg2
+                import psycopg2.extras
+                return psycopg2.connect(self.config.connection_string)
+            except ImportError:
+                raise ImportError("Please install psycopg2: pip install psycopg2-binary")
+
+        elif self.engine == "mssql":
+            try:
+                import pyodbc
+                return pyodbc.connect(self.config.connection_string)
+            except ImportError:
+                raise ImportError("Please install pyodbc: pip install pyodbc")
+
+        raise ValueError(f"Unsupported engine: {self.engine}")
+
+    def execute_query(self, sql: str, params: tuple = None) -> List[Dict]:
+        """Execute query and return results as list of dicts"""
+        conn = self._get_connection()
+
+        try:
+            if self.engine == "sqlite":
+                cursor = conn.cursor()
+                if params:
+                    cursor.execute(sql, params)
+                else:
+                    cursor.execute(sql)
+
+                if cursor.description:
+                    columns = [col[0] for col in cursor.description]
+                    rows = cursor.fetchall()
+                    return [dict(zip(columns, row)) for row in rows]
+                return []
+
+            elif self.engine == "postgresql":
+                import psycopg2.extras
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                if params:
+                    cursor.execute(sql, params)
+                else:
+                    cursor.execute(sql)
+
+                if cursor.description:
+                    return [dict(row) for row in cursor.fetchall()]
+                return []
+
+            elif self.engine == "mssql":
+                cursor = conn.cursor()
+                if params:
+                    cursor.execute(sql, params)
+                else:
+                    cursor.execute(sql)
+
+                if cursor.description:
+                    columns = [col[0] for col in cursor.description]
+                    rows = cursor.fetchall()
+                    return [dict(zip(columns, row)) for row in rows]
+                return []
+
+        finally:
+            conn.close()
+
+        return []
+
+    def get_placeholder(self) -> str:
+        """Get parameter placeholder for the database engine"""
+        if self.engine == "mssql":
+            return "?"
+        elif self.engine == "postgresql":
+            return "%s"
+        else:  # sqlite
+            return "?"
+
+
+# =========================================================
+# Initialize MCP Server
+# =========================================================
+
+mcp = FastMCP(
+    name="NT Query Server",
+    instructions="Execute and validate SQL queries for NT AI Assistant. Provides tools for SQL validation, execution, sample data retrieval, and Thai language SQL explanation."
+)
+
+# Global database adapter
+_db_adapter: Optional[QueryDatabaseAdapter] = None
+
+
+def get_db() -> QueryDatabaseAdapter:
+    """Get or create database adapter"""
+    global _db_adapter
+    if _db_adapter is None:
+        config = DatabaseConfig.from_env()
+        _db_adapter = QueryDatabaseAdapter(config)
+        logger.info(f"Connected to {config.engine} database")
+    return _db_adapter
+
+
+# =========================================================
+# Constants
+# =========================================================
+
+# Dangerous SQL patterns - never allow these
+DANGEROUS_PATTERNS = [
+    'DROP', 'DELETE', 'TRUNCATE', 'ALTER', 'INSERT',
+    'UPDATE', 'CREATE', 'GRANT', 'REVOKE', 'EXEC',
+    'EXECUTE', 'xp_', 'sp_'
+]
+
+# SQL injection patterns
+INJECTION_PATTERNS = [
+    r';\s*--',           # Comment after semicolon
+    r';\s*DROP',         # Drop after semicolon
+    r'UNION\s+SELECT',   # Union injection
+    r'OR\s+1\s*=\s*1',   # Always true condition
+    r"OR\s+'[^']*'\s*=\s*'[^']*'",  # String comparison injection
+]
+
+
+# =========================================================
+# MCP Tools
+# =========================================================
+
+@mcp.tool()
+def validate_sql(sql: str) -> Dict[str, Any]:
+    """
+    ตรวจสอบ SQL ว่าปลอดภัยและถูกต้อง
+
+    Args:
+        sql: SQL query to validate
+
+    Returns:
+        {
+            "valid": bool,
+            "issues": ["error messages..."],
+            "warnings": ["warning messages..."],
+            "sql_type": "SELECT/WITH/etc"
+        }
+
+    Example:
+        validate_sql("SELECT * FROM revenue_search WHERE year = 2025")
+        → {"valid": True, "issues": [], "warnings": ["Consider adding LIMIT..."], "sql_type": "SELECT"}
+    """
+    issues = []
+    warnings = []
+    sql_type = None
+
+    if not sql or not sql.strip():
+        return {
+            "valid": False,
+            "issues": ["SQL is empty"],
+            "warnings": [],
+            "sql_type": None
+        }
+
+    sql_clean = sql.strip()
+    sql_upper = sql_clean.upper()
+
+    # Determine SQL type
+    if sql_upper.startswith('SELECT'):
+        sql_type = "SELECT"
+    elif sql_upper.startswith('WITH'):
+        sql_type = "WITH"  # CTE
+    else:
+        sql_type = sql_upper.split()[0] if sql_upper.split() else "UNKNOWN"
+
+    # Check: Must be SELECT or WITH (CTE)
+    if sql_type not in ('SELECT', 'WITH'):
+        issues.append(f"Only SELECT queries (or CTEs starting with WITH) are allowed. Found: {sql_type}")
+
+    # Check: Dangerous patterns
+    for pattern in DANGEROUS_PATTERNS:
+        # Use word boundary to avoid false positives
+        if re.search(rf'\b{pattern}\b', sql_upper):
+            issues.append(f"Dangerous operation detected: {pattern}")
+
+    # Check: SQL injection patterns
+    for pattern in INJECTION_PATTERNS:
+        if re.search(pattern, sql_upper):
+            issues.append(f"Potential SQL injection pattern detected")
+            break
+
+    # Check: Multiple statements (semicolon not at end)
+    semicolon_count = sql_clean.count(';')
+    if semicolon_count > 1 or (semicolon_count == 1 and not sql_clean.rstrip().endswith(';')):
+        issues.append("Multiple SQL statements are not allowed")
+
+    # Warnings
+    if 'SELECT *' in sql_upper:
+        warnings.append("Using SELECT * may return unnecessary columns. Consider selecting specific columns.")
+
+    if 'WHERE' not in sql_upper and 'FROM' in sql_upper:
+        warnings.append("Query has no WHERE clause - may return large dataset")
+
+    if 'LIMIT' not in sql_upper and 'TOP' not in sql_upper:
+        warnings.append("Consider adding LIMIT to prevent large result sets")
+
+    # Check for Thai column names without quotes
+    thai_pattern = r'(?<!["\'])[ก-๙]+(?!["\'])'
+    if re.search(thai_pattern, sql):
+        # Check if it's not inside quotes
+        potential_thai = re.findall(thai_pattern, sql)
+        if potential_thai:
+            warnings.append(f"Thai column names should be quoted with double quotes: {potential_thai[:3]}")
+
+    # Check aggregate without GROUP BY
+    aggregate_funcs = ['SUM(', 'COUNT(', 'AVG(', 'MAX(', 'MIN(']
+    has_aggregate = any(func in sql_upper for func in aggregate_funcs)
+    if has_aggregate and 'GROUP BY' not in sql_upper:
+        # Check if there are non-aggregated columns
+        select_match = re.search(r'SELECT\s+(.*?)\s+FROM', sql, re.IGNORECASE | re.DOTALL)
+        if select_match:
+            select_clause = select_match.group(1)
+            # Simple heuristic: if there's a comma and aggregate, might need GROUP BY
+            if ',' in select_clause:
+                warnings.append("Query has aggregate function with multiple columns but no GROUP BY")
+
+    return {
+        "valid": len(issues) == 0,
+        "issues": issues,
+        "warnings": warnings,
+        "sql_type": sql_type
+    }
+
+
+@mcp.tool()
+def execute_query(
+    sql: str,
+    limit: int = 100,
+    validate_first: bool = True
+) -> Dict[str, Any]:
+    """
+    Execute validated SELECT query and return results
+
+    Args:
+        sql: SQL query to execute
+        limit: Maximum rows to return (default: 100, max: 1000)
+        validate_first: Whether to validate SQL before execution (default: True)
+
+    Returns:
+        {
+            "success": bool,
+            "data": [...],
+            "row_count": int,
+            "columns": ["col1", "col2", ...],
+            "truncated": bool,
+            "error": "error message if failed"
+        }
+
+    Example:
+        execute_query("SELECT year, SUM(revenue) FROM revenue_search GROUP BY year", limit=10)
+    """
+    # Enforce limit bounds
+    limit = min(max(1, limit), 1000)
+
+    # Validate first if requested
+    if validate_first:
+        validation = validate_sql(sql)
+        if not validation["valid"]:
+            return {
+                "success": False,
+                "error": "SQL validation failed",
+                "issues": validation["issues"],
+                "data": [],
+                "row_count": 0,
+                "columns": [],
+                "truncated": False
+            }
+
+    try:
+        db = get_db()
+
+        # Add LIMIT if not present (SQLite/PostgreSQL)
+        sql_upper = sql.upper()
+        if 'LIMIT' not in sql_upper and 'TOP' not in sql_upper:
+            sql = f"{sql.rstrip(';')} LIMIT {limit + 1}"  # +1 to detect truncation
+
+        rows = db.execute_query(sql)
+
+        # Check if truncated
+        truncated = len(rows) > limit
+        if truncated:
+            rows = rows[:limit]
+
+        # Get columns from first row or empty
+        columns = list(rows[0].keys()) if rows else []
+
+        return {
+            "success": True,
+            "data": rows,
+            "row_count": len(rows),
+            "columns": columns,
+            "truncated": truncated,
+            "error": None
+        }
+
+    except Exception as e:
+        logger.error(f"Query execution error: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "data": [],
+            "row_count": 0,
+            "columns": [],
+            "truncated": False
+        }
+
+
+@mcp.tool()
+def get_sample_values(
+    column_name: str,
+    table_name: str = "revenue_search",
+    limit: int = 20
+) -> Dict[str, Any]:
+    """
+    ดึงตัวอย่างค่าที่ไม่ซ้ำใน column
+
+    Args:
+        column_name: ชื่อ column ที่ต้องการดูค่า
+        table_name: ชื่อ table หรือ view (default: revenue_search)
+        limit: จำนวนค่าที่ต้องการ (default: 20, max: 100)
+
+    Returns:
+        {
+            "column": "column_name",
+            "table": "table_name",
+            "values": ["value1", "value2", ...],
+            "total_distinct": int,
+            "sample_count": int
+        }
+
+    Example:
+        get_sample_values("department", "revenue_search", 10)
+        → {"column": "department", "values": ["ฝ่ายการเงิน", "ฝ่ายบุคคล", ...], "total_distinct": 45}
+    """
+    limit = min(max(1, limit), 100)
+
+    try:
+        db = get_db()
+
+        # Quote column name for safety
+        quoted_column = f'"{column_name}"'
+
+        # Get sample distinct values
+        if db.engine == "mssql":
+            values_sql = f'''
+                SELECT DISTINCT TOP {limit} {quoted_column}
+                FROM {table_name}
+                WHERE {quoted_column} IS NOT NULL
+            '''
+        else:
+            values_sql = f'''
+                SELECT DISTINCT {quoted_column}
+                FROM {table_name}
+                WHERE {quoted_column} IS NOT NULL
+                LIMIT {limit}
+            '''
+
+        rows = db.execute_query(values_sql)
+        values = [row[column_name] for row in rows]
+
+        # Get total distinct count
+        count_sql = f'''
+            SELECT COUNT(DISTINCT {quoted_column}) as cnt
+            FROM {table_name}
+            WHERE {quoted_column} IS NOT NULL
+        '''
+        count_result = db.execute_query(count_sql)
+        total_distinct = count_result[0]['cnt'] if count_result else 0
+
+        return {
+            "column": column_name,
+            "table": table_name,
+            "values": values,
+            "total_distinct": total_distinct,
+            "sample_count": len(values)
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting sample values: {e}")
+        return {
+            "column": column_name,
+            "table": table_name,
+            "error": str(e),
+            "values": [],
+            "total_distinct": 0,
+            "sample_count": 0
+        }
+
+
+@mcp.tool()
+def explain_sql_thai(sql: str) -> Dict[str, Any]:
+    """
+    อธิบาย SQL เป็นภาษาไทยแบบทีละขั้นตอน
+
+    Args:
+        sql: SQL query to explain
+
+    Returns:
+        {
+            "steps": ["ขั้นตอนที่ 1...", "ขั้นตอนที่ 2..."],
+            "summary": "สรุปสั้นๆ",
+            "components": {
+                "select": "...",
+                "from": "...",
+                "where": "...",
+                "group_by": "...",
+                "order_by": "...",
+                "limit": "..."
+            }
+        }
+
+    Example:
+        explain_sql_thai("SELECT department, SUM(revenue) FROM revenue_search WHERE year = 2025 GROUP BY department")
+    """
+    steps = []
+    components = {}
+    sql_upper = sql.upper()
+
+    # Parse SELECT clause
+    select_match = re.search(r'SELECT\s+(.*?)\s+FROM', sql, re.IGNORECASE | re.DOTALL)
+    if select_match:
+        select_clause = select_match.group(1).strip()
+        components["select"] = select_clause
+
+        # Analyze SELECT
+        if select_clause == '*':
+            steps.append("เลือกข้อมูลทุกคอลัมน์")
+        else:
+            # Check for aggregates
+            aggregates = []
+            if 'SUM(' in sql_upper:
+                aggregates.append("รวมยอด (SUM)")
+            if 'COUNT(' in sql_upper:
+                aggregates.append("นับจำนวน (COUNT)")
+            if 'AVG(' in sql_upper:
+                aggregates.append("หาค่าเฉลี่ย (AVG)")
+            if 'MAX(' in sql_upper:
+                aggregates.append("หาค่าสูงสุด (MAX)")
+            if 'MIN(' in sql_upper:
+                aggregates.append("หาค่าต่ำสุด (MIN)")
+
+            if aggregates:
+                steps.append(f"คำนวณ: {', '.join(aggregates)}")
+
+            # List columns
+            cols = [c.strip() for c in select_clause.split(',')]
+            non_agg_cols = [c for c in cols if not any(agg in c.upper() for agg in ['SUM(', 'COUNT(', 'AVG(', 'MAX(', 'MIN('])]
+            if non_agg_cols:
+                steps.append(f"เลือกคอลัมน์: {', '.join(non_agg_cols[:5])}" + ("..." if len(non_agg_cols) > 5 else ""))
+
+    # Parse FROM clause
+    from_match = re.search(r'FROM\s+(\w+)', sql, re.IGNORECASE)
+    if from_match:
+        table = from_match.group(1)
+        components["from"] = table
+
+        # Translate common table names
+        table_names_thai = {
+            "revenue_search": "ตารางรายได้",
+            "v_expense_mart": "ตารางค่าใช้จ่าย",
+            "revenue": "ตารางรายได้",
+            "expense": "ตารางค่าใช้จ่าย"
+        }
+        table_thai = table_names_thai.get(table.lower(), f"ตาราง {table}")
+        steps.append(f"จาก{table_thai}")
+
+    # Parse JOIN clauses
+    join_matches = re.findall(r'(LEFT|RIGHT|INNER|OUTER|CROSS)?\s*JOIN\s+(\w+)', sql, re.IGNORECASE)
+    if join_matches:
+        for join_type, join_table in join_matches:
+            join_type = join_type or "INNER"
+            steps.append(f"เชื่อมกับตาราง {join_table} ({join_type} JOIN)")
+
+    # Parse WHERE clause
+    where_match = re.search(r'WHERE\s+(.*?)(?:GROUP BY|ORDER BY|HAVING|LIMIT|$)', sql, re.IGNORECASE | re.DOTALL)
+    if where_match:
+        where_clause = where_match.group(1).strip()
+        components["where"] = where_clause
+
+        # Parse conditions
+        conditions = []
+
+        # Year condition
+        year_match = re.search(r'year\s*=\s*(\d+)', where_clause, re.IGNORECASE)
+        if year_match:
+            year = int(year_match.group(1))
+            thai_year = year + 543
+            conditions.append(f"ปี {year} (พ.ศ. {thai_year})")
+
+        # Month condition
+        month_match = re.search(r'month\s*=\s*(\d+)', where_clause, re.IGNORECASE)
+        if month_match:
+            month = int(month_match.group(1))
+            thai_months = ["", "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม",
+                         "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"]
+            month_name = thai_months[month] if 1 <= month <= 12 else str(month)
+            conditions.append(f"เดือน{month_name}")
+
+        # Other conditions
+        if not conditions:
+            conditions.append(where_clause[:100] + ("..." if len(where_clause) > 100 else ""))
+
+        steps.append(f"กรองข้อมูล: {', '.join(conditions)}")
+
+    # Parse GROUP BY clause
+    group_match = re.search(r'GROUP BY\s+(.*?)(?:HAVING|ORDER BY|LIMIT|$)', sql, re.IGNORECASE | re.DOTALL)
+    if group_match:
+        group_clause = group_match.group(1).strip()
+        components["group_by"] = group_clause
+        steps.append(f"จัดกลุ่มตาม: {group_clause}")
+
+    # Parse HAVING clause
+    having_match = re.search(r'HAVING\s+(.*?)(?:ORDER BY|LIMIT|$)', sql, re.IGNORECASE | re.DOTALL)
+    if having_match:
+        having_clause = having_match.group(1).strip()
+        components["having"] = having_clause
+        steps.append(f"กรองกลุ่มที่: {having_clause}")
+
+    # Parse ORDER BY clause
+    order_match = re.search(r'ORDER BY\s+(.*?)(?:LIMIT|$)', sql, re.IGNORECASE | re.DOTALL)
+    if order_match:
+        order_clause = order_match.group(1).strip()
+        components["order_by"] = order_clause
+
+        order_desc = order_clause
+        if 'DESC' in order_clause.upper():
+            order_desc = order_clause.replace('DESC', '').replace('desc', '').strip() + " (มากไปน้อย)"
+        elif 'ASC' in order_clause.upper():
+            order_desc = order_clause.replace('ASC', '').replace('asc', '').strip() + " (น้อยไปมาก)"
+
+        steps.append(f"เรียงลำดับตาม: {order_desc}")
+
+    # Parse LIMIT clause
+    limit_match = re.search(r'LIMIT\s+(\d+)', sql, re.IGNORECASE)
+    if limit_match:
+        limit_val = limit_match.group(1)
+        components["limit"] = limit_val
+        steps.append(f"แสดงผลไม่เกิน {limit_val} แถว")
+
+    # Generate summary
+    if steps:
+        summary = " → ".join(steps[:4])
+        if len(steps) > 4:
+            summary += " → ..."
+    else:
+        summary = "ไม่สามารถวิเคราะห์ SQL ได้"
+
+    return {
+        "steps": steps,
+        "summary": summary,
+        "components": components
+    }
+
+
+@mcp.tool()
+def get_table_stats(table_name: str = "revenue_search") -> Dict[str, Any]:
+    """
+    ดึงสถิติของตาราง
+
+    Args:
+        table_name: ชื่อตารางหรือ view
+
+    Returns:
+        {
+            "table": "table_name",
+            "row_count": int,
+            "columns": [...],
+            "sample_row": {...}
+        }
+
+    Example:
+        get_table_stats("revenue_search")
+    """
+    try:
+        db = get_db()
+
+        # Get row count
+        count_sql = f"SELECT COUNT(*) as cnt FROM {table_name}"
+        count_result = db.execute_query(count_sql)
+        row_count = count_result[0]['cnt'] if count_result else 0
+
+        # Get columns (using PRAGMA for SQLite, INFORMATION_SCHEMA for others)
+        columns = []
+        if db.engine == "sqlite":
+            col_sql = f"PRAGMA table_info({table_name})"
+            col_result = db.execute_query(col_sql)
+            columns = [{"name": row['name'], "type": row['type']} for row in col_result]
+        elif db.engine == "postgresql":
+            col_sql = f"""
+                SELECT column_name as name, data_type as type
+                FROM information_schema.columns
+                WHERE table_name = '{table_name}'
+            """
+            columns = db.execute_query(col_sql)
+        elif db.engine == "mssql":
+            col_sql = f"""
+                SELECT COLUMN_NAME as name, DATA_TYPE as type
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_NAME = '{table_name}'
+            """
+            columns = db.execute_query(col_sql)
+
+        # Get sample row
+        if db.engine == "mssql":
+            sample_sql = f"SELECT TOP 1 * FROM {table_name}"
+        else:
+            sample_sql = f"SELECT * FROM {table_name} LIMIT 1"
+
+        sample_result = db.execute_query(sample_sql)
+        sample_row = sample_result[0] if sample_result else {}
+
+        return {
+            "table": table_name,
+            "row_count": row_count,
+            "column_count": len(columns),
+            "columns": columns,
+            "sample_row": sample_row
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting table stats: {e}")
+        return {
+            "table": table_name,
+            "error": str(e),
+            "row_count": 0,
+            "columns": [],
+            "sample_row": {}
+        }
+
+
+# =========================================================
+# Main Entry Point
+# =========================================================
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="NT Query MCP Server")
+    parser.add_argument(
+        "--db-url",
+        help="Database URL (default: from METADATA_DB_URL env or nt_fi_report.sqlite)"
+    )
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "sse"],
+        default="stdio",
+        help="MCP transport (default: stdio)"
+    )
+
+    args = parser.parse_args()
+
+    if args.db_url:
+        os.environ["METADATA_DB_URL"] = args.db_url
+
+    logger.info("Starting NT Query MCP Server...")
+    mcp.run(transport=args.transport)

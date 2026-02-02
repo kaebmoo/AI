@@ -8,6 +8,7 @@ import Contexts from './pages/Contexts'
 import Analyzer from './pages/Analyzer'
 import Mappings from './pages/Mappings'
 import Rules from './pages/Rules'
+import Prompts from './pages/Prompts'
 import Examples from './pages/Examples'
 import ViewBuilder from './pages/ViewBuilder'
 
@@ -35,7 +36,7 @@ function App() {
             <Route path="/analyzer" element={<Analyzer />} />
             <Route path="/mappings" element={<Mappings />} />
             <Route path="/rules" element={<Rules />} />
-
+            <Route path="/prompts" element={<Prompts />} />
             <Route path="/examples" element={<Examples />} />
             <Route path="/view-builder" element={<ViewBuilder />} />
             <Route path="/" element={<Navigate to="/dashboard" replace />} />

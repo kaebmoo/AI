@@ -1,0 +1,15 @@
+# MCP Server Dependencies
+mcp>=1.0.0
+fastmcp>=0.1.0
+
+# Database drivers (install based on your needs)
+# SQLite is built-in
+
+# PostgreSQL
+psycopg2-binary>=2.9.0
+
+# MSSQL
+pyodbc>=4.0.0
+
+# Utilities
+python-dotenv>=1.0.0

@@ -57,7 +57,8 @@ export default function ChatScreen() {
         content: response.answer,
         sql: response.sql_query,
         executionTime: response.execution_time_ms,
-        warnings: response.warnings
+        warnings: response.warnings,
+        data: response.data  // ✅ เพิ่ม data จาก API
       };
 
       setMessages((prev) => [...prev, aiMessage]);

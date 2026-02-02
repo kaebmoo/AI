@@ -10,6 +10,7 @@ class ChatRequest(BaseModel):
     provider: Optional[str] = "gemini"  # 'claude', 'gemini', or 'matcha'
     context: Optional[str] = None        # None = Auto-detect, or 'revenue', 'expense'
     max_retries: int = Field(default=3, ge=0, le=5, description="Max retry attempts when SQL fails (0-5)")
+    mode: Optional[str] = Field(default="hybrid", description="Query mode: 'hybrid' (recommended, cost-effective) or 'mcp' (full tool access)")
 
 
 
