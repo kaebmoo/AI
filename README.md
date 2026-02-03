@@ -35,6 +35,10 @@
       - Visual management for Users, Schemas, Rules, and Golden Examples.
       - **Context Management:** Create and edit data contexts (Revenue, Expense) and manage routing keywords.
       - Schema Analyzer tool for importing and verifying metadata from Excel/CSV (Backend ready).
+  - **User App (Frontend):**
+    - Built with **React Native (Expo)** for Web, iOS, and Android.
+    - **Smart Visualization:** Auto-selects best chart type (Line/Bar/Grouped) based on data shape.
+    - **Interactive Reports:** Drill-down tooltips, responsive data tables, and rich markdown support.
   - **Task Queue:** Celery + Redis for async tasks (Email, Long-running queries)
 - **Feedback System:**
   - Collect user feedback (Thumbs Up/Down)
