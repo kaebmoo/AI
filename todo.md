@@ -13,14 +13,14 @@
 | Phase 2: Authentication  | 90%   | Auth & OTP & Rate Limit เสร็จ, ขาด RBAC เต็มรูปแบบ |
 | Phase 3: Core Features   | 85%   | AI Integration เสร็จแล้ว (Claude + Gemini)      |
 | Phase 3.5: Feedback Loop | 90%   | Models & Services มี, Admin UI เสร็จเฟสแรก       |
-| Phase 4: Frontend (Expo) | 30%   | เริ่มแล้ว: Chat UI & Auth basic functioning     |
+| Phase 4: Frontend (Expo) | 80%   | Core done: Chat, Auth, Charts, Tables, History, Markdown |
 | Phase 4.5: Telegram Bot  | 0%    | ยังไม่เริ่ม                                     |
 | Phase 5-6: Reports       | 0%    | ยังไม่เริ่ม                                     |
 | Phase 7: Testing         | 10%   | มี scripts แต่ยังไม่เป็น pytest                 |
 | Phase 7.5: DR & Backup   | 0%    | ยังไม่เริ่ม                                     |
 | Phase 8: Deployment      | 0%    | ยังไม่เริ่ม                                     |
 
-**รวม: ~65%**
+**รวม: ~80%**
 
 ---
 
@@ -172,7 +172,7 @@
 
 ---
 
-## Phase 4: Universal Frontend (Expo) ⚠️ 30%
+## Phase 4: Universal Frontend (Expo) ✅ 80%
 
 ### ทำเสร็จแล้ว
 
@@ -192,11 +192,15 @@
 
 ### ยังไม่ได้ทำ
 
-- [ ] History list screen
-- [ ] Settings screen (Theme, Language)
-- [ ] Markdown rendering in Chat (currently basic text)
-- [ ] Copy SQL/Result buttons
-- [ ] Mobile-specific optimizations
+- [x] History list screen (Basic implementation)
+- [x] Settings screen (Theme, Language)
+- [x] Markdown rendering in Chat (Styled Bubbles)
+- [x] **Data Visualization**
+  - [x] Interactive Charts (Bar/Line/Grouped) with Tooltips
+  - [x] Smart Tables (Crosstab/Scrollable)
+  - [x] Responsive Layouts (Mobile/Desktop)
+- [x] Copy SQL/Result buttons (Basic text selection)
+- [ ] Mobile-specific optimizations (Fine-tuning)
 
 ---
 
