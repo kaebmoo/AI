@@ -15,7 +15,22 @@ export const DataTable = ({ data }: DataTableProps) => {
 
     // 1. Hierarchy & Dimension Detection
     // Strict exclusion of measure terms from dimensions
-    const isMeasure = (k: string) => ['total', 'revenue', 'amount', 'count', 'value', 'price', 'cost', 'profit', 'รายได้', 'ยอดรวม', 'จำนวน', 'expense', 'baht', 'บาท'].some(term => k.toLowerCase().includes(term));
+    // IMPORTANT: Use word-boundary for 'count' to avoid matching 'account'
+    const measurePatterns = ['total', 'revenue', 'amount', 'value', 'price', 'cost', 'profit', 'รายได้', 'ยอดรวม', 'จำนวน', 'expense', 'baht', 'บาท'];
+    const wordBoundaryMeasures = ['count']; // These need word-boundary to avoid false positives
+
+    const isMeasure = (k: string) => {
+        const lower = k.toLowerCase();
+        // Check regular patterns (substring match is fine)
+        if (measurePatterns.some(term => lower.includes(term))) {
+            return true;
+        }
+        // Check word-boundary patterns (must be whole word or with underscore)
+        return wordBoundaryMeasures.some(term => {
+            const regex = new RegExp(`(^|_)${term}($|_)`, 'i');
+            return regex.test(lower);
+        });
+    };
 
     const monthKey = keys.find(k => !isMeasure(k) && ['month', 'เดือน'].some(term => k.toLowerCase().includes(term)));
     const yearKey = keys.find(k => !isMeasure(k) && ['year', 'ปี', 'พ.ศ.', 'ค.ศ.'].some(term => k.toLowerCase().includes(term)));
@@ -51,17 +66,16 @@ export const DataTable = ({ data }: DataTableProps) => {
         const uniqueTimes = new Set(timeLabels);
 
         // Only pivot if we have duplicates (meaning multiple categories per time slot)
-        if (timeLabels.length > uniqueTimes.size && categoryKeys.length > 0) {
+        // OR simply if we have Time + Category (Force Crosstab for cleaner view)
+        if (categoryKeys.length > 0 && (timeLabels.length > uniqueTimes.size || (monthKey && yearKey))) {
             isCrosstab = true;
             rowKey = categoryKeys[0]; // Primary category (Province, Group)
 
             // --- Month Filling Logic ---
-            // Sort periods naturally first
             let periods = Array.from(uniqueTimes);
 
-            // Smart Sort: Try to parse as dates or integers
+            // 1. Sort periods naturally first
             periods.sort((a, b) => {
-                // Try numeric month sort (e.g. 01/2568)
                 const aParts = a.split('/');
                 const bParts = b.split('/');
                 if (aParts.length > 1 && bParts.length > 1) {
@@ -72,60 +86,99 @@ export const DataTable = ({ data }: DataTableProps) => {
                     if (aYear !== bYear) return aYear - bYear;
                     return aMonth - bMonth;
                 }
+                const aNum = parseInt(a);
+                const bNum = parseInt(b);
+                if (!isNaN(aNum) && !isNaN(bNum)) return aNum - bNum;
                 return a.localeCompare(b);
             });
 
-            // Force Fill 12 Months if looks like monthly data
-            // Check if labels constitute months (01...12)
-            const hasMonthLike = periods.some(p => {
-                const m = parseInt(p.split('/')[0]);
-                return !isNaN(m) && m >= 1 && m <= 12;
-            });
+            // 2. Force Fill 1-12 Months
+            // Detect if data looks like "Month" or "Month/Year"
+            const sample = periods[0] || '';
+            const isMonthYear = sample.includes('/');
+            const isNumericMonth = !isNaN(parseInt(sample)) && parseInt(sample) >= 1 && parseInt(sample) <= 12;
 
-            if (hasMonthLike && periods.length < 12) {
-                // Detect Year from existing data
-                const sampleparts = periods[0].split('/');
-                const yearSuffix = sampleparts.length > 1 ? `/${sampleparts[1]}` : '';
+            if (data.length > 1 && (isMonthYear || isNumericMonth)) {
+                // Determine Year Suffix
+                let yearSuffix = '';
+                if (isMonthYear) {
+                    const parts = sample.split('/');
+                    if (parts.length > 1) yearSuffix = `/${parts[1]}`;
+                }
 
+                // Create Full Month List
                 const allMonths = Array.from({ length: 12 }, (_, i) => {
-                    const m = String(i + 1).padStart(2, '0');
+                    // If original data has leading zero (01), keep it. If (1), keep it.
+                    // Simple heuristic: check length of first part
+                    const firstPart = isMonthYear ? sample.split('/')[0] : sample;
+                    const shouldPad = firstPart.length === 2;
+                    const m = shouldPad ? String(i + 1).padStart(2, '0') : String(i + 1);
                     return `${m}${yearSuffix}`;
                 });
 
-                // Merge (keep sorted existing, insert missing)
-                // Simplest: Use allMonths as the base if yearSuffix implies a single year
-                // If multiple years exists, this logic is tricky. 
-                // Let's safe-guard: Only force fill if ALL periods belong to SAME year.
-                const uniqueYears = new Set(periods.map(p => p.split('/')[1]));
-                if (uniqueYears.size === 1) {
-                    periodLabels = allMonths;
-                } else {
-                    periodLabels = periods;
-                }
-            } else {
-                periodLabels = periods;
+                // Check if our current data falls within a single year scope (safe to fill)
+                // or if we just want to ensure 1-12 are present
+                // Simple logic: Merge existing periods with allMonths, keep unique, then sort again
+                const merged = new Set([...periods, ...allMonths]);
+                periods = Array.from(merged).sort((a, b) => {
+                    const aParts = a.split('/');
+                    const bParts = b.split('/');
+                    if (aParts.length > 1 && bParts.length > 1) {
+                        const aM = parseInt(aParts[0]);
+                        const bM = parseInt(bParts[0]);
+                        return aM - bM;
+                    }
+                    return parseInt(a) - parseInt(b);
+                });
             }
 
-            // Pivot Logic
+            periodLabels = periods;
+
+            // 3. Pivot Data
             const rowMap: Record<string, any> = {};
 
             data.forEach(item => {
-                const rVal = String(item[rowKey]);
+                const rVal = String(item[rowKey] || 'Unknown');
                 let tLabel = '';
-                if (monthKey && yearKey) tLabel = `${item[monthKey]}/${item[yearKey]}`;
-                else if (labelKey) tLabel = String(item[labelKey]);
+
+                if (monthKey && yearKey) {
+                    const m = String(item[monthKey]);
+                    const y = String(item[yearKey]);
+                    // Auto-pad month if needed to match labels logic? 
+                    // Let's assume data comes clean, but we might need to match format
+                    tLabel = `${m}/${y}`;
+
+                    // Try to match period format precisely if mismatch
+                    if (!periodLabels.includes(tLabel)) {
+                        // Maybe it needs padding? 1 -> 01
+                        const padM = m.padStart(2, '0');
+                        if (periodLabels.includes(`${padM}/${y}`)) tLabel = `${padM}/${y}`;
+                        // Or unpadding? 01 -> 1
+                        else if (periodLabels.includes(`${parseInt(m)}/${y}`)) tLabel = `${parseInt(m)}/${y}`;
+                    }
+
+                } else if (labelKey) {
+                    tLabel = String(item[labelKey]);
+                } else if (monthKey) {
+                    tLabel = String(item[monthKey]);
+                }
 
                 if (!rowMap[rVal]) {
                     rowMap[rVal] = { _rowLabel: rVal };
                 }
 
-                // FORMATTING: If user asked for % diff (Case 2), valueKey might be auto-detected wrong?
-                // But Case 2 is NOT crosstab anymore due to stricter check. 
-                // Case 1 is the Crosstab.
-                rowMap[rVal][tLabel] = item[valueKey || keys[keys.length - 1]];
+                if (tLabel && periodLabels.includes(tLabel)) {
+                    // Sum up if duplicate (shouldn't happen often in SQL mart but safe to sum)
+                    const val = item[valueKey || keys[keys.length - 1]];
+                    const numVal = typeof val === 'number' ? val : parseFloat(String(val).replace(/,/g, '')) || 0;
+
+                    rowMap[rVal][tLabel] = (rowMap[rVal][tLabel] || 0) + numVal;
+                }
             });
 
             pivotedRows = Object.values(rowMap);
+            // Sort rows by name
+            pivotedRows.sort((a, b) => a._rowLabel.localeCompare(b._rowLabel));
         }
     }
 
