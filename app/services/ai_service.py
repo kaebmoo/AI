@@ -196,30 +196,32 @@ Return the result as a JSON object with these keys:
    - "series_column": (optional) The column for SECONDARY grouping/comparison (e.g., month, year for time comparison)
 
 IMPORTANT for time-based comparisons:
-- When user asks "รายเดือน" or "by month" → use category=primary_dimension (e.g., department, account), series=month
-- When user asks "แต่ละเดือน" or "per month breakdown" → use category=month, series=secondary_dimension
-- Time columns (month, year, quarter) are usually better as series_column for trend comparison
+- **CRITICAL**: If a Time column exists (Month, Year, Date), YOU MUST USE IT AS 'category_column' (X-axis).
+- **Comparison**: Use the other dimension (Department, Account, Section) as 'series_column' (Legend).
+     - If < 5 series: Suggest 'grouped_bar' or 'line_chart'
+     - If > 5 series: Suggest 'stacked_bar' (to avoid clutter)
+- **Exception**: Only use Time as Series if explicitly asked to "Compare Years" (Year-over-Year).
 
 Example for simple bar chart:
-{
+{{
   "explanation": "ยอดขายแยกตามแผนก...",
   "visualization": "bar_chart",
-  "chart_config": {
+  "chart_config": {{
     "category_column": "department_name",
     "measure_column": "total_sales"
-  }
-}
+  }}
+}}
 
 Example for time comparison (grouped bar) - showing each category with bars for each month:
-{
+{{
   "explanation": "ค่าใช้จ่ายรายหมวดบัญชี แยกตามเดือน...",
   "visualization": "grouped_bar",
-  "chart_config": {
-    "category_column": "หมวดบัญชี",
+  "chart_config": {{
+    "category_column": "เดือน",
     "measure_column": "ยอดค่าใช้จ่าย",
-    "series_column": "เดือน"
-  }
-}
+    "series_column": "หมวดบัญชี"
+  }}
+}}
 """
         response = await self.client.messages.create(
             model=self.model,
@@ -229,10 +231,60 @@ Example for time comparison (grouped bar) - showing each category with bars for 
         )
         content = response.content[0].text
         # Parse JSON if possible, otherwise return text
+        parsed_result = {"explanation": content}
         try:
-            return json.loads(content)
+            # 1. Try pure JSON
+            parsed_result = json.loads(content)
         except:
-            # Fallback for legacy/text-only response
+            try:
+                # 2. Try to extract JSON from Markdown code blocks
+                match = re.search(r'```json\s*(\{.*?\})\s*```', content, re.DOTALL)
+                if match:
+                    parsed_result = json.loads(match.group(1))
+                else:
+                    # 3. Try to find first { and last }
+                    match = re.search(r'(\{.*\})', content, re.DOTALL)
+                    if match:
+                        parsed_result = json.loads(match.group(1))
+            except:
+                pass
+        
+        # Post-process to enforce Time-Series Rule (Code Level)
+        try:
+             # Ensure we have a dict
+             if isinstance(parsed_result, str):
+                  parsed_result = {"explanation": parsed_result}
+                  
+             if "chart_config" in parsed_result:
+                 config = parsed_result["chart_config"]
+                 cat = config.get("category_column", "").lower()
+                 series = config.get("series_column", "").lower()
+                 
+                 time_keys = ['month', 'year', 'date', 'day', 'time', 'quarter', 'week', 'hour', 'minute', 'second', 'เดือน', 'ปี', 'วันที่', 'ไตรมาส', 'งวด', 'เวลา']
+                 
+                 is_series_time = any(t in series for t in time_keys)
+                 is_cat_time = any(t in cat for t in time_keys)
+                 
+                 # If Series is Time BUT Category is NOT Time -> SWAP
+                 print(f"\n[DEBUG] Parsing Config: Cat='{cat}', Series='{series}'")
+                 print(f"[DEBUG] TimeKeys: {time_keys}")
+                 print(f"[DEBUG] IsSeriesTime={is_series_time}, IsCatTime={is_cat_time}")
+                 
+                 if is_series_time and not is_cat_time:
+                     print(f"[DEBUG] >>> SWAPPING DETECTED! <<<<")
+                     logger.info(f"Generated Chart Config violates Time-Series Rule. Swapping {cat} <-> {series}")
+                     config["category_column"] = config["series_column"]
+                     config["series_column"] = cat
+                     # Force Stacked Bar if swappping happened and was grouped_bar (optional, but safer)
+                     if parsed_result.get("visualization") == "grouped_bar":
+                          parsed_result["visualization"] = "stacked_bar"
+                 else:
+                     print(f"[DEBUG] No Swap Needed.")
+
+             return parsed_result
+        except Exception as e:
+            print(f"[DEBUG] CRITICAL ERROR IN PARSING: {e}")
+            logger.error(f"Error processing AI result: {e}")
             return {"explanation": content}
 
     @ai_retry
@@ -429,10 +481,11 @@ Return the result as a JSON object with these keys:
    - "series_column": (optional) The column for SECONDARY grouping/comparison
 
 IMPORTANT for time-based comparisons:
-- When user asks "รายเดือน" or "by month" → use category=primary_dimension (e.g., account type), series=month
-  Example: "ค่าใช้จ่ายรายหมวดบัญชี แบบรายเดือน" → category=หมวดบัญชี, series=เดือน
-- When user asks "แต่ละเดือน" or "each month" → use category=month, series=secondary_dimension
-  Example: "รายได้แต่ละเดือน แยกตามแผนก" → category=เดือน, series=แผนก
+- **CRITICAL**: If a Time column exists (Month, Year, Date), YOU MUST USE IT AS 'category_column' (X-axis).
+- **Comparison**: Use the other dimension (Department, Account, Section) as 'series_column' (Legend).
+     - If < 5 series: Suggest 'grouped_bar' or 'line_chart'
+     - If > 5 series: Suggest 'stacked_bar' (to avoid clutter)
+- **Exception**: Only use Time as Series if explicitly asked to "Compare Years" (Year-over-Year).
 
 Example for simple bar chart:
 {{
@@ -449,9 +502,9 @@ Example for comparison (grouped bar):
   "explanation": "เปรียบเทียบยอดขาย...",
   "visualization": "grouped_bar",
   "chart_config": {{
-    "category_column": "department",
+    "category_column": "month",
     "measure_column": "revenue",
-    "series_column": "month"
+    "series_column": "department"
   }}
 }}
 """
@@ -465,13 +518,56 @@ Example for comparison (grouped bar):
             
         response = await self._run_async(call_api)
         text = response.text
+        # Parse JSON if possible, otherwise return text
+        parsed_result = {"explanation": text}
         try:
-            # Try to find JSON block in case there's extra text
-            json_match = re.search(r'\{.*\}', text, re.DOTALL)
-            if json_match:
-                return json.loads(json_match.group(0))
-            return json.loads(text)
+            # 1. Try pure JSON
+            parsed_result = json.loads(text)
         except:
+            try:
+                # 2. Try to extract JSON from Markdown code blocks
+                match = re.search(r'```json\s*(\{.*?\})\s*```', text, re.DOTALL)
+                if match:
+                    parsed_result = json.loads(match.group(1))
+                else:
+                    # 3. Try to find first { and last }
+                    match = re.search(r'(\{.*\})', text, re.DOTALL)
+                    if match:
+                        parsed_result = json.loads(match.group(1))
+            except:
+                pass
+
+        # Post-process to enforce Time-Series Rule (Code Level)
+        try:
+             # Ensure we have a dict
+             if isinstance(parsed_result, str):
+                  parsed_result = {"explanation": parsed_result}
+                  
+             if "chart_config" in parsed_result:
+                 config = parsed_result["chart_config"]
+                 cat = config.get("category_column", "").lower()
+                 series = config.get("series_column", "").lower()
+                 
+                 time_keys = ['month', 'year', 'date', 'day', 'time', 'quarter', 'week', 'เดือน', 'ปี', 'วันที่']
+                 
+                 is_series_time = any(t in series for t in time_keys)
+                 is_cat_time = any(t in cat for t in time_keys)
+                 
+                 # If Series is Time BUT Category is NOT Time -> SWAP
+                 print(f"DEBUG CHECK: Cat={cat}, Series={series}, IsSeriesTime={is_series_time}, IsCatTime={is_cat_time}")
+                 if is_series_time and not is_cat_time:
+                     print(f"DEBUG: SWAPPING {cat} <-> {series}")
+                     logger.info(f"Generated Chart Config violates Time-Series Rule. Swapping {cat} <-> {series}")
+                     config["category_column"] = config["series_column"]
+                     config["series_column"] = cat
+                     # Force Stacked Bar if swappping happened and was grouped_bar (optional, but safer)
+                     if parsed_result.get("visualization") == "grouped_bar":
+                          parsed_result["visualization"] = "stacked_bar"
+
+             return parsed_result
+        except Exception as e:
+            print(f"DEBUG ERROR: {e}")
+            logger.error(f"Error processing AI result: {e}")
             return {"explanation": text}
 
     @ai_retry
@@ -575,9 +671,81 @@ class MatchaProvider(AIProvider):
         }
 
     # ... Implement explain and generate_content similarly using AsyncClient ...
-    async def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str) -> str:
-         # Simplified impl
-         return "Explanation generic placeholder"
+    async def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str) -> Dict[str, Any]:
+        """Explain result using Matcha/OpenAI and return Config"""
+        
+        # 1. Prepare Data Preview
+        data_preview = json.dumps(data[:5], ensure_ascii=False, default=str)
+        
+        # 2. Construct Prompt
+        prompt = f"""
+Query: {question}
+SQL: {sql}
+
+Data Preview:
+{data_preview}
+
+Based on the data, provide:
+1. A brief explanation of the trends/values.
+2. The BEST chart type to visualize this (bar_chart, line_chart, pie_chart, grouped_bar, stacked_bar, table, single_value).
+3. The configuration:
+   - category_column: X-axis (Grouping)
+   - measure_column: Y-axis (Value)
+   - series_column: Comparison/Legend (Optional)
+"""
+        # 3. Call API
+        response_text = await self.generate_content(prompt, system_prompt)
+        
+        # 4. Parse JSON
+        parsed_result = {"explanation": response_text}
+        try:
+            # Try pure JSON
+            parsed_result = json.loads(response_text)
+        except:
+            try:
+                # Try Markdown JSON
+                match = re.search(r'```json\s*(\{.*?\})\s*```', response_text, re.DOTALL)
+                if match:
+                    parsed_result = json.loads(match.group(1))
+                else:
+                    # Try find {}
+                    match = re.search(r'(\{.*\})', response_text, re.DOTALL)
+                    if match:
+                        parsed_result = json.loads(match.group(1))
+            except:
+                pass
+
+        # 5. Post-process to enforce Time-Series Rule (Code Level)
+        try:
+             # Ensure we have a dict
+             if isinstance(parsed_result, str):
+                  parsed_result = {"explanation": parsed_result}
+                  
+             if "chart_config" in parsed_result:
+                 config = parsed_result["chart_config"]
+                 cat = config.get("category_column", "").lower()
+                 series = config.get("series_column", "").lower()
+                 
+                 time_keys = ['month', 'year', 'date', 'day', 'time', 'quarter', 'week', 'hour', 'minute', 'second', 'เดือน', 'ปี', 'วันที่', 'ไตรมาส', 'งวด', 'เวลา']
+                 
+                 is_series_time = any(t in series for t in time_keys)
+                 is_cat_time = any(t in cat for t in time_keys)
+                 
+                 # If Series is Time BUT Category is NOT Time -> SWAP
+                 print(f"DEBUG CHECK (Matcha): Cat={cat}, Series={series}, IsSeriesTime={is_series_time}, IsCatTime={is_cat_time}")
+                 if is_series_time and not is_cat_time:
+                     print(f"DEBUG (Matcha): SWAPPING {cat} <-> {series}")
+                     logger.info(f"Matcha: Generated Chart Config violates Time-Series Rule. Swapping {cat} <-> {series}")
+                     config["category_column"] = config["series_column"]
+                     config["series_column"] = cat
+                     # Force Stacked Bar if swappping happened and was grouped_bar
+                     if parsed_result.get("visualization") == "grouped_bar":
+                          parsed_result["visualization"] = "stacked_bar"
+
+             return parsed_result
+        except Exception as e:
+            logger.error(f"Matcha: Error processing result: {e}")
+            return {"explanation": response_text}
     
     async def generate_content(self, prompt: str, system_prompt: Optional[str] = None) -> str:
         """Generate content using Matcha/OpenAI-compatible API"""
@@ -639,6 +807,9 @@ class AIService:
              self.provider = MatchaProvider(api_key, kwargs.get("api_url"), model) if model else MatchaProvider(api_key, kwargs.get("api_url"))
         else:
             raise ValueError(f"Unknown provider: {provider}")
+
+    async def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str) -> str:
+        return await self.provider.explain_result(question, sql, data, system_prompt)
             
     async def query_with_retry(
         self,
