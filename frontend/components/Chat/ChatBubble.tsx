@@ -13,6 +13,12 @@ export interface DataWarning {
     severity: 'info' | 'warning' | 'important';
 }
 
+export interface ChartConfig {
+    category_column?: string;
+    measure_column?: string;
+    series_column?: string;
+}
+
 export interface Message {
     id: string | number;
     role: 'user' | 'assistant';
@@ -22,6 +28,8 @@ export interface Message {
     warnings?: DataWarning[];
     data?: Record<string, any>[];  // Query result data
     confidence?: ConfidenceData;   // Confidence score
+    visualization?: string;        // AI Recommended visualization
+    chartConfig?: ChartConfig;     // AI Recommended chart columns
 }
 
 interface ChatBubbleProps {
@@ -179,7 +187,11 @@ export const ChatBubble = ({ message }: ChatBubbleProps) => {
 
                         {/* Data Chart Visualization */}
                         {message.data && message.data.length > 0 && (
-                            <DataChart data={message.data} />
+                            <DataChart
+                                data={message.data}
+                                visualization={message.visualization}
+                                chartConfig={message.chartConfig}
+                            />
                         )}
 
                         {/* Key Metric Visualization (Single Value) */}

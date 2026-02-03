@@ -398,7 +398,11 @@ async def chat(
     # Debug: Log result details
     logger.info(f"Result - SQL: {result.sql_query[:100] if result.sql_query else 'None'}...")
     logger.info(f"Result - Data: {result.data}")
-    logger.info(f"Result - Explanation: {result.explanation[:200] if result.explanation else 'None'}...")
+    # Handle both string and dict explanations
+    if isinstance(result.explanation, dict):
+        logger.info(f"Result - Explanation (dict): visualization={result.explanation.get('visualization')}, has_chart_config={bool(result.explanation.get('chart_config'))}")
+    else:
+        logger.info(f"Result - Explanation: {str(result.explanation)[:200] if result.explanation else 'None'}...")
     logger.info(f"Result - Error: {result.error}")
 
     # Log retry info
@@ -406,13 +410,19 @@ async def chat(
         logger.info(f"Query succeeded after {result.retry_count} retries for question: {request.question[:50]}...")
 
     # Save History
+    # Extract text explanation from dict or use string directly
+    if isinstance(result.explanation, dict):
+        ai_response_text = result.explanation.get("explanation", str(result.explanation))
+    else:
+        ai_response_text = result.explanation if result.explanation else ""
+
     chat_entry = ChatHistory(
         user_id=current_user.id,
         conversation_id=conversation_id,
         question=result.question,
         generated_sql=result.sql_query,
         sql_result_summary=str(result.data)[:1000] if result.data else None,
-        ai_response=result.explanation if not result.error else f"Error: {result.error}",
+        ai_response=ai_response_text if not result.error else f"Error: {result.error}",
         execution_time_ms=execution_time,
         tokens_used=result.tokens_used
     )
@@ -476,6 +486,29 @@ async def chat(
             "recommendation": result.confidence.recommendation
         }
 
+    # Prepare visualization recommendation and chart config
+    visualization_response = None
+    chart_config_response = None
+    if isinstance(result.explanation, dict):
+        if "visualization" in result.explanation:
+            visualization_response = result.explanation.get("visualization")
+        if "chart_config" in result.explanation:
+            chart_config_response = result.explanation.get("chart_config")
+        # Ensure answer is string
+        chat_entry.ai_response = result.explanation.get("explanation", str(result.explanation))
+        # Update DB explanation to be clean text
+        db.add(chat_entry)
+        db.commit()
+
+        # DEBUG: Log AI response
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"📊 AI Response - visualization: {visualization_response}, chart_config: {chart_config_response}")
+    else:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"⚠️ AI explanation is not dict: {type(result.explanation)} = {result.explanation}")
+
     return {
         "id": chat_entry.id,
         "conversation_id": conversation_id,
@@ -487,7 +520,9 @@ async def chat(
         "retry_count": result.retry_count,
         "retry_history": retry_history_response,
         "warnings": warnings_response,
-        "confidence": confidence_response
+        "confidence": confidence_response,
+        "visualization": visualization_response,
+        "chart_config": chart_config_response
     }
 
 @router.get("/history", response_model=List[ChatResponse])

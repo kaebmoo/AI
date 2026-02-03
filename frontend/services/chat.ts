@@ -22,6 +22,28 @@ export interface RetryAttempt {
     sql?: string;
 }
 
+export interface ConfidenceFactor {
+    name: string;
+    score: number;
+    max: number;
+    detail: string;
+}
+
+export interface Confidence {
+    score: number;
+    level: string;
+    level_th: string;
+    color: string;
+    factors: ConfidenceFactor[];
+    recommendation: string;
+}
+
+export interface ChartConfig {
+    category_column?: string;
+    measure_column?: string;
+    series_column?: string;
+}
+
 export interface ChatResponse {
     id: number;
     conversation_id: string;
@@ -33,6 +55,9 @@ export interface ChatResponse {
     retry_count?: number;
     retry_history?: RetryAttempt[];
     warnings?: DataWarning[];
+    confidence?: Confidence;           // Confidence score from validation MCP
+    visualization?: string;            // AI recommended visualization type
+    chart_config?: ChartConfig;        // AI recommended chart columns
 }
 
 export const chatService = {

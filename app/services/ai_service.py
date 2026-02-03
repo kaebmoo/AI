@@ -86,7 +86,7 @@ class QueryResult:
     question: str
     sql_query: str
     data: List[Dict]
-    explanation: str
+    explanation: Union[str, Dict]  # Can be str or dict with visualization/chart_config
     tokens_used: int
     provider: str
     raw_response: Optional[str] = None
@@ -184,7 +184,42 @@ SQL: {sql}
 Results (First 30 rows):
 {json.dumps(data_sample, ensure_ascii=False, indent=2)}
 
-Please explain the results in Thai. Format numbers nicely. Summary only if many rows.
+Format numbers nicely. Summary only if many rows.
+
+CRITICAL: You must analyze the data and recommend the best visualization type.
+Return the result as a JSON object with these keys:
+1. "explanation": The Thai explanation text.
+2. "visualization": One of ['bar_chart', 'horizontal_bar', 'line_chart', 'pie_chart', 'table', 'single_value', 'grouped_bar']
+3. "chart_config": Object with column mappings for the chart:
+   - "category_column": The column name for X-axis labels (the PRIMARY grouping)
+   - "measure_column": The column name for Y-axis values (e.g., total, sum, amount)
+   - "series_column": (optional) The column for SECONDARY grouping/comparison (e.g., month, year for time comparison)
+
+IMPORTANT for time-based comparisons:
+- When user asks "รายเดือน" or "by month" → use category=primary_dimension (e.g., department, account), series=month
+- When user asks "แต่ละเดือน" or "per month breakdown" → use category=month, series=secondary_dimension
+- Time columns (month, year, quarter) are usually better as series_column for trend comparison
+
+Example for simple bar chart:
+{
+  "explanation": "ยอดขายแยกตามแผนก...",
+  "visualization": "bar_chart",
+  "chart_config": {
+    "category_column": "department_name",
+    "measure_column": "total_sales"
+  }
+}
+
+Example for time comparison (grouped bar) - showing each category with bars for each month:
+{
+  "explanation": "ค่าใช้จ่ายรายหมวดบัญชี แยกตามเดือน...",
+  "visualization": "grouped_bar",
+  "chart_config": {
+    "category_column": "หมวดบัญชี",
+    "measure_column": "ยอดค่าใช้จ่าย",
+    "series_column": "เดือน"
+  }
+}
 """
         response = await self.client.messages.create(
             model=self.model,
@@ -192,7 +227,13 @@ Please explain the results in Thai. Format numbers nicely. Summary only if many 
             system=system_prompt,
             messages=[{"role": "user", "content": prompt}]
         )
-        return response.content[0].text
+        content = response.content[0].text
+        # Parse JSON if possible, otherwise return text
+        try:
+            return json.loads(content)
+        except:
+            # Fallback for legacy/text-only response
+            return {"explanation": content}
 
     @ai_retry
     async def generate_content(self, prompt: str, system_prompt: Optional[str] = None) -> str:
@@ -373,7 +414,47 @@ class GeminiProvider(AIProvider):
 
     @ai_retry
     async def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str) -> str:
-        prompt = f"Question: {question}\nSQL: {sql}\nResults: {json.dumps(data[:30], ensure_ascii=False)}\nExplain in Thai."
+        prompt = f"""Question: {question}
+SQL: {sql}
+Results: {json.dumps(data[:30], ensure_ascii=False)}
+
+Explain in Thai.
+CRITICAL: You must analyze the data and recommend the best visualization type.
+Return the result as a JSON object with these keys:
+1. "explanation": The Thai explanation text.
+2. "visualization": One of ['bar_chart', 'horizontal_bar', 'line_chart', 'pie_chart', 'donut_chart', 'table', 'single_value', 'grouped_bar']
+3. "chart_config": Object with column mappings for the chart:
+   - "category_column": The column name for X-axis labels (the PRIMARY grouping)
+   - "measure_column": The column name for Y-axis values (e.g., total, sum, amount)
+   - "series_column": (optional) The column for SECONDARY grouping/comparison
+
+IMPORTANT for time-based comparisons:
+- When user asks "รายเดือน" or "by month" → use category=primary_dimension (e.g., account type), series=month
+  Example: "ค่าใช้จ่ายรายหมวดบัญชี แบบรายเดือน" → category=หมวดบัญชี, series=เดือน
+- When user asks "แต่ละเดือน" or "each month" → use category=month, series=secondary_dimension
+  Example: "รายได้แต่ละเดือน แยกตามแผนก" → category=เดือน, series=แผนก
+
+Example for simple bar chart:
+{{
+  "explanation": "ยอดขายแยกตามแผนก...",
+  "visualization": "bar_chart",
+  "chart_config": {{
+    "category_column": "department_name",
+    "measure_column": "total_sales"
+  }}
+}}
+
+Example for comparison (grouped bar):
+{{
+  "explanation": "เปรียบเทียบยอดขาย...",
+  "visualization": "grouped_bar",
+  "chart_config": {{
+    "category_column": "department",
+    "measure_column": "revenue",
+    "series_column": "month"
+  }}
+}}
+"""
         
         def call_api():
             return self.client.models.generate_content(
@@ -383,7 +464,15 @@ class GeminiProvider(AIProvider):
             )
             
         response = await self._run_async(call_api)
-        return response.text
+        text = response.text
+        try:
+            # Try to find JSON block in case there's extra text
+            json_match = re.search(r'\{.*\}', text, re.DOTALL)
+            if json_match:
+                return json.loads(json_match.group(0))
+            return json.loads(text)
+        except:
+            return {"explanation": text}
 
     @ai_retry
     async def generate_content(self, prompt: str, system_prompt: Optional[str] = None) -> str:
@@ -1059,8 +1148,14 @@ Error: {last_error.get('error', '')}
                 if not data:
                     # No data found - add note to explanation
                     explanation = f"ไม่พบข้อมูลที่ตรงกับเงื่อนไข\n\nSQL ที่ใช้:\n```sql\n{sql_query}\n```\n\nอาจเป็นเพราะ:\n- ไม่มีข้อมูลที่ตรงกับคำค้นหา\n- ชื่อคอลัมน์หรือค่าที่ใช้ค้นหาอาจไม่ถูกต้อง"
-                elif len(data) > 0 and len(explanation) < 50:
-                    explanation = f"พบข้อมูล {len(data)} รายการ"
+                elif len(data) > 0:
+                    # Call explain_result to get visualization and chart_config
+                    try:
+                        explanation = await self.provider.explain_result(question, sql_query, data, system_prompt)
+                        logger.info(f"Hybrid Mode: Got explanation with visualization: {type(explanation)}")
+                    except Exception as explain_error:
+                        logger.warning(f"Could not get explanation: {explain_error}")
+                        explanation = f"พบข้อมูล {len(data)} รายการ"
 
                 # Step 5: Calculate confidence score using validation MCP
                 confidence_result = None
