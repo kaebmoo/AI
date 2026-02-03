@@ -1,16 +1,32 @@
 
 import React, { useMemo } from 'react';
 import { View, Text, Dimensions, ScrollView } from 'react-native';
-import { BarChart, LineChart } from 'react-native-gifted-charts';
+import { BarChart, LineChart, PieChart } from 'react-native-gifted-charts';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+
+interface ChartConfig {
+    category_column?: string;
+    measure_column?: string;
+    series_column?: string;
+}
 
 interface DataChartProps {
     data: Record<string, any>[];
+    visualization?: string;
+    chartConfig?: ChartConfig;  // AI-recommended column configuration
 }
 
 // ============================================================
 // Chart Type Detection
 // ============================================================
+
+// Helper to safely parse numbers (remove commas, %, currency symbols)
+const safelyParseNumber = (val: any): number => {
+    if (typeof val === 'number') return val;
+    if (!val) return 0;
+    const strVal = String(val).replace(/,/g, '').replace(/%/g, '').replace(/฿/g, '');
+    return parseFloat(strVal) || 0;
+};
 
 type ChartMode =
     | 'grouped_bar'      // Comparison: Same categories across different periods (e.g., dept revenue month 8 vs 9)
@@ -18,7 +34,9 @@ type ChartMode =
     | 'horizontal_bar'   // Ranking: Many categories
     | 'vertical_bar'     // Few categories comparison
     | 'line'             // Time series trend
-    | 'multi_line';      // Multiple series over time
+    | 'multi_line'       // Multiple series over time
+    | 'pie_chart'        // Proportional (Pie)
+    | 'donut_chart';     // Proportional (Donut)
 
 interface ChartAnalysis {
     mode: ChartMode;
@@ -32,20 +50,128 @@ interface ChartAnalysis {
     percentDiffKey?: string;
 }
 
-export const DataChart = ({ data }: DataChartProps) => {
+export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) => {
     const colorScheme = useColorScheme();
     const isDark = colorScheme === 'dark';
     const screenWidth = Dimensions.get('window').width;
     const chartWidth = Math.min(screenWidth - 64, 500);
 
     // ============================================================
-    // 1. Analyze Data Structure
+    // 1. Analyze Data Structure (AI-first, fallback to pattern detection)
     // ============================================================
 
     const analysis = useMemo((): ChartAnalysis | null => {
         if (!data || data.length < 1) return null;
 
+        // ============================================================
+        // Skip chart for non-chart visualizations
+        // ============================================================
+        if (visualization === 'table' || visualization === 'single_value') {
+            console.log('📊 DataChart: Skipping - visualization is', visualization);
+            return null;
+        }
+
         const keys = Object.keys(data[0]);
+
+        // ============================================================
+        // Check if data has any numerical columns (required for charts)
+        // ============================================================
+        const hasNumericalData = keys.some(key => {
+            const sampleValue = data[0][key];
+            return typeof sampleValue === 'number' ||
+                   (typeof sampleValue === 'string' && !isNaN(parseFloat(sampleValue.replace(/[,%]/g, ''))));
+        });
+
+        if (!hasNumericalData) {
+            console.log('📊 DataChart: Skipping - no numerical data found');
+            return null;
+        }
+
+        // ============================================================
+        // AI-RECOMMENDED CONFIG (Priority) - No more hardcoded patterns!
+        // ============================================================
+        if (chartConfig?.category_column && chartConfig?.measure_column) {
+            const categoryKey = chartConfig.category_column;
+            const measureKey = chartConfig.measure_column;
+            const seriesKey = chartConfig.series_column || '';
+
+            // Normalize keys for case-insensitive matching
+            const lowerKeys = keys.map(k => k.toLowerCase());
+            const findKeyCaseInsensitive = (target: string) => {
+                const idx = lowerKeys.indexOf(target.toLowerCase());
+                return idx !== -1 ? keys[idx] : undefined;
+            };
+
+            const matchedCategoryKey = findKeyCaseInsensitive(categoryKey);
+            const matchedMeasureKey = findKeyCaseInsensitive(measureKey);
+
+            // Verify columns exist in data (using matched keys)
+            if (!matchedCategoryKey || !matchedMeasureKey) {
+                console.warn(`AI columns not found: ${categoryKey}, ${measureKey}. keys: ${keys.join(', ')}`);
+            } else {
+                // Use the actual keys from data
+                const finalCategoryKey = matchedCategoryKey;
+                const finalMeasureKey = matchedMeasureKey;
+                const finalSeriesKey = seriesKey ? findKeyCaseInsensitive(seriesKey) || '' : '';
+                // Build categories
+                const categoryCounts: Record<string, number> = {};
+                data.forEach(row => {
+                    const cat = String(row[finalCategoryKey] || '');
+                    categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
+                });
+                const categories = Object.keys(categoryCounts);
+                const hasRepeatedCategories = Object.values(categoryCounts).some(count => count > 1);
+
+                // Build series values if series column provided
+                let seriesValues: string[] = [];
+                if (finalSeriesKey) {
+                    seriesValues = Array.from(new Set(data.map(d => String(d[finalSeriesKey])))).sort((a, b) => Number(a) - Number(b));
+                }
+
+                // Detect difference columns
+                const differenceKey = keys.find(k => {
+                    const lower = k.toLowerCase();
+                    return (lower.includes('diff') || lower.includes('ผลต่าง') || lower.includes('change')) &&
+                        !lower.includes('percent') && !lower.includes('%');
+                });
+                const percentDiffKey = keys.find(k => {
+                    const lower = k.toLowerCase();
+                    return (lower.includes('%') || lower.includes('percent') || lower.includes('เปอร์เซ็นต์'));
+                });
+
+                // Determine mode from AI visualization recommendation
+                let mode: ChartMode = 'vertical_bar';
+                if (visualization === 'grouped_bar' || (finalSeriesKey && seriesValues.length >= 2 && hasRepeatedCategories)) {
+                    mode = 'grouped_bar';
+                } else if (visualization === 'line_chart') {
+                    mode = categories.length > 1 ? 'multi_line' : 'line';
+                } else if (visualization === 'pie_chart') {
+                    mode = 'pie_chart';
+                } else if (visualization === 'donut_chart') {
+                    mode = 'donut_chart';
+                } else if (visualization === 'horizontal_bar' || categories.length > 5) {
+                    mode = 'horizontal_bar';
+                } else if (visualization === 'bar_chart') {
+                    mode = 'vertical_bar';
+                }
+
+                return {
+                    mode,
+                    categoryKey: finalCategoryKey,
+                    seriesKey: finalSeriesKey,
+                    measureKey: finalMeasureKey,
+                    seriesValues,
+                    categories,
+                    hasDifferenceColumn: !!(differenceKey || percentDiffKey),
+                    differenceKey,
+                    percentDiffKey
+                };
+            }
+        }
+
+        // ============================================================
+        // FALLBACK: Pattern-based detection (legacy support)
+        // ============================================================
 
         // ============================================================
         // Detect Wide Format (Pivoted) - Multiple measure columns for periods
@@ -165,15 +291,30 @@ export const DataChart = ({ data }: DataChartProps) => {
         // Category keys (for grouping)
         const categoryKeys = keys.filter(k => {
             const lower = k.toLowerCase();
-            return ['department', 'ฝ่าย', 'division', 'สายงาน', 'group', 'กลุ่ม', 'province', 'จังหวัด', 'product', 'สินค้า', 'service', 'บริการ', 'name', 'category'].some(term => lower.includes(term)) &&
+            return ['department', 'ฝ่าย', 'division', 'สายงาน', 'group', 'กลุ่ม', 'province', 'จังหวัด', 'product', 'สินค้า', 'service', 'บริการ', 'name', 'category', 'account', 'หมวด', 'บัญชี', 'segment', 'type', 'ประเภท'].some(term => lower.includes(term)) &&
                 !lower.includes('diff') && !lower.includes('percent');
         });
 
-        // Value/Measure keys
+        // Value/Measure keys (use word boundary matching to avoid false positives like "account" matching "count")
+        const measurePatterns = ['total', 'revenue', 'amount', 'sum', 'avg', 'value', 'price', 'cost', 'profit', 'รายได้', 'ยอดรวม', 'จำนวน', 'expense', 'ค่าใช้จ่าย', 'งบประมาณ', 'budget'];
+        // Patterns that need word boundary (to avoid "account" matching "count")
+        const wordBoundaryPatterns = ['count'];
+
         const measureKeys = keys.filter(k => {
             const lower = k.toLowerCase();
-            return ['total', 'revenue', 'amount', 'count', 'value', 'price', 'cost', 'profit', 'รายได้', 'ยอดรวม', 'จำนวน', 'expense', 'ค่าใช้จ่าย'].some(term => lower.includes(term)) &&
-                !lower.includes('diff') && !lower.includes('percent') && !lower.includes('change');
+            // Skip diff/percent/change columns
+            if (lower.includes('diff') || lower.includes('percent') || lower.includes('change')) {
+                return false;
+            }
+            // Check regular patterns (substring match is fine)
+            if (measurePatterns.some(term => lower.includes(term))) {
+                return true;
+            }
+            // Check word-boundary patterns (must be whole word or with underscore)
+            return wordBoundaryPatterns.some(term => {
+                const regex = new RegExp(`(^|_)${term}($|_)`, 'i');
+                return regex.test(lower);
+            });
         });
 
         if (measureKeys.length === 0) return null;
@@ -203,34 +344,70 @@ export const DataChart = ({ data }: DataChartProps) => {
             seriesValues = Array.from(new Set(data.map(d => String(d[yearKey])))).sort();
         }
 
-        // Determine chart mode
-        let mode: ChartMode = 'vertical_bar';
+        const determineChartMode = (): ChartMode => {
+            let mode: ChartMode = 'vertical_bar'; // Default
 
-        if (seriesKey && seriesValues.length >= 2 && hasRepeatedCategories && uniqueCategories.length > 1) {
-            // Comparison mode: Same departments across different months (Must have > 1 category to compare)
-            mode = 'grouped_bar';
-        } else if (monthKey || yearKey) {
-            // Time series
-            mode = uniqueCategories.length > 1 ? 'multi_line' : 'line';
-        } else if (uniqueCategories.length > 5) {
-            // Many categories - use horizontal for readability
-            mode = 'horizontal_bar';
+            if (seriesKey && seriesValues.length >= 2 && hasRepeatedCategories && uniqueCategories.length > 1) {
+                // Comparison mode: Same departments across different months (Must have > 1 category to compare)
+                mode = 'grouped_bar';
+            } else if (monthKey || yearKey) {
+                // Time series
+                mode = uniqueCategories.length > 1 ? 'multi_line' : 'line';
+            } else if (uniqueCategories.length > 5) {
+                // Many categories - use horizontal for readability
+                mode = 'horizontal_bar';
+            }
+            return mode;
+        };
+
+        // ============================================================
+        // 4. Force AI Recommendation
+        // ============================================================
+        let forcedMode: ChartMode | undefined;
+        if (visualization) {
+            if (visualization === 'bar_chart') forcedMode = 'vertical_bar';
+            else if (visualization === 'horizontal_bar') forcedMode = 'horizontal_bar';
+            else if (visualization === 'line_chart') forcedMode = 'line';
+            else if (visualization === 'line_chart') forcedMode = 'line';
+            else if (visualization === 'pie_chart') forcedMode = 'pie_chart';
+            else if (visualization === 'donut_chart') forcedMode = 'donut_chart';
         }
 
+        // ============================================================
+        // 5. Determine Chart Mode
+        // ============================================================
+
         return {
-            mode,
+            mode: forcedMode || determineChartMode(),
             categoryKey,
-            seriesKey,
+            seriesKey: seriesKey || '',
             measureKey,
             seriesValues,
             categories: uniqueCategories,
-            hasDifferenceColumn: !!(differenceKey || percentDiffKey),
+            hasDifferenceColumn: !!differenceKey,
             differenceKey,
             percentDiffKey
         };
-    }, [data]);
+    }, [data, visualization, chartConfig]);
 
-    if (!analysis) return null;
+    // DEBUG: Log analysis result
+    console.log('📊 DataChart Debug:', {
+        visualization,
+        chartConfig,
+        analysis: analysis ? {
+            mode: analysis.mode,
+            categoryKey: analysis.categoryKey,
+            measureKey: analysis.measureKey,
+            categories: analysis.categories?.length
+        } : null,
+        dataKeys: data?.[0] ? Object.keys(data[0]) : [],
+        dataLength: data?.length
+    });
+
+    if (!analysis) {
+        console.warn('❌ DataChart: analysis is null, chart will not render');
+        return null;
+    }
 
     // ============================================================
     // 2. Color Utilities
@@ -322,9 +499,12 @@ export const DataChart = ({ data }: DataChartProps) => {
         return style;
     };
 
-    if (analysis.mode === 'grouped_bar') {
-        // Transform data into grouped format
-        // Each category gets multiple bars (one per series value)
+    // ============================================================
+    // 3. Process Data for Chart
+    // ============================================================
+
+    const groupedChartData = useMemo(() => {
+        if (!analysis || !data) return [];
 
         const groupedData: Record<string, Record<string, number>> = {};
         const diffData: Record<string, { diff?: number; pctDiff?: number }> = {};
@@ -344,16 +524,16 @@ export const DataChart = ({ data }: DataChartProps) => {
 
                 // Read value from each pivoted column
                 pivotedColumns.forEach(col => {
-                    groupedData[category][col.period] = Number(row[col.key] || 0);
+                    groupedData[category][col.period] = safelyParseNumber(row[col.key]);
                 });
 
                 // Store difference data
                 if (!diffData[category]) diffData[category] = {};
                 if (analysis.differenceKey && row[analysis.differenceKey] !== undefined) {
-                    diffData[category].diff = Number(row[analysis.differenceKey]);
+                    diffData[category].diff = safelyParseNumber(row[analysis.differenceKey]);
                 }
                 if (analysis.percentDiffKey && row[analysis.percentDiffKey] !== undefined) {
-                    diffData[category].pctDiff = Number(row[analysis.percentDiffKey]);
+                    diffData[category].pctDiff = safelyParseNumber(row[analysis.percentDiffKey]);
                 }
             });
         } else {
@@ -361,7 +541,7 @@ export const DataChart = ({ data }: DataChartProps) => {
             data.forEach(row => {
                 const category = String(row[analysis.categoryKey] || 'Unknown');
                 const series = String(row[analysis.seriesKey] || '');
-                const value = Number(row[analysis.measureKey] || 0);
+                const value = safelyParseNumber(row[analysis.measureKey]);
 
                 if (!groupedData[category]) {
                     groupedData[category] = {};
@@ -423,8 +603,8 @@ export const DataChart = ({ data }: DataChartProps) => {
             const isHighValue = currentGroupMax > (maxValue * 0.7);
 
             // Smart Position Logic (Refactored)
-            // Note: Grouped Bar charts also use the isHorizontal flag from outer scope, 
-            // but we need to pass it correctly. 
+            // Note: Grouped Bar charts also use the isHorizontal flag from outer scope,
+            // but we need to pass it correctly.
             // Here 'actualCategories.length > 5' determines isHorizontal for Grouped Charts.
             const isGroupedHorizontal = actualCategories.length > 5;
 
@@ -572,7 +752,13 @@ export const DataChart = ({ data }: DataChartProps) => {
                 </Text>
             </View>
         );
+    }, [data, analysis, isDark, chartWidth]); // Added dependencies for useMemo
+
+    if (analysis.mode === 'grouped_bar' || analysis.mode === 'stacked_bar' || analysis.seriesKey === '__pivoted__') {
+        return groupedChartData;
     }
+
+
 
     // ============================================================
     // 4. Original Chart Logic (Line, Horizontal Bar, Vertical Bar)
@@ -582,7 +768,7 @@ export const DataChart = ({ data }: DataChartProps) => {
     const monthKey = keys.find(k => ['month', 'เดือน'].some(term => k.toLowerCase().includes(term)));
     const yearKey = keys.find(k => ['year', 'ปี'].some(term => k.toLowerCase().includes(term)));
     const labelKey = keys.find(k =>
-        ['date', 'label', 'name', 'product', 'department', 'province', 'group', 'category', 'segment', 'ฝ่าย', 'จังหวัด', 'สินค้า']
+        ['date', 'label', 'name', 'product', 'department', 'province', 'group', 'category', 'segment', 'account', 'type', 'ฝ่าย', 'จังหวัด', 'สินค้า', 'หมวด', 'บัญชี', 'ประเภท']
             .some(term => k.toLowerCase().includes(term))
     );
 
@@ -641,7 +827,7 @@ export const DataChart = ({ data }: DataChartProps) => {
                 const points = sortedLabels.map(label => {
                     const items = groupedData[label] || [];
                     const match = items.find(i => String(i[analysis.categoryKey]) === seriesName);
-                    const val = match ? Number(match[analysis.measureKey]) : 0;
+                    const val = match ? safelyParseNumber(match[analysis.measureKey]) : 0;
                     return {
                         value: val,
                         label: label,
@@ -663,7 +849,7 @@ export const DataChart = ({ data }: DataChartProps) => {
         } else {
             processedData = sortedLabels.map(label => {
                 const items = groupedData[label] || [];
-                const val = items.reduce((sum, i) => sum + Number(i[analysis.measureKey]), 0);
+                const val = items.reduce((sum, i) => sum + safelyParseNumber(i[analysis.measureKey]), 0);
                 return {
                     value: val,
                     label: label,

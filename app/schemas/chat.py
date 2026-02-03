@@ -47,6 +47,13 @@ class Confidence(BaseModel):
     recommendation: str = Field(description="Recommendation message in Thai")
 
 
+class ChartConfig(BaseModel):
+    """AI-recommended chart configuration"""
+    category_column: Optional[str] = Field(default=None, description="Column for X-axis labels")
+    measure_column: Optional[str] = Field(default=None, description="Column for Y-axis values")
+    series_column: Optional[str] = Field(default=None, description="Column for grouping/series (for grouped charts)")
+
+
 class ChatResponse(BaseModel):
     id: int
     conversation_id: Optional[str] = None
@@ -59,3 +66,5 @@ class ChatResponse(BaseModel):
     retry_history: Optional[List[RetryAttempt]] = Field(default=None, description="Retry attempt details")
     warnings: Optional[List[DataWarning]] = Field(default=None, description="Data interpretation warnings")
     confidence: Optional[Confidence] = Field(default=None, description="Confidence score for this response")
+    visualization: Optional[str] = Field(default=None, description="Recommended visualization type: bar_chart, line_chart, etc.")
+    chart_config: Optional[ChartConfig] = Field(default=None, description="AI-recommended chart column configuration")
