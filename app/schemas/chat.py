@@ -29,6 +29,24 @@ class DataWarning(BaseModel):
     severity: str = "info"  # info, warning, important
 
 
+class ConfidenceFactor(BaseModel):
+    """Factor used in confidence calculation"""
+    name: str
+    score: int
+    max: int
+    detail: str
+
+
+class Confidence(BaseModel):
+    """Confidence score for query result"""
+    score: int = Field(description="Confidence score 0-100")
+    level: str = Field(description="Level: high, medium, low, very_low")
+    level_th: str = Field(description="Level in Thai")
+    color: str = Field(description="Color indicator: green, yellow, orange, red")
+    factors: List[ConfidenceFactor] = Field(default=[], description="Factors used in calculation")
+    recommendation: str = Field(description="Recommendation message in Thai")
+
+
 class ChatResponse(BaseModel):
     id: int
     conversation_id: Optional[str] = None
@@ -40,3 +58,4 @@ class ChatResponse(BaseModel):
     retry_count: int = Field(default=0, description="Number of retries performed")
     retry_history: Optional[List[RetryAttempt]] = Field(default=None, description="Retry attempt details")
     warnings: Optional[List[DataWarning]] = Field(default=None, description="Data interpretation warnings")
+    confidence: Optional[Confidence] = Field(default=None, description="Confidence score for this response")

@@ -2,20 +2,21 @@
 
 ## Document Information
 
-| รายการ | รายละเอียด |
-|--------|------------|
-| Version | 2.0 |
-| Date | 2025-01-23 |
-| Status | Draft |
-| Changes | เพิ่ม Feedback Loop, Data Retention, Security Enhancements, DevOps Details |
+| รายการ | รายละเอียด                                                            |
+| ------------ | ------------------------------------------------------------------------------- |
+| Version      | 2.0                                                                             |
+| Date         | 2025-01-23                                                                      |
+| Status       | Draft                                                                           |
+| Changes      | เพิ่ม Feedback Loop, Data Retention, Security Enhancements, DevOps Details |
 
 ---
 
 ## Executive Summary
 
-โครงการพัฒนาระบบ AI Assistant สำหรับสอบถามข้อมูลรายได้และยอดขายของ NT ผ่าน Web Application และ Telegram Bot โดยใช้ Claude AI เป็นตัวประมวลผลคำถามและสร้าง SQL Query
+โครงการพัฒนาระบบ AI Assistant สำหรับสอบถามข้อมูลรายได้ ยอดขาย ค่าใช้จ่าย หรือข้อมูลทางการเงินของ NT ผ่าน Web Application และ Telegram Bot โดยใช้ Claude AI เป็นตัวประมวลผลคำถามและสร้าง SQL Query
 
 **เป้าหมายหลัก:**
+
 - ให้บริการสอบถามข้อมูลรายได้/ยอดขายผ่าน Web App และ Telegram Bot
 - ระบบ Authentication ที่ปลอดภัยด้วย Email OTP (จำกัด Domain)
 - ระบบควบคุมและ Audit Log ที่ครบถ้วน
@@ -179,21 +180,21 @@
 
 ### Phase Overview (Updated)
 
-| Phase | ระยะเวลา | รายละเอียด | Status |
-|-------|----------|------------|--------|
-| Phase 1 | 2 สัปดาห์ | Infrastructure & Core Setup | |
-| Phase 2 | 3 สัปดาห์ | Authentication & Security | |
-| Phase 3 | 3 สัปดาห์ | Core Features (Chat, Query) | |
-| **Phase 3.5** | **1 สัปดาห์** | **[NEW] Feedback Loop & Logging** | |
-| **Phase 4** | **3 สัปดาห์** | **[NEW] Universal Frontend (Expo)** | |
-| **Phase 4.5** | **1 สัปดาห์** | **[NEW] Telegram Bot Integration** | |
-| Phase 5 | 2 สัปดาห์ | Reports & Export | |
-| Phase 6 | 2 สัปดาห์ | Dashboard & Visualization | |
-| Phase 7 | 2 สัปดาห์ | Templates & Scheduling | |
-| Phase 7 | 2 สัปดาห์ | Testing & Security Audit | |
-| **Phase 7.5** | **0.5 สัปดาห์** | **[NEW] DR Drill & Backup Test** | |
-| Phase 8 | 1 สัปดาห์ | Deployment & Go-Live | |
-| **Total** | **19 สัปดาห์** | (~4.5 เดือน) | |
+| Phase               | ระยะเวลา             | รายละเอียด                      | Status |
+| ------------------- | ---------------------------- | ----------------------------------------- | ------ |
+| Phase 1             | 2 สัปดาห์             | Infrastructure & Core Setup               |        |
+| Phase 2             | 3 สัปดาห์             | Authentication & Security                 |        |
+| Phase 3             | 3 สัปดาห์             | Core Features (Chat, Query)               |        |
+| **Phase 3.5** | **1 สัปดาห์**   | **[NEW] Feedback Loop & Logging**   |        |
+| **Phase 4**   | **3 สัปดาห์**   | **[NEW] Universal Frontend (Expo)** |        |
+| **Phase 4.5** | **1 สัปดาห์**   | **[NEW] Telegram Bot Integration**  |        |
+| Phase 5             | 2 สัปดาห์             | Reports & Export                          |        |
+| Phase 6             | 2 สัปดาห์             | Dashboard & Visualization                 |        |
+| Phase 7             | 2 สัปดาห์             | Templates & Scheduling                    |        |
+| Phase 7             | 2 สัปดาห์             | Testing & Security Audit                  |        |
+| **Phase 7.5** | **0.5 สัปดาห์** | **[NEW] DR Drill & Backup Test**    |        |
+| Phase 8             | 1 สัปดาห์             | Deployment & Go-Live                      |        |
+| **Total**     | **19 สัปดาห์**  | (~4.5 เดือน)                         |        |
 
 ---
 
@@ -204,6 +205,7 @@
 #### Week 1: Infrastructure Preparation
 
 **Tasks:**
+
 - [ ] Setup Git repository (GitLab/GitHub)
 - [ ] Create Docker development environment
 - [ ] Setup PostgreSQL database server
@@ -214,6 +216,7 @@
 - [ ] **[NEW]** Setup centralized logging structure
 
 **[NEW] Logging Configuration:**
+
 ```python
 # app/core/logging.py
 import logging
@@ -227,7 +230,7 @@ request_id_var: ContextVar[Optional[str]] = ContextVar('request_id', default=Non
 
 class PIIRedactingFormatter(logging.Formatter):
     """Formatter that redacts PII from log messages"""
-    
+  
     PII_PATTERNS = [
         (r'[\w\.-]+@[\w\.-]+\.\w+', '[EMAIL_REDACTED]'),
         (r'\b\d{10}\b', '[PHONE_REDACTED]'),
@@ -236,22 +239,22 @@ class PIIRedactingFormatter(logging.Formatter):
         (r'token["\']?\s*[:=]\s*["\']?[^"\'\s]+', 'token=[REDACTED]'),
         (r'otp["\']?\s*[:=]\s*["\']?\d+', 'otp=[REDACTED]'),
     ]
-    
+  
     def format(self, record: logging.LogRecord) -> str:
         message = super().format(record)
-        
+      
         for pattern, replacement in self.PII_PATTERNS:
             message = re.sub(pattern, replacement, message, flags=re.IGNORECASE)
-        
+      
         return message
 
 class StructuredLogFormatter(PIIRedactingFormatter):
     """JSON structured logging with request_id correlation"""
-    
+  
     def format(self, record: logging.LogRecord) -> str:
         # Get request_id from context
         request_id = request_id_var.get()
-        
+      
         log_data = {
             "timestamp": self.formatTime(record),
             "level": record.levelname,
@@ -262,40 +265,41 @@ class StructuredLogFormatter(PIIRedactingFormatter):
             "function": record.funcName,
             "line": record.lineno,
         }
-        
+      
         # Add exception info if present
         if record.exc_info:
             log_data["exception"] = self.formatException(record.exc_info)
-        
+      
         # Add extra fields
         if hasattr(record, 'extra_data'):
             log_data["extra"] = record.extra_data
-        
+      
         formatted = json.dumps(log_data, ensure_ascii=False)
-        
+      
         # Apply PII redaction
         for pattern, replacement in self.PII_PATTERNS:
             formatted = re.sub(pattern, replacement, formatted, flags=re.IGNORECASE)
-        
+      
         return formatted
 
 def setup_logging():
     """Configure application logging"""
-    
+  
     handler = logging.StreamHandler()
     handler.setFormatter(StructuredLogFormatter())
-    
+  
     # Root logger
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
     root_logger.addHandler(handler)
-    
+  
     # Reduce noise from libraries
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
 ```
 
 **[NEW] Request ID Middleware:**
+
 ```python
 # app/core/middleware.py
 import uuid
@@ -305,29 +309,30 @@ from app.core.logging import request_id_var
 
 class RequestIDMiddleware(BaseHTTPMiddleware):
     """Add request_id to all requests for log correlation"""
-    
+  
     async def dispatch(self, request: Request, call_next):
         # Get or generate request_id
         request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
-        
+      
         # Set in context for logging
         request_id_var.set(request_id)
-        
+      
         # Add to request state for handlers
         request.state.request_id = request_id
-        
+      
         # Process request
         response = await call_next(request)
-        
+      
         # Add to response headers
         response.headers["X-Request-ID"] = request_id
-        
+      
         return response
 ```
 
 #### Week 2: Project Structure & Base Code
 
 **Project Structure (Updated):**
+
 ```
 nt-revenue-assistant/
 ├── docker/
@@ -429,6 +434,7 @@ nt-revenue-assistant/
 ### 2.3 [NEW] WAF & Rate Limiting Configuration
 
 **NGINX Rate Limiting by Path:**
+
 ```nginx
 # /etc/nginx/conf.d/rate_limit.conf
 
@@ -442,53 +448,53 @@ limit_req_zone $binary_remote_addr zone=report_limit:10m rate=10r/m;
 server {
     listen 443 ssl;
     server_name revenue.nt.co.th;
-    
+  
     # SSL configuration
     ssl_certificate /etc/ssl/certs/revenue.nt.co.th.crt;
     ssl_certificate_key /etc/ssl/private/revenue.nt.co.th.key;
-    
+  
     # Security headers
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-XSS-Protection "1; mode=block" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-    
+  
     # Block suspicious user agents
     if ($http_user_agent ~* (bot|crawler|spider|scraper)) {
         return 403;
     }
-    
+  
     # Rate limited endpoints
     location /api/v1/auth/login {
         limit_req zone=login_limit burst=3 nodelay;
         limit_req_status 429;
         proxy_pass http://app:8000;
     }
-    
+  
     location /api/v1/auth/otp {
         limit_req zone=otp_limit burst=2 nodelay;
         limit_req_status 429;
         proxy_pass http://app:8000;
     }
-    
+  
     location /api/v1/chat {
         limit_req zone=chat_limit burst=10;
         limit_req_status 429;
         proxy_pass http://app:8000;
     }
-    
+  
     location /api/v1/reports {
         limit_req zone=report_limit burst=5;
         limit_req_status 429;
         proxy_pass http://app:8000;
     }
-    
+  
     location /api/ {
         limit_req zone=api_limit burst=20;
         limit_req_status 429;
         proxy_pass http://app:8000;
     }
-    
+  
     location / {
         proxy_pass http://app:8000;
     }
@@ -504,6 +510,7 @@ server {
 ### 3.3 [NEW] Prompt Manager Service
 
 **Prompt Versioning:**
+
 ```python
 # app/services/prompt_manager.py
 from typing import List, Dict, Optional
@@ -516,41 +523,41 @@ from app.config import settings
 
 class PromptManager:
     """Manage prompt versions and few-shot examples"""
-    
+  
     def __init__(self, db: Session):
         self.db = db
         self._cache = {}
-    
+  
     def get_active_prompt(self) -> PromptVersion:
         """Get currently active prompt version"""
         if 'active_prompt' in self._cache:
             return self._cache['active_prompt']
-        
+      
         prompt = self.db.query(PromptVersion).filter(
             PromptVersion.is_active == True
         ).order_by(PromptVersion.created_at.desc()).first()
-        
+      
         if not prompt:
             # Create default prompt if none exists
             prompt = self._create_default_prompt()
-        
+      
         self._cache['active_prompt'] = prompt
         return prompt
-    
+  
     def get_few_shot_examples(self, category: Optional[str] = None, limit: int = 5) -> List[Dict]:
         """Get few-shot examples for prompt"""
-        
+      
         query = self.db.query(GoldenExample).filter(
             GoldenExample.is_active == True
         )
-        
+      
         if category:
             query = query.filter(GoldenExample.category == category)
-        
+      
         examples = query.order_by(
             GoldenExample.usage_count.desc()
         ).limit(limit).all()
-        
+      
         return [
             {
                 "question": ex.question_pattern,
@@ -558,13 +565,13 @@ class PromptManager:
             }
             for ex in examples
         ]
-    
+  
     def build_system_prompt(self, schema_info: str) -> str:
         """Build complete system prompt with few-shot examples"""
-        
+      
         active_prompt = self.get_active_prompt()
         examples = self.get_few_shot_examples(limit=5)
-        
+      
         # Build few-shot section
         few_shot_section = ""
         if examples:
@@ -577,19 +584,23 @@ SQL:
 ```sql
 {ex['sql']}
 ```
+
 """
-        
-        # Combine all parts
+
+    # Combine all parts
         full_prompt = f"""{active_prompt.system_prompt}
 
 ## Database Schema
+
 {schema_info}
 {few_shot_section}
+
 ## Prompt Version
+
 Version: {active_prompt.version}
 """
         return full_prompt
-    
+
     def create_new_version(
         self,
         system_prompt: str,
@@ -597,15 +608,15 @@ Version: {active_prompt.version}
         notes: str = ""
     ) -> PromptVersion:
         """Create new prompt version (doesn't activate it)"""
-        
-        # Get next version number
+
+    # Get next version number
         latest = self.db.query(PromptVersion).order_by(
             PromptVersion.version.desc()
         ).first()
-        
-        next_version = (latest.version + 1) if latest else 1
-        
-        new_prompt = PromptVersion(
+
+    next_version = (latest.version + 1) if latest else 1
+
+    new_prompt = PromptVersion(
             version=next_version,
             system_prompt=system_prompt,
             created_at=datetime.utcnow(),
@@ -613,37 +624,38 @@ Version: {active_prompt.version}
             is_active=False,
             notes=notes
         )
-        
-        self.db.add(new_prompt)
+
+    self.db.add(new_prompt)
         self.db.commit()
-        
-        return new_prompt
-    
+
+    return new_prompt
+
     def activate_version(self, version_id: int):
         """Activate a specific prompt version"""
-        
-        # Deactivate all
+
+    # Deactivate all
         self.db.query(PromptVersion).update({"is_active": False})
-        
-        # Activate selected
+
+    # Activate selected
         self.db.query(PromptVersion).filter(
             PromptVersion.id == version_id
         ).update({"is_active": True})
-        
-        self.db.commit()
-        
-        # Clear cache
+
+    self.db.commit()
+
+    # Clear cache
         self._cache.pop('active_prompt', None)
-    
+
     def rollback_to_version(self, version: int):
         """Rollback to a previous prompt version"""
-        
-        prompt = self.db.query(PromptVersion).filter(
+
+    prompt = self.db.query(PromptVersion).filter(
             PromptVersion.version == version
         ).first()
-        
-        if prompt:
+
+    if prompt:
             self.activate_version(prompt.id)
+
 ```
 
 ---
@@ -659,6 +671,7 @@ Version: {active_prompt.version}
 
 ### 4.1 Project Setup
 ```
+
 frontend/
 ├── app/                  # Expo Router pages
 │   ├── (auth)/           # Authentication group
@@ -673,6 +686,7 @@ frontend/
 ├── constants/            # Config & Colors
 ├── hooks/                # Custom React Hooks
 └── services/             # API services
+
 ```
 
 ### 4.2 Key Features
@@ -724,26 +738,27 @@ class FeedbackCategory(enum.Enum):
 
 class UserFeedback(Base):
     __tablename__ = "user_feedback"
-    
+  
     id = Column(Integer, primary_key=True)
     chat_id = Column(Integer, ForeignKey("chat_history.id"), nullable=False)
     rating = Column(Enum(FeedbackRating), nullable=False)
     feedback_category = Column(Enum(FeedbackCategory), nullable=True)
     feedback_text = Column(Text, nullable=True)
     created_at = Column(DateTime, nullable=False)
-    
+  
     # Review fields (for admin)
     reviewed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     reviewed_at = Column(DateTime, nullable=True)
     review_notes = Column(Text, nullable=True)
     is_golden_example = Column(Boolean, default=False)
-    
+  
     # Relationships
     chat = relationship("ChatHistory", back_populates="feedback")
     reviewer = relationship("User", foreign_keys=[reviewed_by])
 ```
 
 **Feedback Service:**
+
 ```python
 # app/services/feedback_service.py
 from typing import List, Optional, Dict, Any
@@ -758,7 +773,7 @@ from app.models.golden_example import GoldenExample
 class FeedbackService:
     def __init__(self, db: Session):
         self.db = db
-    
+  
     def submit_feedback(
         self,
         chat_id: int,
@@ -767,7 +782,7 @@ class FeedbackService:
         feedback_text: Optional[str] = None
     ) -> UserFeedback:
         """Submit user feedback for a chat response"""
-        
+      
         feedback = UserFeedback(
             chat_id=chat_id,
             rating=rating,
@@ -775,30 +790,30 @@ class FeedbackService:
             feedback_text=feedback_text,
             created_at=datetime.utcnow()
         )
-        
+      
         self.db.add(feedback)
         self.db.commit()
-        
+      
         return feedback
-    
+  
     def get_pending_reviews(
         self,
         limit: int = 50,
         include_thumbs_up: bool = False
     ) -> List[Dict[str, Any]]:
         """Get feedback items pending admin review"""
-        
+      
         query = self.db.query(UserFeedback, ChatHistory).join(
             ChatHistory, UserFeedback.chat_id == ChatHistory.id
         ).filter(
             UserFeedback.reviewed_at.is_(None)
         )
-        
+      
         if not include_thumbs_up:
             query = query.filter(UserFeedback.rating == FeedbackRating.THUMBS_DOWN)
-        
+      
         results = query.order_by(UserFeedback.created_at.desc()).limit(limit).all()
-        
+      
         return [
             {
                 "feedback": feedback,
@@ -809,7 +824,7 @@ class FeedbackService:
             }
             for feedback, chat in results
         ]
-    
+  
     def mark_as_golden_example(
         self,
         feedback_id: int,
@@ -818,29 +833,29 @@ class FeedbackService:
         review_notes: Optional[str] = None
     ):
         """Mark a chat as a golden example for few-shot learning"""
-        
+      
         feedback = self.db.query(UserFeedback).filter(
             UserFeedback.id == feedback_id
         ).first()
-        
+      
         if not feedback:
             raise ValueError("Feedback not found")
-        
+      
         # Update feedback
         feedback.reviewed_by = reviewer_id
         feedback.reviewed_at = datetime.utcnow()
         feedback.review_notes = review_notes
         feedback.is_golden_example = True
-        
+      
         # Get the chat
         chat = self.db.query(ChatHistory).filter(
             ChatHistory.id == feedback.chat_id
         ).first()
-        
+      
         # Create golden example
         import json
         sql_queries = json.loads(chat.generated_sql) if chat.generated_sql else []
-        
+      
         golden = GoldenExample(
             chat_id=chat.id,
             question_pattern=chat.question,
@@ -850,30 +865,30 @@ class FeedbackService:
             added_by=reviewer_id,
             created_at=datetime.utcnow()
         )
-        
+      
         self.db.add(golden)
         self.db.commit()
-    
+  
     def get_feedback_stats(self, days: int = 30) -> Dict[str, Any]:
         """Get feedback statistics for dashboard"""
-        
+      
         since = datetime.utcnow() - timedelta(days=days)
-        
+      
         # Total counts
         total = self.db.query(func.count(UserFeedback.id)).filter(
             UserFeedback.created_at >= since
         ).scalar()
-        
+      
         thumbs_up = self.db.query(func.count(UserFeedback.id)).filter(
             UserFeedback.created_at >= since,
             UserFeedback.rating == FeedbackRating.THUMBS_UP
         ).scalar()
-        
+      
         thumbs_down = self.db.query(func.count(UserFeedback.id)).filter(
             UserFeedback.created_at >= since,
             UserFeedback.rating == FeedbackRating.THUMBS_DOWN
         ).scalar()
-        
+      
         # Category breakdown
         category_counts = self.db.query(
             UserFeedback.feedback_category,
@@ -882,7 +897,7 @@ class FeedbackService:
             UserFeedback.created_at >= since,
             UserFeedback.feedback_category.isnot(None)
         ).group_by(UserFeedback.feedback_category).all()
-        
+      
         return {
             "total": total,
             "thumbs_up": thumbs_up,
@@ -899,6 +914,7 @@ class FeedbackService:
 ```
 
 **Feedback API Endpoints:**
+
 ```python
 # app/api/v1/feedback.py
 from fastapi import APIRouter, Depends, HTTPException
@@ -923,16 +939,16 @@ async def submit_feedback(
     db: Session = Depends(get_db)
 ):
     """Submit feedback for a chat response"""
-    
+  
     service = FeedbackService(db)
-    
+  
     result = service.submit_feedback(
         chat_id=chat_id,
         rating=feedback.rating,
         category=feedback.category,
         feedback_text=feedback.feedback_text
     )
-    
+  
     return result
 
 @router.get("/stats", response_model=FeedbackStatsResponse)
@@ -942,7 +958,7 @@ async def get_feedback_stats(
     db: Session = Depends(get_db)
 ):
     """Get feedback statistics (admin only)"""
-    
+  
     service = FeedbackService(db)
     return service.get_feedback_stats(days)
 
@@ -953,7 +969,7 @@ async def get_pending_reviews(
     db: Session = Depends(get_db)
 ):
     """Get feedback items pending review (admin only)"""
-    
+  
     service = FeedbackService(db)
     return service.get_pending_reviews(limit)
 
@@ -965,9 +981,9 @@ async def review_feedback(
     db: Session = Depends(get_db)
 ):
     """Review feedback and optionally mark as golden example"""
-    
+  
     service = FeedbackService(db)
-    
+  
     if review.is_golden_example:
         service.mark_as_golden_example(
             feedback_id=feedback_id,
@@ -975,13 +991,14 @@ async def review_feedback(
             category=review.category,
             review_notes=review.notes
         )
-    
+  
     return {"status": "reviewed"}
 ```
 
 ### 3.5.2 Trending Queries
 
 **Trending Service:**
+
 ```python
 # app/services/trending_service.py
 from typing import List, Dict
@@ -995,22 +1012,22 @@ from app.models.trending import TrendingQuery
 class TrendingService:
     def __init__(self, db: Session):
         self.db = db
-    
+  
     def get_trending_queries(self, limit: int = 10) -> List[Dict]:
         """Get trending/popular queries"""
-        
+      
         return self.db.query(TrendingQuery).filter(
             TrendingQuery.is_featured == True
         ).order_by(
             TrendingQuery.usage_count_week.desc()
         ).limit(limit).all()
-    
+  
     def update_trending_stats(self):
         """Update trending statistics (called by Celery)"""
-        
+      
         today = datetime.utcnow().date()
         week_ago = today - timedelta(days=7)
-        
+      
         # Get popular query patterns from last week
         popular = self.db.query(
             ChatHistory.question,
@@ -1024,13 +1041,13 @@ class TrendingService:
         ).order_by(
             func.count(ChatHistory.id).desc()
         ).limit(20).all()
-        
+      
         # Update or create trending records
         for question, count in popular:
             existing = self.db.query(TrendingQuery).filter(
                 TrendingQuery.query_pattern == question
             ).first()
-            
+          
             if existing:
                 existing.usage_count_week = count
                 existing.last_used_at = datetime.utcnow()
@@ -1042,13 +1059,14 @@ class TrendingService:
                     last_used_at=datetime.utcnow()
                 )
                 self.db.add(new_trending)
-        
+      
         self.db.commit()
 ```
 
 ### 3.5.3 Admin Review Dashboard
 
 **Admin Dashboard Endpoints:**
+
 ```python
 # app/api/v1/admin.py (extended)
 
@@ -1058,9 +1076,9 @@ async def get_review_dashboard(
     db: Session = Depends(get_db)
 ):
     """Get admin review dashboard data"""
-    
+  
     feedback_service = FeedbackService(db)
-    
+  
     return {
         "feedback_stats": feedback_service.get_feedback_stats(30),
         "pending_reviews": feedback_service.get_pending_reviews(20),
@@ -1071,7 +1089,7 @@ async def get_review_dashboard(
 
 def get_slow_queries(db: Session, threshold_ms: int, limit: int):
     """Get queries that took longer than threshold"""
-    
+  
     return db.query(ChatHistory).filter(
         ChatHistory.execution_time_ms > threshold_ms
     ).order_by(
@@ -1080,7 +1098,7 @@ def get_slow_queries(db: Session, threshold_ms: int, limit: int):
 
 def get_empty_result_queries(db: Session, limit: int):
     """Get queries that returned no results"""
-    
+  
     return db.query(ChatHistory).filter(
         ChatHistory.sql_result_summary.like('%0 rows%')
     ).order_by(
@@ -1089,6 +1107,7 @@ def get_empty_result_queries(db: Session, limit: int):
 ```
 
 **Deliverables Phase 3.5:**
+
 - [ ] User feedback submission (thumbs up/down)
 - [ ] Feedback categories
 - [ ] Admin review dashboard
@@ -1110,6 +1129,7 @@ def get_empty_result_queries(db: Session, limit: int):
 ### 7.1 [NEW] Mock Claude API for Testing
 
 **Mock Configuration:**
+
 ```python
 # tests/conftest.py
 import pytest
@@ -1126,33 +1146,33 @@ def mock_claude_responses():
 @pytest.fixture
 def mock_claude_client(mock_claude_responses):
     """Mock Anthropic client for testing without API calls"""
-    
+  
     with patch("anthropic.Anthropic") as MockAnthropic:
         mock_client = MagicMock()
         MockAnthropic.return_value = mock_client
-        
+      
         # Mock messages.create
         def mock_create(**kwargs):
             # Determine response based on message content
             user_message = kwargs.get("messages", [{}])[-1].get("content", "")
-            
+          
             # Find matching mock response
             for pattern, response in mock_claude_responses.items():
                 if pattern.lower() in user_message.lower():
                     return create_mock_message(response)
-            
+          
             # Default response
             return create_mock_message(mock_claude_responses.get("default", {}))
-        
+      
         mock_client.messages.create = Mock(side_effect=mock_create)
-        
+      
         yield mock_client
 
 def create_mock_message(response_data: dict) -> Message:
     """Create mock Message object"""
-    
+  
     content = []
-    
+  
     # Add tool use if present
     if "tool_use" in response_data:
         tool_use = response_data["tool_use"]
@@ -1162,11 +1182,11 @@ def create_mock_message(response_data: dict) -> Message:
             name=tool_use["name"],
             input=tool_use["input"]
         ))
-    
+  
     # Add text response
     if "text" in response_data:
         content.append(TextBlock(type="text", text=response_data["text"]))
-    
+  
     return Message(
         id="test_msg_id",
         type="message",
@@ -1182,6 +1202,7 @@ def create_mock_message(response_data: dict) -> Message:
 ```
 
 **Mock Responses Fixture:**
+
 ```json
 // tests/fixtures/claude_responses.json
 {
@@ -1219,69 +1240,70 @@ def create_mock_message(response_data: dict) -> Message:
 ```
 
 **Example Test with Mocked Claude:**
+
 ```python
 # tests/unit/test_claude_service.py
 import pytest
 from app.services.claude_service import ClaudeRevenueAssistant
 
 class TestClaudeService:
-    
+  
     @pytest.mark.asyncio
     async def test_chat_returns_response(self, mock_claude_client, mock_db_service):
         """Test that chat returns a proper response"""
-        
+      
         assistant = ClaudeRevenueAssistant(
             db_service=mock_db_service,
             cache_service=Mock(),
             cost_service=Mock(),
             audit_service=Mock()
         )
-        
+      
         result = await assistant.chat(
             user_id=1,
             message="รายได้รวมเดือนล่าสุด",
             session_id=1
         )
-        
+      
         assert "response" in result
         assert "sql_queries" in result
         assert "tokens_used" in result
-        
+      
         # Verify no real API calls were made
         # (mock would raise if called with unexpected args)
-    
+  
     @pytest.mark.asyncio
     async def test_chat_cost_tracking(self, mock_claude_client, mock_db_service):
         """Test that API costs are tracked"""
-        
+      
         cost_service = Mock()
-        
+      
         assistant = ClaudeRevenueAssistant(
             db_service=mock_db_service,
             cache_service=Mock(),
             cost_service=cost_service,
             audit_service=Mock()
         )
-        
+      
         await assistant.chat(
             user_id=1,
             message="รายได้รวม",
             session_id=1
         )
-        
+      
         # Verify cost was logged
         cost_service.log_usage.assert_called_once()
 ```
 
 ### 7.2 Testing Strategy (Updated)
 
-| Category | Tools | Coverage Target | Notes |
-|----------|-------|-----------------|-------|
-| Unit Tests | pytest + mocks | 80%+ | **Mock Claude API** |
-| Integration Tests | pytest + testcontainers | API endpoints | Use test DB |
-| E2E Tests | Playwright | Critical flows | Staging environment |
-| Load Tests | Locust | 100 concurrent | Mock Claude for cost |
-| Security Tests | OWASP ZAP | OWASP Top 10 | Manual + automated |
+| Category          | Tools                   | Coverage Target | Notes                     |
+| ----------------- | ----------------------- | --------------- | ------------------------- |
+| Unit Tests        | pytest + mocks          | 80%+            | **Mock Claude API** |
+| Integration Tests | pytest + testcontainers | API endpoints   | Use test DB               |
+| E2E Tests         | Playwright              | Critical flows  | Staging environment       |
+| Load Tests        | Locust                  | 100 concurrent  | Mock Claude for cost      |
+| Security Tests    | OWASP ZAP               | OWASP Top 10    | Manual + automated        |
 
 ---
 
@@ -1290,6 +1312,7 @@ class TestClaudeService:
 ### 7.5.1 Backup Strategy
 
 **Backup Configuration:**
+
 ```yaml
 # docker/backup/backup-config.yml
 backup:
@@ -1315,6 +1338,7 @@ backup:
 ```
 
 **Backup Script:**
+
 ```bash
 #!/bin/bash
 # scripts/backup.sh
@@ -1365,6 +1389,7 @@ echo "Backup location: $BACKUP_DIR.tar.gz"
 ```
 
 **Restore Script:**
+
 ```bash
 #!/bin/bash
 # scripts/restore.sh
@@ -1431,6 +1456,7 @@ echo "Old database preserved as 'nt_assistant_old'"
 ### 7.5.2 DR Drill Checklist
 
 **Pre-Migration Backup Test:**
+
 - [ ] Take full backup before migration
 - [ ] Verify backup file integrity (checksum)
 - [ ] Test restore to separate environment
@@ -1438,6 +1464,7 @@ echo "Old database preserved as 'nt_assistant_old'"
 - [ ] Document restore time
 
 **DR Drill Steps:**
+
 1. [ ] Schedule maintenance window
 2. [ ] Notify stakeholders
 3. [ ] Take fresh backup
@@ -1449,10 +1476,11 @@ echo "Old database preserved as 'nt_assistant_old'"
 9. [ ] Update runbook if needed
 
 **Recovery Time Objectives:**
-| Scenario | RTO | RPO |
-|----------|-----|-----|
-| Database corruption | 1 hour | 6 hours |
-| Server failure | 2 hours | 6 hours |
+
+| Scenario              | RTO     | RPO      |
+| --------------------- | ------- | -------- |
+| Database corruption   | 1 hour  | 6 hours  |
+| Server failure        | 2 hours | 6 hours  |
 | Complete site failure | 4 hours | 24 hours |
 
 ---
@@ -1462,6 +1490,7 @@ echo "Old database preserved as 'nt_assistant_old'"
 ### 8.1 [NEW] CI/CD Pipeline Details
 
 **GitLab CI/CD Pipeline:**
+
 ```yaml
 # .gitlab-ci.yml
 stages:
@@ -1636,14 +1665,14 @@ deploy-production:
 
 ### 9.1 Retention Policy
 
-| Data Type | Hot Storage | Cold Storage | Delete |
-|-----------|-------------|--------------|--------|
-| chat_history | 6 เดือน | 2 ปี | 5 ปี |
-| audit_logs | 1 ปี | 7 ปี | 10 ปี |
-| user_feedback | 1 ปี | 3 ปี | 5 ปี |
-| generated_reports | 3 เดือน | 1 ปี | 2 ปี |
-| api_usage_logs | 3 เดือน | 1 ปี | 2 ปี |
-| user_sessions | 30 วัน | - | 90 วัน |
+| Data Type         | Hot Storage  | Cold Storage | Delete    |
+| ----------------- | ------------ | ------------ | --------- |
+| chat_history      | 6 เดือน | 2 ปี       | 5 ปี    |
+| audit_logs        | 1 ปี       | 7 ปี       | 10 ปี   |
+| user_feedback     | 1 ปี       | 3 ปี       | 5 ปี    |
+| generated_reports | 3 เดือน | 1 ปี       | 2 ปี    |
+| api_usage_logs    | 3 เดือน | 1 ปี       | 2 ปี    |
+| user_sessions     | 30 วัน    | -            | 90 วัน |
 
 ### 9.2 Archive Service
 
@@ -1666,31 +1695,31 @@ class ArchiveService:
     def __init__(self, db: Session, storage: StorageService):
         self.db = db
         self.storage = storage
-    
+  
     def archive_old_data(self, table: str, days_old: int) -> Dict:
         """Archive data older than specified days"""
-        
+      
         cutoff_date = datetime.utcnow() - timedelta(days=days_old)
-        
+      
         if table == "chat_history":
             return self._archive_chat_history(cutoff_date)
         elif table == "audit_logs":
             return self._archive_audit_logs(cutoff_date)
         else:
             raise ValueError(f"Unknown table: {table}")
-    
+  
     def _archive_chat_history(self, cutoff_date: datetime) -> Dict:
         """Archive chat history to cold storage"""
-        
+      
         # Get records to archive
         records = self.db.query(ChatHistory).filter(
             ChatHistory.created_at < cutoff_date,
             ChatHistory.is_bookmarked == False  # Don't archive bookmarked
         ).limit(10000).all()
-        
+      
         if not records:
             return {"archived": 0}
-        
+      
         # Convert to JSON
         data = [
             {
@@ -1704,18 +1733,18 @@ class ArchiveService:
             }
             for r in records
         ]
-        
+      
         # Compress and upload
         json_data = json.dumps(data, ensure_ascii=False)
         compressed = gzip.compress(json_data.encode('utf-8'))
-        
+      
         # Generate archive filename
         date_range = f"{records[-1].created_at.date()}_to_{records[0].created_at.date()}"
         filename = f"archives/chat_history/{date_range}.json.gz"
-        
+      
         # Upload to cold storage
         file_path = self.storage.upload(filename, compressed)
-        
+      
         # Record archive metadata
         archive_record = DataArchive(
             source_table="chat_history",
@@ -1727,36 +1756,36 @@ class ArchiveService:
             file_size_bytes=len(compressed)
         )
         self.db.add(archive_record)
-        
+      
         # Delete archived records
         record_ids = [r.id for r in records]
         self.db.query(ChatHistory).filter(
             ChatHistory.id.in_(record_ids)
         ).delete(synchronize_session=False)
-        
+      
         self.db.commit()
-        
+      
         return {
             "archived": len(records),
             "file_path": file_path,
             "file_size_mb": len(compressed) / 1024 / 1024
         }
-    
+  
     def restore_from_archive(self, archive_id: int) -> Dict:
         """Restore data from archive (for audit/legal purposes)"""
-        
+      
         archive = self.db.query(DataArchive).filter(
             DataArchive.id == archive_id
         ).first()
-        
+      
         if not archive:
             raise ValueError("Archive not found")
-        
+      
         # Download and decompress
         compressed = self.storage.download(archive.archive_file_path)
         json_data = gzip.decompress(compressed).decode('utf-8')
         records = json.loads(json_data)
-        
+      
         return {
             "source_table": archive.source_table,
             "record_count": len(records),
@@ -1766,6 +1795,7 @@ class ArchiveService:
 ```
 
 **Archive Worker (Celery):**
+
 ```python
 # app/workers/archive_worker.py
 from celery import Celery
@@ -1777,23 +1807,23 @@ celery_app = Celery('tasks', broker=settings.REDIS_URL)
 @celery_app.task
 def run_daily_archive():
     """Run daily archival job"""
-    
+  
     archive_service = ArchiveService(...)
-    
+  
     results = {}
-    
+  
     # Archive chat_history older than 6 months
     results["chat_history"] = archive_service.archive_old_data(
         table="chat_history",
         days_old=180
     )
-    
+  
     # Archive audit_logs older than 1 year
     results["audit_logs"] = archive_service.archive_old_data(
         table="audit_logs",
         days_old=365
     )
-    
+  
     return results
 
 # Schedule
@@ -1809,16 +1839,16 @@ celery_app.conf.beat_schedule['daily-archive'] = {
 
 ### Features ที่ไม่จำเป็นในตอนนี้ แต่ควรพิจารณาเมื่อ:
 
-| Feature | ควรทำเมื่อ | เหตุผล |
-|---------|-----------|--------|
-| **OpenTelemetry/Jaeger (Distributed Tracing)** | มี services > 10 ตัว หรือ debug ยากขึ้น | ระบบปัจจุบันมี 4-5 services ใช้ request_id correlation เพียงพอ |
-| **Terraform/Ansible (IaC)** | ย้ายไป cloud หรือต้อง provision servers บ่อย | ถ้าใช้ on-premise servers ที่มีอยู่ manual setup ก็พอ |
-| **HashiCorp Vault (Secrets Manager)** | มี secrets > 20 ตัว หรือต้อง rotate บ่อย | Docker secrets + .env file ยังจัดการได้ |
-| **Read Replica for PostgreSQL** | Users > 500 หรือ reports ทำให้ chat ช้า | ดู load จริงก่อน ค่อยเพิ่ม |
-| **A/B Testing for Prompts** | มี users > 100 และต้องการ optimize prompt | ระยะแรกใช้ manual review + golden examples |
-| **Real-time Dashboard (WebSocket)** | Users ต้องการ live data refresh < 1 นาที | Polling ทุก 1-5 นาทีน่าจะเพียงพอ |
-| **Multi-language Support** | มี users ที่ไม่ใช้ภาษาไทย | ปัจจุบัน users เป็นคนไทยทั้งหมด |
-| **Mobile App (Native)** | Users ต้องการ offline หรือ push notifications | Web app + Telegram ครอบคลุมแล้ว |
+| Feature                                              | ควรทำเมื่อ                                           | เหตุผล                                                                           |
+| ---------------------------------------------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| **OpenTelemetry/Jaeger (Distributed Tracing)** | มี services > 10 ตัว หรือ debug ยากขึ้น        | ระบบปัจจุบันมี 4-5 services ใช้ request_id correlation เพียงพอ |
+| **Terraform/Ansible (IaC)**                    | ย้ายไป cloud หรือต้อง provision servers บ่อย | ถ้าใช้ on-premise servers ที่มีอยู่ manual setup ก็พอ               |
+| **HashiCorp Vault (Secrets Manager)**          | มี secrets > 20 ตัว หรือต้อง rotate บ่อย      | Docker secrets + .env file ยังจัดการได้                                    |
+| **Read Replica for PostgreSQL**                | Users > 500 หรือ reports ทำให้ chat ช้า            | ดู load จริงก่อน ค่อยเพิ่ม                                          |
+| **A/B Testing for Prompts**                    | มี users > 100 และต้องการ optimize prompt          | ระยะแรกใช้ manual review + golden examples                                   |
+| **Real-time Dashboard (WebSocket)**            | Users ต้องการ live data refresh < 1 นาที            | Polling ทุก 1-5 นาทีน่าจะเพียงพอ                                    |
+| **Multi-language Support**                     | มี users ที่ไม่ใช้ภาษาไทย                    | ปัจจุบัน users เป็นคนไทยทั้งหมด                                |
+| **Mobile App (Native)**                        | Users ต้องการ offline หรือ push notifications       | Web app + Telegram ครอบคลุมแล้ว                                            |
 
 ---
 
@@ -1826,54 +1856,54 @@ celery_app.conf.beat_schedule['daily-archive'] = {
 
 ### 11.1 Infrastructure Costs (Monthly)
 
-| Item | Specification | Est. Cost (THB) |
-|------|---------------|-----------------|
-| App Servers (2x) | 4 vCPU, 8GB RAM | 6,000 |
-| Database Server | 4 vCPU, 16GB RAM | 5,000 |
-| Redis | 2 vCPU, 4GB RAM | 2,000 |
-| MinIO Storage | 100GB + Archive 200GB | 1,000 |
-| Backup Storage | 100GB | 500 |
-| SSL Certificate | Wildcard | 250/month |
-| **Total Infrastructure** | | **~15,000/month** |
+| Item                           | Specification         | Est. Cost (THB)         |
+| ------------------------------ | --------------------- | ----------------------- |
+| App Servers (2x)               | 4 vCPU, 8GB RAM       | 6,000                   |
+| Database Server                | 4 vCPU, 16GB RAM      | 5,000                   |
+| Redis                          | 2 vCPU, 4GB RAM       | 2,000                   |
+| MinIO Storage                  | 100GB + Archive 200GB | 1,000                   |
+| Backup Storage                 | 100GB                 | 500                     |
+| SSL Certificate                | Wildcard              | 250/month               |
+| **Total Infrastructure** |                       | **~15,000/month** |
 
 ### 11.2 Development Costs (Updated)
 
-| Phase | Duration | Resources | Est. Cost (THB) |
-|-------|----------|-----------|-----------------|
-| Phase 1-2 | 5 weeks | 2 developers | 250,000 |
-| Phase 3-3.5 | 4 weeks | 2 developers | 200,000 |
-| Phase 4-6 | 6 weeks | 2 developers | 300,000 |
-| Phase 7-8 | 4 weeks | 2 devs + 1 QA | 250,000 |
-| **Total Development** | **19 weeks** | | **~1,000,000** |
+| Phase                       | Duration           | Resources     | Est. Cost (THB)      |
+| --------------------------- | ------------------ | ------------- | -------------------- |
+| Phase 1-2                   | 5 weeks            | 2 developers  | 250,000              |
+| Phase 3-3.5                 | 4 weeks            | 2 developers  | 200,000              |
+| Phase 4-6                   | 6 weeks            | 2 developers  | 300,000              |
+| Phase 7-8                   | 4 weeks            | 2 devs + 1 QA | 250,000              |
+| **Total Development** | **19 weeks** |               | **~1,000,000** |
 
 ---
 
 ## 12. Summary of Changes in v2.0
 
-| Section | Change Type | Description |
-|---------|-------------|-------------|
-| Architecture | Enhanced | เพิ่ม Feedback Service, Prompt Manager, Archive Service |
-| Database Schema | Enhanced | เพิ่ม user_feedback, golden_examples, prompt_versions, data_archives, trending_queries |
-| Phase 3.5 | **NEW** | Feedback Loop & Enhanced Logging |
-| Phase 7.5 | **NEW** | DR Drill & Backup Test |
-| Logging | **NEW** | Request ID correlation, PII redaction |
-| Testing | Enhanced | Mock Claude API for cost-effective testing |
-| CI/CD | **NEW** | Detailed pipeline with security scanning |
-| Data Retention | **NEW** | Archive policy & automated archival |
-| WAF | **NEW** | NGINX rate limiting by path |
-| Future Features | **NEW** | Documented what to add and when |
+| Section         | Change Type   | Description                                                                                 |
+| --------------- | ------------- | ------------------------------------------------------------------------------------------- |
+| Architecture    | Enhanced      | เพิ่ม Feedback Service, Prompt Manager, Archive Service                                |
+| Database Schema | Enhanced      | เพิ่ม user_feedback, golden_examples, prompt_versions, data_archives, trending_queries |
+| Phase 3.5       | **NEW** | Feedback Loop & Enhanced Logging                                                            |
+| Phase 7.5       | **NEW** | DR Drill & Backup Test                                                                      |
+| Logging         | **NEW** | Request ID correlation, PII redaction                                                       |
+| Testing         | Enhanced      | Mock Claude API for cost-effective testing                                                  |
+| CI/CD           | **NEW** | Detailed pipeline with security scanning                                                    |
+| Data Retention  | **NEW** | Archive policy & automated archival                                                         |
+| WAF             | **NEW** | NGINX rate limiting by path                                                                 |
+| Future Features | **NEW** | Documented what to add and when                                                             |
 
 ---
 
 ## Document History
 
-| Version | Date | Author | Changes |
-|---------|------|--------|---------|
-| 1.0 | 2025-01-23 | Claude | Initial version |
-| 2.0 | 2025-01-23 | Claude | Added feedback loop, DR, logging, CI/CD details |
+| Version | Date       | Author | Changes                                         |
+| ------- | ---------- | ------ | ----------------------------------------------- |
+| 1.0     | 2025-01-23 | Claude | Initial version                                 |
+| 2.0     | 2025-01-23 | Claude | Added feedback loop, DR, logging, CI/CD details |
 
 ---
 
-**Prepared for:** NT (National Telecom) - Finance Department  
-**Project:** NT AI Assistant  
+**Prepared for:** NT (National Telecom) - Finance Department
+**Project:** NT AI Assistant
 **Classification:** Internal Use Only

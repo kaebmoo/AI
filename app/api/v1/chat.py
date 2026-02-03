@@ -464,6 +464,18 @@ async def chat(
     if not warnings_response:
         warnings_response = None
 
+    # Prepare confidence response
+    confidence_response = None
+    if result.confidence:
+        confidence_response = {
+            "score": result.confidence.score,
+            "level": result.confidence.level,
+            "level_th": result.confidence.level_th,
+            "color": result.confidence.color,
+            "factors": result.confidence.factors,
+            "recommendation": result.confidence.recommendation
+        }
+
     return {
         "id": chat_entry.id,
         "conversation_id": conversation_id,
@@ -474,7 +486,8 @@ async def chat(
         "execution_time_ms": execution_time,
         "retry_count": result.retry_count,
         "retry_history": retry_history_response,
-        "warnings": warnings_response
+        "warnings": warnings_response,
+        "confidence": confidence_response
     }
 
 @router.get("/history", response_model=List[ChatResponse])

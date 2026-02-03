@@ -71,6 +71,16 @@ def create_retry_decorator():
 ai_retry = create_retry_decorator()
 
 @dataclass
+class ConfidenceResult:
+    """Confidence score for query result"""
+    score: int
+    level: str  # high, medium, low, very_low
+    level_th: str
+    color: str  # green, yellow, orange, red
+    factors: List[Dict]
+    recommendation: str
+
+@dataclass
 class QueryResult:
     """Result from AI query"""
     question: str
@@ -83,6 +93,7 @@ class QueryResult:
     error: Optional[str] = None
     retry_count: int = 0
     retry_history: Optional[List[Dict]] = None
+    confidence: Optional[ConfidenceResult] = None
 
 @dataclass
 class RetryStatus:
@@ -786,6 +797,10 @@ class AIService:
         if not explanation and total_tokens > 0:
             explanation = "I apologize, but I was unable to complete the analysis within the allowed number of steps. The request required exploring too much schema information."
 
+        # Append Limit Warning if triggered
+        if getattr(self, '_pending_limit_warning', None):
+            explanation += self._pending_limit_warning
+
         return QueryResult(
             question=question,
             sql_query=sql_query,
@@ -982,7 +997,7 @@ Error: {last_error.get('error', '')}
                 try:
                     exec_result = await self.mcp_client.call_tool("execute_query", {
                         "sql": sql_query,
-                        "limit": 100,
+                        "limit": 1000,
                         "validate_first": False  # Already validated
                     })
                     logger.info(f"Hybrid Mode: Execution result length: {len(exec_result) if exec_result else 0}")
@@ -994,6 +1009,25 @@ Error: {last_error.get('error', '')}
                         continue
 
                     exec_data = json.loads(exec_result) if isinstance(exec_result, str) else exec_result
+                    
+                    # Logic to warn user if LIMIT is hit
+                    if isinstance(exec_data, list) and len(exec_data) >= 1000:
+                        logger.warning("Query hit the 1000 row limit.")
+                        limit_warning = "\n\n⚠️ **คำเตือน:** ข้อมูลมีจำนวนมากและถูกจำกัดการแสดงผลที่ 1,000 รายการ อาจมีข้อมูลบางส่วนขาดหายไป กรุณาเพิ่มเงื่อนไขการค้นหา (เช่น ระบุเดือน หรือ ฝ่าย) เพื่อให้ได้ข้อมูลที่ครบถ้วนครับ"
+                        # We will append this to the final explanation later or store it
+                        # For now, let's prepend/append it to any explanation generated subsequently
+                        # Or set a flag. Ideally, explanation is generated in next turn or extracted.
+                        # Simplest: Append to the LAST tool result content so that the Model *sees* it and explains it?
+                        # No, the user wants to see it.
+                        # Let's append it to the explanation variable if it exists, or ensure it's added to the final output.
+                        # Since explanation comes from the Model *reading* the data, the Model *might* not mention it unless told.
+                        # Better strategy: Inject it into the system explanation logic OR directly modify the result object if possible.
+                        # But QueryResult is just data.
+                        # Let's modify the 'explanation' string at the end of the method.
+                        
+                        # Hack: Store it in a temporary variable to append at the return statement
+                        self._pending_limit_warning = limit_warning
+
                 except json.JSONDecodeError as e:
                     logger.error(f"Failed to parse execution result: {e}")
                     retry_history.append({"sql": sql_query, "error": f"Execution parse error: {str(e)}"})
@@ -1028,6 +1062,37 @@ Error: {last_error.get('error', '')}
                 elif len(data) > 0 and len(explanation) < 50:
                     explanation = f"พบข้อมูล {len(data)} รายการ"
 
+                # Step 5: Calculate confidence score using validation MCP
+                confidence_result = None
+                try:
+                    if "nt-validation" in self.mcp_client.servers:
+                        validation_summary = await self.mcp_client.call_tool(
+                            "get_validation_summary",
+                            {
+                                "sql": sql_query,
+                                "question": question,
+                                "context_name": context_name,
+                                "has_similar_example": False,  # TODO: Check golden examples
+                                "example_similarity": 0.0,
+                                "execution_success": True,
+                                "result_row_count": len(data)
+                            }
+                        )
+                        if validation_summary:
+                            summary_data = json.loads(validation_summary) if isinstance(validation_summary, str) else validation_summary
+                            conf = summary_data.get("confidence", {})
+                            confidence_result = ConfidenceResult(
+                                score=conf.get("score", 0),
+                                level=conf.get("level", "medium"),
+                                level_th=conf.get("level_th", "ปานกลาง"),
+                                color=conf.get("color", "yellow"),
+                                factors=conf.get("factors", []),
+                                recommendation=conf.get("recommendation", "")
+                            )
+                            logger.info(f"Hybrid Mode: Confidence score = {confidence_result.score}% ({confidence_result.level})")
+                except Exception as conf_error:
+                    logger.warning(f"Could not calculate confidence: {conf_error}")
+
                 return QueryResult(
                     question=question,
                     sql_query=sql_query,
@@ -1036,7 +1101,8 @@ Error: {last_error.get('error', '')}
                     tokens_used=total_tokens,
                     provider=self.provider_name,
                     retry_count=attempt,
-                    retry_history=retry_history if retry_history else None
+                    retry_history=retry_history if retry_history else None,
+                    confidence=confidence_result
                 )
 
             except Exception as e:

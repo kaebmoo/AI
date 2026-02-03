@@ -4,6 +4,8 @@ import Markdown from 'react-native-markdown-display';
 import { TechnicalAccordion } from './TechnicalAccordion';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { DataChart } from './DataChart';
+import { DataTable } from './DataTable';
+import { ConfidenceBadge, ConfidenceData } from './ConfidenceBadge';
 
 export interface DataWarning {
     code: string;
@@ -19,6 +21,7 @@ export interface Message {
     executionTime?: number;
     warnings?: DataWarning[];
     data?: Record<string, any>[];  // Query result data
+    confidence?: ConfidenceData;   // Confidence score
 }
 
 interface ChatBubbleProps {
@@ -198,121 +201,69 @@ export const ChatBubble = ({ message }: ChatBubbleProps) => {
                         )}
 
                         {/* Query Result Data - Data Grid / Table */}
-                        {/* Show table if multiple rows OR single row with complex data (> 2 columns) */}
                         {message.data && message.data.length > 0 && (message.data.length > 1 || Object.keys(message.data[0]).length > 2) && (
-                            <View className="mt-4 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden shadow-sm">
-                                <View className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/50 flex-row justify-between items-center">
-                                    <View className="flex-row items-center space-x-2">
-                                        <Text className="text-base">🔢</Text>
-                                        <Text className="text-sm font-semibold text-gray-800 dark:text-gray-200">
-                                            ตารางข้อมูล
-                                        </Text>
-                                    </View>
-                                    <Text className="text-xs text-gray-500 dark:text-gray-400 font-medium bg-white dark:bg-gray-800 px-2 py-1 rounded-md border border-gray-200 dark:border-gray-700">
-                                        {message.data.length} รายการ
-                                    </Text>
-                                </View>
-
-                                {/* Horizontal Scrollable Table */}
-                                <ScrollView horizontal showsHorizontalScrollIndicator={true} className="w-full">
-                                    <View>
-                                        {/* Table Header */}
-                                        <View className="flex-row bg-gray-100 dark:bg-gray-800/80 border-b border-gray-200 dark:border-gray-700">
-                                            {Object.keys(message.data[0]).map((key, index) => (
-                                                <View key={key} className="px-4 py-3 min-w-[120px]" style={{ width: index === 0 ? 100 : 150 }}>
-                                                    <Text className="text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wide">
-                                                        {key}
-                                                    </Text>
-                                                </View>
-                                            ))}
-                                        </View>
-
-                                        {/* Table Body */}
-                                        <View>
-                                            {dataToShow.map((row, idx) => (
-                                                <View
-                                                    key={idx}
-                                                    className={`flex-row border-b border-gray-100 dark:border-gray-700/50 ${idx % 2 === 0 ? 'bg-white dark:bg-gray-900' : 'bg-gray-50/50 dark:bg-gray-800/30'}`}
-                                                >
-                                                    {Object.entries(row).map(([key, value], colIndex) => (
-                                                        <View key={`${idx}-${key}`} className="px-4 py-3 flex-row items-center" style={{ width: colIndex === 0 ? 100 : 150 }}>
-                                                            <Text className={`text-sm text-gray-700 dark:text-gray-300 ${typeof value === 'number' ? 'text-right w-full font-variant-numeric' : 'text-left'}`}>
-                                                                {(() => {
-                                                                    if (typeof value === 'number') {
-                                                                        const lowerKey = key.toLowerCase();
-                                                                        // Don't format Year, ID, Code, Key, No (e.g. 2,025 -> 2025)
-                                                                        if (['year', 'id', 'code', 'key', 'no.', 'ปี', 'รหัส', 'quarter'].some(t => lowerKey.includes(t))) {
-                                                                            return String(value);
-                                                                        }
-                                                                        return value.toLocaleString('th-TH', { maximumFractionDigits: 2 });
-                                                                    }
-                                                                    return String(value);
-                                                                })()}
-                                                            </Text>
-                                                        </View>
-                                                    ))}
-                                                </View>
-                                            ))}
-                                        </View>
-                                    </View>
-                                </ScrollView>
-
-                                {/* Show More/Less Button */}
-                                {hasMoreData && (
-                                    <TouchableOpacity
-                                        onPress={() => setShowAllData(!showAllData)}
-                                        className="py-3 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 active:bg-gray-50 dark:active:bg-gray-700 transition"
-                                    >
-                                        <Text className="text-[13px] text-blue-600 dark:text-blue-400 text-center font-semibold">
-                                            {showAllData
-                                                ? '▲ ย่อข้อมูล'
-                                                : `▼ แสดงทั้งหมด ${message.data.length} รายการ`}
-                                        </Text>
-                                    </TouchableOpacity>
-                                )}
-                            </View>
+                            <DataTable data={message.data} />
                         )}
-
-                        {/* Data Warnings - Enhanced */}
-                        {message.warnings && message.warnings.length > 0 && (
-                            <View className="mt-4 space-y-2">
-                                {message.warnings.map((warning, index) => (
-                                    <View
-                                        key={index}
-                                        className={`flex-row p-3 rounded-xl border ${warning.severity === 'important'
-                                            ? 'bg-red-50 dark:bg-red-900/10 border-red-100 dark:border-red-900/30'
-                                            : warning.severity === 'warning'
-                                                ? 'bg-amber-50 dark:bg-amber-900/10 border-amber-100 dark:border-amber-900/30'
-                                                : 'bg-blue-50 dark:bg-blue-900/10 border-blue-100 dark:border-blue-900/30'
-                                            }`}
-                                    >
-                                        <Text className="mr-3 text-base">
-                                            {warning.severity === 'important' ? '⚠️' : warning.severity === 'warning' ? '📝' : 'ℹ️'}
-                                        </Text>
-                                        <Text
-                                            className={`flex-1 text-sm font-medium leading-5 ${warning.severity === 'important'
-                                                ? 'text-red-800 dark:text-red-200'
-                                                : warning.severity === 'warning'
-                                                    ? 'text-amber-800 dark:text-amber-200'
-                                                    : 'text-blue-800 dark:text-blue-200'
-                                                }`}
-                                        >
-                                            {warning.message}
-                                        </Text>
-                                    </View>
-                                ))}
-                            </View>
+                        {/* Show More/Less Button */}
+                        {hasMoreData && (
+                            <TouchableOpacity
+                                onPress={() => setShowAllData(!showAllData)}
+                                className="py-3 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 active:bg-gray-50 dark:active:bg-gray-700 transition"
+                            >
+                                <Text className="text-[13px] text-blue-600 dark:text-blue-400 text-center font-semibold">
+                                    {showAllData
+                                        ? '▲ ย่อข้อมูล'
+                                        : `▼ แสดงทั้งหมด ${message.data.length} รายการ`}
+                                </Text>
+                            </TouchableOpacity>
                         )}
+                    </View>
+                )}
 
-                        {/* Technical Details Accordion */}
-                        {message.sql && (
-                            <View className="mt-2">
-                                <TechnicalAccordion
-                                    sql={message.sql}
-                                    executionTime={message.executionTime}
-                                />
+                {/* Data Warnings - Enhanced */}
+                {message.warnings && message.warnings.length > 0 && (
+                    <View className="mt-4 space-y-2">
+                        {message.warnings.map((warning, index) => (
+                            <View
+                                key={index}
+                                className={`flex-row p-3 rounded-xl border ${warning.severity === 'important'
+                                    ? 'bg-red-50 dark:bg-red-900/10 border-red-100 dark:border-red-900/30'
+                                    : warning.severity === 'warning'
+                                        ? 'bg-amber-50 dark:bg-amber-900/10 border-amber-100 dark:border-amber-900/30'
+                                        : 'bg-blue-50 dark:bg-blue-900/10 border-blue-100 dark:border-blue-900/30'
+                                    }`}
+                            >
+                                <Text className="mr-3 text-base">
+                                    {warning.severity === 'important' ? '⚠️' : warning.severity === 'warning' ? '📝' : 'ℹ️'}
+                                </Text>
+                                <Text
+                                    className={`flex-1 text-sm font-medium leading-5 ${warning.severity === 'important'
+                                        ? 'text-red-800 dark:text-red-200'
+                                        : warning.severity === 'warning'
+                                            ? 'text-amber-800 dark:text-amber-200'
+                                            : 'text-blue-800 dark:text-blue-200'
+                                        }`}
+                                >
+                                    {warning.message}
+                                </Text>
                             </View>
-                        )}
+                        ))}
+                    </View>
+                )}
+
+                {/* Confidence Badge */}
+                {message.confidence && (
+                    <ConfidenceBadge confidence={message.confidence} />
+                )}
+
+                {/* Technical Details Accordion */}
+                {/* Technical Details Accordion */}
+                {message.sql && (
+                    <View className="mt-2">
+                        <TechnicalAccordion
+                            sql={message.sql}
+                            executionTime={message.executionTime}
+                        />
                     </View>
                 )}
             </View>

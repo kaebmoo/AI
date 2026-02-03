@@ -26,9 +26,10 @@
 |------------|--------|-------|-------|
 | `nt_metadata_mcp.py` | ✅ **Complete** | 14 tools | Multi-DB support |
 | `nt_query_mcp.py` | ✅ **Complete** | 5 tools | SQL execution, validation |
-| `nt_validation_mcp.py` | ⏳ Pending | 3 tools | Confidence scoring |
+| `nt_validation_mcp.py` | ✅ **Complete** | 4 tools | Confidence scoring |
 | `nt_reporting_mcp.py` | ⏳ Pending | 3 tools | Report comparison |
-| MCP Client Integration | ⏳ Pending | - | Backend integration |
+| MCP Client Integration | ✅ **Complete** | - | Auto-detect validation MCP |
+| Frontend Confidence UI | ✅ **Complete** | - | ConfidenceBadge component |
 
 ### สิ่งที่ MCP จะเพิ่มเติม
 
@@ -1061,25 +1062,30 @@ Week 5: Polish & Documentation
 - [x] Create `test_query_mcp.py`
 - [x] Test all 5 query tools - **5/5 PASSED**
 
-### Phase 2 - Validation
-- [ ] Implement `nt_validation_mcp.py`
-- [ ] Add business rules from existing `schema_business_rules`
-- [ ] Implement confidence scoring
-- [ ] Test validation tools
+### Phase 2 - Validation ✅ COMPLETE
+- [x] Implement `nt_validation_mcp.py` (4 tools)
+- [x] Add business rules (built-in + database rules)
+- [x] Implement confidence scoring system
+- [x] Test validation tools - **4/4 PASSED**
+- [x] Create `test_validation_mcp.py`
 
-### Phase 3 - Reporting
+### Phase 3 - Reporting ⏳ PENDING
 - [ ] Implement `nt_reporting_mcp.py`
 - [ ] Setup `/data/official_reports/` directory
 - [ ] Add sample official reports
 - [ ] Test reporting tools
 
-### Phase 4 - Integration
-- [ ] Create `app/services/mcp_client.py`
-- [ ] Integrate MCP with existing `AIService`
-- [ ] Add confidence display to frontend (`ConfidenceBadge.tsx`)
-- [ ] End-to-end testing
+### Phase 4 - Integration ✅ COMPLETE
+- [x] Create `app/services/mcp_client.py` (auto-detects validation MCP)
+- [x] Integrate MCP with existing `AIService`
+- [x] Add `ConfidenceResult` dataclass to ai_service.py
+- [x] Add `Confidence` schema to chat.py
+- [x] Update chat API to return confidence
+- [x] Add confidence display to frontend (`ConfidenceBadge.tsx`)
+- [x] Integrate ConfidenceBadge with ChatBubble.tsx
+- [x] Update frontend app to pass confidence data
 
-### Phase 5 - Deployment
+### Phase 5 - Deployment ⏳ PENDING
 - [ ] Create `docker-compose.yml` for MCP servers
 - [ ] Update documentation
 - [ ] Production deployment
