@@ -79,7 +79,7 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
         const hasNumericalData = keys.some(key => {
             const sampleValue = data[0][key];
             return typeof sampleValue === 'number' ||
-                   (typeof sampleValue === 'string' && !isNaN(parseFloat(sampleValue.replace(/[,%]/g, ''))));
+                (typeof sampleValue === 'string' && !isNaN(parseFloat(sampleValue.replace(/[,%]/g, ''))));
         });
 
         if (!hasNumericalData) {
@@ -140,16 +140,22 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
                 });
 
                 // Determine mode from AI visualization recommendation
+                // Determine mode from AI visualization recommendation
                 let mode: ChartMode = 'vertical_bar';
                 if (visualization === 'grouped_bar' || (finalSeriesKey && seriesValues.length >= 2 && hasRepeatedCategories)) {
                     mode = 'grouped_bar';
+                } else if (visualization === 'stacked_bar') {
+                    mode = 'stacked_bar';
                 } else if (visualization === 'line_chart') {
                     mode = categories.length > 1 ? 'multi_line' : 'line';
                 } else if (visualization === 'pie_chart') {
                     mode = 'pie_chart';
                 } else if (visualization === 'donut_chart') {
                     mode = 'donut_chart';
-                } else if (visualization === 'horizontal_bar' || categories.length > 5) {
+                } else if (visualization === 'horizontal_bar') {
+                    mode = 'horizontal_bar';
+                } else if (!visualization && categories.length > 5) {
+                    // Only auto-switch to horizontal if NO explicit visualization is requested
                     mode = 'horizontal_bar';
                 } else if (visualization === 'bar_chart') {
                     mode = 'vertical_bar';
@@ -641,7 +647,7 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
                                     }}
                                 />
                                 <Text className="text-gray-300 dark:text-gray-600 text-[11px]">
-                                    {isPivotedFormat ? series : `เดือน ${series}`}
+                                    {isPivotedFormat || isNaN(Number(series)) ? series : `เดือน ${series}`}
                                 </Text>
                             </View>
                             <Text className="text-white dark:text-gray-900 text-[11px] font-semibold">
@@ -674,7 +680,7 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
             );
         };
 
-        const isHorizontal = actualCategories.length > 5;
+        const isHorizontal = analysis.mode === 'horizontal_bar';
         const chartHeight = isHorizontal
             ? Math.max(250, actualCategories.length * 60)
             : 220;
@@ -701,7 +707,7 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
                                 }}
                             />
                             <Text className="text-xs text-gray-600 dark:text-gray-300">
-                                {isPivotedFormat ? series : `เดือน ${series}`}
+                                {isPivotedFormat || isNaN(Number(series)) ? series : `เดือน ${series}`}
                             </Text>
                         </View>
                     ))}
