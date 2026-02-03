@@ -1,6 +1,6 @@
 # NT AI Assistant
 
-โครงการพัฒนาระบบ AI Assistant สำหรับสอบถามข้อมูลรายได้และยอดขายของหน่วยงาน ผ่าน Web Application (React Native) และ API Backend (FastAPI) โดยใช้ GenAI (Claude/Gemini) เป็นตัวประมวลผลคำถามและสร้าง SQL Query อัตโนมัติ
+โครงการพัฒนาระบบ AI Assistant สำหรับสอบถามข้อมูลรายได้ ยอดขาย ค่าใช้จ่าย และข้อมูลทางการเงิน ของหน่วยงาน ผ่าน Web Application (React Native) และ API Backend (FastAPI) โดยใช้ GenAI (Claude/Gemini/Matcha) เป็นตัวประมวลผลคำถามและสร้าง SQL Query อัตโนมัติ
 
 ## Project Status
 
@@ -110,24 +110,28 @@ npm run dev
 You need to run these 4 processes in parallel (separate terminals):
 
 **Terminal 1: Backend API**
+
 ```bash
 # Make sure venv is activated
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 **Terminal 2: Celery Worker (Async Tasks)**
+
 ```bash
 # Make sure venv is activated and Redis is running
 celery -A app.celery worker -Q email-queue,celery --loglevel=info
 ```
 
 **Terminal 3: User Frontend (Expo)**
+
 ```bash
 cd frontend
 npm run web
 ```
 
 **Terminal 4: Admin Web UI**
+
 ```bash
 cd frontend-admin
 npm run dev
@@ -138,6 +142,7 @@ npm run dev
 ## API Documentation
 
 Once the backend is running, visit:
+
 - **Swagger UI:** http://localhost:8000/docs
 - **ReDoc:** http://localhost:8000/redoc
 
@@ -148,9 +153,9 @@ Once the backend is running, visit:
 - `app/config.py`: Application configuration settings
 - `frontend/`: React Native / Expo application
 - `scripts/`: Utility scripts for maintenance and testing
-    - `verify_dynamic_rules.py`: Test SQL syntax generation for different DBs
-    - `verify_sql_syntax.py`: Test actual DB query execution
-    - `setup_rules_db.py`: Manage business rules
+  - `verify_dynamic_rules.py`: Test SQL syntax generation for different DBs
+  - `verify_sql_syntax.py`: Test actual DB query execution
+  - `setup_rules_db.py`: Manage business rules
 
 ## Testing
 
