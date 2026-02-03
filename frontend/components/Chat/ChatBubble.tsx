@@ -202,7 +202,7 @@ export const ChatBubble = ({ message }: ChatBubbleProps) => {
 
                         {/* Query Result Data - Data Grid / Table */}
                         {message.data && message.data.length > 0 && (message.data.length > 1 || Object.keys(message.data[0]).length > 2) && (
-                            <DataTable data={message.data} />
+                            <DataTable data={dataToShow} />
                         )}
                         {/* Show More/Less Button */}
                         {hasMoreData && (
