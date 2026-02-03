@@ -58,7 +58,8 @@ export default function ChatScreen() {
         sql: response.sql_query,
         executionTime: response.execution_time_ms,
         warnings: response.warnings,
-        data: response.data  // ✅ เพิ่ม data จาก API
+        data: response.data,
+        confidence: response.confidence  // Confidence score from validation MCP
       };
 
       setMessages((prev) => [...prev, aiMessage]);

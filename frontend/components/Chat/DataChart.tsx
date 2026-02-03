@@ -1,5 +1,6 @@
-import React from 'react';
-import { View, Text, Dimensions } from 'react-native';
+
+import React, { useMemo } from 'react';
+import { View, Text, Dimensions, ScrollView } from 'react-native';
 import { BarChart, LineChart } from 'react-native-gifted-charts';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
@@ -7,108 +8,771 @@ interface DataChartProps {
     data: Record<string, any>[];
 }
 
+// ============================================================
+// Chart Type Detection
+// ============================================================
+
+type ChartMode =
+    | 'grouped_bar'      // Comparison: Same categories across different periods (e.g., dept revenue month 8 vs 9)
+    | 'stacked_bar'      // Composition: Parts of a whole
+    | 'horizontal_bar'   // Ranking: Many categories
+    | 'vertical_bar'     // Few categories comparison
+    | 'line'             // Time series trend
+    | 'multi_line';      // Multiple series over time
+
+interface ChartAnalysis {
+    mode: ChartMode;
+    categoryKey: string;      // X-axis grouping (e.g., department)
+    seriesKey: string;        // Color grouping (e.g., month)
+    measureKey: string;       // Y-axis value (e.g., revenue)
+    seriesValues: string[];   // Unique series (e.g., ['8', '9'])
+    categories: string[];     // Unique categories
+    hasDifferenceColumn: boolean;
+    differenceKey?: string;
+    percentDiffKey?: string;
+}
+
 export const DataChart = ({ data }: DataChartProps) => {
     const colorScheme = useColorScheme();
     const isDark = colorScheme === 'dark';
     const screenWidth = Dimensions.get('window').width;
+    const chartWidth = Math.min(screenWidth - 64, 500);
 
-    // 1. Validate Data
-    // We require at least 2 data points to show a trend or comparison.
-    if (!data || data.length < 2) return null;
+    // ============================================================
+    // 1. Analyze Data Structure
+    // ============================================================
 
-    const keys = Object.keys(data[0]);
+    const analysis = useMemo((): ChartAnalysis | null => {
+        if (!data || data.length < 1) return null;
 
-    // Heuristics
-    const monthKey = keys.find(k => ['month', 'เดือน'].some(term => k.toLowerCase().includes(term)));
-    const yearKey = keys.find(k => ['year', 'ปี', 'พ.ศ.', 'ค.ศ.'].some(term => k.toLowerCase().includes(term)));
-    const labelKey = monthKey || keys.find(k => ['date', 'label', 'name', 'product'].some(term => k.toLowerCase().includes(term)));
+        const keys = Object.keys(data[0]);
 
-    const valueKey = keys.find(k =>
-        ['total', 'revenue', 'amount', 'count', 'value', 'price', 'cost', 'profit', 'รายได้', 'ยอดรวม', 'จำนวน'].some(term => k.toLowerCase().includes(term))
-    );
+        // ============================================================
+        // Detect Wide Format (Pivoted) - Multiple measure columns for periods
+        // e.g., revenue_august, revenue_september, revenue_8, revenue_9
+        // ============================================================
 
-    if (!valueKey) return null;
+        const monthNames: Record<string, string> = {
+            'january': '1', 'jan': '1', 'ม.ค.': '1', 'มกราคม': '1',
+            'february': '2', 'feb': '2', 'ก.พ.': '2', 'กุมภาพันธ์': '2',
+            'march': '3', 'mar': '3', 'มี.ค.': '3', 'มีนาคม': '3',
+            'april': '4', 'apr': '4', 'เม.ย.': '4', 'เมษายน': '4',
+            'may': '5', 'พ.ค.': '5', 'พฤษภาคม': '5',
+            'june': '6', 'jun': '6', 'มิ.ย.': '6', 'มิถุนายน': '6',
+            'july': '7', 'jul': '7', 'ก.ค.': '7', 'กรกฎาคม': '7',
+            'august': '8', 'aug': '8', 'ส.ค.': '8', 'สิงหาคม': '8',
+            'september': '9', 'sep': '9', 'ก.ย.': '9', 'กันยายน': '9',
+            'october': '10', 'oct': '10', 'ต.ค.': '10', 'ตุลาคม': '10',
+            'november': '11', 'nov': '11', 'พ.ย.': '11', 'พฤศจิกายน': '11',
+            'december': '12', 'dec': '12', 'ธ.ค.': '12', 'ธันวาคม': '12',
+        };
 
-    // 2. Transform Data
-    const chartData = data.map(item => {
-        let label = '';
-        if (monthKey && yearKey) {
-            // Check if year is 4 digits (e.g., 2568, 2025)
-            const yearStr = String(item[yearKey]);
-            const shortYear = yearStr.length === 4 ? yearStr.slice(-2) : yearStr;
-            label = `${item[monthKey]}/${shortYear}`;
-        } else if (labelKey) {
-            label = String(item[labelKey]);
-        } else {
-            label = String(Object.values(item)[0]); // Fallback
+        // Detect pivoted measure columns (revenue_august, revenue_september, etc.)
+        const pivotedMeasureColumns: { key: string; period: string; periodNum: number }[] = [];
+
+        keys.forEach(k => {
+            const lower = k.toLowerCase();
+
+            // Skip non-measure columns
+            if (lower.includes('diff') || lower.includes('percent') || lower.includes('%') || lower.includes('change')) {
+                return;
+            }
+
+            // Check for month name in column
+            for (const [monthName, monthNum] of Object.entries(monthNames)) {
+                if (lower.includes(monthName.toLowerCase())) {
+                    pivotedMeasureColumns.push({
+                        key: k,
+                        period: monthName,
+                        periodNum: parseInt(monthNum)
+                    });
+                    return;
+                }
+            }
+
+            // Check for month number suffix: revenue_8, revenue_9, etc.
+            const monthSuffixMatch = k.match(/_(\d{1,2})$/);
+            if (monthSuffixMatch) {
+                const monthNum = parseInt(monthSuffixMatch[1]);
+                if (monthNum >= 1 && monthNum <= 12) {
+                    pivotedMeasureColumns.push({
+                        key: k,
+                        period: `เดือน ${monthNum}`,
+                        periodNum: monthNum
+                    });
+                }
+            }
+        });
+
+        // Sort by period number
+        pivotedMeasureColumns.sort((a, b) => a.periodNum - b.periodNum);
+
+        // Detect difference and percent columns
+        const differenceKey = keys.find(k => {
+            const lower = k.toLowerCase();
+            return (lower.includes('diff') || lower.includes('ผลต่าง') || lower.includes('change')) &&
+                !lower.includes('percent') && !lower.includes('%');
+        });
+
+        const percentDiffKey = keys.find(k => {
+            const lower = k.toLowerCase();
+            return (lower.includes('%') || lower.includes('percent') || lower.includes('เปอร์เซ็นต์'));
+        });
+
+        // ============================================================
+        // Wide Format Detected - Use Pivoted Mode
+        // ============================================================
+
+        if (pivotedMeasureColumns.length >= 2) {
+            // Find category key (non-numeric, non-measure column)
+            const categoryKey = keys.find(k => {
+                const lower = k.toLowerCase();
+                const isPivotCol = pivotedMeasureColumns.some(p => p.key === k);
+                const isDiffCol = lower.includes('diff') || lower.includes('percent') || lower.includes('%');
+                return !isPivotCol && !isDiffCol && typeof data[0][k] === 'string';
+            }) || keys[0];
+
+            const categories = data.map(row => String(row[categoryKey] || 'Unknown'));
+            const seriesValues = pivotedMeasureColumns.map(p => p.period);
+
+            return {
+                mode: 'grouped_bar',
+                categoryKey,
+                seriesKey: '__pivoted__', // Special marker for wide format
+                measureKey: pivotedMeasureColumns[0].key, // Primary measure
+                seriesValues,
+                categories,
+                hasDifferenceColumn: !!(differenceKey || percentDiffKey),
+                differenceKey,
+                percentDiffKey,
+                // Store pivoted columns info for rendering
+                _pivotedColumns: pivotedMeasureColumns,
+            } as ChartAnalysis & { _pivotedColumns: typeof pivotedMeasureColumns };
+        }
+
+        // ============================================================
+        // Long Format Detection (Original Logic)
+        // ============================================================
+
+        const monthKey = keys.find(k =>
+            ['month', 'เดือน'].some(term => k.toLowerCase().includes(term)) &&
+            !k.toLowerCase().includes('diff')
+        );
+        const yearKey = keys.find(k =>
+            ['year', 'ปี'].some(term => k.toLowerCase().includes(term))
+        );
+
+        // Category keys (for grouping)
+        const categoryKeys = keys.filter(k => {
+            const lower = k.toLowerCase();
+            return ['department', 'ฝ่าย', 'division', 'สายงาน', 'group', 'กลุ่ม', 'province', 'จังหวัด', 'product', 'สินค้า', 'service', 'บริการ', 'name', 'category'].some(term => lower.includes(term)) &&
+                !lower.includes('diff') && !lower.includes('percent');
+        });
+
+        // Value/Measure keys
+        const measureKeys = keys.filter(k => {
+            const lower = k.toLowerCase();
+            return ['total', 'revenue', 'amount', 'count', 'value', 'price', 'cost', 'profit', 'รายได้', 'ยอดรวม', 'จำนวน', 'expense', 'ค่าใช้จ่าย'].some(term => lower.includes(term)) &&
+                !lower.includes('diff') && !lower.includes('percent') && !lower.includes('change');
+        });
+
+        if (measureKeys.length === 0) return null;
+
+        const measureKey = measureKeys[0];
+        const categoryKey = categoryKeys[0] || keys.find(k => typeof data[0][k] === 'string' && !measureKeys.includes(k)) || keys[0];
+
+        // Check if same category appears multiple times with different months
+        const categoryCounts: Record<string, number> = {};
+        data.forEach(row => {
+            const cat = String(row[categoryKey] || '');
+            categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
+        });
+
+        const hasRepeatedCategories = Object.values(categoryCounts).some(count => count > 1);
+        const uniqueCategories = Object.keys(categoryCounts);
+
+        // Detect series key (what differentiates repeated categories)
+        let seriesKey = '';
+        let seriesValues: string[] = [];
+
+        if (hasRepeatedCategories && monthKey) {
+            seriesKey = monthKey;
+            seriesValues = Array.from(new Set(data.map(d => String(d[monthKey])))).sort((a, b) => Number(a) - Number(b));
+        } else if (hasRepeatedCategories && yearKey) {
+            seriesKey = yearKey;
+            seriesValues = Array.from(new Set(data.map(d => String(d[yearKey])))).sort();
+        }
+
+        // Determine chart mode
+        let mode: ChartMode = 'vertical_bar';
+
+        if (seriesKey && seriesValues.length >= 2 && hasRepeatedCategories && uniqueCategories.length > 1) {
+            // Comparison mode: Same departments across different months (Must have > 1 category to compare)
+            mode = 'grouped_bar';
+        } else if (monthKey || yearKey) {
+            // Time series
+            mode = uniqueCategories.length > 1 ? 'multi_line' : 'line';
+        } else if (uniqueCategories.length > 5) {
+            // Many categories - use horizontal for readability
+            mode = 'horizontal_bar';
         }
 
         return {
-            value: Number(item[valueKey]),
-            label: label,
-            frontColor: '#3B82F6',
-            labelTextStyle: { color: isDark ? '#9CA3AF' : '#6B7280', fontSize: 10 },
-            // Tooltip data
-            formattedValue: Number(item[valueKey]).toLocaleString('th-TH', { minimumFractionDigits: 2 }),
-            dataPointText: '' // Hide default
+            mode,
+            categoryKey,
+            seriesKey,
+            measureKey,
+            seriesValues,
+            categories: uniqueCategories,
+            hasDifferenceColumn: !!(differenceKey || percentDiffKey),
+            differenceKey,
+            percentDiffKey
         };
-    });
+    }, [data]);
 
-    const isLineChart = chartData.length > 20;
+    if (!analysis) return null;
 
-    // Compact Y-Axis
+    // ============================================================
+    // 2. Color Utilities
+    // ============================================================
+
+    const SERIES_COLORS = [
+        '#3B82F6', // Blue
+        '#10B981', // Green
+        '#F59E0B', // Amber
+        '#EF4444', // Red
+        '#8B5CF6', // Purple
+        '#EC4899', // Pink
+        '#06B6D4', // Cyan
+        '#F97316', // Orange
+    ];
+
+    const stringToColor = (str: string, index?: number) => {
+        if (typeof index === 'number' && index < SERIES_COLORS.length) {
+            return SERIES_COLORS[index];
+        }
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+            hash = str.charCodeAt(i) + ((hash << 5) - hash);
+        }
+        const hue = Math.abs(hash % 360);
+        return `hsl(${hue}, 70%, 50%)`;
+    };
+
     const formatYLabel = (val: string) => {
         const num = parseFloat(val);
         if (num >= 1_000_000_000) return (num / 1_000_000_000).toFixed(1) + 'B';
         if (num >= 1_000_000) return (num / 1_000_000).toFixed(1) + 'M';
         if (num >= 1_000) return (num / 1_000).toFixed(1) + 'K';
-        return num.toString();
+        return num.toFixed(0);
     };
 
-    const maxValue = Math.max(...chartData.map(d => d.value));
+    const truncateLabel = (label: string, maxLen: number = 12) => {
+        return label.length > maxLen ? label.slice(0, maxLen) + '...' : label;
+    };
 
-    const renderTooltip = (item: any, index: number) => {
-        if (!item) return null;
-        const isRightSide = index > chartData.length / 2;
-        const isHighValue = item.value > (maxValue * 0.8);
+    // ============================================================
+    // 3. Render Grouped Bar Chart (Comparison Mode)
+    // ============================================================
+
+    // Helper: Smart Tooltip Position
+    // Defined here to be accessible by both Grouped and Single Chart logic
+    const calculateTooltipStyle = (
+        index: number,
+        totalItems: number,
+        isHorizontalChart: boolean,
+        isHighValue: boolean
+    ) => {
+        const style: any = {
+            position: 'absolute',
+            zIndex: 1000,
+            minWidth: 140,
+            maxWidth: 200,
+            padding: 8,
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.25,
+            shadowRadius: 3.84,
+            elevation: 5,
+        };
+
+        if (isHorizontalChart) {
+            // Horizontal Bar Chart (Sideways Bars)
+            // If high value (long bar), tooltip should be LEFT of the bar end to avoid right overflow
+            if (isHighValue) {
+                // Shift strictly LEFT for any bar longer than 30% of max
+                style.left = -160;
+            } else {
+                style.left = 10; // Shift forward right
+            }
+            style.top = -20; // Center vertically relative to bar
+        } else {
+            // Vertical Bar Chart (Standard)
+            const isFarRight = index > totalItems * 0.7;
+            const isFarLeft = index < totalItems * 0.2;
+
+            if (isFarRight) style.right = -20;
+            else if (isFarLeft) style.left = -10;
+            else style.left = -70; // Center
+
+            // Vertical Flip
+            if (isHighValue) style.top = 10; // Flip down
+            else style.bottom = 10; // Flip up
+        }
+        return style;
+    };
+
+    if (analysis.mode === 'grouped_bar') {
+        // Transform data into grouped format
+        // Each category gets multiple bars (one per series value)
+
+        const groupedData: Record<string, Record<string, number>> = {};
+        const diffData: Record<string, { diff?: number; pctDiff?: number }> = {};
+
+        // Check if this is Wide Format (pivoted columns)
+        const isPivotedFormat = analysis.seriesKey === '__pivoted__';
+        const pivotedColumns = (analysis as any)._pivotedColumns as { key: string; period: string; periodNum: number }[] | undefined;
+
+        if (isPivotedFormat && pivotedColumns) {
+            // Wide Format: Read values from pivoted columns
+            data.forEach(row => {
+                const category = String(row[analysis.categoryKey] || 'Unknown');
+
+                if (!groupedData[category]) {
+                    groupedData[category] = {};
+                }
+
+                // Read value from each pivoted column
+                pivotedColumns.forEach(col => {
+                    groupedData[category][col.period] = Number(row[col.key] || 0);
+                });
+
+                // Store difference data
+                if (!diffData[category]) diffData[category] = {};
+                if (analysis.differenceKey && row[analysis.differenceKey] !== undefined) {
+                    diffData[category].diff = Number(row[analysis.differenceKey]);
+                }
+                if (analysis.percentDiffKey && row[analysis.percentDiffKey] !== undefined) {
+                    diffData[category].pctDiff = Number(row[analysis.percentDiffKey]);
+                }
+            });
+        } else {
+            // Long Format: Original logic
+            data.forEach(row => {
+                const category = String(row[analysis.categoryKey] || 'Unknown');
+                const series = String(row[analysis.seriesKey] || '');
+                const value = Number(row[analysis.measureKey] || 0);
+
+                if (!groupedData[category]) {
+                    groupedData[category] = {};
+                }
+                groupedData[category][series] = value;
+
+                // Store difference data
+                if (analysis.differenceKey || analysis.percentDiffKey) {
+                    if (!diffData[category]) diffData[category] = {};
+                    if (analysis.differenceKey && row[analysis.differenceKey] !== undefined) {
+                        diffData[category].diff = Number(row[analysis.differenceKey]);
+                    }
+                    if (analysis.percentDiffKey && row[analysis.percentDiffKey] !== undefined) {
+                        diffData[category].pctDiff = Number(row[analysis.percentDiffKey]);
+                    }
+                }
+            });
+        }
+
+        // Get actual categories from grouped data (important for Wide Format)
+        const actualCategories = Object.keys(groupedData);
+
+        // Get actual series values (periods)
+        const actualSeriesValues = isPivotedFormat && pivotedColumns
+            ? pivotedColumns.map(col => col.period)
+            : analysis.seriesValues;
+
+        // Build stacked data for grouped bars
+        // react-native-gifted-charts uses stackData for grouped bars
+        const stackData = actualCategories.map(category => {
+            const stacks = actualSeriesValues.map((series, idx) => ({
+                value: groupedData[category]?.[series] || 0,
+                color: SERIES_COLORS[idx % SERIES_COLORS.length],
+                marginBottom: 2,
+            }));
+
+            return {
+                stacks,
+                label: truncateLabel(category, 10),
+                fullLabel: category,
+                diffInfo: diffData[category],
+            };
+        });
+
+        // Calculate max value for scaling
+        const maxValue = Math.max(
+            ...Object.values(groupedData).flatMap(g => Object.values(g))
+        );
+
+        // Tooltip renderer
+        const renderGroupedTooltip = (item: any, index: number) => {
+            if (!item) return null;
+
+            const category = item.fullLabel || item.label || "";
+            const values = groupedData[category] || {};
+            const diff = diffData[category];
+
+            const currentGroupMax = Math.max(...Object.values(values).map(v => Number(v) || 0));
+            const isHighValue = currentGroupMax > (maxValue * 0.7);
+
+            // Smart Position Logic (Refactored)
+            // Note: Grouped Bar charts also use the isHorizontal flag from outer scope, 
+            // but we need to pass it correctly. 
+            // Here 'actualCategories.length > 5' determines isHorizontal for Grouped Charts.
+            const isGroupedHorizontal = actualCategories.length > 5;
+
+            const tooltipStyle = calculateTooltipStyle(
+                index,
+                actualCategories.length,
+                isGroupedHorizontal,
+                isHighValue
+            );
+
+            return (
+                <View
+                    className="bg-gray-900 dark:bg-white rounded-lg shadow-lg"
+                    style={{
+                        ...tooltipStyle,
+                        minWidth: 180, // Override minWidth for grouped content
+                        maxWidth: 220,
+                    }}
+                >
+                    <Text className="text-white dark:text-gray-900 text-xs font-bold mb-2 text-center">
+                        {category}
+                    </Text>
+
+                    {actualSeriesValues.map((series, idx) => (
+                        <View key={series} className="flex-row justify-between items-center mb-1">
+                            <View className="flex-row items-center">
+                                <View
+                                    style={{
+                                        width: 10,
+                                        height: 10,
+                                        borderRadius: 2,
+                                        backgroundColor: SERIES_COLORS[idx % SERIES_COLORS.length],
+                                        marginRight: 6
+                                    }}
+                                />
+                                <Text className="text-gray-300 dark:text-gray-600 text-[11px]">
+                                    {isPivotedFormat ? series : `เดือน ${series}`}
+                                </Text>
+                            </View>
+                            <Text className="text-white dark:text-gray-900 text-[11px] font-semibold">
+                                {(values[series] || 0).toLocaleString('th-TH', { maximumFractionDigits: 0 })}
+                            </Text>
+                        </View>
+                    ))}
+
+                    {diff && (
+                        <View className="border-t border-gray-700 dark:border-gray-300 mt-2 pt-2">
+                            {diff.diff !== undefined && (
+                                <View className="flex-row justify-between">
+                                    <Text className="text-gray-400 dark:text-gray-500 text-[10px]">ผลต่าง:</Text>
+                                    <Text className={`text-[10px] font-semibold ${diff.diff >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                        {diff.diff >= 0 ? '+' : ''}{diff.diff.toLocaleString('th-TH', { maximumFractionDigits: 0 })}
+                                    </Text>
+                                </View>
+                            )}
+                            {diff.pctDiff !== undefined && (
+                                <View className="flex-row justify-between">
+                                    <Text className="text-gray-400 dark:text-gray-500 text-[10px]">% ผลต่าง:</Text>
+                                    <Text className={`text-[10px] font-semibold ${diff.pctDiff >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                        {diff.pctDiff >= 0 ? '+' : ''}{diff.pctDiff.toFixed(2)}%
+                                    </Text>
+                                </View>
+                            )}
+                        </View>
+                    )}
+                </View>
+            );
+        };
+
+        const isHorizontal = actualCategories.length > 5;
+        const chartHeight = isHorizontal
+            ? Math.max(250, actualCategories.length * 60)
+            : 220;
 
         return (
-            <View
-                className="bg-gray-900 dark:bg-white px-3 py-2 rounded-lg shadow-lg"
-                style={{
-                    position: 'absolute',
-                    // Smart vertical positioning: If value is high, show tooltip BELOW the point
-                    bottom: isHighValue ? undefined : 10,
-                    top: isHighValue ? 20 : undefined,
+            <View className="my-4 p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm">
+                <View className="flex-row justify-between items-center mb-4">
+                    <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                        📊 เปรียบเทียบ: {analysis.measureKey}
+                    </Text>
+                </View>
 
-                    // Smart horizontal positioning
-                    left: isRightSide ? undefined : -30,
-                    right: isRightSide ? -10 : undefined,
-                    zIndex: 100,
-                    minWidth: 120, // Ensure it has some width
-                    alignItems: 'center'
-                }}
-            >
-                <Text className="text-white dark:text-gray-900 text-xs font-bold mb-1 text-center">{item.label}</Text>
-                <Text className="text-white dark:text-gray-900 text-xs text-center">{item.formattedValue} บาท</Text>
+                {/* Legend */}
+                <View className="flex-row flex-wrap mb-4 gap-x-4 gap-y-2">
+                    {actualSeriesValues.map((series, idx) => (
+                        <View key={series} className="flex-row items-center">
+                            <View
+                                style={{
+                                    width: 12,
+                                    height: 12,
+                                    borderRadius: 3,
+                                    backgroundColor: SERIES_COLORS[idx % SERIES_COLORS.length],
+                                    marginRight: 6
+                                }}
+                            />
+                            <Text className="text-xs text-gray-600 dark:text-gray-300">
+                                {isPivotedFormat ? series : `เดือน ${series}`}
+                            </Text>
+                        </View>
+                    ))}
+                </View>
+
+                <ScrollView
+                    style={{ maxHeight: 400, width: '100%' }}
+                    nestedScrollEnabled={true}
+                    showsVerticalScrollIndicator={true}
+                    showsHorizontalScrollIndicator={true}
+                    contentContainerStyle={{ paddingRight: 20 }}
+                >
+                    {/* @ts-ignore */}
+                    <BarChart
+                        stackData={stackData}
+                        barWidth={isHorizontal ? 16 : 20}
+                        spacing={isHorizontal ? 30 : 40}
+                        roundedTop
+                        roundedBottom
+                        hideRules
+                        xAxisThickness={0}
+                        yAxisThickness={0}
+                        horizontal={isHorizontal}
+                        yAxisTextStyle={{
+                            color: isDark ? '#9CA3AF' : '#6B7280',
+                            fontSize: 10,
+                            width: isHorizontal ? 100 : undefined
+                        }}
+                        xAxisLabelTextStyle={{
+                            color: isDark ? '#9CA3AF' : '#6B7280',
+                            fontSize: 9,
+                            width: 60,
+                            textAlign: 'center'
+                        }}
+                        yAxisLabelWidth={isHorizontal ? 110 : 45}
+                        formatYLabel={formatYLabel}
+                        noOfSections={4}
+                        maxValue={maxValue * 1.1}
+                        height={chartHeight}
+                        width={chartWidth - (isHorizontal ? 110 : 45)}
+                        isAnimated
+                        renderTooltip={renderGroupedTooltip}
+                    />
+                </ScrollView>
+
+                <Text className="text-[10px] text-gray-400 dark:text-gray-500 text-center mt-3">
+                    * แตะที่กราฟเพื่อดูรายละเอียดและผลต่าง
+                </Text>
+            </View>
+        );
+    }
+
+    // ============================================================
+    // 4. Original Chart Logic (Line, Horizontal Bar, Vertical Bar)
+    // ============================================================
+
+    const keys = Object.keys(data[0]);
+    const monthKey = keys.find(k => ['month', 'เดือน'].some(term => k.toLowerCase().includes(term)));
+    const yearKey = keys.find(k => ['year', 'ปี'].some(term => k.toLowerCase().includes(term)));
+    const labelKey = keys.find(k =>
+        ['date', 'label', 'name', 'product', 'department', 'province', 'group', 'category', 'segment', 'ฝ่าย', 'จังหวัด', 'สินค้า']
+            .some(term => k.toLowerCase().includes(term))
+    );
+
+    const isTimeSeries = !!(yearKey || monthKey);
+    const isLineChart = isTimeSeries && data.length > 1;
+
+    // Process data for non-grouped charts
+    let processedData: any[] = [];
+    let lineDataSets: any[] = [];
+    let isMultiSeries = false;
+    let seriesNames: string[] = [];
+    const groupedData: Record<string, any[]> = {};
+
+    if (isLineChart) {
+        // Generate unique time labels
+        const timeLabels = new Set<string>();
+
+        data.forEach(item => {
+            let label = '';
+            if (monthKey && yearKey) {
+                const yearStr = String(item[yearKey]);
+                const shortYear = yearStr.length === 4 ? yearStr.slice(-2) : yearStr;
+                label = `${item[monthKey]}/${shortYear}`;
+            } else if (labelKey) {
+                label = String(item[labelKey]);
+            } else {
+                label = String(item[keys[0]]);
+            }
+
+            if (!groupedData[label]) groupedData[label] = [];
+            groupedData[label].push(item);
+            timeLabels.add(label);
+        });
+
+        const sortedLabels = Array.from(timeLabels).sort((a, b) => {
+            const aParts = a.split('/');
+            const bParts = b.split('/');
+            if (aParts.length > 1 && bParts.length > 1) {
+                const aYear = parseInt(aParts[1]);
+                const bYear = parseInt(bParts[1]);
+                const aMonth = parseInt(aParts[0]);
+                const bMonth = parseInt(bParts[0]);
+                if (aYear !== bYear) return aYear - bYear;
+                return aMonth - bMonth;
+            }
+            return a.localeCompare(b);
+        });
+
+        if (Object.values(groupedData).some(arr => arr.length > 1)) {
+            isMultiSeries = true;
+            seriesNames = Array.from(new Set(data.map(d => String(d[analysis.categoryKey]))));
+        }
+
+        if (isMultiSeries) {
+            seriesNames.forEach((seriesName, idx) => {
+                const points = sortedLabels.map(label => {
+                    const items = groupedData[label] || [];
+                    const match = items.find(i => String(i[analysis.categoryKey]) === seriesName);
+                    const val = match ? Number(match[analysis.measureKey]) : 0;
+                    return {
+                        value: val,
+                        label: label,
+                        dataPointText: '',
+                        formattedValue: val.toLocaleString('th-TH', { minimumFractionDigits: 2 }),
+                        seriesName: seriesName,
+                        dateLabel: label
+                    };
+                });
+
+                lineDataSets.push({
+                    data: points,
+                    color: stringToColor(seriesName, idx),
+                    label: seriesName,
+                    dataPointsColor: stringToColor(seriesName, idx),
+                });
+            });
+            processedData = lineDataSets[0]?.data || [];
+        } else {
+            processedData = sortedLabels.map(label => {
+                const items = groupedData[label] || [];
+                const val = items.reduce((sum, i) => sum + Number(i[analysis.measureKey]), 0);
+                return {
+                    value: val,
+                    label: label,
+                    parent: '',
+                    frontColor: '#3B82F6',
+                    labelTextStyle: { color: isDark ? '#9CA3AF' : '#6B7280', fontSize: 10 },
+                    formattedValue: val.toLocaleString('th-TH', { minimumFractionDigits: 2 }),
+                    dataPointText: ''
+                };
+            });
+        }
+    } else {
+        // Bar chart processing
+        processedData = data.map(item => {
+            const val = Number(item[analysis.measureKey]);
+            let label = '';
+
+            if (monthKey && yearKey && item[monthKey] && item[yearKey]) {
+                const yearStr = String(item[yearKey]);
+                const shortYear = yearStr.length === 4 ? yearStr.slice(-2) : yearStr;
+                label = `${item[monthKey]}/${shortYear}`;
+            } else if (labelKey && item[labelKey]) {
+                label = String(item[labelKey]);
+            } else if (analysis.categoryKey && item[analysis.categoryKey]) {
+                label = String(item[analysis.categoryKey]);
+            } else {
+                label = String(Object.values(item)[0]);
+            }
+
+            const displayLabel = truncateLabel(label, 15);
+
+            return {
+                value: val,
+                label: displayLabel,
+                fullLabel: label,
+                frontColor: stringToColor(label),
+                labelTextStyle: { color: isDark ? '#9CA3AF' : '#6B7280', fontSize: 10 },
+                formattedValue: val.toLocaleString('th-TH', { minimumFractionDigits: 2 }),
+                topLabelComponent: () => (
+                    <Text style={{ color: isDark ? '#FFF' : '#000', fontSize: 10, marginBottom: 2 }}>
+                        {val.toLocaleString('th-TH', { maximumFractionDigits: 0 })}
+                    </Text>
+                )
+            };
+        });
+    }
+
+    const isHorizontal = !isLineChart && data.length > 5;
+
+    let maxValue = 0;
+    if (isMultiSeries) {
+        maxValue = Math.max(...lineDataSets.flatMap(ds => ds.data.map((d: any) => d.value)));
+    } else {
+        maxValue = Math.max(...processedData.map(d => d.value));
+    }
+
+    // ============================================================
+    // Fix: Dimensions and Safe Areas
+    // ============================================================
+    // screenWidth is already defined at top of component
+    const safeChartWidth = Math.min(screenWidth - 48, 600); // Max width 600px, otherwise screen - 48px padding
+
+
+
+    // Render Smart Tooltip (Refactored)
+    const renderTooltip = (item: any, index: number) => {
+        if (!item) return null;
+
+        // Check High Value relative to Max
+        const isHorizontalChart = !isLineChart && data.length > 5;
+        // Lower threshold to 0.3 (30%) for horizontal charts to force left-shift more often
+        const threshold = isHorizontalChart ? 0.3 : 0.6;
+        const isHigh = item.value > (maxValue * threshold);
+
+        const total = processedData.length;
+
+        const tooltipStyle = calculateTooltipStyle(index, total, isHorizontalChart, isHigh);
+
+        return (
+            <View className="bg-gray-900 dark:bg-white rounded-lg shadow-lg" style={tooltipStyle}>
+                <Text className="text-white dark:text-gray-900 text-xs font-bold mb-1 text-center">
+                    {item.fullLabel || item.label}
+                </Text>
+                <Text className="text-white dark:text-gray-900 text-xs text-center">
+                    {item.formattedValue} บาท
+                </Text>
             </View>
         );
     };
 
     return (
         <View className="my-4 p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm"
-            style={{ overflow: 'visible' }}>
+            style={{ width: '100%', overflow: 'visible' }}>
+
+            {/* ... Header ... */}
             <View className="flex-row justify-between items-center mb-6">
                 <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-                    📈 แนวโน้ม{valueKey}
+                    {isLineChart ? '📈 Trends' : isHorizontal ? '📊 Comparative Rank' : '📊 Comparison'} : {analysis.measureKey}
                 </Text>
             </View>
 
-            <View style={{ marginLeft: -10 }}>
+            {/* Chart Area */}
+            <View style={{ marginLeft: isHorizontal ? 0 : -10 }}>
                 {isLineChart ? (
+                    // ... Line Chart ...
                     <LineChart
-                        data={chartData}
-                        color="#3B82F6"
+                        dataSet={isMultiSeries ? lineDataSets : undefined} // Usage for Multi-Line
+                        data={isMultiSeries ? undefined : processedData}   // Usage for Single-Line
+                        color={isMultiSeries ? undefined : "#3B82F6"}
                         thickness={2}
                         startFillColor="rgba(59, 130, 246, 0.3)"
                         endFillColor="rgba(59, 130, 246, 0.01)"
@@ -122,49 +786,126 @@ export const DataChart = ({ data }: DataChartProps) => {
                         hideDataPoints={false}
                         dataPointsColor="#3B82F6"
                         curved
-                        areaChart
+                        areaChart={!isMultiSeries} // Only area for single series to avoid clutter
                         height={200}
-                        width={screenWidth * 0.75}
+                        width={safeChartWidth} // Use safe width
                         isAnimated
                         pointerConfig={{
                             pointerStripUptoDataPoint: true,
-                            pointerStripColor: 'lightgray',
+                            pointerStripColor: isDark ? '#4B5563' : '#D1D5DB',
                             pointerStripWidth: 2,
                             strokeDashArray: [2, 5],
-                            pointerColor: 'lightgray',
+                            pointerColor: isDark ? '#9CA3AF' : '#6B7280',
                             radius: 4,
                             pointerLabelWidth: 100,
                             pointerLabelHeight: 120,
+                            autoAdjustPointerLabelPosition: true,
                             pointerComponent: (items: any) => {
                                 if (!items || items.length === 0 || !items[0]) return null;
-                                return renderTooltip(items[0], 0);
+                                // Multi-series tooltip inside pointer
+                                const item = items[0];
+
+                                if (isMultiSeries) {
+                                    const targetLabel = item.dateLabel || item.label;
+                                    const groupItems = groupedData[targetLabel] || [];
+                                    return (
+                                        <View className="bg-gray-900 dark:bg-white rounded-lg shadow-lg p-2"
+                                            style={{
+                                                position: 'absolute',
+                                                left: item.pointerX ? 10 : 0, // Offset from pointer
+                                                top: -60,
+                                                zIndex: 1000,
+                                                minWidth: 160
+                                            }}>
+                                            <Text className="text-gray-300 dark:text-gray-500 text-[10px] mb-2 font-bold text-center">{targetLabel}</Text>
+                                            {groupItems.map((gItem: any, idx: number) => {
+                                                const sName = String(gItem[analysis.categoryKey]);
+                                                const val = Number(gItem[analysis.measureKey]);
+                                                return (
+                                                    <View key={idx} className="flex-row justify-between mb-1">
+                                                        <View className="flex-row items-center mr-2">
+                                                            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: stringToColor(sName, idx), marginRight: 4 }} />
+                                                            <Text className="text-white dark:text-gray-900 text-[10px]">{sName}</Text>
+                                                        </View>
+                                                        <Text className="text-white dark:text-gray-900 text-[10px] font-bold">{val.toLocaleString('th-TH', { maximumFractionDigits: 0 })}</Text>
+                                                    </View>
+                                                );
+                                            })}
+                                        </View>
+                                    );
+                                }
+
+                                return (
+                                    <View
+                                        className="bg-gray-900 dark:bg-white rounded-lg shadow-lg p-2"
+                                        style={{
+                                            position: 'absolute',
+                                            left: -70,
+                                            top: -60,
+                                            zIndex: 1000,
+                                            width: 140
+                                        }}
+                                    >
+                                        <Text className="text-white dark:text-gray-900 text-xs font-bold mb-1 text-center">{item.label}</Text>
+                                        <Text className="text-white dark:text-gray-900 text-xs text-center">{item.formattedValue} บาท</Text>
+                                    </View>
+                                );
                             },
                         }}
                     />
                 ) : (
-                    <BarChart
-                        data={chartData}
-                        barWidth={22}
-                        spacing={24}
-                        roundedTop
-                        roundedBottom
-                        hideRules
-                        xAxisThickness={0}
-                        yAxisThickness={0}
-                        yAxisTextStyle={{ color: isDark ? '#9CA3AF' : '#6B7280', fontSize: 10 }}
-                        formatYLabel={formatYLabel}
-                        noOfSections={4}
-                        height={200}
-                        width={screenWidth * 0.75}
-                        isAnimated
-                        frontColor={'#3B82F6'}
-                        renderTooltip={renderTooltip}
-                    />
+                    <ScrollView
+                        style={{ maxHeight: 400, width: '100%' }}
+                        nestedScrollEnabled={true}
+                        showsVerticalScrollIndicator={true}
+                        showsHorizontalScrollIndicator={true}
+                        contentContainerStyle={{
+                            paddingRight: 40, // More padding for right-side safety
+                            minWidth: isHorizontal ? '100%' : undefined
+                        }}
+                    >
+                        <BarChart
+                            data={processedData}
+                            barWidth={22}
+                            spacing={24}
+                            roundedTop
+                            roundedBottom
+                            hideRules
+                            xAxisThickness={0}
+                            yAxisThickness={0}
+                            horizontal={isHorizontal}
+                            yAxisTextStyle={{ color: isDark ? '#9CA3AF' : '#6B7280', fontSize: 10, width: isHorizontal ? 120 : undefined }}
+                            yAxisLabelWidth={isHorizontal ? 130 : 40}
+                            formatYLabel={formatYLabel}
+                            noOfSections={4}
+                            height={isHorizontal ? Math.max(200, processedData.length * 50) : 200}
+                            width={safeChartWidth - (isHorizontal ? 130 : 40)} // Constrain width
+                            isAnimated
+                            frontColor={'#3B82F6'}
+                            renderTooltip={renderTooltip}
+                            shiftX={isHorizontal ? -10 : 0}
+                        />
+                    </ScrollView>
                 )}
             </View>
-            <Text className="text-[10px] text-gray-400 dark:text-gray-500 text-center mt-2">
-                * แตะที่กราฟเพื่อดูยอดเงิน
+
+            {/* Legend for multi-series */}
+            {isMultiSeries && seriesNames.length > 0 && (
+                <View className="flex-row flex-wrap mt-4 pt-4 border-t border-gray-100 dark:border-gray-700 justify-center gap-x-4 gap-y-2">
+                    {seriesNames.map((name, idx) => (
+                        <View key={name} className="flex-row items-center">
+                            <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: stringToColor(name, idx), marginRight: 6 }} />
+                            <Text className="text-xs text-gray-600 dark:text-gray-300">{name}</Text>
+                        </View>
+                    ))}
+                </View>
+            )}
+
+            <Text className="text-[10px] text-gray-400 dark:text-gray-500 text-center mt-3">
+                * แตะที่กราฟเพื่อดูรายละเอียด
             </Text>
         </View>
     );
 };
+
+export default DataChart;
