@@ -1,7 +1,7 @@
 # แผนการพัฒนา MCP Server สำหรับ NT AI Assistant (V2)
 **ปรับปรุงให้สอดคล้องกับ Project ปัจจุบัน**
 
-**Last Updated:** 2026-02-02
+**Last Updated:** 2026-02-03
 
 ---
 
@@ -30,6 +30,7 @@
 | `nt_reporting_mcp.py` | ⏳ Pending | 3 tools | Report comparison |
 | MCP Client Integration | ✅ **Complete** | - | Auto-detect validation MCP |
 | Frontend Confidence UI | ✅ **Complete** | - | ConfidenceBadge component |
+| DataChart Wide Format | ✅ **Complete** | - | Pivoted SQL → Grouped Bars |
 
 ### สิ่งที่ MCP จะเพิ่มเติม
 
@@ -113,7 +114,7 @@
 │                                                                 │
 │  ┌─────────────────────┐  ┌─────────────────────┐              │
 │  │  nt-validation-mcp  │  │  nt-reporting-mcp   │              │
-│  │  ⏳ PENDING         │  │  ⏳ PENDING         │              │
+│  │  ✅ COMPLETE        │  │  ⏳ PENDING         │              │
 │  ├─────────────────────┤  ├─────────────────────┤              │
 │  │ Tools:              │  │ Tools:              │              │
 │  │ • check_business    │  │ • fetch_official    │              │
@@ -121,6 +122,8 @@
 │  │ • calculate         │  │ • compare_results   │              │
 │  │   _confidence       │  │ • get_report_list   │              │
 │  │ • validate_result   │  │                     │              │
+│  │ • get_validation    │  │                     │              │
+│  │   _summary          │  │                     │              │
 │  └─────────────────────┘  └─────────────────────┘              │
 │                                                                 │
 └────────────────────────┬────────────────────────────────────────┘
@@ -508,11 +511,32 @@ if __name__ == "__main__":
 
 ---
 
-## 🛡️ Phase 2: Validation MCP Server ⏳ PENDING
+## 🛡️ Phase 2: Validation MCP Server ✅ COMPLETE
 
 ### 2.1 NT Validation MCP
 
-**ไฟล์ที่จะสร้าง:** `mcp_servers/nt_validation_mcp.py`
+**ไฟล์:** `mcp_servers/nt_validation_mcp.py`
+
+**4 Tools Implemented:**
+
+| Tool | Description | Status |
+|------|-------------|--------|
+| `check_business_rules` | ตรวจสอบ business rules (built-in + database) | ✅ |
+| `calculate_confidence_score` | คำนวณ confidence score (0-100) | ✅ |
+| `validate_result` | ตรวจสอบผลลัพธ์ query | ✅ |
+| `get_validation_summary` | สรุปผลการ validate ทั้งหมด | ✅ |
+
+**Test Results:**
+```
+[PASS] check_business_rules - Built-in + DB rules
+[PASS] calculate_confidence_score - All scenarios
+[PASS] validate_result - Empty/Valid data
+[PASS] get_validation_summary - Full pipeline
+
+Total: 4/4 tests passed
+```
+
+**Code (Implemented):**
 
 ```python
 # mcp_servers/nt_validation_mcp.py
@@ -989,10 +1013,11 @@ nt-ai-assistant/
 │   ├── __init__.py              # ✅ COMPLETE - Package init
 │   ├── nt_metadata_mcp.py       # ✅ COMPLETE - Metadata tools (14 tools)
 │   ├── nt_query_mcp.py          # ✅ COMPLETE - Query tools (5 tools)
-│   ├── nt_validation_mcp.py     # ⏳ PENDING - Validation tools
+│   ├── nt_validation_mcp.py     # ✅ COMPLETE - Validation tools (4 tools)
 │   ├── nt_reporting_mcp.py      # ⏳ PENDING - Reporting tools
 │   ├── test_metadata_mcp.py     # ✅ COMPLETE - Test script
 │   ├── test_query_mcp.py        # ✅ COMPLETE - Test script
+│   ├── test_validation_mcp.py   # ✅ COMPLETE - Test script
 │   ├── requirements.txt         # ✅ COMPLETE - Dependencies
 │   └── claude_desktop_config.json # ✅ COMPLETE - Claude Desktop config
 │
@@ -1000,7 +1025,9 @@ nt-ai-assistant/
 │   ├── components/Chat/
 │   │   ├── ContextSelector.tsx  # Context selector (existing)
 │   │   ├── ModelSelector.tsx    # Model selector (existing)
-│   │   └── ConfidenceBadge.tsx  # NEW: Confidence display
+│   │   ├── ConfidenceBadge.tsx  # ✅ NEW: Confidence display
+│   │   ├── DataChart.tsx        # ✅ UPDATED: Wide Format support
+│   │   └── ChatBubble.tsx       # ✅ UPDATED: ConfidenceBadge integration
 │   └── ...
 │
 ├── frontend-admin/               # Existing Admin dashboard
@@ -1023,26 +1050,27 @@ Week 1: Core MCP Servers ✅ COMPLETE
 ├─ Day 3-4: nt_query_mcp ✅ COMPLETE (5 tools, 5/5 tests passed)
 └─ Day 5: Testing with existing backend ✅ COMPLETE
 
-Week 2: Validation & Confidence
-├─ Day 1-2: nt_validation_mcp
-├─ Day 3-4: Confidence scoring system
-└─ Day 5: Integration testing
+Week 2: Validation & Confidence ✅ COMPLETE
+├─ Day 1-2: nt_validation_mcp ✅ COMPLETE (4 tools, 4/4 tests passed)
+├─ Day 3-4: Confidence scoring system ✅ COMPLETE
+└─ Day 5: Integration testing ✅ COMPLETE
 
-Week 3: Reporting & Comparison
+Week 3: Frontend Integration ✅ COMPLETE
+├─ Day 1: ConfidenceBadge.tsx ✅ COMPLETE
+├─ Day 2: ChatBubble + index.tsx integration ✅ COMPLETE
+├─ Day 3-4: DataChart.tsx Wide Format support ✅ COMPLETE
+└─ Day 5: End-to-end testing ✅ COMPLETE
+
+Week 4: Reporting & Comparison ⏳ PENDING
 ├─ Day 1-2: nt_reporting_mcp
 ├─ Day 3-4: Report comparison logic
 └─ Day 5: Setup official reports data
 
-Week 4: Integration & UI
-├─ Day 1-2: MCP Client in backend
-├─ Day 3-4: Frontend confidence display
-└─ Day 5: End-to-end testing
-
-Week 5: Polish & Documentation
+Week 5: Polish & Deployment ⏳ PENDING
 ├─ Day 1-2: Performance optimization
 ├─ Day 3: Documentation
 ├─ Day 4: Bug fixes
-└─ Day 5: Deployment
+└─ Day 5: Production deployment
 ```
 
 ---
@@ -1084,6 +1112,9 @@ Week 5: Polish & Documentation
 - [x] Add confidence display to frontend (`ConfidenceBadge.tsx`)
 - [x] Integrate ConfidenceBadge with ChatBubble.tsx
 - [x] Update frontend app to pass confidence data
+- [x] Update DataChart.tsx for Wide Format (Pivoted SQL) support
+- [x] Add grouped bar chart for period comparison
+- [x] Add difference/percent display in tooltips
 
 ### Phase 5 - Deployment ⏳ PENDING
 - [ ] Create `docker-compose.yml` for MCP servers
@@ -1144,6 +1175,49 @@ Week 5: Polish & Documentation
    # Run tests
    python mcp_servers/test_metadata_mcp.py
    ```
+
+---
+
+### DataChart.tsx - Wide Format Support ✅ NEW
+
+**ปัญหาเดิม:** SQL ที่ return ข้อมูลแบบ Wide Format (pivoted columns) เช่น:
+```
+department | revenue_august | revenue_september | difference | percent_difference
+```
+
+ไม่สามารถแสดงเป็น grouped bar chart ได้ เพราะ logic เดิมรองรับแค่ Long Format:
+```
+department | month | revenue
+```
+
+**Solution Implemented:**
+1. **Month Name Detection** - รองรับทั้ง English และ Thai:
+   ```javascript
+   const monthNames = {
+       'january': '1', 'jan': '1', 'ม.ค.': '1', 'มกราคม': '1',
+       'august': '8', 'aug': '8', 'ส.ค.': '8', 'สิงหาคม': '8',
+       // ... all 12 months
+   };
+   ```
+
+2. **Pivoted Column Detection**:
+   - Detects columns like `revenue_august`, `revenue_september`, `revenue_8`
+   - Filters out `difference` and `percent_difference` columns
+
+3. **Grouped Bar Rendering**:
+   - Uses `stackData` format for `react-native-gifted-charts`
+   - Side-by-side bars for each period within category
+   - Legend shows period colors
+
+4. **Tooltip with Difference Display**:
+   - Shows values for each period
+   - Shows `ผลต่าง` and `% ผลต่าง` when available
+   - Color-coded: green (+) / red (-)
+
+5. **Smart Tooltip Positioning**:
+   - `calculateTooltipStyle()` handles edge cases
+   - Prevents overflow on edges
+   - Flips based on bar height
 
 ---
 
