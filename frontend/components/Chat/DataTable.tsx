@@ -6,6 +6,71 @@ interface DataTableProps {
     data: Record<string, any>[];
 }
 
+// Helper: Smart Month Sorting (same as DataChart)
+const smartMonthSort = (values: string[]): string[] => {
+    const monthNameToNum: Record<string, number> = {
+        'มกราคม': 1, 'january': 1, 'jan': 1, 'ม.ค.': 1,
+        'กุมภาพันธ์': 2, 'february': 2, 'feb': 2, 'ก.พ.': 2,
+        'มีนาคม': 3, 'march': 3, 'mar': 3, 'มี.ค.': 3,
+        'เมษายน': 4, 'april': 4, 'apr': 4, 'เม.ย.': 4,
+        'พฤษภาคม': 5, 'may': 5, 'พ.ค.': 5,
+        'มิถุนายน': 6, 'june': 6, 'jun': 6, 'มิ.ย.': 6,
+        'กรกฎาคม': 7, 'july': 7, 'jul': 7, 'ก.ค.': 7,
+        'สิงหาคม': 8, 'august': 8, 'aug': 8, 'ส.ค.': 8,
+        'กันยายน': 9, 'september': 9, 'sep': 9, 'ก.ย.': 9,
+        'ตุลาคม': 10, 'october': 10, 'oct': 10, 'ต.ค.': 10,
+        'พฤศจิกายน': 11, 'november': 11, 'nov': 11, 'พ.ย.': 11,
+        'ธันวาคม': 12, 'december': 12, 'dec': 12, 'ธ.ค.': 12,
+    };
+
+    const extractMonthNum = (val: string): number => {
+        const lower = val.toLowerCase().trim();
+
+        // 1. Check Thai/English month name
+        if (monthNameToNum[lower] !== undefined) {
+            return monthNameToNum[lower];
+        }
+
+        // 2. Extract number from "เดือน X", "M/Y" format
+        const parts = val.split('/');
+        if (parts.length > 1) {
+            // Format: "1/2025" - extract first part as month
+            const monthNum = parseInt(parts[0]);
+            if (!isNaN(monthNum) && monthNum >= 1 && monthNum <= 12) {
+                return monthNum;
+            }
+        }
+
+        const match = val.match(/\d+/);
+        if (match) {
+            const num = parseInt(match[0]);
+            if (num >= 1 && num <= 12) return num;
+        }
+
+        // 3. Pure numeric string
+        const asNum = parseInt(val);
+        if (!isNaN(asNum) && asNum >= 1 && asNum <= 12) {
+            return asNum;
+        }
+
+        // 4. Fallback
+        return 999;
+    };
+
+    return [...values].sort((a, b) => {
+        const aNum = extractMonthNum(a);
+        const bNum = extractMonthNum(b);
+
+        // If both are valid months, sort by month number
+        if (aNum !== 999 && bNum !== 999) {
+            return aNum - bNum;
+        }
+
+        // Fallback to string comparison
+        return a.localeCompare(b);
+    });
+};
+
 export const DataTable = ({ data }: DataTableProps) => {
     const isDark = useColorScheme() === 'dark';
 
@@ -45,9 +110,13 @@ export const DataTable = ({ data }: DataTableProps) => {
         return (typeof val === 'string' || ['year', 'id', 'code', 'date'].some(t => lowerK.includes(t))) && k !== valueKey && !isMeasure(k);
     });
 
-    const categoryKeys = dimensionKeys.filter(k =>
-        !['year', 'month', 'date', 'time', 'quarter'].some(t => k.toLowerCase().includes(t))
-    );
+    const categoryKeys = dimensionKeys.filter(k => {
+        const lower = k.toLowerCase();
+        // Exclude time-related columns (both English and Thai)
+        const timeKeywords = ['year', 'month', 'date', 'time', 'quarter', 'week', 'day',
+            'ปี', 'เดือน', 'วันที่', 'ไตรมาส', 'สัปดาห์', 'วัน', 'เวลา', 'พ.ศ.', 'ค.ศ.'];
+        return !timeKeywords.some(t => lower.includes(t));
+    });
 
     // Determines if we should Pivot (Crosstab)
     // Rule: We have Time dimensions AND Category dimensions AND duplicate time entries (implying multiple series)
@@ -74,23 +143,8 @@ export const DataTable = ({ data }: DataTableProps) => {
             // --- Month Filling Logic ---
             let periods = Array.from(uniqueTimes);
 
-            // 1. Sort periods naturally first
-            periods.sort((a, b) => {
-                const aParts = a.split('/');
-                const bParts = b.split('/');
-                if (aParts.length > 1 && bParts.length > 1) {
-                    const aYear = parseInt(aParts[1]);
-                    const bYear = parseInt(bParts[1]);
-                    const aMonth = parseInt(aParts[0]);
-                    const bMonth = parseInt(bParts[0]);
-                    if (aYear !== bYear) return aYear - bYear;
-                    return aMonth - bMonth;
-                }
-                const aNum = parseInt(a);
-                const bNum = parseInt(b);
-                if (!isNaN(aNum) && !isNaN(bNum)) return aNum - bNum;
-                return a.localeCompare(b);
-            });
+            // 1. Sort periods using smart month sorting
+            periods = smartMonthSort(periods);
 
             // 2. Force Fill 1-12 Months
             // Detect if data looks like "Month" or "Month/Year"
@@ -120,16 +174,7 @@ export const DataTable = ({ data }: DataTableProps) => {
                 // or if we just want to ensure 1-12 are present
                 // Simple logic: Merge existing periods with allMonths, keep unique, then sort again
                 const merged = new Set([...periods, ...allMonths]);
-                periods = Array.from(merged).sort((a, b) => {
-                    const aParts = a.split('/');
-                    const bParts = b.split('/');
-                    if (aParts.length > 1 && bParts.length > 1) {
-                        const aM = parseInt(aParts[0]);
-                        const bM = parseInt(bParts[0]);
-                        return aM - bM;
-                    }
-                    return parseInt(a) - parseInt(b);
-                });
+                periods = smartMonthSort(Array.from(merged));
             }
 
             periodLabels = periods;
