@@ -719,6 +719,37 @@ DATE เก็บเป็น Unix Timestamp (milliseconds) ต้องแป�
 
 {syntax_rules}
 
+## การแปลงหน่วย (Unit Conversion)
+**เมื่อ User ระบุหน่วยเงินตรา ให้แปลงและตั้งชื่อ column ให้ชัดเจน:**
+
+1. **ล้านบาท / Million Baht**:
+   ```sql
+   -- ✅ CORRECT
+   SUM(amount) / 1000000.0 AS revenue_million_baht
+   SUM(expense) / 1000000.0 AS expense_ล้านบาท
+
+   -- ❌ WRONG - ชื่อไม่ชัด
+   SUM(amount) / 1000000.0 AS revenue
+   SUM(amount) / 1000000.0 AS total
+   ```
+
+2. **พันล้านบาท / Billion Baht**:
+   ```sql
+   SUM(amount) / 1000000000.0 AS revenue_billion_baht
+   SUM(amount) / 1000000000.0 AS revenue_พันล้าน
+   ```
+
+3. **พันบาท / Thousand Baht**:
+   ```sql
+   SUM(amount) / 1000.0 AS revenue_thousand_baht
+   SUM(amount) / 1000.0 AS revenue_พันบาท
+   ```
+
+**กฎสำคัญ:**
+- ถ้า User ไม่ระบุหน่วย → ใช้บาท (ไม่ต้องหาร)
+- ถ้า User บอก "ล้านบาท" → **ต้องหาร 1000000** และตั้งชื่อ `*_million_baht` หรือ `*_ล้านบาท`
+- Column name ต้องมี suffix บอกหน่วย: `_million_baht`, `_ล้านบาท`, `_billion_baht`, `_thousand_baht`
+
 ## รูปแบบการตอบ
 1. แสดง SQL query
 2. อธิบายผลลัพธ์เป็นภาษาไทย

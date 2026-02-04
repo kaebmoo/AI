@@ -28,6 +28,139 @@ const safelyParseNumber = (val: any): number => {
     return parseFloat(strVal) || 0;
 };
 
+// Helper: Detect unit from column name
+const detectUnitFromColumnName = (columnName?: string): 'baht' | 'thousand' | 'million' | 'billion' | 'auto' => {
+    if (!columnName) return 'auto';
+
+    const lower = columnName.toLowerCase();
+
+    // Check for billion indicators
+    if (lower.includes('billion') || lower.includes('พันล้าน') || lower.includes('_b_baht') || lower.includes('_billion')) {
+        return 'billion';
+    }
+
+    // Check for million indicators
+    if (lower.includes('million') || lower.includes('ล้าน') ||
+        lower.includes('_m_baht') || lower.includes('_million') ||
+        lower.endsWith('_m') || lower.includes('_mb')) {
+        return 'million';
+    }
+
+    // Check for thousand indicators
+    if (lower.includes('thousand') || lower.includes('พัน') ||
+        lower.includes('_k_baht') || lower.includes('_thousand') ||
+        lower.endsWith('_k')) {
+        return 'thousand';
+    }
+
+    // Auto-detect based on maxValue
+    return 'auto';
+};
+
+// Helper: Smart number formatting with appropriate unit (บาท, ล้านบาท, พันล้านบาท)
+const formatNumberWithUnit = (
+    value: number,
+    maxValue: number,
+    columnName?: string
+): { text: string; unit: string } => {
+    // Detect unit from column name first
+    const detectedUnit = detectUnitFromColumnName(columnName);
+
+    // If unit is pre-determined by column name (value already converted)
+    if (detectedUnit === 'billion') {
+        return {
+            text: value.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+            unit: 'พันล้านบาท'
+        };
+    }
+
+    if (detectedUnit === 'million') {
+        return {
+            text: value.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+            unit: 'ล้านบาท'
+        };
+    }
+
+    if (detectedUnit === 'thousand') {
+        return {
+            text: value.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+            unit: 'พันบาท'
+        };
+    }
+
+    // Auto-detect based on max value in dataset (for raw baht values)
+    if (maxValue >= 1_000_000_000) {
+        // พันล้านบาท (Billions)
+        return {
+            text: (value / 1_000_000_000).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+            unit: 'พันล้านบาท'
+        };
+    } else if (maxValue >= 1_000_000) {
+        // ล้านบาท (Millions)
+        return {
+            text: (value / 1_000_000).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+            unit: 'ล้านบาท'
+        };
+    } else if (maxValue >= 1_000) {
+        // พันบาท (Thousands)
+        return {
+            text: (value / 1_000).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+            unit: 'พันบาท'
+        };
+    } else {
+        // บาท (Baht)
+        return {
+            text: value.toLocaleString('th-TH', { minimumFractionDigits: 0, maximumFractionDigits: 0 }),
+            unit: 'บาท'
+        };
+    }
+};
+
+// Helper: Smart Month Sorting (handles Thai names, "เดือน X", numeric)
+const smartMonthSort = (values: string[]): string[] => {
+    const monthNameToNum: Record<string, number> = {
+        'มกราคม': 1, 'january': 1, 'jan': 1, 'ม.ค.': 1,
+        'กุมภาพันธ์': 2, 'february': 2, 'feb': 2, 'ก.พ.': 2,
+        'มีนาคม': 3, 'march': 3, 'mar': 3, 'มี.ค.': 3,
+        'เมษายน': 4, 'april': 4, 'apr': 4, 'เม.ย.': 4,
+        'พฤษภาคม': 5, 'may': 5, 'พ.ค.': 5,
+        'มิถุนายน': 6, 'june': 6, 'jun': 6, 'มิ.ย.': 6,
+        'กรกฎาคม': 7, 'july': 7, 'jul': 7, 'ก.ค.': 7,
+        'สิงหาคม': 8, 'august': 8, 'aug': 8, 'ส.ค.': 8,
+        'กันยายน': 9, 'september': 9, 'sep': 9, 'ก.ย.': 9,
+        'ตุลาคม': 10, 'october': 10, 'oct': 10, 'ต.ค.': 10,
+        'พฤศจิกายน': 11, 'november': 11, 'nov': 11, 'พ.ย.': 11,
+        'ธันวาคม': 12, 'december': 12, 'dec': 12, 'ธ.ค.': 12,
+    };
+
+    const extractMonthNum = (val: string): number => {
+        const lower = val.toLowerCase().trim();
+
+        // 1. Check Thai/English month name
+        if (monthNameToNum[lower] !== undefined) {
+            return monthNameToNum[lower];
+        }
+
+        // 2. Extract number from "เดือน X" or similar patterns
+        const match = val.match(/\d+/);
+        if (match) {
+            const num = parseInt(match[0]);
+            if (num >= 1 && num <= 12) return num;
+        }
+
+        // 3. Pure numeric string
+        const asNum = parseInt(val);
+        if (!isNaN(asNum) && asNum >= 1 && asNum <= 12) {
+            return asNum;
+        }
+
+        // 4. Fallback: return large number to push to end
+        return 999;
+    };
+
+    return [...values].sort((a, b) => extractMonthNum(a) - extractMonthNum(b));
+};
+
 type ChartMode =
     | 'grouped_bar'      // Comparison: Same categories across different periods (e.g., dept revenue month 8 vs 9)
     | 'stacked_bar'      // Composition: Parts of a whole
@@ -110,22 +243,64 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
                 console.warn(`AI columns not found: ${categoryKey}, ${measureKey}. keys: ${keys.join(', ')}`);
             } else {
                 // Use the actual keys from data
-                const finalCategoryKey = matchedCategoryKey;
+                let finalCategoryKey = matchedCategoryKey;
                 const finalMeasureKey = matchedMeasureKey;
-                const finalSeriesKey = seriesKey ? findKeyCaseInsensitive(seriesKey) || '' : '';
+                let finalSeriesKey = seriesKey ? findKeyCaseInsensitive(seriesKey) || '' : '';
+
+                // ============================================================
+                // CRITICAL FIX: Validate AI Config - Swap if Time is in Series instead of Category
+                // ============================================================
+                if (finalSeriesKey) {
+                    const timeKeywords = ['month', 'year', 'date', 'quarter', 'week', 'day', 'time',
+                        'เดือน', 'ปี', 'วันที่', 'ไตรมาส', 'สัปดาห์', 'วัน', 'เวลา'];
+
+                    const isCategoryTime = timeKeywords.some(t => finalCategoryKey.toLowerCase().includes(t));
+                    const isSeriesTime = timeKeywords.some(t => finalSeriesKey.toLowerCase().includes(t));
+
+                    // If Series is Time but Category is NOT Time -> SWAP them
+                    if (isSeriesTime && !isCategoryTime) {
+                        console.warn(`⚠️ AI Config Issue Detected: Time column "${finalSeriesKey}" is in series_column instead of category_column. Auto-swapping...`);
+                        [finalCategoryKey, finalSeriesKey] = [finalSeriesKey, finalCategoryKey];
+                        console.log(`✅ Swapped: category="${finalCategoryKey}", series="${finalSeriesKey}"`);
+                    }
+                }
+
                 // Build categories
                 const categoryCounts: Record<string, number> = {};
                 data.forEach(row => {
                     const cat = String(row[finalCategoryKey] || '');
                     categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
                 });
-                const categories = Object.keys(categoryCounts);
+                let categories = Object.keys(categoryCounts);
+
+                // CRITICAL: Sort categories if it's a time column (after potential swap)
+                const isCategoryTimeColumn = ['month', 'year', 'date', 'quarter', 'week', 'เดือน', 'ปี', 'วันที่', 'ไตรมาส'].some(t =>
+                    finalCategoryKey.toLowerCase().includes(t)
+                );
+                if (isCategoryTimeColumn) {
+                    categories = smartMonthSort(categories);
+                }
+
                 const hasRepeatedCategories = Object.values(categoryCounts).some(count => count > 1);
 
                 // Build series values if series column provided
                 let seriesValues: string[] = [];
                 if (finalSeriesKey) {
-                    seriesValues = Array.from(new Set(data.map(d => String(d[finalSeriesKey])))).sort((a, b) => Number(a) - Number(b));
+                    const uniqueValues = Array.from(new Set(data.map(d => String(d[finalSeriesKey]))));
+
+                    // Detect if this is a month/time column
+                    const isMonthColumn = ['month', 'เดือน', 'quarter', 'ไตรมาส'].some(t =>
+                        finalSeriesKey.toLowerCase().includes(t)
+                    );
+
+                    // Use smart month sorting for time columns, numeric for others
+                    seriesValues = isMonthColumn
+                        ? smartMonthSort(uniqueValues)
+                        : uniqueValues.sort((a, b) => {
+                            const aNum = parseFloat(a);
+                            const bNum = parseFloat(b);
+                            return !isNaN(aNum) && !isNaN(bNum) ? aNum - bNum : a.localeCompare(b);
+                        });
                 }
 
                 // Detect difference columns
@@ -344,7 +519,8 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
 
         if (hasRepeatedCategories && monthKey) {
             seriesKey = monthKey;
-            seriesValues = Array.from(new Set(data.map(d => String(d[monthKey])))).sort((a, b) => Number(a) - Number(b));
+            const uniqueMonths = Array.from(new Set(data.map(d => String(d[monthKey]))));
+            seriesValues = smartMonthSort(uniqueMonths);
         } else if (hasRepeatedCategories && yearKey) {
             seriesKey = yearKey;
             seriesValues = Array.from(new Set(data.map(d => String(d[yearKey])))).sort();
@@ -568,7 +744,16 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
         }
 
         // Get actual categories from grouped data (important for Wide Format)
-        const actualCategories = Object.keys(groupedData);
+        // CRITICAL FIX: Use analysis.categories (already sorted) instead of Object.keys
+        let actualCategories = analysis.categories || Object.keys(groupedData);
+
+        // If categories are months/time, ensure they're sorted
+        const isCategoryTimeColumn = ['month', 'year', 'date', 'quarter', 'week', 'เดือน', 'ปี', 'วันที่', 'ไตรมาส'].some(t =>
+            analysis.categoryKey.toLowerCase().includes(t)
+        );
+        if (isCategoryTimeColumn && actualCategories.length > 0) {
+            actualCategories = smartMonthSort(actualCategories);
+        }
 
         // Get actual series values (periods)
         const actualSeriesValues = isPivotedFormat && pivotedColumns
@@ -621,48 +806,74 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
                 isHighValue
             );
 
+            // Smart unit detection - determine once for all values
+            const formattedDiff = diff?.diff ? formatNumberWithUnit(Math.abs(diff.diff), maxValue, analysis.measureKey) : null;
+
             return (
                 <View
                     className="bg-gray-900 dark:bg-white rounded-lg shadow-lg"
                     style={{
                         ...tooltipStyle,
-                        minWidth: 180, // Override minWidth for grouped content
-                        maxWidth: 220,
+                        minWidth: 200,
+                        maxWidth: 340, // Increased from 220 for longer text
+                        maxHeight: 280, // Prevent tooltip from getting too tall
                     }}
                 >
-                    <Text className="text-white dark:text-gray-900 text-xs font-bold mb-2 text-center">
+                    <Text
+                        className="text-white dark:text-gray-900 text-xs font-bold mb-2 text-center"
+                        style={{ flexWrap: 'wrap', maxWidth: '100%' }}
+                    >
                         {category}
                     </Text>
 
-                    {actualSeriesValues.map((series, idx) => (
-                        <View key={series} className="flex-row justify-between items-center mb-1">
-                            <View className="flex-row items-center">
-                                <View
-                                    style={{
-                                        width: 10,
-                                        height: 10,
-                                        borderRadius: 2,
-                                        backgroundColor: SERIES_COLORS[idx % SERIES_COLORS.length],
-                                        marginRight: 6
-                                    }}
-                                />
-                                <Text className="text-gray-300 dark:text-gray-600 text-[11px]">
-                                    {isPivotedFormat || isNaN(Number(series)) ? series : `เดือน ${series}`}
-                                </Text>
-                            </View>
-                            <Text className="text-white dark:text-gray-900 text-[11px] font-semibold">
-                                {(values[series] || 0).toLocaleString('th-TH', { maximumFractionDigits: 0 })}
-                            </Text>
-                        </View>
-                    ))}
+                    <ScrollView
+                        style={{ maxHeight: 200 }}
+                        nestedScrollEnabled={true}
+                        showsVerticalScrollIndicator={actualSeriesValues.length > 5}
+                    >
+                        {actualSeriesValues.map((series, idx) => {
+                            const formatted = formatNumberWithUnit(values[series] || 0, maxValue, analysis.measureKey);
+                            const displayLabel = isPivotedFormat || isNaN(Number(series)) ? series : `เดือน ${series}`;
+
+                            return (
+                                <View key={series} className="mb-2">
+                                    {/* Label row with color indicator */}
+                                    <View className="flex-row items-center mb-1">
+                                        <View
+                                            style={{
+                                                width: 10,
+                                                height: 10,
+                                                borderRadius: 2,
+                                                backgroundColor: SERIES_COLORS[idx % SERIES_COLORS.length],
+                                                marginRight: 6,
+                                                flexShrink: 0
+                                            }}
+                                        />
+                                        <Text
+                                            className="text-gray-300 dark:text-gray-600 text-[11px] flex-1"
+                                            style={{ flexWrap: 'wrap' }}
+                                        >
+                                            {displayLabel}
+                                        </Text>
+                                    </View>
+                                    {/* Value row - indented to align with text */}
+                                    <View style={{ marginLeft: 16 }}>
+                                        <Text className="text-white dark:text-gray-900 text-[11px] font-semibold">
+                                            {formatted.text} {formatted.unit}
+                                        </Text>
+                                    </View>
+                                </View>
+                            );
+                        })}
+                    </ScrollView>
 
                     {diff && (
                         <View className="border-t border-gray-700 dark:border-gray-300 mt-2 pt-2">
-                            {diff.diff !== undefined && (
+                            {diff.diff !== undefined && formattedDiff && (
                                 <View className="flex-row justify-between">
                                     <Text className="text-gray-400 dark:text-gray-500 text-[10px]">ผลต่าง:</Text>
                                     <Text className={`text-[10px] font-semibold ${diff.diff >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                        {diff.diff >= 0 ? '+' : ''}{diff.diff.toLocaleString('th-TH', { maximumFractionDigits: 0 })}
+                                        {diff.diff >= 0 ? '+' : '-'}{formattedDiff.text} {formattedDiff.unit}
                                     </Text>
                                 </View>
                             )}
@@ -934,13 +1145,27 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
 
         const tooltipStyle = calculateTooltipStyle(index, total, isHorizontalChart, isHigh);
 
+        // Smart unit formatting
+        const formatted = formatNumberWithUnit(item.value || 0, maxValue, analysis.measureKey);
+
         return (
-            <View className="bg-gray-900 dark:bg-white rounded-lg shadow-lg" style={tooltipStyle}>
-                <Text className="text-white dark:text-gray-900 text-xs font-bold mb-1 text-center">
+            <View
+                className="bg-gray-900 dark:bg-white rounded-lg shadow-lg"
+                style={{
+                    ...tooltipStyle,
+                    minWidth: 140,
+                    maxWidth: 280, // Increased for longer labels
+                    padding: 8
+                }}
+            >
+                <Text
+                    className="text-white dark:text-gray-900 text-xs font-bold mb-1 text-center"
+                    style={{ flexWrap: 'wrap' }}
+                >
                     {item.fullLabel || item.label}
                 </Text>
                 <Text className="text-white dark:text-gray-900 text-xs text-center">
-                    {item.formattedValue} บาท
+                    {formatted.text} {formatted.unit}
                 </Text>
             </View>
         );
@@ -1004,42 +1229,57 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
                                         <View className="bg-gray-900 dark:bg-white rounded-lg shadow-lg p-2"
                                             style={{
                                                 position: 'absolute',
-                                                left: item.pointerX ? 10 : 0, // Offset from pointer
-                                                top: -60,
+                                                left: item.pointerX ? 10 : 0,
+                                                top: -80,
                                                 zIndex: 1000,
-                                                minWidth: 160
+                                                minWidth: 180,
+                                                maxWidth: 300,
+                                                maxHeight: 240
                                             }}>
                                             <Text className="text-gray-300 dark:text-gray-500 text-[10px] mb-2 font-bold text-center">{targetLabel}</Text>
-                                            {groupItems.map((gItem: any, idx: number) => {
-                                                const sName = String(gItem[analysis.categoryKey]);
-                                                const val = Number(gItem[analysis.measureKey]);
-                                                return (
-                                                    <View key={idx} className="flex-row justify-between mb-1">
-                                                        <View className="flex-row items-center mr-2">
-                                                            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: stringToColor(sName, idx), marginRight: 4 }} />
-                                                            <Text className="text-white dark:text-gray-900 text-[10px]">{sName}</Text>
+                                            <ScrollView
+                                                style={{ maxHeight: 180 }}
+                                                nestedScrollEnabled={true}
+                                                showsVerticalScrollIndicator={groupItems.length > 5}
+                                            >
+                                                {groupItems.map((gItem: any, idx: number) => {
+                                                    const sName = String(gItem[analysis.categoryKey]);
+                                                    const val = Number(gItem[analysis.measureKey]);
+                                                    const formatted = formatNumberWithUnit(val, maxValue, analysis.measureKey);
+                                                    return (
+                                                        <View key={idx} className="mb-2">
+                                                            <View className="flex-row items-center mb-1">
+                                                                <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: stringToColor(sName, idx), marginRight: 4, flexShrink: 0 }} />
+                                                                <Text className="text-white dark:text-gray-900 text-[10px] flex-1" style={{ flexWrap: 'wrap' }}>{sName}</Text>
+                                                            </View>
+                                                            <View style={{ marginLeft: 12 }}>
+                                                                <Text className="text-white dark:text-gray-900 text-[10px] font-bold">{formatted.text} {formatted.unit}</Text>
+                                                            </View>
                                                         </View>
-                                                        <Text className="text-white dark:text-gray-900 text-[10px] font-bold">{val.toLocaleString('th-TH', { maximumFractionDigits: 0 })}</Text>
-                                                    </View>
-                                                );
-                                            })}
+                                                    );
+                                                })}
+                                            </ScrollView>
                                         </View>
                                     );
                                 }
 
+                                // Single series tooltip
+                                const formatted = formatNumberWithUnit(item.value || 0, maxValue, analysis.measureKey);
                                 return (
                                     <View
                                         className="bg-gray-900 dark:bg-white rounded-lg shadow-lg p-2"
                                         style={{
                                             position: 'absolute',
-                                            left: -70,
+                                            left: -90,
                                             top: -60,
                                             zIndex: 1000,
-                                            width: 140
+                                            minWidth: 140,
+                                            maxWidth: 240,
+                                            padding: 8
                                         }}
                                     >
-                                        <Text className="text-white dark:text-gray-900 text-xs font-bold mb-1 text-center">{item.label}</Text>
-                                        <Text className="text-white dark:text-gray-900 text-xs text-center">{item.formattedValue} บาท</Text>
+                                        <Text className="text-white dark:text-gray-900 text-xs font-bold mb-1 text-center" style={{ flexWrap: 'wrap' }}>{item.label}</Text>
+                                        <Text className="text-white dark:text-gray-900 text-xs text-center">{formatted.text} {formatted.unit}</Text>
                                     </View>
                                 );
                             },
