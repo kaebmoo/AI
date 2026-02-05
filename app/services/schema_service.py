@@ -178,7 +178,7 @@ class SchemaService:
         """Create new context"""
         with self.engine.begin() as conn:
             # Prepare columns
-            columns = ['name', 'display_name', 'description', 'main_view', 'is_active', 'priority', 'keywords']
+            columns = ['name', 'display_name', 'description', 'main_view', 'is_active', 'priority', 'keywords', 'instruction_th', 'instruction_en']
             placeholders = ', '.join([f":{col}" for col in columns])
             sql = f"INSERT INTO schema_contexts ({', '.join(columns)}) VALUES ({placeholders})"
             
@@ -602,9 +602,9 @@ DATE เก็บเป็น Unix Timestamp (milliseconds) ต้องแป�
         
         # 2. Build Instruction based on context
         if language == "thai":
-            instruction = self._build_thai_prompt(ai_provider, main_view, context_name)
+            instruction = self._build_thai_prompt(ai_provider, main_view, context_name, context_info)
         else:
-            instruction = self._build_english_prompt(ai_provider, main_view, context_name)
+            instruction = self._build_english_prompt(ai_provider, main_view, context_name, context_info)
         
         # 3. Build Context (Schema, Rules, etc.)
         context_text = self.get_schema_context(context_name, include_samples)
@@ -617,9 +617,9 @@ DATE เก็บเป็น Unix Timestamp (milliseconds) ต้องแป�
         main_view = context_info['main_view']
         
         if language == "thai":
-            return self._build_thai_prompt(ai_provider, main_view, context_name)
+            return self._build_thai_prompt(ai_provider, main_view, context_name, context_info)
         else:
-            return self._build_english_prompt(ai_provider, main_view, context_name)
+            return self._build_english_prompt(ai_provider, main_view, context_name, context_info)
             
     def _get_syntax_rules(self, language: str = "thai") -> str:
         """Get database-specific syntax rules"""
@@ -647,7 +647,7 @@ DATE เก็บเป็น Unix Timestamp (milliseconds) ต้องแป�
        - NO `LPAD` -> Use `printf('%02d', CAST(col AS INTEGER))`
        - NO `DATE_FORMAT` -> Use `strftime`"""
 
-    def _build_thai_prompt(self, ai_provider: str, main_view: str, context_name: str) -> str:
+    def _build_thai_prompt(self, ai_provider: str, main_view: str, context_name: str, context_info: Dict = {}) -> str:
         """Build Thai language system prompt"""
         
         syntax_rules = self._get_syntax_rules("thai")
@@ -655,19 +655,25 @@ DATE เก็บเป็น Unix Timestamp (milliseconds) ต้องแป�
         # Context specific instructions
         context_instructions = ""
         if context_name == "revenue":
-            context_instructions = """
-   - **คำเตือน (Revenue Context):**
-     - อย่ารวม 'รายได้อื่น' (Other Revenue) ในการคำนวณรายได้ทั้งหมด ยกเว้น user สั่ง
-     - หน่วยรายได้เป็น **บาท**
-            """
+             context_instructions = context_info.get('instruction_th') or ""
+             if not context_instructions:
+                context_instructions = """
+    - **คำเตือน (Revenue Context):**
+      - อย่ารวม 'รายได้อื่น' (Other Revenue) ในการคำนวณรายได้ทั้งหมด ยกเว้น user สั่ง
+      - หน่วยรายได้เป็น **บาท**
+             """
         elif context_name == "expense":
-            context_instructions = """
-   - **คำเตือน (Expense Context):**
-     - ค่าใช้จ่ายแยกตามหมวดบัญชี (Account Group)
-     - `gl_code` คือรหัสบัญชี, `account_name` คือชื่อบัญชี
-     - `amount` คือยอดค่าใช้จ่าย (เป็นตัวเลขติดลบ หรือบวกแล้วแต่การบันทึก ให้ระวังเรื่อง SUM)
-     - ปกติถ้าเป็น Expense table ค่าอาจจะเป็น + หรือ - ให้เช็ค Data range ใน Schema
-            """
+             context_instructions = context_info.get('instruction_th') or ""
+             if not context_instructions:
+                 context_instructions = """
+    - **คำเตือน (Expense Context):**
+      - ค่าใช้จ่ายแยกตามหมวดบัญชี (Account Group)
+      - `gl_code` คือรหัสบัญชี, `account_name` คือชื่อบัญชี
+      - `amount` คือยอดค่าใช้จ่าย (เป็นตัวเลขติดลบ หรือบวกแล้วแต่การบันทึก ให้ระวังเรื่อง SUM)
+      - ปกติถ้าเป็น Expense table ค่าอาจจะเป็น + หรือ - ให้เช็ค Data range ใน Schema
+             """
+        else:
+             context_instructions = context_info.get('instruction_th') or ""
         
         return f"""คุณเป็น AI Assistant สำหรับวิเคราะห์ข้อมูลของ NT (National Telecom)
 บริบทปัจจุบัน: **{context_name.upper()}** (ตาราง: `{main_view}`)
@@ -755,10 +761,14 @@ DATE เก็บเป็น Unix Timestamp (milliseconds) ต้องแป�
 2. อธิบายผลลัพธ์เป็นภาษาไทย
 3. Format ตัวเลขให้อ่านง่าย (เช่น 1,234,567.89)"""
     
-    def _build_english_prompt(self, ai_provider: str, main_view: str, context_name: str) -> str:
+    def _build_english_prompt(self, ai_provider: str, main_view: str, context_name: str, context_info: Dict = {}) -> str:
         """Build English language system prompt"""
         
         syntax_rules = self._get_syntax_rules("english")
+        
+        # Get context info again to fetch instruction_en
+        context_info = self.get_context_info(context_name) or {}
+        context_instructions = context_info.get('instruction_en') or ""
         
         return f"""You are an AI Assistant for analyzing NT data.
 Current Context: **{context_name.upper()}** (Table: `{main_view}`)
@@ -776,6 +786,8 @@ Current Context: **{context_name.upper()}** (Table: `{main_view}`)
    - Always `CAST(month AS INTEGER)`
 5. Wrap UNION + ORDER BY/LIMIT in subqueries
 6. Do NOT query raw tables directly
+
+{context_instructions}
 
 {syntax_rules}
 

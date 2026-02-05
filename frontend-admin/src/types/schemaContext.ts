@@ -7,6 +7,8 @@ export interface SchemaContext {
     is_active: boolean;
     priority: number;
     keywords: string[];
+    instruction_th?: string;
+    instruction_en?: string;
     created_at?: string;
 }
 
@@ -18,6 +20,8 @@ export interface SchemaContextCreate {
     is_active?: boolean;
     priority?: number;
     keywords?: string[];
+    instruction_th?: string;
+    instruction_en?: string;
 }
 
 export interface SchemaContextUpdate {
@@ -27,4 +31,6 @@ export interface SchemaContextUpdate {
     is_active?: boolean;
     priority?: number;
     keywords?: string[];
+    instruction_th?: string;
+    instruction_en?: string;
 }
