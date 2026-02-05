@@ -1,8 +1,9 @@
 
-import React, { useMemo } from 'react';
-import { View, Text, Dimensions, ScrollView } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { View, Text, Dimensions, ScrollView, Modal, TouchableOpacity, Pressable } from 'react-native';
 import { BarChart, LineChart, PieChart } from 'react-native-gifted-charts';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { Ionicons } from '@expo/vector-icons';
 
 interface ChartConfig {
     category_column?: string;
@@ -188,6 +189,9 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
     const isDark = colorScheme === 'dark';
     const screenWidth = Dimensions.get('window').width;
     const chartWidth = Math.min(screenWidth - 64, 500);
+
+    // Full screen modal state
+    const [isFullScreen, setIsFullScreen] = useState(false);
 
     // ============================================================
     // 1. Analyze Data Structure (AI-first, fallback to pattern detection)
@@ -580,7 +584,10 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
             mode: analysis.mode,
             categoryKey: analysis.categoryKey,
             measureKey: analysis.measureKey,
-            categories: analysis.categories?.length
+            categories: analysis.categories?.length,
+            seriesKey: analysis.seriesKey,
+            isLineChart: analysis.mode === 'line',
+            isGrouped: analysis.mode === 'grouped_bar'
         } : null,
         dataKeys: data?.[0] ? Object.keys(data[0]) : [],
         dataLength: data?.length
@@ -590,6 +597,10 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
         console.warn('❌ DataChart: analysis is null, chart will not render');
         return null;
     }
+
+    console.log('✅ DataChart: Rendering chart with expand button. Chart type:',
+        analysis.mode === 'line' ? 'LINE' :
+            analysis.mode === 'grouped_bar' ? 'GROUPED BAR' : 'BAR');
 
     // ============================================================
     // 2. Color Utilities
@@ -899,9 +910,24 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
         return (
             <View className="my-4 p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm">
                 <View className="flex-row justify-between items-center mb-4">
-                    <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                    <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200" style={{ flex: 1 }}>
                         📊 เปรียบเทียบ: {analysis.measureKey}
                     </Text>
+                    <TouchableOpacity
+                        onPress={() => setIsFullScreen(true)}
+                        style={{
+                            padding: 8,
+                            borderRadius: 8,
+                            backgroundColor: '#3B82F6',
+                            width: 36, // Smaller button
+                            height: 36,
+                            justifyContent: 'center',
+                            alignItems: 'center',
+                            marginLeft: 8
+                        }}
+                    >
+                        <Text style={{ color: '#FFFFFF', fontSize: 16 }}>⤢</Text>
+                    </TouchableOpacity>
                 </View>
 
                 {/* Legend */}
@@ -967,9 +993,85 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
                 <Text className="text-[10px] text-gray-400 dark:text-gray-500 text-center mt-3">
                     * แตะที่กราฟเพื่อดูรายละเอียดและผลต่าง
                 </Text>
+
+                {/* Full Screen Modal for Grouped Bars */}
+                <Modal
+                    visible={isFullScreen}
+                    animationType="fade"
+                    transparent={false}
+                    onRequestClose={() => setIsFullScreen(false)}
+                >
+                    <View className="flex-1 bg-white dark:bg-gray-900 pt-12">
+                        <View className="flex-row justify-between items-center px-6 pb-4 border-b border-gray-200 dark:border-gray-700">
+                            <Text className="text-lg font-bold text-gray-800 dark:text-gray-100">
+                                📊 เปรียบเทียบ: {analysis.measureKey}
+                            </Text>
+                            <TouchableOpacity
+                                onPress={() => setIsFullScreen(false)}
+                                className="p-2 rounded-lg bg-gray-100 dark:bg-gray-800 active:bg-gray-200 dark:active:bg-gray-700"
+                            >
+                                <Ionicons name="close-outline" size={24} color={isDark ? '#E5E7EB' : '#374151'} />
+                            </TouchableOpacity>
+                        </View>
+                        <ScrollView className="flex-1 px-6 pt-6">
+                            <View style={{ marginLeft: isHorizontal ? 0 : -10 }}>
+                                {/* @ts-ignore */}
+                                <BarChart
+                                    stackData={stackData}
+                                    barWidth={20}
+                                    spacing={40}
+                                    roundedTop
+                                    roundedBottom
+                                    hideRules
+                                    xAxisThickness={0}
+                                    yAxisThickness={0}
+                                    horizontal={isHorizontal}
+                                    yAxisTextStyle={{
+                                        color: isDark ? '#9CA3AF' : '#6B7280',
+                                        fontSize: 10,
+                                        width: isHorizontal ? 100 : undefined
+                                    }}
+                                    xAxisLabelTextStyle={{
+                                        color: isDark ? '#9CA3AF' : '#6B7280',
+                                        fontSize: 9,
+                                        width: 60,
+                                        textAlign: 'center'
+                                    }}
+                                    yAxisLabelWidth={isHorizontal ? 110 : 45}
+                                    formatYLabel={formatYLabel}
+                                    noOfSections={4}
+                                    maxValue={maxValue * 1.1}
+                                    height={isHorizontal ? Math.max(400, actualCategories.length * 60) : 400} // Taller for fullscreen
+                                    width={screenWidth - 80} // Explicit full width
+                                    isAnimated
+                                    renderTooltip={renderGroupedTooltip}
+                                />
+                            </View>
+                            {/* Legend in Modal */}
+                            <View className="flex-row flex-wrap mt-6 justify-center gap-x-4 gap-y-2">
+                                {actualSeriesValues.map((series, idx) => (
+                                    <View key={series} className="flex-row items-center">
+                                        <View
+                                            style={{
+                                                width: 12,
+                                                height: 12,
+                                                borderRadius: 3,
+                                                backgroundColor: SERIES_COLORS[idx % SERIES_COLORS.length],
+                                                marginRight: 6
+                                            }}
+                                        />
+                                        <Text className="text-xs text-gray-600 dark:text-gray-300">
+                                            {isPivotedFormat || isNaN(Number(series)) ? series : `เดือน ${series}`}
+                                        </Text>
+                                    </View>
+                                ))}
+                            </View>
+                        </ScrollView>
+                    </View>
+                </Modal>
             </View>
         );
-    }, [data, analysis, isDark, chartWidth]); // Added dependencies for useMemo
+    }, [data, analysis, isDark, chartWidth, isFullScreen]); // Added isFullScreen dependency
 
     if (analysis.mode === 'grouped_bar' || analysis.mode === 'stacked_bar' || analysis.seriesKey === '__pivoted__') {
         return groupedChartData;
@@ -1176,14 +1278,51 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
             style={{ width: '100%', overflow: 'visible' }}>
 
             {/* ... Header ... */}
-            <View className="flex-row justify-between items-center mb-6">
-                <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+            <View style={{
+                flexDirection: 'row',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: 24,
+                width: '100%',
+                gap: 8,
+                padding: 4
+            }}>
+                <Text
+                    className="text-sm font-semibold text-gray-700 dark:text-gray-200"
+                    style={{ flex: 1, flexShrink: 1 }}
+                    numberOfLines={2}
+                >
                     {isLineChart ? '📈 Trends' : isHorizontal ? '📊 Comparative Rank' : '📊 Comparison'} : {analysis.measureKey}
                 </Text>
+                <TouchableOpacity
+                    onPress={() => {
+                        console.log('🔍 Expand button clicked!');
+                        setIsFullScreen(true);
+                    }}
+                    style={{
+                        padding: 8,
+                        borderRadius: 8,
+                        backgroundColor: '#3B82F6',
+                        // borderWidth: 3,
+                        // borderColor: '#FF0000',
+                        width: 44,
+                        height: 44,
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        flexShrink: 0,
+                        zIndex: 9999
+                    }}
+                    activeOpacity={0.7}
+                >
+                    <Text style={{ color: '#FFFFFF', fontSize: 20, fontWeight: 'bold' }}>⤢</Text>
+                </TouchableOpacity>
             </View>
 
             {/* Chart Area */}
-            <View style={{ marginLeft: isHorizontal ? 0 : -10 }}>
+            <View style={{ marginLeft: isHorizontal ? 0 : -10, position: 'relative' }}>
+                {/* Floating Expand Button */}
+
+
                 {isLineChart ? (
                     // ... Line Chart ...
                     <LineChart
@@ -1336,6 +1475,176 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
             <Text className="text-[10px] text-gray-400 dark:text-gray-500 text-center mt-3">
                 * แตะที่กราฟเพื่อดูรายละเอียด
             </Text>
+
+            {/* Full Screen Modal */}
+            <Modal
+                visible={isFullScreen}
+                animationType="fade"
+                transparent={false}
+                onRequestClose={() => setIsFullScreen(false)}
+            >
+                <View className="flex-1 bg-white dark:bg-gray-900 pt-12">
+                    {/* Modal Header */}
+                    <View className="flex-row justify-between items-center px-6 pb-4 border-b border-gray-200 dark:border-gray-700">
+                        <Text className="text-lg font-bold text-gray-800 dark:text-gray-100">
+                            {isLineChart ? '📈 Trends' : isHorizontal ? '📊 Comparative Rank' : '📊 Comparison'} : {analysis.measureKey}
+                        </Text>
+                        <TouchableOpacity
+                            onPress={() => setIsFullScreen(false)}
+                            className="p-2 rounded-lg bg-gray-100 dark:bg-gray-800 active:bg-gray-200 dark:active:bg-gray-700"
+                        >
+                            <Ionicons name="close-outline" size={24} color={isDark ? '#E5E7EB' : '#374151'} />
+                        </TouchableOpacity>
+                    </View>
+
+                    {/* Full Screen Chart */}
+                    <ScrollView className="flex-1 px-6 pt-6">
+                        <View style={{ marginLeft: isHorizontal ? 0 : -10 }}>
+                            {isLineChart ? (
+                                <LineChart
+                                    dataSet={isMultiSeries ? lineDataSets : undefined}
+                                    data={isMultiSeries ? undefined : processedData}
+                                    color={isMultiSeries ? undefined : "#3B82F6"}
+                                    thickness={2}
+                                    startFillColor="rgba(59, 130, 246, 0.3)"
+                                    endFillColor="rgba(59, 130, 246, 0.01)"
+                                    startOpacity={0.9}
+                                    endOpacity={0.2}
+                                    initialSpacing={20}
+                                    noOfSections={4}
+                                    yAxisTextStyle={{ color: isDark ? '#9CA3AF' : '#6B7280', fontSize: 12 }}
+                                    xAxisLabelTextStyle={{ color: isDark ? '#9CA3AF' : '#6B7280', fontSize: 12 }}
+                                    formatYLabel={formatYLabel}
+                                    hideDataPoints={false}
+                                    dataPointsColor="#3B82F6"
+                                    curved
+                                    areaChart={!isMultiSeries}
+                                    height={300}
+                                    width={screenWidth - 80}
+                                    isAnimated
+                                    pointerConfig={{
+                                        pointerStripUptoDataPoint: true,
+                                        pointerStripColor: isDark ? '#4B5563' : '#D1D5DB',
+                                        pointerStripWidth: 2,
+                                        strokeDashArray: [2, 5],
+                                        pointerColor: isDark ? '#9CA3AF' : '#6B7280',
+                                        radius: 4,
+                                        pointerLabelWidth: 100,
+                                        pointerLabelHeight: 120,
+                                        autoAdjustPointerLabelPosition: true,
+                                        pointerComponent: (items: any) => {
+                                            if (!items || items.length === 0) return null;
+                                            if (isMultiSeries && items[0]?.dataSet) {
+                                                const pointsInDataSet = items[0].dataSet;
+                                                const categoryValue = pointsInDataSet[0]?.label || '';
+                                                return (
+                                                    <View
+                                                        className="absolute bg-gray-800 dark:bg-gray-100 rounded-lg shadow-lg p-3 border border-gray-600 dark:border-gray-300"
+                                                        style={{ minWidth: 200, maxWidth: 300, maxHeight: 240 }}
+                                                    >
+                                                        <Text className="text-white dark:text-gray-900 font-semibold mb-2 text-sm" style={{ flexWrap: 'wrap' }}>
+                                                            {categoryValue}
+                                                        </Text>
+                                                        <ScrollView style={{ maxHeight: 180 }} showsVerticalScrollIndicator={true} nestedScrollEnabled={true}>
+                                                            {pointsInDataSet.map((point: any, i: number) => {
+                                                                const seriesName = lineDataSets?.[i]?.dataSetName || '';
+                                                                const value = point.value;
+                                                                const formatted = formatNumberWithUnit(value, maxValue, analysis.measureKey);
+                                                                const color = lineDataSets?.[i]?.color || '#3B82F6';
+                                                                return (
+                                                                    <View key={i} className="mb-2">
+                                                                        <View className="flex-row items-center mb-1">
+                                                                            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: color, marginRight: 8, flexShrink: 0 }} />
+                                                                            <Text className="text-white dark:text-gray-900 text-xs flex-1" style={{ flexWrap: 'wrap' }}>
+                                                                                {seriesName}
+                                                                            </Text>
+                                                                        </View>
+                                                                        <View style={{ marginLeft: 16 }}>
+                                                                            <Text className="text-white dark:text-gray-900 text-xs font-semibold">
+                                                                                {formatted.text} {formatted.unit}
+                                                                            </Text>
+                                                                        </View>
+                                                                    </View>
+                                                                );
+                                                            })}
+                                                        </ScrollView>
+                                                    </View>
+                                                );
+                                            } else {
+                                                const item = items[0];
+                                                if (!item) return null; // Added safety check
+                                                const formatted = formatNumberWithUnit(item.value, maxValue, analysis.measureKey);
+                                                return (
+                                                    <View
+                                                        className="absolute bg-gray-800 dark:bg-gray-100 rounded-lg shadow-lg p-3 border border-gray-600 dark:border-gray-300"
+                                                        style={{ minWidth: 160, maxWidth: 240 }}
+                                                    >
+                                                        <Text className="text-white dark:text-gray-900 text-xs font-semibold mb-1" style={{ flexWrap: 'wrap' }}>
+                                                            {item.label || ''}
+                                                        </Text>
+                                                        <Text className="text-white dark:text-gray-900 text-xs">
+                                                            {formatted.text} {formatted.unit}
+                                                        </Text>
+                                                    </View>
+                                                );
+                                            }
+                                        }
+                                    }}
+                                />
+                            ) : (
+                                <ScrollView
+                                    horizontal={!isHorizontal}
+                                    showsHorizontalScrollIndicator={!isHorizontal}
+                                    showsVerticalScrollIndicator={isHorizontal}
+                                    style={{
+                                        maxWidth: isHorizontal ? undefined : '100%',
+                                        maxHeight: isHorizontal ? 500 : undefined,
+                                        minWidth: isHorizontal ? '100%' : undefined
+                                    }}
+                                >
+                                    <BarChart
+                                        data={processedData}
+                                        barWidth={22}
+                                        spacing={24}
+                                        roundedTop
+                                        roundedBottom
+                                        hideRules
+                                        xAxisThickness={0}
+                                        yAxisThickness={0}
+                                        horizontal={isHorizontal}
+                                        yAxisTextStyle={{ color: isDark ? '#9CA3AF' : '#6B7280', fontSize: 12, width: isHorizontal ? 120 : undefined }}
+                                        yAxisLabelWidth={isHorizontal ? 130 : 40}
+                                        formatYLabel={formatYLabel}
+                                        noOfSections={4}
+                                        height={isHorizontal ? Math.max(300, processedData.length * 50) : 300}
+                                        width={screenWidth - 120}
+                                        isAnimated
+                                        frontColor={'#3B82F6'}
+                                        renderTooltip={renderTooltip}
+                                        shiftX={isHorizontal ? -10 : 0}
+                                    />
+                                </ScrollView>
+                            )}
+                        </View>
+
+                        {/* Legend for multi-series */}
+                        {isMultiSeries && seriesNames.length > 0 && (
+                            <View className="flex-row flex-wrap mt-6 pt-4 border-t border-gray-100 dark:border-gray-700 justify-center gap-x-4 gap-y-2">
+                                {seriesNames.map((name, idx) => (
+                                    <View key={name} className="flex-row items-center">
+                                        <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: stringToColor(name, idx), marginRight: 6 }} />
+                                        <Text className="text-xs text-gray-600 dark:text-gray-300">{name}</Text>
+                                    </View>
+                                ))}
+                            </View>
+                        )}
+
+                        <Text className="text-xs text-gray-400 dark:text-gray-500 text-center mt-6 mb-4">
+                            * แตะที่กราฟเพื่อดูรายละเอียด
+                        </Text>
+                    </ScrollView>
+                </View>
+            </Modal>
         </View>
     );
 };
