@@ -5,7 +5,8 @@
 1. [schema_metadata](#1-schema_metadata)
 2. [schema_business_rules](#2-schema_business_rules)
 3. [schema_semantic_mapping](#3-schema_semantic_mapping)
-4. [golden_examples](#4-golden_examples)
+4. [schema_context_tables](#4-schema_context_tables)
+5. [golden_examples](#5-golden_examples)
 
 ---
 
@@ -358,7 +359,63 @@ semantic_text = service.build_semantic_mapping_text()
 
 ---
 
-## 4. golden_examples
+## 4. schema_context_tables
+
+### หน้าที่
+
+เก็บข้อมูล **ความสัมพันธ์ระหว่าง Context และ Table** เพื่อรองรับการทำงานแบบ **Multi-Table Context**
+ช่วยให้ AI รู้ว่าในหนึ่งเรื่อง (Context) ควรไปดึงข้อมูลจากตารางไหนได้บ้าง และแต่ละตารางทำหน้าที่อะไร
+
+### โครงสร้างตาราง
+
+```sql
+CREATE TABLE schema_context_tables (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    context_id INTEGER,                 -- อ้างอิง ID จาก schema_contexts
+    table_name TEXT,                    -- ชื่อตารางที่เกี่ยวข้อง
+    role TEXT DEFAULT 'main',           -- หน้าที่ ('main'='Fact', 'dimension', 'reference')
+    FOREIGN KEY (context_id) REFERENCES schema_contexts(id)
+);
+```
+
+### การใช้งาน
+
+#### 1. ประเภทของ Role (บทบาทของตาราง)
+
+*   **main**: ตารางหลักที่เก็บข้อมูลสำคัญ (Fact Table) เช่น ยอดขาย, ค่าใช้จ่าย
+*   **dimension**:ตารางมิติข้อมูล เช่น ตารางลูกค้า, ตารางสินค้า, ตารางแผนก
+*   **reference**: ตารางอ้างอิงอื่นๆ
+
+#### 2. ตัวอย่างข้อมูล
+
+สมมติ Context: **Revenue** (รายได้) นอกจากตารางหลัก `revenue_search` แล้ว ต้องการให้ AI รู้จักตารางสินค้าและลูกค้าด้วย
+
+```sql
+-- 1. Main Table
+context_id: 1 (Revenue)
+table_name: 'revenue_search'
+role: 'main'
+
+-- 2. Product Dimension
+context_id: 1 (Revenue)
+table_name: 'product_master'
+role: 'dimension'
+
+-- 3. Customer Dimension
+context_id: 1 (Revenue)
+table_name: 'customer_dim'
+role: 'dimension'
+```
+
+### ประโยชน์
+
+✅ AI สามารถทำ **Cross-Table Query** (JOIN) ได้แม่นยำขึ้น
+✅ รองรับโครงสร้างข้อมูลที่ซับซ้อน (Star Schema)
+✅ ไม่จำเป็นต้องยัดทุกอย่างลง View ใหญ่ตัวเดียว (Modular Design)
+
+---
+
+## 5. golden_examples
 
 ### หน้าที่
 
