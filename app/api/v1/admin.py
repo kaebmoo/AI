@@ -655,7 +655,7 @@ def create_view(
         raise HTTPException(status_code=500, detail=f"Failed to create view: {str(e)}")
 
 @router.get("/schema/tables/{table_name}/suggest-mapping", response_model=List[ViewMappingSuggestion])
-def suggest_view_mapping(
+async def suggest_view_mapping(
     table_name: str,
     current_user: User = Depends(deps.require_admin),
     service: SchemaService = Depends(deps.get_schema_service),
@@ -667,12 +667,12 @@ def suggest_view_mapping(
     try:
         # 1. Get Schema Info
         columns = service.get_table_info(table_name)
-        
+
         # 2. Get Sample Values (for better context)
         samples = service.get_sample_values(table_name)
-        
-        # 3. Call AI Service
-        suggestions_data = ai_service.suggest_mappings(columns, samples)
+
+        # 3. Call AI Service (await async method)
+        suggestions_data = await ai_service.suggest_mappings(columns, samples)
         
         # 4. Convert to Response Model
         suggestions = []

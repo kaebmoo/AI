@@ -1433,6 +1433,88 @@ Error: {last_error.get('error', '')}
 
         return "ดำเนินการสำเร็จ"
 
+    async def suggest_mappings(self, columns: List[Dict], samples: Dict[str, List]) -> List[Dict[str, str]]:
+        """
+        Suggest column name mappings (aliases) using AI.
+
+        Args:
+            columns: List of column info dicts with 'name' and 'type'
+            samples: Dict mapping column names to sample values
+
+        Returns:
+            List of suggestions with 'col', 'alias', and 'reason'
+        """
+        try:
+            # Build prompt
+            column_info = []
+            for col in columns:
+                col_name = col['name']
+                col_type = col['type']
+                sample_vals = samples.get(col_name, [])[:3]  # First 3 samples
+                column_info.append(f"- {col_name} ({col_type}): {sample_vals}")
+
+            column_text = "\n".join(column_info)
+
+            prompt = f"""ต้องการตั้งชื่อ alias (Suggested Alias) ภาษาอังกฤษที่เหมาะสมสำหรับคอลัมน์เหล่านี้ แบบ Snake Case เท่านั้น:
+
+{column_text}
+
+กรุณาแนะนำ alias ที่:
+1. สั้น กระชับ ไม่เกิน 3-4 คำ
+2. เข้าใจง่าย เหมาะกับการใช้งานทั่วไป
+3. เป็นภาษาอังกฤษที่ถูกต้อง
+
+ตอบในรูปแบบ JSON array:
+```json
+[
+  {{"col": "column_name", "alias": "sugestion_name", "reason": "short reason"}},
+  ...
+]
+```"""
+
+            # Call AI with simple prompt (no tools needed)
+            result = await self.provider.generate_content(prompt, system_prompt="คุณเป็น AI ที่ช่วยตั้งชื่อคอลัมน์ภาษาไทยให้เหมาะสม")
+
+            # Extract JSON from response
+            import json
+            import re
+
+            # Find JSON block
+            json_match = re.search(r'```json\s*(\[.*?\])\s*```', result, re.DOTALL)
+            if json_match:
+                suggestions = json.loads(json_match.group(1))
+                return suggestions
+
+            # Try parsing whole response as JSON
+            try:
+                suggestions = json.loads(result)
+                if isinstance(suggestions, list):
+                    return suggestions
+            except:
+                pass
+
+            # Fallback: generate simple mappings
+            return [
+                {
+                    'col': col['name'],
+                    'alias': col['name'].lower().replace('_', ' '),
+                    'reason': 'ชื่อเดิมโดยแปลง underscore เป็น space'
+                }
+                for col in columns
+            ]
+
+        except Exception as e:
+            logger.error(f"Error in suggest_mappings: {e}")
+            # Fallback: return original names
+            return [
+                {
+                    'col': col['name'],
+                    'alias': col['name'],
+                    'reason': 'ไม่สามารถสร้างคำแนะนำได้ ใช้ชื่อเดิม'
+                }
+                for col in columns
+            ]
+
 
 # Factories
 def create_claude_service(api_key: str, mcp_client: MCPClientService, model: Optional[str] = None) -> AIService:
