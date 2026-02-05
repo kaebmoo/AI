@@ -264,6 +264,22 @@ const Contexts: React.FC = () => {
                     </div>
 
                     <Form.Item
+                        name="instruction_th"
+                        label="Prompt Instruction (TH)"
+                        tooltip="Specific rules for Thai prompt (will be injected into system prompt)"
+                    >
+                        <Input.TextArea rows={4} placeholder="- Avoid using..." />
+                    </Form.Item>
+
+                    <Form.Item
+                        name="instruction_en"
+                        label="Prompt Instruction (EN)"
+                        tooltip="Specific rules for English prompt"
+                    >
+                        <Input.TextArea rows={4} placeholder="- Avoid using..." />
+                    </Form.Item>
+
+                    <Form.Item
                         name="description"
                         label="Description"
                     >

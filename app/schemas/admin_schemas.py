@@ -235,6 +235,8 @@ class SchemaContextBase(BaseModel):
     is_active: bool = True
     priority: int = 0
     keywords: Optional[List[str]] = None
+    instruction_th: Optional[str] = None
+    instruction_en: Optional[str] = None
 
 class SchemaContextCreate(SchemaContextBase):
     pass
@@ -246,6 +248,8 @@ class SchemaContextUpdate(BaseModel):
     is_active: Optional[bool] = None
     priority: Optional[int] = None
     keywords: Optional[List[str]] = None
+    instruction_th: Optional[str] = None
+    instruction_en: Optional[str] = None
 
 class SchemaContextResponse(SchemaContextBase):
     id: int
