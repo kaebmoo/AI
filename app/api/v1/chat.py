@@ -16,7 +16,45 @@ from app.services.ai_service import AIService, create_gemini_service, create_cla
 from app.services.schema_service import SchemaService
 from app.config import settings
 
+
 router = APIRouter()
+
+# =============================================================================
+# Context & Metadata API
+# =============================================================================
+
+@router.get("/contexts", response_model=List[Dict[str, Any]])
+def get_contexts(
+    schema_service: SchemaService = Depends(deps.get_schema_service),
+    current_user: User = Depends(deps.get_current_user)
+):
+    """Get all available data contexts"""
+    try:
+        contexts = schema_service.get_all_contexts()
+        # Ensure 'auto' is not in DB list (it's frontend logic), but allow DB to override if needed
+        return contexts
+    except Exception as e:
+        logger.error(f"Error fetching contexts: {e}")
+        # Fallback
+        return [
+            {'name': 'revenue', 'display_name': 'รายได้', 'description': 'ข้อมูลรายได้'},
+            {'name': 'expense', 'display_name': 'ค่าใช้จ่าย', 'description': 'ข้อมูลค่าใช้จ่าย'}
+        ]
+
+@router.post("/refresh")
+def refresh_metadata(
+    schema_service: SchemaService = Depends(deps.get_schema_service),
+    current_user: User = Depends(deps.require_admin)
+):
+    """Force refresh of schema metadata and contexts"""
+    try:
+        schema_service.refresh_cache()
+        schema_service.refresh_context_cache()
+        return {"message": "Metadata and Contexts refreshed successfully"}
+    except Exception as e:
+        logger.error(f"Error refreshing metadata: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 
 # =============================================================================
