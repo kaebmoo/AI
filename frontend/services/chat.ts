@@ -60,6 +60,12 @@ export interface ChatResponse {
     chart_config?: ChartConfig;        // AI recommended chart columns
 }
 
+export interface TrainingRequest {
+    question: string;
+    sql: string;
+    context?: string;
+}
+
 export const chatService = {
     sendMessage: async (payload: ChatRequest) => {
         console.log('Sending message to chat service:', payload);
@@ -69,6 +75,11 @@ export const chatService = {
 
     getHistory: async () => {
         const response = await api.get<ChatResponse[]>('/chat/history');
+        return response.data;
+    },
+
+    train: async (payload: TrainingRequest) => {
+        const response = await api.post<{ success: boolean; message: string }>('/chat/train', payload);
         return response.data;
     }
 };

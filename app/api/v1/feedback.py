@@ -11,6 +11,7 @@ from app.models.feedback_models import FeedbackRating, FeedbackCategory, UserFee
 from app.services.feedback_service import FeedbackService
 from app.services.trending_service import TrendingService
 from app.services.prompt_manager import PromptManager
+from app.services.ai_service import AIService
 
 router = APIRouter()
 
@@ -240,16 +241,14 @@ def submit_feedback(
     category: Optional[FeedbackCategory] = None,
     feedback_text: Optional[str] = None,
     current_user: User = Depends(deps.get_current_user),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_db),
+    ai_service: AIService = Depends(deps.get_ai_service)
 ):
     """
     Submit feedback for a specific chat message.
+    If Admin submits THUMBS_UP, auto-train the AI.
     """
     service = FeedbackService(db)
-    
-    # Verify chat ownership (or admin)
-    # Ideally should check if chat_id belongs to current_user
-    # For now assuming valid chat_id passed from frontend
     
     try:
         feedback = service.submit_feedback(
@@ -258,7 +257,24 @@ def submit_feedback(
             category=category,
             feedback_text=feedback_text
         )
-        return {"message": "Feedback submitted successfully", "id": feedback.id}
+        
+        response_msg = "Feedback submitted successfully"
+        
+        # Auto-Training for Admins (Priority 2 Improvement)
+        if current_user.role == "admin" and rating == FeedbackRating.THUMBS_UP:
+            from app.models.chat import ChatHistory
+            chat = db.query(ChatHistory).filter(ChatHistory.id == chat_id).first()
+            
+            if chat and chat.generated_sql:
+                try:
+                    # Train Vanna
+                    ai_service.train(question=chat.question, sql_query=chat.generated_sql)
+                    response_msg += " (Auto-trained)"
+                except Exception as e:
+                    print(f"Auto-train failed: {e}")
+                    # Don't fail the feedback submission just because training failed
+                    
+        return {"message": response_msg, "id": feedback.id}
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

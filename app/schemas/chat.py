@@ -13,6 +13,13 @@ class ChatRequest(BaseModel):
     mode: Optional[str] = Field(default="hybrid", description="Query mode: 'hybrid' (recommended, cost-effective) or 'mcp' (full tool access)")
 
 
+class TrainingRequest(BaseModel):
+    """Request to train RAG with corrected SQL"""
+    question: str
+    sql: str
+    context: Optional[str] = "revenue"
+
+
 
 class RetryAttempt(BaseModel):
     """Single retry attempt info"""

@@ -57,6 +57,7 @@ export default function ChatScreen() {
         role: 'assistant',
         content: response.answer,
         sql: response.sql_query,
+        question: response.question, // Pass original question for training context
         executionTime: response.execution_time_ms,
         warnings: response.warnings,
         data: response.data,
@@ -80,6 +81,20 @@ export default function ChatScreen() {
       flatListRef.current?.scrollToEnd({ animated: true });
     }, 100);
   }, [messages]);
+
+  const handleTrain = async (question: string, sql: string) => {
+    try {
+      await chatService.train({
+        question,
+        sql,
+        context: context === 'auto' ? undefined : context
+      });
+      // Optional: Refresh context or give visual feedback handled by component
+    } catch (error) {
+      console.error("Training error:", error);
+      throw error; // Let component handle error alert
+    }
+  };
 
   return (
     <SafeAreaView className="flex-1 bg-gray-50 dark:bg-gray-900">
@@ -114,7 +129,12 @@ export default function ChatScreen() {
             ref={flatListRef}
             data={messages}
             keyExtractor={(item) => item.id.toString()}
-            renderItem={({ item }) => <ChatBubble message={item} />}
+            renderItem={({ item }) => (
+              <ChatBubble
+                message={item}
+                onTrain={handleTrain}
+              />
+            )}
             contentContainerStyle={{ padding: 16, paddingBottom: 20 }}
             className="flex-1"
           />

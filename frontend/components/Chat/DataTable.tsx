@@ -336,14 +336,29 @@ export const DataTable = ({ data }: DataTableProps) => {
 
     // 2. Formatting Logic
     const renderCell = (key: string, value: any) => {
+        const lowerKey = key.toLowerCase();
+
+        // Don't format IDs, Codes, Years, etc.
+        if (['year', 'id', 'code', 'key', 'no.', 'ปี', 'รหัส', 'quarter'].some(t => lowerKey.includes(t)) && key !== '_rowLabel') {
+            return String(value);
+        }
+
+        // Handle Actual Numbers
         if (typeof value === 'number') {
-            const lowerKey = key.toLowerCase();
-            // Don't format Year, ID, Code, keys, No.
-            if (['year', 'id', 'code', 'key', 'no.', 'ปี', 'รหัส', 'quarter'].some(t => lowerKey.includes(t)) && key !== '_rowLabel') {
-                return String(value);
-            }
             return value.toLocaleString('th-TH', { maximumFractionDigits: 2 });
         }
+
+        // Handle String Numbers (e.g. "104323.50")
+        if (typeof value === 'string') {
+            // Check if it's a pure number (no clean integers like 2024, but floats)
+            // Or just try to parse
+            const num = parseFloat(value);
+            if (!isNaN(num) && /^-?\d+(\.\d+)?$/.test(value)) {
+                // It's a valid number string.
+                return num.toLocaleString('th-TH', { maximumFractionDigits: 2 });
+            }
+        }
+
         return String(value || '-');
     };
 

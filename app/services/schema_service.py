@@ -547,7 +547,13 @@ DATE เก็บเป็น Unix Timestamp (milliseconds) ต้องแป�
 - **Mobile** → `BUSINESS_GROUP = 'Mobile'`
 """
     
-    def get_schema_context(self, context_name: str = "revenue", include_samples: bool = True, include_semantic_mappings: bool = True) -> str:
+    def get_schema_context(
+        self, 
+        context_name: str = "revenue", 
+        include_samples: bool = True, 
+        include_semantic_mappings: bool = True,
+        lite_mode: bool = False
+    ) -> str:
         """Get schema context (Schema + Rules + Semantic Mappings + Samples)"""
         
         # 1. Get Context Info
@@ -564,11 +570,22 @@ DATE เก็บเป็น Unix Timestamp (milliseconds) ต้องแป�
         context += self.build_schema_text(table_name=main_view)
         context += "\n\n" + self.build_business_rules_text(table_name=main_view)
 
-        if include_semantic_mappings:
-            context += "\n\n" + self.build_semantic_mapping_text()
+        # In Lite Mode (RAG Enabled), we skip heavy static mappings and samples
+        # BUT we must keep DATA_RANGE to prevent AI from querying future dates (e.g. 2026 when data ends 2025)
+        if not lite_mode:
+            if include_semantic_mappings:
+                context += "\n\n" + self.build_semantic_mapping_text()
 
-        if include_samples:
-            context += "\n\n" + self.build_sample_values_text(table_name=main_view)
+            if include_samples:
+                context += "\n\n" + self.build_sample_values_text(table_name=main_view)
+        else:
+            # Lite Mode: Inject ONLY Data Range
+            samples = self.get_sample_values(table_name=main_view)
+            if 'DATA_RANGE' in samples:
+                dr = samples['DATA_RANGE']
+                context += f"\n\n## Available Values\n**Data Range:** {dr.get('min_year')}/{dr.get('min_month')} - {dr.get('max_year')}/{dr.get('max_month')}\n"
+            
+            context += "\n(Semantic mappings and detailed samples omitted for RAG optimization - relevant items will be injected)"
 
         date_format = self.get_date_format(main_view)
         context += "\n\n" + self._get_date_instructions(date_format)
@@ -583,7 +600,8 @@ DATE เก็บเป็น Unix Timestamp (milliseconds) ต้องแป�
         ai_provider: str = "claude",
         include_samples: bool = True,
         language: str = "thai",
-        context_name: str = "revenue"
+        context_name: str = "revenue",
+        rag_enabled: bool = False
     ) -> str:
         """
         Build complete system prompt for AI
@@ -607,7 +625,13 @@ DATE เก็บเป็น Unix Timestamp (milliseconds) ต้องแป�
             instruction = self._build_english_prompt(ai_provider, main_view, context_name, context_info)
         
         # 3. Build Context (Schema, Rules, etc.)
-        context_text = self.get_schema_context(context_name, include_samples)
+        # Optimization: Use lite_mode if rag_enabled
+        # This keeps the Table Schema (Critical) but drops the huge static lists
+        context_text = self.get_schema_context(
+            context_name=context_name, 
+            include_samples=include_samples, 
+            lite_mode=rag_enabled
+        )
         
         return f"{instruction}\n\n{context_text}"
     
@@ -696,6 +720,10 @@ DATE เก็บเป็น Unix Timestamp (milliseconds) ต้องแป�
 5. SELECT query เท่านั้น
    - ถ้ามี ORDER BY + LIMIT + UNION ต้องครอบด้วย Subquery
 6. ห้ามใช้ table จริง ให้ใช้ view ที่กำหนดเท่านั้น
+7. **ห้าม Format ตัวเลขใน SQL:** (สำคัญมาก!)
+   - ห้ามใช้ `PRINTF`, `FORMAT` กับค่าเงิน/ตัวเลขคำนวณ
+   - ต้องส่งค่าดิบ (Raw Number) เช่น `1234567.89` เท่านั้น
+   - (Frontend จะจัดการใส่ลูกน้ำเอง)
 
 ## กฎการรักษาบริบท (Context Retention Rules)
 **หลักการสำคัญ:** แยกระหว่าง REPLACE vs MERGE
@@ -757,9 +785,9 @@ DATE เก็บเป็น Unix Timestamp (milliseconds) ต้องแป�
 - Column name ต้องมี suffix บอกหน่วย: `_million_baht`, `_ล้านบาท`, `_billion_baht`, `_thousand_baht`
 
 ## รูปแบบการตอบ
-1. แสดง SQL query
+1. แสดง SQL query (ต้อง return ค่าตัวเลขดิบ ห้าม format ใส่ลูกน้ำ)
 2. อธิบายผลลัพธ์เป็นภาษาไทย
-3. Format ตัวเลขให้อ่านง่าย (เช่น 1,234,567.89)"""
+3. ในส่วน**คำอธิบาย** (Text) ให้ Format ตัวเลขให้อ่านง่าย (เช่น 1,234,567.89)"""
     
     def _build_english_prompt(self, ai_provider: str, main_view: str, context_name: str, context_info: Dict = {}) -> str:
         """Build English language system prompt"""
