@@ -30,16 +30,18 @@ export interface Message {
     confidence?: ConfidenceData;   // Confidence score
     visualization?: string;        // AI Recommended visualization
     chartConfig?: ChartConfig;     // AI Recommended chart columns
+    question?: string;             // Original question (needed for training)
 }
 
 interface ChatBubbleProps {
     message: Message;
+    onTrain?: (question: string, sql: string) => Promise<void>;
 }
 
 // Initial number of rows to show
 const INITIAL_ROWS = 5;
 
-export const ChatBubble = ({ message }: ChatBubbleProps) => {
+export const ChatBubble = ({ message, onTrain }: ChatBubbleProps) => {
     const isUser = message.role === 'user';
     const colorScheme = useColorScheme();
     const isDark = colorScheme === 'dark';
@@ -225,7 +227,7 @@ export const ChatBubble = ({ message }: ChatBubbleProps) => {
                                 <Text className="text-[13px] text-blue-600 dark:text-blue-400 text-center font-semibold">
                                     {showAllData
                                         ? '▲ ย่อข้อมูล'
-                                        : `▼ แสดงทั้งหมด ${message.data.length} รายการ`}
+                                        : `▼ แสดงทั้งหมด ${message.data?.length || 0} รายการ`}
                                 </Text>
                             </TouchableOpacity>
                         )}
@@ -275,6 +277,11 @@ export const ChatBubble = ({ message }: ChatBubbleProps) => {
                         <TechnicalAccordion
                             sql={message.sql}
                             executionTime={message.executionTime}
+                            onTrain={
+                                (onTrain && message.question)
+                                    ? async (newSql) => await onTrain(message.question!, newSql)
+                                    : undefined
+                            }
                         />
                     </View>
                 )}

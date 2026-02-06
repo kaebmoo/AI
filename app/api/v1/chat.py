@@ -5,13 +5,14 @@ import time
 import re
 import json
 import logging
+from datetime import datetime
 
 from app.api import deps
 
 logger = logging.getLogger(__name__)
 from app.models.user import User
 from app.models.chat import ChatHistory
-from app.schemas.chat import ChatRequest, ChatResponse, DataWarning
+from app.schemas.chat import ChatRequest, ChatResponse, DataWarning, TrainingRequest
 from app.services.ai_service import AIService, create_gemini_service, create_claude_service, create_matcha_service
 from app.services.schema_service import SchemaService
 from app.config import settings
@@ -402,7 +403,8 @@ async def chat(
             ai_provider=request.provider or "gemini",
             include_samples=True,
             language="thai",
-            context_name=context_name
+            context_name=context_name,
+            rag_enabled=True  # ENABLE RAG OPTIMIZATION: Use lite prompt, let AIService inject snippets
         )
 
         result = await ai_service.query_hybrid(
@@ -587,4 +589,78 @@ def get_history(
             "data": None, 
             "execution_time_ms": c.execution_time_ms or 0
         })
-    return results
+from app.models.feedback_models import GoldenExample
+
+@router.post("/train")
+async def train_model(
+    request: TrainingRequest,
+    current_request: Request, # for mcp client
+    current_user: User = Depends(deps.get_current_user),
+    default_ai_service: AIService = Depends(deps.get_ai_service),
+    db: Session = Depends(deps.get_db)
+):
+    """
+    Train RAG with Correct SQL
+    - Admins: Validates & Trains immediately (Active).
+    - Users: Submits for review (Inactive).
+    """
+    try:
+        # 1. Validate SQL integrity first (for everyone)
+        # We need to run the SQL to make sure it's valid SQLite/SQL
+        mcp_client = deps.get_mcp_client(current_request)
+        try:
+            # Dry run / Explain to check syntax
+            # Or just run with limit 1
+            check_res = await mcp_client.call_tool("execute_query", {"sql": request.sql, "limit": 1})
+            # If string error or dict with error
+            if isinstance(check_res, dict) and check_res.get('error'):
+                 raise ValueError(f"Invalid SQL: {check_res['error']}")
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid SQL: {str(e)}")
+
+        # 2. Check Permissions
+        is_admin = getattr(current_user, 'is_superuser', False) or getattr(current_user, 'role', '') == 'admin'
+        
+        # 3. Save to Database (GoldenExample)
+        # Check if already exists? (Maybe duplicate question pattern)
+        existing = db.query(GoldenExample).filter(GoldenExample.question_pattern == request.question).first()
+        
+        if existing:
+            # Update existing
+            existing.expected_sql = request.sql
+            existing.is_active = is_admin # If admin, auto-active. If user, needs review (unless updating their own?)
+            existing.updated_at = datetime.utcnow() # Need datetime import or func.now
+            if is_admin:
+                existing.added_by = current_user.id
+            db_item = existing
+        else:
+            # Create new
+            db_item = GoldenExample(
+                question_pattern=request.question,
+                expected_sql=request.sql,
+                category=request.context,
+                is_active=is_admin, # Admin = Active, User = Pending
+                added_by=current_user.id
+            )
+            db.add(db_item)
+        
+        db.commit()
+        db.refresh(db_item)
+
+        if is_admin:
+            # Power User: Train Vanna immediately
+            success = default_ai_service.train(request.question, request.sql)
+            if success:
+                return {"success": True, "message": "Admin: System trained and saved successfully"}
+            else:
+                # DB saved but Vanna failed?
+                return {"success": True, "message": "Saved to DB, but Vector training failed (check logs)"}
+        else:
+            # Standard User: Queue for review
+            return {"success": True, "message": "Suggestion submitted for review. Thank you!"}
+
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"Training error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

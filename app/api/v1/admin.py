@@ -26,6 +26,7 @@ from app.schemas.admin_schemas import (
 )
 from app.services.schema_service import SchemaService
 from app.services.prompt_manager import PromptManager
+from app.config import settings
 
 router = APIRouter()
 
@@ -489,11 +490,13 @@ def get_golden_example(
 def create_golden_example(
     data: GoldenExampleCreate,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_db),
+    ai_service: AIService = Depends(deps.get_ai_service)
 ):
     """
     Create golden example manually.
     Admin only.
+    Also trains Vanna (Vector Store).
     """
     example = GoldenExample(
         **data.model_dump(),
@@ -502,6 +505,11 @@ def create_golden_example(
     db.add(example)
     db.commit()
     db.refresh(example)
+    
+    # Sync with Vanna (Train)
+    if example.is_active:
+        ai_service.train(question=example.question_pattern, sql_query=example.expected_sql)
+        
     return GoldenExampleResponse.model_validate(example)
 
 
@@ -510,11 +518,13 @@ def update_golden_example(
     example_id: int,
     data: GoldenExampleUpdate,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_db),
+    ai_service: AIService = Depends(deps.get_ai_service)
 ):
     """
     Update golden example.
     Admin only.
+    Also retrains Vanna if active.
     """
     example = db.query(GoldenExample).filter(GoldenExample.id == example_id).first()
     if not example:
@@ -526,6 +536,14 @@ def update_golden_example(
 
     db.commit()
     db.refresh(example)
+    
+    # Sync with Vanna (Train)
+    # Note: Vanna training is additive. Updating here just adds a new pair.
+    # To fully "update" in Vanna (remove old), we'd need to re-index or use IDs, 
+    # but Vanna legacy uses simple vector addition. Adding the correct one is usually enough to override semantic search.
+    if example.is_active:
+         ai_service.train(question=example.question_pattern, sql_query=example.expected_sql)
+         
     return GoldenExampleResponse.model_validate(example)
 
 
@@ -538,6 +556,8 @@ def delete_golden_example(
     """
     Delete golden example.
     Admin only.
+    Note: Does NOT remove from Vanna Vector DB (Vanna legacy doesn't support granular delete easily).
+    Full re-sync is recommended if many deletions occur.
     """
     example = db.query(GoldenExample).filter(GoldenExample.id == example_id).first()
     if not example:
@@ -809,4 +829,30 @@ def activate_prompt_version(
     if not version:
         raise HTTPException(status_code=404, detail="Prompt version not found")
     return PromptVersionResponse.model_validate(version)
+
+
+# ============================================================
+# Sync Brain Endpoints
+# ============================================================
+
+@router.post("/sync-brain", response_model=dict)
+def sync_brain_knowledge(
+    current_user: User = Depends(deps.require_admin),
+    service: SchemaService = Depends(deps.get_schema_service)
+):
+    """
+    Trigger Vanna Brain Sync (Retrain Vector DB).
+    Admin only.
+    """
+    try:
+        from app.services.vanna_service import VannaService
+        vanna = VannaService(config={
+            "path": settings.VANNA_CHROMA_PATH,
+            "distance_threshold": settings.VANNA_DISTANCE_THRESHOLD
+        })
+        vanna.sync_brain(service)
+        return {"status": "success", "message": "Brain sync completed successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 

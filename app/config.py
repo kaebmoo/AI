@@ -59,7 +59,11 @@ class Settings(BaseSettings):
     # Model Configuration
     GEMINI_MODEL: str = "gemini-2.0-flash-exp"
     CLAUDE_MODEL: str = "claude-sonnet-4-20250514"
-    
+
+    # Vanna AI (RAG) Settings
+    VANNA_CHROMA_PATH: str = "./chroma_db"
+    VANNA_DISTANCE_THRESHOLD: float = 1.8
+
     METADATA_DB_PATH: Optional[str] = None # Defaults to DATABASE_URL path if None 
 
     

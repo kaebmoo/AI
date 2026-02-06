@@ -24,9 +24,19 @@ interface DataChartProps {
 // Helper to safely parse numbers (remove commas, %, currency symbols)
 const safelyParseNumber = (val: any): number => {
     if (typeof val === 'number') return val;
-    if (!val) return 0;
-    const strVal = String(val).replace(/,/g, '').replace(/%/g, '').replace(/฿/g, '');
-    return parseFloat(strVal) || 0;
+    if (val === null || val === undefined || val === '') return 0;
+
+    let strVal = String(val).trim();
+    // Check for accounting negative format: (123.45) -> -123.45
+    const isAccountingNegative = strVal.startsWith('(') && strVal.endsWith(')');
+
+    // Whitelist strategy: Keep only digits, dots, and minus sign.
+    strVal = strVal.replace(/[^0-9.-]/g, '');
+
+    const parsed = parseFloat(strVal);
+    if (isNaN(parsed)) return 0;
+
+    return isAccountingNegative ? -Math.abs(parsed) : parsed;
 };
 
 // Helper: Detect unit from column name
@@ -215,8 +225,9 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
         // ============================================================
         const hasNumericalData = keys.some(key => {
             const sampleValue = data[0][key];
+            const cleanVal = String(sampleValue).replace(/[^0-9.-]/g, '');
             return typeof sampleValue === 'number' ||
-                (typeof sampleValue === 'string' && !isNaN(parseFloat(sampleValue.replace(/[,%]/g, ''))));
+                (typeof sampleValue === 'string' && cleanVal.length > 0 && !isNaN(parseFloat(cleanVal)));
         });
 
         if (!hasNumericalData) {
@@ -235,6 +246,7 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
             // Normalize keys for case-insensitive matching
             const lowerKeys = keys.map(k => k.toLowerCase());
             const findKeyCaseInsensitive = (target: string) => {
+                if (!target) return undefined;
                 const idx = lowerKeys.indexOf(target.toLowerCase());
                 return idx !== -1 ? keys[idx] : undefined;
             };
@@ -515,7 +527,15 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
         });
 
         const hasRepeatedCategories = Object.values(categoryCounts).some(count => count > 1);
-        const uniqueCategories = Object.keys(categoryCounts);
+        let uniqueCategories = Object.keys(categoryCounts);
+
+        // Sort categories if it's a time/month column
+        const isCategoryTimeCol = ['month', 'year', 'date', 'quarter', 'week', 'เดือน', 'ปี', 'วันที่', 'ไตรมาส'].some(t =>
+            categoryKey.toLowerCase().includes(t)
+        );
+        if (isCategoryTimeCol && uniqueCategories.length > 0) {
+            uniqueCategories = smartMonthSort(uniqueCategories);
+        }
 
         // Detect series key (what differentiates repeated categories)
         let seriesKey = '';
@@ -630,7 +650,7 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
     };
 
     const formatYLabel = (val: string) => {
-        const num = parseFloat(val);
+        const num = safelyParseNumber(val);
         if (num >= 1_000_000_000) return (num / 1_000_000_000).toFixed(1) + 'B';
         if (num >= 1_000_000) return (num / 1_000_000).toFixed(1) + 'M';
         if (num >= 1_000) return (num / 1_000).toFixed(1) + 'K';
@@ -745,10 +765,10 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
                 if (analysis.differenceKey || analysis.percentDiffKey) {
                     if (!diffData[category]) diffData[category] = {};
                     if (analysis.differenceKey && row[analysis.differenceKey] !== undefined) {
-                        diffData[category].diff = Number(row[analysis.differenceKey]);
+                        diffData[category].diff = safelyParseNumber(row[analysis.differenceKey]);
                     }
                     if (analysis.percentDiffKey && row[analysis.percentDiffKey] !== undefined) {
-                        diffData[category].pctDiff = Number(row[analysis.percentDiffKey]);
+                        diffData[category].pctDiff = safelyParseNumber(row[analysis.percentDiffKey]);
                     }
                 }
             });
@@ -801,7 +821,7 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
             const values = groupedData[category] || {};
             const diff = diffData[category];
 
-            const currentGroupMax = Math.max(...Object.values(values).map(v => Number(v) || 0));
+            const currentGroupMax = Math.max(...Object.values(values).map(v => safelyParseNumber(v)));
             const isHighValue = currentGroupMax > (maxValue * 0.7);
 
             // Smart Position Logic (Refactored)
@@ -1183,7 +1203,7 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
     } else {
         // Bar chart processing
         processedData = data.map(item => {
-            const val = Number(item[analysis.measureKey]);
+            const val = safelyParseNumber(item[analysis.measureKey]);
             let label = '';
 
             if (monthKey && yearKey && item[monthKey] && item[yearKey]) {
@@ -1383,7 +1403,7 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
                                             >
                                                 {groupItems.map((gItem: any, idx: number) => {
                                                     const sName = String(gItem[analysis.categoryKey]);
-                                                    const val = Number(gItem[analysis.measureKey]);
+                                                    const val = safelyParseNumber(gItem[analysis.measureKey]);
                                                     const formatted = formatNumberWithUnit(val, maxValue, analysis.measureKey);
                                                     return (
                                                         <View key={idx} className="mb-2">

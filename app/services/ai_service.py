@@ -28,6 +28,8 @@ import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from app.services.mcp_client import MCPClientService
+from app.services.vanna_service import VannaService
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -742,6 +744,56 @@ Based on the data, provide:
                      if parsed_result.get("visualization") == "grouped_bar":
                           parsed_result["visualization"] = "stacked_bar"
 
+             # 6. Fallback: If no chart_config, try to infer from data
+             if "chart_config" not in parsed_result and data and len(data) > 0:
+                 logger.info("Matcha: No chart_config found, attempting auto-detection")
+                 keys = list(data[0].keys())
+
+                 # Find measure column (numeric column)
+                 measure_col = None
+                 for key in keys:
+                     sample_val = data[0][key]
+                     if isinstance(sample_val, (int, float)) or (isinstance(sample_val, str) and sample_val.replace(',', '').replace('.', '').replace('-', '').isdigit()):
+                         measure_col = key
+                         break
+
+                 # Find category column (first non-numeric column, or first column if all numeric)
+                 category_col = None
+                 for key in keys:
+                     if key != measure_col:
+                         category_col = key
+                         break
+
+                 if category_col and measure_col:
+                     # Check if we have 3+ columns -> might have series
+                     series_col = None
+                     if len(keys) >= 3:
+                         for key in keys:
+                             if key != category_col and key != measure_col:
+                                 # Check if this is a grouping column (has few unique values)
+                                 unique_vals = set(str(row.get(key, '')) for row in data[:20])
+                                 if len(unique_vals) <= 10:  # Max 10 unique values for series
+                                     series_col = key
+                                     break
+
+                     # Determine visualization type
+                     viz_type = "bar_chart"
+                     if series_col:
+                         viz_type = "grouped_bar"
+                     elif len(data) > 20:
+                         # Check if category looks like time
+                         time_patterns = ['month', 'year', 'date', 'เดือน', 'ปี', 'วันที่']
+                         if any(pattern in category_col.lower() for pattern in time_patterns):
+                             viz_type = "line_chart"
+
+                     parsed_result["visualization"] = viz_type
+                     parsed_result["chart_config"] = {
+                         "category_column": category_col,
+                         "measure_column": measure_col,
+                         "series_column": series_col or ""
+                     }
+                     logger.info(f"Matcha: Auto-detected chart config: {parsed_result['chart_config']}")
+
              return parsed_result
         except Exception as e:
             logger.error(f"Matcha: Error processing result: {e}")
@@ -798,7 +850,13 @@ class AIService:
     ):
         self.provider_name = provider
         self.mcp_client = mcp_client
-        
+        # Initialize Vanna RAG with config from settings
+        self.vanna = VannaService(config={
+            "path": settings.VANNA_CHROMA_PATH,
+            "distance_threshold": settings.VANNA_DISTANCE_THRESHOLD
+        })
+
+
         if provider == "claude":
             self.provider = ClaudeProvider(api_key, model) if model else ClaudeProvider(api_key)
         elif provider == "gemini":
@@ -838,6 +896,16 @@ class AIService:
         total_tokens = 0
         
         working_question = question
+        
+        # Inject Vanna RAG Context into System Prompt
+        try:
+            rag_context = self._get_vanna_context_string(question)
+            if rag_context:
+                system_prompt += f"\n\n{rag_context}"
+                logger.info(f"Injected Vanna RAG Context ({len(rag_context)} chars)")
+        except Exception as e:
+            logger.error(f"Failed to get Vanna context: {e}")
+
 
         for turn in range(max_turns):
             logger.info(f"AIService Turn {turn}/{max_turns} for provider {self.provider_name}")
@@ -1090,7 +1158,11 @@ class AIService:
 
         Cost: 2-4 API calls vs 13+ calls in full MCP mode
         """
+        import time
+        start_request = time.perf_counter()
+        
         sql_query = None
+
         data = []
         explanation = ""
         total_tokens = 0
@@ -1155,9 +1227,22 @@ class AIService:
                     logger.info(f"Hybrid Mode: Using conversation history with {len(history_lines)} context items")
 
             if attempt == 0:
+                # Get RAG Context
+                rag_context = ""
+                try:
+                    t0 = time.perf_counter()
+                    rag_context = self._get_vanna_context_string(question)
+                    t_rag = time.perf_counter() - t0
+                    if rag_context:
+                        logger.info(f"Hybrid Mode: Injected RAG Context ({len(rag_context)} chars) took {t_rag:.4f}s")
+                except Exception as e:
+                    logger.warning(f"Failed to get RAG context: {e}")
+
                 user_prompt = f"""คำถาม: {question}
 
 **บริบท:** ข้อมูล{context_thai} (ใช้ตาราง {context_table}){history_context}
+
+{rag_context}
 
 สร้าง SQL query และอธิบายผลลัพธ์เป็นภาษาไทย
 สำคัญ: ต้องใช้ตาราง {context_table} เท่านั้น
@@ -1197,7 +1282,10 @@ Error: {last_error.get('error', '')}
                 logger.info(f"Hybrid Mode: Provider={self.provider_name}, user_prompt_len={len(user_prompt)}, system_prompt_len={len(system_prompt) if system_prompt else 0}")
 
                 try:
+                    t0 = time.perf_counter()
                     response_text = await self.provider.generate_content(user_prompt, system_prompt)
+                    t_gen = time.perf_counter() - t0
+                    logger.info(f"Hybrid Mode: SQL Generation took {t_gen:.4f}s")
                 except Exception as gen_error:
                     logger.error(f"Hybrid Mode: generate_content raised exception: {type(gen_error).__name__}: {gen_error}")
                     retry_history.append({"sql": "", "error": f"generate_content error: {str(gen_error)}"})
@@ -1255,11 +1343,14 @@ Error: {last_error.get('error', '')}
                 logger.info(f"Hybrid Mode: Executing SQL: {sql_query}")
 
                 try:
+                    t0 = time.perf_counter()
                     exec_result = await self.mcp_client.call_tool("execute_query", {
                         "sql": sql_query,
                         "limit": 1000,
                         "validate_first": False  # Already validated
                     })
+                    t_exec = time.perf_counter() - t0
+                    logger.info(f"Hybrid Mode: SQL Execution in DB took {t_exec:.4f}s")
                     logger.info(f"Hybrid Mode: Execution result length: {len(exec_result) if exec_result else 0}")
                     logger.info(f"Hybrid Mode: Execution result preview: {exec_result[:500] if exec_result else 'None'}...")
 
@@ -1322,7 +1413,12 @@ Error: {last_error.get('error', '')}
                 elif len(data) > 0:
                     # Call explain_result to get visualization and chart_config
                     try:
-                        explanation = await self.provider.explain_result(question, sql_query, data, system_prompt)
+                        t0 = time.perf_counter()
+                        # Use lightweight system prompt for explanation to save tokens/time
+                        simple_system_prompt = "You are a data visualization assistant. Analyze the data and provide a Thai explanation and chart recommendation."
+                        explanation = await self.provider.explain_result(question, sql_query, data, simple_system_prompt)
+                        t_explain = time.perf_counter() - t0
+                        logger.info(f"Hybrid Mode: Explanation Generation took {t_explain:.4f}s")
                         logger.info(f"Hybrid Mode: Got explanation with visualization: {type(explanation)}")
                     except Exception as explain_error:
                         logger.warning(f"Could not get explanation: {explain_error}")
@@ -1359,6 +1455,9 @@ Error: {last_error.get('error', '')}
                 except Exception as conf_error:
                     logger.warning(f"Could not calculate confidence: {conf_error}")
 
+                t_total = time.perf_counter() - start_request
+                logger.info(f"Hybrid Mode: Total Request Time: {t_total:.4f}s")
+                
                 return QueryResult(
                     question=question,
                     sql_query=sql_query,
@@ -1432,6 +1531,50 @@ Error: {last_error.get('error', '')}
             return cleaned
 
         return "ดำเนินการสำเร็จ"
+    
+    
+    def _get_vanna_context_string(self, question: str) -> str:
+        """Retrieve and format RAG context from Vanna"""
+        try:
+            contexts = self.vanna.get_rag_context(question)
+            
+            parts = []
+            
+            # 1. DDL
+            if contexts.get('ddl'):
+                parts.append("### Relevant Tables (Schema):")
+                parts.extend(contexts['ddl'])
+                
+            # 2. Documentation (Rules & Mappings)
+            if contexts.get('doc'):
+                parts.append("\n### Relevant Rules & Dictionary:")
+                parts.extend(contexts['doc'])
+                
+            # 3. Golden Examples (Few-Shot)
+            if contexts.get('sql'):
+                parts.append("\n### Similar Examples (Golden SQL):")
+                for ex in contexts['sql']:
+                    parts.append(f"- Question: {ex['question']}\n  SQL: {ex['sql']}")
+                    
+            if not parts:
+                return ""
+                
+            return "\n".join(parts)
+        except Exception as e:
+            logger.error(f"Error getting Vanna context: {e}")
+            return ""
+
+    def train(self, question: str, sql_query: str) -> bool:
+        """Train the RAG system with a verified Q&A pair"""
+        try:
+            if not self.vanna:
+                logger.warning("Vanna service not initialized, skipping training")
+                return False
+                
+            return self.vanna.train(question=question, sql=sql_query)
+        except Exception as e:
+            logger.error(f"Error in AIService.train: {e}")
+            return False
 
     async def suggest_mappings(self, columns: List[Dict], samples: Dict[str, List]) -> List[Dict[str, str]]:
         """
@@ -1525,3 +1668,4 @@ def create_gemini_service(api_key: str, mcp_client: MCPClientService, model: Opt
 
 def create_matcha_service(api_key: str, api_url: str, mcp_client: MCPClientService, model: Optional[str] = None) -> AIService:
     return AIService("matcha", api_key, mcp_client, model, api_url=api_url)
+

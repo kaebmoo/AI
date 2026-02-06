@@ -42,49 +42,73 @@ const AppLayout: React.FC = () => {
             label: 'Dashboard',
         },
         {
-            key: '/users',
-            icon: <UserOutlined />,
-            label: 'User Management',
+            type: 'group',
+            label: 'Discovery & Analysis',
+            children: [
+                {
+                    key: '/analyzer',
+                    icon: <RobotOutlined />,
+                    label: 'Schema Analyzer (AI)',
+                },
+                {
+                    key: '/schema',
+                    icon: <TableOutlined />,
+                    label: 'Schema Explorer',
+                },
+            ]
         },
         {
-            key: '/schema',
-            icon: <TableOutlined />,
-            label: 'Schema Explorer',
+            type: 'group',
+            label: 'Data Management',
+            children: [
+                {
+                    key: '/contexts',
+                    icon: <DatabaseOutlined />,
+                    label: 'Data Contexts',
+                },
+                {
+                    key: '/view-builder',
+                    icon: <BuildOutlined />,
+                    label: 'View Builder',
+                },
+            ]
         },
         {
-            key: '/view-builder',
-            icon: <BuildOutlined />,
-            label: 'View Builder',
+            type: 'group',
+            label: 'Knowledge Base',
+            children: [
+                {
+                    key: '/rules',
+                    icon: <SafetyCertificateOutlined />,
+                    label: 'Business Rules',
+                },
+                {
+                    key: '/mappings',
+                    icon: <ProjectOutlined />,
+                    label: 'Semantic Mappings',
+                },
+                {
+                    key: '/examples',
+                    icon: <BulbOutlined />,
+                    label: 'Golden Examples',
+                },
+            ]
         },
         {
-            key: '/contexts',
-            icon: <DatabaseOutlined />,
-            label: 'Data Contexts',
-        },
-        {
-            key: '/analyzer',
-            icon: <RobotOutlined />,
-            label: 'Schema Analyzer (AI)',
-        },
-        {
-            key: '/mappings',
-            icon: <ProjectOutlined />,
-            label: 'Semantic Mappings',
-        },
-        {
-            key: '/rules',
-            icon: <SafetyCertificateOutlined />,
-            label: 'Business Rules',
-        },
-        {
-            key: '/prompts',
-            icon: <FileTextOutlined />,
-            label: 'Prompt Management',
-        },
-        {
-            key: '/examples',
-            icon: <BulbOutlined />,
-            label: 'Golden Examples',
+            type: 'group',
+            label: 'System',
+            children: [
+                {
+                    key: '/prompts',
+                    icon: <FileTextOutlined />,
+                    label: 'Prompt Management',
+                },
+                {
+                    key: '/users',
+                    icon: <UserOutlined />,
+                    label: 'User Management',
+                },
+            ]
         },
     ];
 
