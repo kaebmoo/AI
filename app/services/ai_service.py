@@ -688,34 +688,48 @@ Data Preview:
 {data_preview}
 
 Based on the data, provide:
-1. A brief explanation of the trends/values.
+1. A brief explanation of the trends/values (in Thai).
 2. The BEST chart type to visualize this (bar_chart, line_chart, pie_chart, grouped_bar, stacked_bar, table, single_value).
 3. The configuration:
-   - category_column: X-axis (Grouping)
-   - measure_column: Y-axis (Value)
-   - series_column: Comparison/Legend (Optional)
+   - category_column: X-axis (Grouping). Rule: Use 'month' for trends, 'department'/'group' for comparison.
+   - measure_column: Y-axis (Value).
+   - series_column: Comparison/Legend (Optional). Rule: If comparing multiple groups over time, use this.
+
+IMPORTANT: Return VALID JSON only. Do not wrap in markdown unless necessary.
+Structure:
+{{
+  "explanation": "...",
+  "visualization": "...",
+  "chart_config": {{
+      "category_column": "...",
+      "measure_column": "...",
+      "series_column": "..."
+  }}
+}}
 """
         # 3. Call API
         response_text = await self.generate_content(prompt, system_prompt)
         
         # 4. Parse JSON
         parsed_result = {"explanation": response_text}
+        json_str = response_text
+        
         try:
-            # Try pure JSON
-            parsed_result = json.loads(response_text)
-        except:
-            try:
-                # Try Markdown JSON
-                match = re.search(r'```json\s*(\{.*?\})\s*```', response_text, re.DOTALL)
+            # 4.1 Check for Markdown Code Block
+            match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response_text, re.DOTALL)
+            if match:
+                json_str = match.group(1)
+            else:
+                # 4.2 Check for raw JSON object (brackets)
+                match = re.search(r'(\{.*\})', response_text, re.DOTALL)
                 if match:
-                    parsed_result = json.loads(match.group(1))
-                else:
-                    # Try find {}
-                    match = re.search(r'(\{.*\})', response_text, re.DOTALL)
-                    if match:
-                        parsed_result = json.loads(match.group(1))
-            except:
-                pass
+                    json_str = match.group(1)
+            
+            # Clean up potential trailing commas or comments if necessary (basic check)
+            parsed_result = json.loads(json_str)
+
+        except Exception as e:
+            logger.warning(f"Matcha: JSON parsing failed: {e}. Raw: {response_text[:100]}...")
 
         # 5. Post-process to enforce Time-Series Rule (Code Level)
         try:
@@ -725,8 +739,9 @@ Based on the data, provide:
                   
              if "chart_config" in parsed_result:
                  config = parsed_result["chart_config"]
-                 cat = config.get("category_column", "").lower()
-                 series = config.get("series_column", "").lower()
+                 # Normalize keys to lower case for comparison
+                 cat = str(config.get("category_column", "")).lower()
+                 series = str(config.get("series_column", "")).lower()
                  
                  time_keys = ['month', 'year', 'date', 'day', 'time', 'quarter', 'week', 'hour', 'minute', 'second', 'เดือน', 'ปี', 'วันที่', 'ไตรมาส', 'งวด', 'เวลา']
                  
@@ -749,56 +764,102 @@ Based on the data, provide:
                  logger.info("Matcha: No chart_config found, attempting auto-detection")
                  keys = list(data[0].keys())
 
-                 # Find measure column (numeric column)
+                 # Find measure column - prioritize by name patterns, exclude time dimensions
                  measure_col = None
+                 numeric_cols = []
+                 measure_patterns = ['revenue', 'value', 'amount', 'total', 'sum', 'count', 'baht', 'รายได้', 'จำนวน', 'ยอด']
+                 dimension_patterns = ['year', 'month', 'date', 'day', 'week', 'quarter', 'ปี', 'เดือน', 'วันที่', 'id']
+
                  for key in keys:
                      sample_val = data[0][key]
-                     if isinstance(sample_val, (int, float)) or (isinstance(sample_val, str) and sample_val.replace(',', '').replace('.', '').replace('-', '').isdigit()):
-                         measure_col = key
+                     is_numeric = isinstance(sample_val, (int, float)) or (isinstance(sample_val, str) and sample_val.replace(',', '').replace('.', '').replace('-', '').isdigit())
+                     if is_numeric:
+                         numeric_cols.append(key)
+
+                 # Priority 1: Find column with measure-like name
+                 for col in numeric_cols:
+                     if any(p in col.lower() for p in measure_patterns):
+                         measure_col = col
+                         logger.info(f"Matcha: Found measure by pattern: {col}")
                          break
 
-                 # Find category column (first non-numeric column, or first column if all numeric)
+                 # Priority 2: Find numeric column that's NOT a dimension
+                 if not measure_col:
+                     for col in reversed(numeric_cols):  # Prefer last column (often the value)
+                         if not any(p in col.lower() for p in dimension_patterns):
+                             measure_col = col
+                             logger.info(f"Matcha: Found measure by exclusion: {col}")
+                             break
+
+                 # Priority 3: Use last numeric column as fallback
+                 if not measure_col and numeric_cols:
+                     measure_col = numeric_cols[-1]
+                     logger.info(f"Matcha: Using last numeric col as measure: {measure_col}")
+
+                 # Find category column - Smarter Selection
                  category_col = None
-                 for key in keys:
-                     if key != measure_col:
-                         category_col = key
-                         break
+                 series_col = None
+                 
+                 potential_cats = [k for k in keys if k != measure_col]
+                 
+                 # Rule: Prefer 'month', 'date' over 'year' for Category if both exist
+                 has_month = any('month' in k.lower() for k in potential_cats)
+                 has_year = any('year' in k.lower() for k in potential_cats)
+                 
+                 if has_month:
+                     category_col = next((k for k in potential_cats if 'month' in k.lower()), potential_cats[0])
+                 elif has_year:
+                     category_col = next((k for k in potential_cats if 'year' in k.lower()), potential_cats[0])
+                 elif potential_cats:
+                     category_col = potential_cats[0]
+                 
+                 # Infer Series Column - prefer string columns over numeric for series
+                 if len(potential_cats) >= 2:
+                     remaining_cols = [k for k in potential_cats if k != category_col]
+                     # Prefer string columns as series (like SERVICE_GROUP, product_name, etc.)
+                     string_cols = []
+                     for col in remaining_cols:
+                         sample_val = data[0].get(col)
+                         if isinstance(sample_val, str):
+                             # Check it has reasonable cardinality for a series (2-30 unique values)
+                             unique_vals = set(str(row.get(col, '')) for row in data[:50])
+                             if 2 <= len(unique_vals) <= 30:
+                                 string_cols.append(col)
+                                 logger.info(f"Matcha: Found string series candidate: {col} ({len(unique_vals)} unique values)")
 
-                 if category_col and measure_col:
-                     # Check if we have 3+ columns -> might have series
-                     series_col = None
-                     if len(keys) >= 3:
-                         for key in keys:
-                             if key != category_col and key != measure_col:
-                                 # Check if this is a grouping column (has few unique values)
-                                 unique_vals = set(str(row.get(key, '')) for row in data[:20])
-                                 if len(unique_vals) <= 10:  # Max 10 unique values for series
-                                     series_col = key
-                                     break
+                     if string_cols:
+                         series_col = string_cols[0]
+                     else:
+                         # Fallback: first remaining column (but avoid picking 'year' if there are other options)
+                         non_year_cols = [k for k in remaining_cols if 'year' not in k.lower()]
+                         series_col = non_year_cols[0] if non_year_cols else remaining_cols[0] if remaining_cols else None
+                 
+                 # Determine visualization type
+                 time_patterns = ['month', 'year', 'date', 'เดือน', 'ปี', 'วันที่']
+                 is_time_category = category_col and any(pattern in category_col.lower() for pattern in time_patterns)
 
-                     # Determine visualization type
-                     viz_type = "bar_chart"
-                     if series_col:
-                         viz_type = "grouped_bar"
-                     elif len(data) > 20:
-                         # Check if category looks like time
-                         time_patterns = ['month', 'year', 'date', 'เดือน', 'ปี', 'วันที่']
-                         if any(pattern in category_col.lower() for pattern in time_patterns):
-                             viz_type = "line_chart"
+                 viz_type = "bar_chart"
+                 if series_col and is_time_category:
+                     viz_type = "line_chart"  # Time-based category with series = line chart
+                 elif series_col:
+                     viz_type = "stacked_bar"  # Non-time category with series = stacked bar
+                 elif is_time_category and len(data) > 10:
+                     viz_type = "line_chart"  # Time-based category without series = line chart
 
-                     parsed_result["visualization"] = viz_type
-                     parsed_result["chart_config"] = {
-                         "category_column": category_col,
-                         "measure_column": measure_col,
-                         "series_column": series_col or ""
-                     }
-                     logger.info(f"Matcha: Auto-detected chart config: {parsed_result['chart_config']}")
+                 logger.info(f"Matcha: viz_type={viz_type}, is_time_category={is_time_category}, series_col={series_col}")
+
+                 parsed_result["visualization"] = viz_type
+                 parsed_result["chart_config"] = {
+                     "category_column": category_col,
+                     "measure_column": measure_col,
+                     "series_column": series_col or ""
+                 }
+                 logger.info(f"Matcha: Auto-detected chart config: {parsed_result['chart_config']}")
 
              return parsed_result
         except Exception as e:
             logger.error(f"Matcha: Error processing result: {e}")
             return {"explanation": response_text}
-    
     async def generate_content(self, prompt: str, system_prompt: Optional[str] = None) -> str:
         """Generate content using Matcha/OpenAI-compatible API"""
         logger.info(f"MatchaProvider.generate_content called")
@@ -1553,8 +1614,9 @@ Error: {last_error.get('error', '')}
             # 3. Golden Examples (Few-Shot)
             if contexts.get('sql'):
                 parts.append("\n### Similar Examples (Golden SQL):")
-                for ex in contexts['sql']:
-                    parts.append(f"- Question: {ex['question']}\n  SQL: {ex['sql']}")
+                for sql in contexts['sql']:
+                    # sql is a string from ChromaDB, not a dict
+                    parts.append(f"- {sql}")
                     
             if not parts:
                 return ""
