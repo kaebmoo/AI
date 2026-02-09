@@ -52,17 +52,22 @@ export const ModelSelector = ({ provider, onSelect }: ModelSelectorProps) => {
 
             setProviders(fetchedProviders);
 
-            // If current provider is not in the list, select the default
+            // Auto-select default provider on first load or if current provider is not available
             if (fetchedProviders.length > 0) {
                 const isCurrentProviderAvailable = fetchedProviders.some(
                     (p: Provider) => p.id === provider
                 );
 
-                if (!isCurrentProviderAvailable) {
+                // If no provider selected yet OR current provider is not available
+                if (!provider || !isCurrentProviderAvailable) {
+                    // Find default provider from API
                     const defaultProvider = fetchedProviders.find((p: Provider) => p.is_default);
                     if (defaultProvider) {
+                        console.log('[ModelSelector] Auto-selecting default provider:', defaultProvider.id);
                         onSelect(defaultProvider.id);
                     } else {
+                        // Fallback to first provider if no default set
+                        console.log('[ModelSelector] No default set, using first provider:', fetchedProviders[0].id);
                         onSelect(fetchedProviders[0].id);
                     }
                 }

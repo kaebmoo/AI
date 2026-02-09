@@ -241,13 +241,66 @@ class AdminConfigService:
 
     def get_active_providers(self) -> List[Dict[str, Any]]:
         """
-        Get list of active AI providers.
+        Get list of active AI providers with 3-tier fallback:
+        1. Database (ai_providers table) + admin_config enabled status
+        2. admin_config table (legacy)
+        3. Hardcoded defaults
 
         Returns:
             List of provider info dicts
         """
-        config = self.get_ai_config()
         providers = []
+
+        # Priority 1: Try to get from ai_providers table
+        # BUT also check admin_config for enabled status and default
+        try:
+            results = self.db.execute(
+                text("""
+                    SELECT
+                        p.id,
+                        p.name,
+                        p.display_name,
+                        p.icon,
+                        m.model_id as default_model
+                    FROM ai_providers p
+                    LEFT JOIN ai_models m ON p.id = m.provider_id AND m.is_default = 1
+                    WHERE p.is_active = 1
+                    ORDER BY p.priority DESC, p.name
+                """)
+            ).fetchall()
+
+            if results:
+                # Get default provider from admin_config (priority over ai_providers.is_default)
+                default_provider = self.get_config("default_ai_provider", "matcha")
+
+                # Database has providers - but filter by admin_config enabled status
+                for row in results:
+                    provider_id = row[0]
+
+                    # Check if provider is enabled in admin_config
+                    enabled_key = f"{provider_id}_enabled"
+                    is_enabled = self.get_config(enabled_key, "true") == "true"
+
+                    if is_enabled:
+                        providers.append({
+                            "id": provider_id,
+                            "name": row[1],
+                            "display_name": row[2] or row[1],
+                            "icon": row[3] or "bulb",
+                            "is_default": provider_id == default_provider,  # Use admin_config value
+                            "model": row[4] or "default"
+                        })
+
+                # Only return if we found enabled providers
+                if providers:
+                    return providers
+
+        except Exception as e:
+            # Table doesn't exist or query failed - fall back
+            logger.debug(f"Failed to get providers from ai_providers table: {e}")
+
+        # Priority 2 & 3: Fallback to admin_config + hardcoded
+        config = self.get_ai_config()
 
         if config["claude_enabled"]:
             providers.append({
@@ -283,16 +336,39 @@ class AdminConfigService:
 
     def get_available_models(self, provider: str) -> List[str]:
         """
-        Get available models for a provider.
+        Get available models for a provider with 2-tier fallback:
+        1. Database (ai_models table)
+        2. Hardcoded defaults
 
         Args:
             provider: Provider name (claude, gemini, matcha)
 
         Returns:
-            List of model names
+            List of model IDs
         """
-        # Hardcoded for now - could be fetched from API in future
-        models = {
+        # Priority 1: Try to get from ai_models table
+        try:
+            results = self.db.execute(
+                text("""
+                    SELECT model_id
+                    FROM ai_models
+                    WHERE provider_id = :provider
+                    AND is_active = 1
+                    ORDER BY priority DESC, display_name
+                """),
+                {"provider": provider}
+            ).fetchall()
+
+            if results:
+                # Database has models - use them
+                return [row[0] for row in results]
+
+        except Exception as e:
+            # Table doesn't exist or query failed - fall back
+            logger.debug(f"Failed to get models from ai_models table: {e}")
+
+        # Priority 2: Hardcoded defaults
+        hardcoded_models = {
             "claude": [
                 "claude-sonnet-4-5-20250929",
                 "claude-sonnet-4-20250514",
@@ -313,7 +389,7 @@ class AdminConfigService:
             ]
         }
 
-        return models.get(provider, [])
+        return hardcoded_models.get(provider, [])
 
     # ============================================================
     # Feature Flags
@@ -443,3 +519,364 @@ class AdminConfigService:
             api_key = env_fallback
 
         return api_key
+
+    # ============================================================
+    # Provider Management (NEW)
+    # ============================================================
+
+    def get_all_providers(self, include_inactive: bool = False) -> List[Dict[str, Any]]:
+        """
+        Get all AI providers (including inactive).
+
+        Args:
+            include_inactive: Include inactive providers
+
+        Returns:
+            List of provider dicts
+        """
+        try:
+            where_clause = "" if include_inactive else "WHERE p.is_active = 1"
+            results = self.db.execute(
+                text(f"""
+                    SELECT
+                        p.id,
+                        p.name,
+                        p.display_name,
+                        p.icon,
+                        p.is_active,
+                        p.is_default,
+                        p.api_key_env_var,
+                        p.api_url_env_var,
+                        p.default_api_url,
+                        p.description,
+                        p.priority,
+                        m.model_id as default_model
+                    FROM ai_providers p
+                    LEFT JOIN ai_models m ON p.id = m.provider_id AND m.is_default = 1
+                    {where_clause}
+                    ORDER BY p.priority DESC, p.name
+                """)
+            ).fetchall()
+
+            return [{
+                "id": row[0],
+                "name": row[1],
+                "display_name": row[2],
+                "icon": row[3],
+                "is_active": bool(row[4]),
+                "is_default": bool(row[5]),
+                "api_key_env_var": row[6],
+                "api_url_env_var": row[7],
+                "default_api_url": row[8],
+                "description": row[9],
+                "priority": row[10],
+                "default_model": row[11]
+            } for row in results]
+
+        except Exception as e:
+            logger.error(f"Failed to get providers: {e}")
+            return []
+
+    def create_provider(
+        self,
+        provider_id: str,
+        name: str,
+        display_name: Optional[str] = None,
+        icon: str = "bulb",
+        api_key_env_var: Optional[str] = None,
+        description: Optional[str] = None,
+        priority: int = 0
+    ) -> bool:
+        """Create a new AI provider."""
+        try:
+            self.db.execute(
+                text("""
+                    INSERT INTO ai_providers (
+                        id, name, display_name, icon, is_active, is_default,
+                        api_key_env_var, description, priority
+                    ) VALUES (
+                        :id, :name, :display_name, :icon, 1, 0,
+                        :api_key_env_var, :description, :priority
+                    )
+                """),
+                {
+                    "id": provider_id,
+                    "name": name,
+                    "display_name": display_name or name,
+                    "icon": icon,
+                    "api_key_env_var": api_key_env_var,
+                    "description": description,
+                    "priority": priority
+                }
+            )
+            self.db.commit()
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to create provider: {e}")
+            self.db.rollback()
+            return False
+
+    def update_provider(
+        self,
+        provider_id: str,
+        name: Optional[str] = None,
+        display_name: Optional[str] = None,
+        icon: Optional[str] = None,
+        is_active: Optional[bool] = None,
+        is_default: Optional[bool] = None,
+        description: Optional[str] = None,
+        priority: Optional[int] = None
+    ) -> bool:
+        """Update an existing AI provider."""
+        try:
+            updates = []
+            params = {"id": provider_id}
+
+            if name is not None:
+                updates.append("name = :name")
+                params["name"] = name
+
+            if display_name is not None:
+                updates.append("display_name = :display_name")
+                params["display_name"] = display_name
+
+            if icon is not None:
+                updates.append("icon = :icon")
+                params["icon"] = icon
+
+            if is_active is not None:
+                updates.append("is_active = :is_active")
+                params["is_active"] = 1 if is_active else 0
+
+            if is_default is not None:
+                updates.append("is_default = :is_default")
+                params["is_default"] = 1 if is_default else 0
+
+                # If setting as default, unset others
+                if is_default:
+                    self.db.execute(
+                        text("UPDATE ai_providers SET is_default = 0 WHERE id != :id"),
+                        {"id": provider_id}
+                    )
+
+            if description is not None:
+                updates.append("description = :description")
+                params["description"] = description
+
+            if priority is not None:
+                updates.append("priority = :priority")
+                params["priority"] = priority
+
+            if updates:
+                sql = f"UPDATE ai_providers SET {', '.join(updates)} WHERE id = :id"
+                self.db.execute(text(sql), params)
+                self.db.commit()
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to update provider: {e}")
+            self.db.rollback()
+            return False
+
+    def delete_provider(self, provider_id: str) -> bool:
+        """Delete an AI provider (CASCADE deletes models)."""
+        try:
+            self.db.execute(
+                text("DELETE FROM ai_providers WHERE id = :id"),
+                {"id": provider_id}
+            )
+            self.db.commit()
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to delete provider: {e}")
+            self.db.rollback()
+            return False
+
+    # ============================================================
+    # Model Management (NEW)
+    # ============================================================
+
+    def get_models_by_provider(self, provider_id: str, include_inactive: bool = False) -> List[Dict[str, Any]]:
+        """Get all models for a provider."""
+        try:
+            where_clause = "AND m.is_active = 1" if not include_inactive else ""
+            results = self.db.execute(
+                text(f"""
+                    SELECT
+                        m.id,
+                        m.provider_id,
+                        m.model_id,
+                        m.display_name,
+                        m.is_active,
+                        m.is_default,
+                        m.context_window,
+                        m.supports_vision,
+                        m.cost_per_1m_tokens,
+                        m.description,
+                        m.priority
+                    FROM ai_models m
+                    WHERE m.provider_id = :provider
+                    {where_clause}
+                    ORDER BY m.priority DESC, m.display_name
+                """),
+                {"provider": provider_id}
+            ).fetchall()
+
+            return [{
+                "id": row[0],
+                "provider_id": row[1],
+                "model_id": row[2],
+                "display_name": row[3],
+                "is_active": bool(row[4]),
+                "is_default": bool(row[5]),
+                "context_window": row[6],
+                "supports_vision": bool(row[7]),
+                "cost_per_1m_tokens": row[8],
+                "description": row[9],
+                "priority": row[10]
+            } for row in results]
+
+        except Exception as e:
+            logger.error(f"Failed to get models: {e}")
+            return []
+
+    def create_model(
+        self,
+        provider_id: str,
+        model_id: str,
+        display_name: Optional[str] = None,
+        is_default: bool = False,
+        context_window: Optional[int] = None,
+        supports_vision: bool = False,
+        description: Optional[str] = None,
+        priority: int = 0
+    ) -> bool:
+        """Create a new AI model."""
+        try:
+            # If setting as default, unset other defaults for this provider
+            if is_default:
+                self.db.execute(
+                    text("UPDATE ai_models SET is_default = 0 WHERE provider_id = :provider"),
+                    {"provider": provider_id}
+                )
+
+            self.db.execute(
+                text("""
+                    INSERT INTO ai_models (
+                        provider_id, model_id, display_name, is_active, is_default,
+                        context_window, supports_vision, description, priority
+                    ) VALUES (
+                        :provider, :model_id, :display_name, 1, :is_default,
+                        :context_window, :supports_vision, :description, :priority
+                    )
+                """),
+                {
+                    "provider": provider_id,
+                    "model_id": model_id,
+                    "display_name": display_name or model_id,
+                    "is_default": 1 if is_default else 0,
+                    "context_window": context_window,
+                    "supports_vision": 1 if supports_vision else 0,
+                    "description": description,
+                    "priority": priority
+                }
+            )
+            self.db.commit()
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to create model: {e}")
+            self.db.rollback()
+            return False
+
+    def update_model(
+        self,
+        model_pk_id: int,
+        display_name: Optional[str] = None,
+        is_active: Optional[bool] = None,
+        is_default: Optional[bool] = None,
+        context_window: Optional[int] = None,
+        supports_vision: Optional[bool] = None,
+        description: Optional[str] = None,
+        priority: Optional[int] = None
+    ) -> bool:
+        """Update an existing AI model."""
+        try:
+            # Get provider_id first
+            result = self.db.execute(
+                text("SELECT provider_id FROM ai_models WHERE id = :id"),
+                {"id": model_pk_id}
+            ).fetchone()
+
+            if not result:
+                return False
+
+            provider_id = result[0]
+
+            updates = []
+            params = {"id": model_pk_id}
+
+            if display_name is not None:
+                updates.append("display_name = :display_name")
+                params["display_name"] = display_name
+
+            if is_active is not None:
+                updates.append("is_active = :is_active")
+                params["is_active"] = 1 if is_active else 0
+
+            if is_default is not None:
+                updates.append("is_default = :is_default")
+                params["is_default"] = 1 if is_default else 0
+
+                # If setting as default, unset others for this provider
+                if is_default:
+                    self.db.execute(
+                        text("UPDATE ai_models SET is_default = 0 WHERE provider_id = :provider AND id != :id"),
+                        {"provider": provider_id, "id": model_pk_id}
+                    )
+
+            if context_window is not None:
+                updates.append("context_window = :context_window")
+                params["context_window"] = context_window
+
+            if supports_vision is not None:
+                updates.append("supports_vision = :supports_vision")
+                params["supports_vision"] = 1 if supports_vision else 0
+
+            if description is not None:
+                updates.append("description = :description")
+                params["description"] = description
+
+            if priority is not None:
+                updates.append("priority = :priority")
+                params["priority"] = priority
+
+            if updates:
+                sql = f"UPDATE ai_models SET {', '.join(updates)} WHERE id = :id"
+                self.db.execute(text(sql), params)
+                self.db.commit()
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to update model: {e}")
+            self.db.rollback()
+            return False
+
+    def delete_model(self, model_pk_id: int) -> bool:
+        """Delete an AI model."""
+        try:
+            self.db.execute(
+                text("DELETE FROM ai_models WHERE id = :id"),
+                {"id": model_pk_id}
+            )
+            self.db.commit()
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to delete model: {e}")
+            self.db.rollback()
+            return False

@@ -12,7 +12,7 @@ export default function ChatScreen() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [provider, setProvider] = useState('gemini'); // Default provider
+  const [provider, setProvider] = useState(''); // Let ModelSelector auto-select default from API
   const [context, setContext] = useState<DataContext>('auto'); // Default: auto-detect
   const [conversationId, setConversationId] = useState<string | undefined>(undefined);
   const flatListRef = useRef<FlatList>(null);

@@ -66,43 +66,56 @@ def get_mcp_client(request: Request) -> MCPClientService:
 
 from app.services.prompt_manager import PromptManager
 
+from app.services.admin_config_service import AdminConfigService
+
 def get_ai_service(
     db: Session = Depends(get_db),
     mcp_client: MCPClientService = Depends(get_mcp_client)
 ) -> AIService:
     """
     Dependency to get initialized AIService based on config.
+    Prioritizes DB config > Env var > Default
     """
+    config_service = AdminConfigService(db)
+    ai_config = config_service.get_ai_config()
+    default_provider = ai_config.get("default_provider", "matcha")
     
-    if settings.AI_PROVIDER == "gemini":
-        if not settings.GOOGLE_AI_API_KEY:
+    # Get API key using service (handles fallback)
+    api_key = config_service.get_provider_api_key(default_provider)
+    
+    if default_provider == "gemini":
+        if not api_key:
              raise HTTPException(status_code=500, detail="GOOGLE_AI_API_KEY not configured")
         return create_gemini_service(
-            settings.GOOGLE_AI_API_KEY, 
+            api_key=api_key,
             mcp_client=mcp_client,
-            model=settings.GEMINI_MODEL
+            model=ai_config.get("gemini_model", settings.GEMINI_MODEL)
         )
-    elif settings.AI_PROVIDER == "claude":
-        if not settings.ANTHROPIC_API_KEY:
+    elif default_provider == "claude":
+        if not api_key:
              raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
         return create_claude_service(
-            settings.ANTHROPIC_API_KEY, 
+            api_key=api_key,
             mcp_client=mcp_client,
-            model=settings.CLAUDE_MODEL
+            model=ai_config.get("claude_model", settings.CLAUDE_MODEL)
         )
-    elif settings.AI_PROVIDER == "matcha":
-        if not settings.MATCHA_AI_API_KEY:
+    elif default_provider == "matcha":
+        if not api_key:
              raise HTTPException(status_code=500, detail="MATCHA_AI_API_KEY not configured")
-        if not settings.MATCHA_API_URL:
+        
+        # Matcha specific: Get URL from config or settings fallback
+        api_url = ai_config.get("matcha_api_url") or settings.MATCHA_API_URL
+        if not api_url:
              raise HTTPException(status_code=500, detail="MATCHA_API_URL not configured")
+             
         return create_matcha_service(
-            api_key=settings.MATCHA_AI_API_KEY,
-            api_url=settings.MATCHA_API_URL,
+            api_key=api_key,
+            api_url=api_url,
             mcp_client=mcp_client,
-            model=settings.MATCHA_MODEL
+            model=ai_config.get("matcha_model", settings.MATCHA_MODEL)
         )
     else:
-        raise HTTPException(status_code=500, detail=f"Unknown AI Provider: {settings.AI_PROVIDER}")
+        raise HTTPException(status_code=500, detail=f"Unknown AI Provider: {default_provider}")
 
 def require_admin(current_user: User = Depends(get_current_user)) -> User:
     """

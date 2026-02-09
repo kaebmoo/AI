@@ -169,7 +169,11 @@ const smartMonthSort = (values: string[]): string[] => {
         return 999;
     };
 
-    return [...values].sort((a, b) => extractMonthNum(a) - extractMonthNum(b));
+    return [...values].sort((a, b) => {
+        const numA = extractMonthNum(a);
+        const numB = extractMonthNum(b);
+        return numA - numB;
+    });
 };
 
 type ChartMode =
@@ -290,11 +294,28 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
                 let categories = Object.keys(categoryCounts);
 
                 // CRITICAL: Sort categories if it's a time column (after potential swap)
+                // Enhanced detection: Check if values look like months (1-12), not just column names
+                const looksLikeMonths = categories.length > 0 &&
+                    categories.filter(c => !isNaN(parseInt(c))).length > 0 && // Has numeric values
+                    categories.every(c => {
+                        const num = parseInt(c);
+                        return isNaN(num) || (num >= 1 && num <= 12); // All numeric values are 1-12
+                    });
+
                 const isCategoryTimeColumn = ['month', 'year', 'date', 'quarter', 'week', 'เดือน', 'ปี', 'วันที่', 'ไตรมาส'].some(t =>
                     finalCategoryKey.toLowerCase().includes(t)
-                );
+                ) || looksLikeMonths; // Add value-based detection
+
+                // Helper: Check if categories are numeric
+                const isNumericCategories = categories.length > 0 && categories.every(c => !isNaN(parseFloat(c)) && isFinite(parseFloat(c)));
+
                 if (isCategoryTimeColumn) {
+                    console.log('📊 DataChart: Applying Smart Month Sort', { finalCategoryKey, looksLikeMonths });
                     categories = smartMonthSort(categories);
+                } else if (isNumericCategories) {
+                    // Fallback: If categories are numbers (e.g., "1", "10", "2"), sort them numerically
+                    console.log('📊 DataChart: Applying Numeric Sort to Categories', { finalCategoryKey });
+                    categories.sort((a, b) => parseFloat(a) - parseFloat(b));
                 }
 
                 const hasRepeatedCategories = Object.values(categoryCounts).some(count => count > 1);
@@ -490,6 +511,20 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
             const lower = k.toLowerCase();
             return ['department', 'ฝ่าย', 'division', 'สายงาน', 'group', 'กลุ่ม', 'province', 'จังหวัด', 'product', 'สินค้า', 'service', 'บริการ', 'name', 'category', 'account', 'หมวด', 'บัญชี', 'segment', 'type', 'ประเภท'].some(term => lower.includes(term)) &&
                 !lower.includes('diff') && !lower.includes('percent');
+        }).sort((a, b) => {
+            // Prefer keys containing 'name' or 'desc' over 'id' or 'code'
+            const aLower = a.toLowerCase();
+            const bLower = b.toLowerCase();
+            const aHasName = aLower.includes('name') || aLower.includes('create') || aLower.includes('desc');
+            const bHasName = bLower.includes('name') || bLower.includes('create') || bLower.includes('desc');
+            const aHasCode = aLower.includes('code') || aLower.includes('id');
+            const bHasCode = bLower.includes('code') || bLower.includes('id');
+
+            if (aHasName && !bHasName) return -1;
+            if (!aHasName && bHasName) return 1;
+            if (!aHasCode && bHasCode) return -1;
+            if (aHasCode && !bHasCode) return 1;
+            return 0;
         });
 
         // Value/Measure keys (use word boundary matching to avoid false positives like "account" matching "count")
@@ -779,11 +814,27 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
         let actualCategories = analysis.categories || Object.keys(groupedData);
 
         // If categories are months/time, ensure they're sorted
+        // Enhanced detection: Check if values look like months (1-12), not just column names
+        const looksLikeMonths = actualCategories.length > 0 &&
+            actualCategories.filter(c => !isNaN(parseInt(c))).length > 0 && // Has numeric values
+            actualCategories.every(c => {
+                const num = parseInt(c);
+                return isNaN(num) || (num >= 1 && num <= 12); // All numeric values are 1-12
+            });
+
         const isCategoryTimeColumn = ['month', 'year', 'date', 'quarter', 'week', 'เดือน', 'ปี', 'วันที่', 'ไตรมาส'].some(t =>
             analysis.categoryKey.toLowerCase().includes(t)
-        );
+        ) || looksLikeMonths; // Add value-based detection
+
+        // Check numeric
+        const isNumericCategories = actualCategories.length > 0 && actualCategories.every(c => !isNaN(parseFloat(c)) && isFinite(parseFloat(c)));
+
         if (isCategoryTimeColumn && actualCategories.length > 0) {
+            console.log('📊 DataChart (Grouped): Applying Smart Month Sort', { categoryKey: analysis.categoryKey, looksLikeMonths });
             actualCategories = smartMonthSort(actualCategories);
+        } else if (isNumericCategories && actualCategories.length > 0) {
+            console.log('📊 DataChart (Grouped): Applying Numeric Sort', { categoryKey: analysis.categoryKey });
+            actualCategories.sort((a, b) => parseFloat(a) - parseFloat(b));
         }
 
         // Get actual series values (periods)
