@@ -117,17 +117,42 @@ class SchemaService:
     # =========================================================
 
     def get_context_info(self, context_name: str) -> Optional[Dict]:
-        """Get context information from schema_contexts table"""
+        """Get context information from schema_contexts table
+
+        Handles name normalization: 'transfer_price' matches 'transfer price' and vice versa
+        """
         if context_name in self._context_cache:
             return self._context_cache[context_name]
 
         with self.engine.connect() as conn:
             try:
+                # Try exact match first
                 result = conn.execute(
                     text("SELECT * FROM schema_contexts WHERE name = :name AND is_active = 1"),
                     {"name": context_name}
                 )
                 row = result.mappings().fetchone()
+
+                # If not found, try with underscore <-> space normalization
+                if not row:
+                    # Try underscore to space (e.g., 'transfer_price' -> 'transfer price')
+                    alt_name = context_name.replace('_', ' ')
+                    if alt_name != context_name:
+                        result = conn.execute(
+                            text("SELECT * FROM schema_contexts WHERE name = :name AND is_active = 1"),
+                            {"name": alt_name}
+                        )
+                        row = result.mappings().fetchone()
+
+                if not row:
+                    # Try space to underscore (e.g., 'transfer price' -> 'transfer_price')
+                    alt_name = context_name.replace(' ', '_')
+                    if alt_name != context_name:
+                        result = conn.execute(
+                            text("SELECT * FROM schema_contexts WHERE name = :name AND is_active = 1"),
+                            {"name": alt_name}
+                        )
+                        row = result.mappings().fetchone()
                 
                 if row:
                     context_info = dict(row)

@@ -5,7 +5,7 @@ Pydantic schemas for Admin API endpoints.
 """
 
 from typing import List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 
 
@@ -184,6 +184,10 @@ class GoldenExampleResponse(GoldenExampleBase):
 
     class Config:
         from_attributes = True
+
+    @field_validator('usage_count', mode='before')
+    def set_usage_count(cls, v):
+        return v or 0
 
 
 # ============================================================

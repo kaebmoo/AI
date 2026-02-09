@@ -17,8 +17,11 @@ AI Query Assistant สำหรับ NT (National Telecom)
 
 ### AI Providers Supported
 
-- Claude API (Anthropic)
-- Google AI / Gemini API
+- **Claude API (Anthropic)** - claude-sonnet-4-5, claude-opus-4, claude-haiku-3-5
+- **Google AI / Gemini API** - gemini-3-flash, gemini-2.0-flash-exp
+- **Matcha (NT Gateway)** - gpt-4.1, gpt-4o, gpt-4-turbo (OpenAI-compatible)
+
+**Configuration:** Admin can enable/disable providers and select models via Admin Settings UI
 
 ---
 
@@ -231,6 +234,25 @@ print(result.sql_query)
 print(result.explanation)
 ```
 
+### Matcha (NT Gateway)
+
+```python
+from app.services.ai_service import create_matcha_service
+
+service = create_matcha_service(
+    api_key="sk-...",
+    api_url="https://aigateway.ntictsolution.com/v1/chat/completions",
+    model="gpt-4.1",
+    db_path="revenue.sqlite"
+)
+
+result = service.query("รายได้รวมเดือนมกราคม 2568")
+print(result.sql_query)
+print(result.explanation)
+```
+
+**Note:** Matcha is the default provider. Configuration is stored in `admin_config` table with fallback to `.env`
+
 ---
 
 ## Testing
@@ -277,7 +299,80 @@ def mock_ai_response():
 ```
 # requirements.txt
 anthropic>=0.18.0      # Claude API
-google-genai  # Gemini API
+google-genai           # Gemini API
+openai                 # For Matcha (OpenAI-compatible)
+```
+
+---
+
+## Admin Configuration System
+
+### Dynamic Provider Management
+
+The system uses a **3-tier fallback** configuration:
+
+1. **Database (admin_config table)** - Admin changes via Web UI
+2. **.env file** - Developer/deployment config
+3. **Hardcoded defaults** - Safety net
+
+### Configuration Tables
+
+**admin_config:**
+- `default_ai_provider` - Which provider to use (claude/gemini/matcha)
+- `claude_enabled`, `gemini_enabled`, `matcha_enabled` - Enable/disable providers
+- `claude_model`, `gemini_model`, `matcha_model` - Model selection
+- Feature flags: `rag_enabled`, `auto_context_detection`, `debug_mode`, etc.
+
+**schema_contexts:**
+- Multiple data contexts with routing keywords
+- Custom AI instructions per context
+- Example: "รายได้" → revenue, "ค่าใช้จ่าย" → expense
+
+### Admin Settings UI
+
+**Access:** `http://localhost:5173/settings` (Admin only)
+
+**Features:**
+- Enable/disable AI providers
+- Select default provider and models
+- Configure Matcha API gateway URL
+- Toggle feature flags
+- Manage data contexts
+
+### User Experience
+
+**Dynamic Model Selector:**
+- Frontend automatically loads enabled providers from backend
+- Users only see providers that admin has enabled
+- If admin disables Claude → Claude button disappears from UI
+
+**API Endpoints:**
+```python
+# Public - no auth required
+GET /api/v1/admin/config/ai/providers  # Get active providers
+
+# Admin only
+GET /api/v1/admin/config/ai            # Get full AI config
+PUT /api/v1/admin/config/ai            # Update AI config
+```
+
+### Configuration Priority Example
+
+```python
+# How system determines default provider:
+
+# 1. Try database first
+default_provider = db.query(admin_config).filter(
+    config_key='default_ai_provider'
+).first()
+
+# 2. Fallback to .env
+if not default_provider:
+    default_provider = os.getenv('AI_PROVIDER')
+
+# 3. Fallback to hardcoded
+if not default_provider:
+    default_provider = 'matcha'
 ```
 
 ---

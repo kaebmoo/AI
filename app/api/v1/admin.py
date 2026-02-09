@@ -26,6 +26,7 @@ from app.schemas.admin_schemas import (
 )
 from app.services.schema_service import SchemaService
 from app.services.prompt_manager import PromptManager
+from app.services.admin_config_service import AdminConfigService
 from app.config import settings
 
 router = APIRouter()
@@ -854,5 +855,201 @@ def sync_brain_knowledge(
         return {"status": "success", "message": "Brain sync completed successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================
+# AI Configuration Endpoints
+# ============================================================
+
+@router.get("/config/ai", response_model=dict)
+def get_ai_config(
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db)
+):
+    """
+    Get complete AI configuration (providers, models, etc).
+    Admin only.
+
+    Returns config with fallback to .env if database not configured.
+    """
+    config_service = AdminConfigService(db)
+    ai_config = config_service.get_ai_config()
+    feature_flags = config_service.get_feature_flags()
+
+    return {
+        "ai": ai_config,
+        "features": feature_flags,
+        "fallback_note": "Values shown here may come from database (priority 1) or .env file (priority 2)"
+    }
+
+
+@router.put("/config/ai", response_model=dict)
+def update_ai_config(
+    config_update: dict,
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db)
+):
+    """
+    Update AI configuration.
+    Admin only.
+
+    Request body example:
+    {
+        "default_provider": "matcha",
+        "claude_enabled": true,
+        "gemini_enabled": true,
+        "matcha_enabled": true,
+        "claude_model": "claude-sonnet-4-5-20250929",
+        "gemini_model": "gemini-3-flash-preview",
+        "matcha_model": "gpt-4.1",
+        "matcha_api_url": "https://aigateway.ntictsolution.com/v1/chat/completions"
+    }
+    """
+    config_service = AdminConfigService(db)
+
+    success = config_service.update_ai_config(
+        default_provider=config_update.get("default_provider"),
+        claude_enabled=config_update.get("claude_enabled"),
+        gemini_enabled=config_update.get("gemini_enabled"),
+        matcha_enabled=config_update.get("matcha_enabled"),
+        claude_model=config_update.get("claude_model"),
+        gemini_model=config_update.get("gemini_model"),
+        matcha_model=config_update.get("matcha_model"),
+        matcha_api_url=config_update.get("matcha_api_url"),
+        updated_by=current_user.email
+    )
+
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to update configuration")
+
+    # Clear cache to reflect changes
+    config_service.clear_cache()
+
+    return {
+        "status": "success",
+        "message": "AI configuration updated successfully",
+        "updated_by": current_user.email
+    }
+
+
+@router.get("/config/ai/providers", response_model=List[dict])
+def get_active_providers(
+    db: Session = Depends(deps.get_db)
+):
+    """
+    Get list of ACTIVE AI providers (enabled by admin).
+
+    PUBLIC endpoint - called by frontend ModelSelector.
+    Users can only see and select providers that admin has enabled.
+
+    Returns:
+    [
+        {
+            "id": "matcha",
+            "name": "Matcha",
+            "display_name": "Matcha (NT Gateway)",
+            "model": "gpt-4.1",
+            "icon": "leaf",
+            "is_default": true
+        },
+        ...
+    ]
+    """
+    config_service = AdminConfigService(db)
+    providers = config_service.get_active_providers()
+
+    return providers
+
+
+@router.get("/config/ai/models/{provider}", response_model=List[str])
+def get_available_models(
+    provider: str,
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db)
+):
+    """
+    Get available models for a specific provider.
+    Admin only.
+
+    Args:
+        provider: Provider name (claude, gemini, matcha)
+
+    Returns:
+        List of model names
+    """
+    if provider not in ["claude", "gemini", "matcha"]:
+        raise HTTPException(status_code=400, detail="Invalid provider")
+
+    config_service = AdminConfigService(db)
+    models = config_service.get_available_models(provider)
+
+    return models
+
+
+@router.get("/config/features", response_model=dict)
+def get_feature_flags(
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db)
+):
+    """
+    Get all feature flags.
+    Admin only.
+    """
+    config_service = AdminConfigService(db)
+    return config_service.get_feature_flags()
+
+
+@router.post("/config/features/{feature_name}/toggle", response_model=dict)
+def toggle_feature_flag(
+    feature_name: str,
+    enabled: bool,
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db)
+):
+    """
+    Toggle a feature flag.
+    Admin only.
+
+    Args:
+        feature_name: Feature to toggle (rag_enabled, auto_context_detection, debug_mode, etc)
+        enabled: Enable or disable
+    """
+    config_service = AdminConfigService(db)
+
+    success = config_service.toggle_feature(
+        feature_name=feature_name,
+        enabled=enabled,
+        updated_by=current_user.email
+    )
+
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to toggle feature")
+
+    return {
+        "status": "success",
+        "feature": feature_name,
+        "enabled": enabled,
+        "updated_by": current_user.email
+    }
+
+
+@router.post("/config/cache/clear", response_model=dict)
+def clear_config_cache(
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db)
+):
+    """
+    Clear configuration cache.
+    Admin only.
+
+    Use this after making direct database changes.
+    """
+    config_service = AdminConfigService(db)
+    config_service.clear_cache()
+
+    return {
+        "status": "success",
+        "message": "Configuration cache cleared"
+    }
 
 

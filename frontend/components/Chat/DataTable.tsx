@@ -168,8 +168,10 @@ export const DataTable = ({ data }: DataTableProps) => {
     };
 
     const monthKey = keys.find(k => !isMeasure(k) && ['month', 'เดือน'].some(term => k.toLowerCase().includes(term)));
+    const quarterKey = keys.find(k => !isMeasure(k) && ['quarter', 'ไตรมาส'].some(term => k.toLowerCase().includes(term)));
     const yearKey = keys.find(k => !isMeasure(k) && ['year', 'ปี', 'พ.ศ.', 'ค.ศ.'].some(term => k.toLowerCase().includes(term)));
-    const labelKey = monthKey || keys.find(k => !isMeasure(k) && ['date', 'label', 'name', 'time'].some(term => k.toLowerCase().includes(term)));
+    const periodKey = monthKey || quarterKey; // Generic period key (month or quarter)
+    const labelKey = periodKey || keys.find(k => !isMeasure(k) && ['date', 'label', 'name', 'time'].some(term => k.toLowerCase().includes(term)));
 
     // Measure Key
     const valueKey = keys.find(k => isMeasure(k)) || keys.find(k => typeof data[0][k] === 'number' && !k.toLowerCase().includes('id'));
@@ -192,19 +194,21 @@ export const DataTable = ({ data }: DataTableProps) => {
     // Rule: We have Time dimensions AND Category dimensions AND duplicate time entries (implying multiple series)
     let isCrosstab = false;
     let rowKey = ''; // e.g. Province
+    let colKey = ''; // Column dimension (for Category×Category crosstabs)
     let periodLabels: string[] = [];
     let pivotedRows: any[] = [];
 
-    if (yearKey || monthKey) {
+    if (yearKey || periodKey) {
         // Check for duplicate time entries
         // Check for duplicate time entries
         const timeLabels = data.map(item => {
-            if (monthKey && yearKey) {
-                const m = item[monthKey];
+            if (periodKey && yearKey) {
+                const p = item[periodKey]; // month or quarter
                 const y = item[yearKey];
-                if (m && y) return `${m}/${y}`;
+                if (p && y) return `${p}/${y}`;
                 return '';
             }
+            if (periodKey) return String(item[periodKey] || '');
             if (labelKey) return String(item[labelKey] || '');
             return '';
         }).filter(t => t && t.trim() !== '' && t !== '/' && !t.includes('undefined') && !t.includes('null'));
@@ -213,9 +217,10 @@ export const DataTable = ({ data }: DataTableProps) => {
 
         // Only pivot if we have duplicates (meaning multiple categories per time slot)
         // OR simply if we have Time + Category (Force Crosstab for cleaner view)
-        if (categoryKeys.length > 0 && (timeLabels.length > uniqueTimes.size || (monthKey && yearKey))) {
+        if (categoryKeys.length > 0 && (timeLabels.length > uniqueTimes.size || (periodKey && yearKey))) {
             isCrosstab = true;
             rowKey = categoryKeys[0]; // Primary category (Province, Group)
+            colKey = quarterKey ? 'ไตรมาส' : monthKey ? 'เดือน' : yearKey ? 'ปี' : 'ช่วงเวลา';
 
             // --- Month Filling Logic ---
             let periods = Array.from(uniqueTimes);
@@ -250,14 +255,32 @@ export const DataTable = ({ data }: DataTableProps) => {
             // 1. Sort periods using smart month sorting
             periods = smartMonthSort(periods);
 
-            // 2. Force Fill 1-12 Months (only if we have < 12 periods)
-            // Detect if data looks like "Month" or "Month/Year"
+            // 2. Detect period type and optionally fill missing periods
             const sample = periods[0] || '';
-            const isMonthYear = sample.includes('/');
+            const isQuarter = /^Q[1-4]/i.test(sample) || quarterKey;
+            const isMonthYear = sample.includes('/') && !isQuarter;
             const isNumericMonth = !isNaN(parseInt(sample)) && parseInt(sample) >= 1 && parseInt(sample) <= 12;
 
-            // Only fill if we have less than 12 periods (avoid duplicates)
-            if (data.length > 1 && periods.length < 12 && (isMonthYear || isNumericMonth)) {
+            // For quarters: Sort Q1, Q2, Q3, Q4 properly
+            if (isQuarter) {
+                periods = periods.sort((a, b) => {
+                    // Extract quarter number (Q1 -> 1, Q2/2025 -> 2)
+                    const getQNum = (s: string) => {
+                        const match = s.match(/Q?(\d)/i);
+                        return match ? parseInt(match[1]) : 999;
+                    };
+                    // Extract year if present
+                    const getYear = (s: string) => {
+                        const match = s.match(/\/(\d{4})/);
+                        return match ? parseInt(match[1]) : 0;
+                    };
+                    const yearA = getYear(a), yearB = getYear(b);
+                    if (yearA !== yearB) return yearA - yearB;
+                    return getQNum(a) - getQNum(b);
+                });
+            }
+            // Only fill months if we have less than 12 periods (avoid duplicates)
+            else if (data.length > 1 && periods.length < 12 && (isMonthYear || isNumericMonth)) {
                 // Determine Year Suffix
                 let yearSuffix = '';
                 if (isMonthYear) {
@@ -285,21 +308,29 @@ export const DataTable = ({ data }: DataTableProps) => {
                 const rVal = String(item[rowKey] || 'Unknown');
                 let tLabel = '';
 
-                if (monthKey && yearKey) {
-                    const m = parseInt(String(item[monthKey]));
+                if (periodKey && yearKey) {
+                    const p = item[periodKey]; // could be month number, quarter (Q1), etc.
                     const y = String(item[yearKey]);
 
-                    if (!isNaN(m)) {
-                        // Always pad to match column headers
-                        const padM = String(m).padStart(2, '0');
-                        tLabel = `${padM}/${y}`;
+                    if (quarterKey) {
+                        // Quarter format: Q1/2025 or just Q1
+                        tLabel = `${p}/${y}`;
+                    } else if (monthKey) {
+                        const m = parseInt(String(p));
+                        if (!isNaN(m)) {
+                            // Always pad to match column headers
+                            const padM = String(m).padStart(2, '0');
+                            tLabel = `${padM}/${y}`;
+                        } else {
+                            tLabel = `${p}/${y}`;
+                        }
                     } else {
-                        tLabel = `${item[monthKey]}/${y}`;
+                        tLabel = `${p}/${y}`;
                     }
+                } else if (periodKey) {
+                    tLabel = String(item[periodKey]);
                 } else if (labelKey) {
                     tLabel = String(item[labelKey]);
-                } else if (monthKey) {
-                    tLabel = String(item[monthKey]);
                 }
 
                 if (!rowMap[rVal]) {
@@ -318,6 +349,93 @@ export const DataTable = ({ data }: DataTableProps) => {
             pivotedRows = Object.values(rowMap);
             // Sort rows by name
             pivotedRows.sort((a, b) => a._rowLabel.localeCompare(b._rowLabel));
+        }
+    }
+
+    // === NEW: Category × Category Crosstab Detection ===
+    // If no time-based crosstab, try to detect Category × Category pattern
+    if (!isCrosstab && categoryKeys.length >= 2 && valueKey) {
+        // Analyze each category's cardinality
+        const categoryStats = categoryKeys.map(k => ({
+            key: k,
+            uniqueCount: new Set(data.map(d => d[k])).size,
+            values: Array.from(new Set(data.map(d => String(d[k] || ''))))
+        }));
+
+        // Semantic hints for row vs column preference
+        // "Owner/Provider/Source" columns should be ROWS (who gave)
+        // "User/Recipient/Target" columns should be COLUMNS (who received)
+        // Using word-boundary matching to avoid false positives (e.g., "user_id", "total")
+        const rowPatterns = [
+            /owner/i, /provider/i, /seller/i, /sender/i,
+            /ผู้ให้/i, /ผู้ขาย/i, /ต้นทาง/i, /ผู้ส่ง/i
+        ];
+        const colPatterns = [
+            /\buser\b/i, /recipient/i, /buyer/i, /receiver/i,  // \buser\b = whole word only
+            /ผู้รับ/i, /ผู้ซื้อ/i, /ปลายทาง/i
+        ];
+
+        const getSemanticScore = (key: string): number => {
+            // Check row patterns (positive score = prefer as row)
+            if (rowPatterns.some(pattern => pattern.test(key))) return 1;
+            // Check column patterns (negative score = prefer as column)
+            if (colPatterns.some(pattern => pattern.test(key))) return -1;
+            return 0;
+        };
+
+        // Sort by: 1) semantic preference (row keywords first), 2) unique count (fewer = column)
+        categoryStats.sort((a, b) => {
+            const semanticDiff = getSemanticScore(b.key) - getSemanticScore(a.key);
+            if (semanticDiff !== 0) return semanticDiff;
+            return a.uniqueCount - b.uniqueCount;
+        });
+
+        // After sorting: first item prefers rows, last prefers columns
+        // But we still pick based on cardinality for columns
+        const colCandidate = categoryStats.find(c => c.uniqueCount >= 2 && c.uniqueCount <= 20 && getSemanticScore(c.key) <= 0)
+                          || categoryStats.find(c => c.uniqueCount >= 2 && c.uniqueCount <= 20);
+        // Best row candidate: not the column candidate
+        const rowCandidate = categoryStats.find(c => c !== colCandidate && c.uniqueCount >= 1);
+
+        if (colCandidate && rowCandidate) {
+            // Check if data has the expected pattern (row × col combinations)
+            const expectedCombinations = rowCandidate.uniqueCount * colCandidate.uniqueCount;
+            const actualRows = data.length;
+
+            // If actual data is close to expected combinations, it's a good crosstab candidate
+            // Allow some flexibility (50% to 150% of expected)
+            const isSuitableForCrosstab = actualRows >= expectedCombinations * 0.3 &&
+                                          actualRows <= expectedCombinations * 2 &&
+                                          colCandidate.uniqueCount <= 20;
+
+            if (isSuitableForCrosstab) {
+                isCrosstab = true;
+                rowKey = rowCandidate.key;
+                colKey = colCandidate.key;
+                periodLabels = colCandidate.values.sort((a, b) => a.localeCompare(b, 'th'));
+
+                // Pivot the data
+                const rowMap: Record<string, any> = {};
+                data.forEach(item => {
+                    const rVal = String(item[rowKey] || 'Unknown');
+                    const cVal = String(item[colCandidate.key] || '');
+
+                    if (!rowMap[rVal]) {
+                        rowMap[rVal] = { _rowLabel: rVal };
+                    }
+
+                    if (cVal && periodLabels.includes(cVal)) {
+                        const val = item[valueKey];
+                        const numVal = typeof val === 'number' ? val : parseFloat(String(val).replace(/,/g, '')) || 0;
+                        rowMap[rVal][cVal] = (rowMap[rVal][cVal] || 0) + numVal;
+                    }
+                });
+
+                pivotedRows = Object.values(rowMap);
+                pivotedRows.sort((a, b) => a._rowLabel.localeCompare(b._rowLabel, 'th'));
+
+                console.log(`[DataTable] Category×Category Crosstab: ${rowKey} × ${colCandidate.key}`);
+            }
         }
     }
 
@@ -494,12 +612,12 @@ export const DataTable = ({ data }: DataTableProps) => {
             } else if (parentKey) {
                 // Grouped Table CSV
                 const childKeys = dimensionKeys.filter(k => k !== parentKey);
-                const headers = [parentKey, ...childKeys, valueKey].filter(Boolean);
+                const headers = [parentKey, ...childKeys, valueKey].filter((h): h is string => Boolean(h));
                 csvContent = headers.map(h => `"${h}"`).join(',') + '\n';
 
                 data.forEach(item => {
                     const rowValues = headers.map(key => {
-                        const val = item[key];
+                        const val = item[key as string];
                         return val !== undefined && val !== null ? val : '-';
                     });
                     csvContent += rowValues.map(v => `"${v}"`).join(',') + '\n';
@@ -568,7 +686,7 @@ export const DataTable = ({ data }: DataTableProps) => {
                 <View className="flex-row items-center space-x-2">
                     <Text className="text-base">🔢</Text>
                     <Text className="text-sm font-semibold text-gray-800 dark:text-gray-200">
-                        {isCrosstab ? `สรุปตาม ${rowKey} (Crosstab)` : parentKey ? `ตารางแยกตาม ${parentKey}` : 'ตารางข้อมูล'}
+                        {isCrosstab ? `${rowKey} × ${colKey}` : parentKey ? `ตารางแยกตาม ${parentKey}` : 'ตารางข้อมูล'}
                     </Text>
                 </View>
                 <View className="flex-row items-center gap-2">

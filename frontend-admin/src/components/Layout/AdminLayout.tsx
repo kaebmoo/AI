@@ -12,7 +12,8 @@ import {
     RobotOutlined,
     DatabaseOutlined,
     BuildOutlined,
-    FileTextOutlined
+    FileTextOutlined,
+    SettingOutlined
 } from '@ant-design/icons';
 import { Layout, Menu, Button, theme, Dropdown, Avatar, Space } from 'antd';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
@@ -98,6 +99,11 @@ const AppLayout: React.FC = () => {
             type: 'group',
             label: 'System',
             children: [
+                {
+                    key: '/settings',
+                    icon: <SettingOutlined />,
+                    label: 'Settings',
+                },
                 {
                     key: '/prompts',
                     icon: <FileTextOutlined />,
