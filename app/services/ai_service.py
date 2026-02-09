@@ -1249,9 +1249,32 @@ class AIService:
                 on_status(RetryStatus(attempt, max_retries, "generating", f"Generating SQL (attempt {attempt + 1})"))
 
             # Build prompt for AI
-            # Get main table for context
-            context_table = "v_expense_mart" if context_name == "expense" else "revenue_search"
-            context_thai = "ค่าใช้จ่าย" if context_name == "expense" else "รายได้"
+            # Get main table from context info (dynamic, not hardcoded)
+            context_table = "revenue_search"  # Default fallback
+            context_thai = "รายได้"  # Default fallback
+
+            # Try to get actual context info from schema_service
+            try:
+                from app.services.schema_service import SchemaService
+                from app.config import settings
+                db_path = settings.DATABASE_URL.replace("sqlite:///", "").replace("sqlite://", "")
+                temp_schema = SchemaService(db_path=db_path)
+                context_info = temp_schema.get_context_info(context_name)
+                if context_info:
+                    context_table = context_info.get('main_view', context_table)
+                    context_thai = context_info.get('display_name', context_name)
+                    logger.info(f"Hybrid Mode: Using context '{context_name}' -> table '{context_table}', display '{context_thai}'")
+                else:
+                    # Fallback for known contexts
+                    if context_name == "expense":
+                        context_table = "v_expense_mart"
+                        context_thai = "ค่าใช้จ่าย"
+                    logger.warning(f"Hybrid Mode: Context '{context_name}' not found, using fallback table '{context_table}'")
+            except Exception as e:
+                logger.warning(f"Failed to get context info: {e}, using defaults")
+                if context_name == "expense":
+                    context_table = "v_expense_mart"
+                    context_thai = "ค่าใช้จ่าย"
 
             # Build conversation history context
             history_context = ""

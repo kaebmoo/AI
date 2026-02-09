@@ -11,6 +11,7 @@ import Rules from './pages/Rules'
 import Prompts from './pages/Prompts'
 import Examples from './pages/Examples'
 import ViewBuilder from './pages/ViewBuilder'
+import Settings from './pages/Settings'
 
 // Simple Auth Guard
 const ProtectedRoute = () => {
@@ -39,6 +40,7 @@ function App() {
             <Route path="/prompts" element={<Prompts />} />
             <Route path="/examples" element={<Examples />} />
             <Route path="/view-builder" element={<ViewBuilder />} />
+            <Route path="/settings" element={<Settings />} />
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
           </Route>
         </Route>
