@@ -143,6 +143,8 @@ export const DataTable = ({ data }: DataTableProps) => {
     };
 
     const keys = Object.keys(data[0]);
+    console.log('[DataTable DEBUG] Keys:', keys);
+    console.log('[DataTable DEBUG] Data Sample:', data[0]);
 
     // 1. Hierarchy & Dimension Detection
     const FIRST_COL_WIDTH = 180;
@@ -375,7 +377,44 @@ export const DataTable = ({ data }: DataTableProps) => {
             /ผู้รับ/i, /ผู้ซื้อ/i, /ปลายทาง/i
         ];
 
+        // IMPORTANT: Identifier and Name columns should NEVER be column candidates
+        // They belong together in rows (business rule: CODE + NAME pairs)
+        const isIdentifier = (key: string): boolean => {
+            const lower = key.toLowerCase();
+
+            // Exact patterns that should match anywhere (substring match)
+            // These are always identifiers regardless of position
+            if (lower.includes('code') ||
+                lower.includes('รหัส') ||
+                lower.includes('เลขที่') ||
+                lower.includes('cost_center') ||
+                lower.includes('abbr') ||          // Abbreviations are identifiers
+                lower.includes('ย่อ')) {            // Thai abbreviation
+                return true;
+            }
+
+            // Word-boundary patterns (must be whole word or with underscore/hyphen separator)
+            // This handles cases like: gl_code, account_id, key_value, but NOT: building, division
+            const boundaryPatterns = ['id', 'gl', 'key', 'no'];
+            return boundaryPatterns.some(pattern => {
+                const regex = new RegExp(`(^|_|-)${pattern}($|_|-)`, 'i');
+                return regex.test(lower);
+            });
+        };
+
+        // NAME columns should also never be column candidates
+        // They pair with CODE columns and belong in rows
+        const isNameColumn = (key: string): boolean => {
+            const lower = key.toLowerCase();
+            return lower.includes('name') ||
+                   lower.includes('ชื่อ') ||
+                   lower.includes('_desc') ||
+                   lower.includes('description');
+        };
+
         const getSemanticScore = (key: string): number => {
+            // Identifiers must be rows (highest priority)
+            if (isIdentifier(key)) return 100;
             // Check row patterns (positive score = prefer as row)
             if (rowPatterns.some(pattern => pattern.test(key))) return 1;
             // Check column patterns (negative score = prefer as column)
@@ -392,32 +431,61 @@ export const DataTable = ({ data }: DataTableProps) => {
 
         // After sorting: first item prefers rows, last prefers columns
         // But we still pick based on cardinality for columns
-        const colCandidate = categoryStats.find(c => c.uniqueCount >= 2 && c.uniqueCount <= 20 && getSemanticScore(c.key) <= 0)
-                          || categoryStats.find(c => c.uniqueCount >= 2 && c.uniqueCount <= 20);
-        // Best row candidate: not the column candidate
-        const rowCandidate = categoryStats.find(c => c !== colCandidate && c.uniqueCount >= 1);
+        // IMPORTANT: Exclude identifiers from column candidates
 
-        if (colCandidate && rowCandidate) {
+        // DEBUG: Log identifier detection
+        categoryStats.forEach(c => {
+            console.log(`[DataTable] Column: ${c.key}, uniqueCount: ${c.uniqueCount}, isIdentifier: ${isIdentifier(c.key)}, isName: ${isNameColumn(c.key)}, semanticScore: ${getSemanticScore(c.key)}`);
+        });
+
+        const colCandidate = categoryStats.find(c =>
+            c.uniqueCount >= 2 &&
+            c.uniqueCount <= 20 &&
+            getSemanticScore(c.key) <= 0 &&
+            !isIdentifier(c.key) &&     // CRITICAL: No identifiers as columns
+            !isNameColumn(c.key)        // CRITICAL: No name columns as columns (they pair with codes)
+        ) || categoryStats.find(c =>
+            c.uniqueCount >= 2 &&
+            c.uniqueCount <= 20 &&
+            !isIdentifier(c.key) &&
+            !isNameColumn(c.key)
+        );
+
+        if (colCandidate) {
+            console.log(`[DataTable] Selected column candidate: ${colCandidate.key}`);
+        } else {
+            console.log(`[DataTable] No suitable column candidate found - will use flat table`);
+        }
+
+        // Use ALL other keys as row keys to preserve dimensions (e.g. Dept + Account)
+        const rowCandidates = categoryStats.filter(c => c.key !== colCandidate?.key);
+
+        if (colCandidate && rowCandidates.length > 0) {
             // Check if data has the expected pattern (row × col combinations)
-            const expectedCombinations = rowCandidate.uniqueCount * colCandidate.uniqueCount;
-            const actualRows = data.length;
-
-            // If actual data is close to expected combinations, it's a good crosstab candidate
-            // Allow some flexibility (50% to 150% of expected)
-            const isSuitableForCrosstab = actualRows >= expectedCombinations * 0.3 &&
-                                          actualRows <= expectedCombinations * 2 &&
-                                          colCandidate.uniqueCount <= 20;
+            // Rough check: total rows vs (unique rows * unique cols)
+            // But with multi-dimensions, unique rows = unique combinations of all row keys
+            const isSuitableForCrosstab = colCandidate.uniqueCount <= 20; // Relaxed check for multi-dim
 
             if (isSuitableForCrosstab) {
                 isCrosstab = true;
-                rowKey = rowCandidate.key;
+                const allRowKeys = rowCandidates.map(r => r.key);
+                rowKey = allRowKeys.join(' / '); // Display Label
                 colKey = colCandidate.key;
-                periodLabels = colCandidate.values.sort((a, b) => a.localeCompare(b, 'th'));
 
-                // Pivot the data
+                // Enhanced sorting: If all values are numeric (like GL codes), sort numerically
+                const allNumeric = colCandidate.values.every(v => !isNaN(parseFloat(v)) && isFinite(parseFloat(v)));
+                periodLabels = colCandidate.values.sort((a, b) => {
+                    if (allNumeric) {
+                        return parseFloat(a) - parseFloat(b);
+                    }
+                    return a.localeCompare(b, 'th');
+                });
+
+                // Pivot the data - Use ALL row keys (including both code and name)
                 const rowMap: Record<string, any> = {};
                 data.forEach(item => {
-                    const rVal = String(item[rowKey] || 'Unknown');
+                    // Create Composite Row Key using ALL row keys (code + name together)
+                    const rVal = allRowKeys.map(k => String(item[k] || '')).filter(v => v).join(' - ');
                     const cVal = String(item[colCandidate.key] || '');
 
                     if (!rowMap[rVal]) {
@@ -434,7 +502,7 @@ export const DataTable = ({ data }: DataTableProps) => {
                 pivotedRows = Object.values(rowMap);
                 pivotedRows.sort((a, b) => a._rowLabel.localeCompare(b._rowLabel, 'th'));
 
-                console.log(`[DataTable] Category×Category Crosstab: ${rowKey} × ${colCandidate.key}`);
+                console.log(`[DataTable] Category×Category Crosstab: [${allRowKeys.join(', ')}] × ${colCandidate.key}`);
             }
         }
     }

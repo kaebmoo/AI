@@ -200,6 +200,7 @@ Return the result as a JSON object with these keys:
 IMPORTANT for time-based comparisons:
 - **CRITICAL**: If a Time column exists (Month, Year, Date), YOU MUST USE IT AS 'category_column' (X-axis).
 - **Comparison**: Use the other dimension (Department, Account, Section) as 'series_column' (Legend).
+     - **Legend Rule**: Prefer DESCRIPTIVE columns (e.g., 'department_name', 'account_name') over ID/Code columns (e.g., 'gl_code', 'id') for better readability.
      - If < 5 series: Suggest 'grouped_bar' or 'line_chart'
      - If > 5 series: Suggest 'stacked_bar' (to avoid clutter)
 - **Exception**: Only use Time as Series if explicitly asked to "Compare Years" (Year-over-Year).
@@ -485,6 +486,7 @@ Return the result as a JSON object with these keys:
 IMPORTANT for time-based comparisons:
 - **CRITICAL**: If a Time column exists (Month, Year, Date), YOU MUST USE IT AS 'category_column' (X-axis).
 - **Comparison**: Use the other dimension (Department, Account, Section) as 'series_column' (Legend).
+     - **Legend Rule**: Prefer DESCRIPTIVE columns (e.g., 'department_name', 'account_name') over ID/Code columns (e.g., 'gl_code', 'id') for better readability.
      - If < 5 series: Suggest 'grouped_bar' or 'line_chart'
      - If > 5 series: Suggest 'stacked_bar' (to avoid clutter)
 - **Exception**: Only use Time as Series if explicitly asked to "Compare Years" (Year-over-Year).
@@ -693,7 +695,7 @@ Based on the data, provide:
 3. The configuration:
    - category_column: X-axis (Grouping). Rule: Use 'month' for trends, 'department'/'group' for comparison.
    - measure_column: Y-axis (Value).
-   - series_column: Comparison/Legend (Optional). Rule: If comparing multiple groups over time, use this.
+   - series_column: Comparison/Legend (Optional). Rule: If comparing multiple groups over time, use this. Prefer NAME columns over CODE columns.
 
 IMPORTANT: Return VALID JSON only. Do not wrap in markdown unless necessary.
 Structure:
