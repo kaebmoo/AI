@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Table, Button, Space, Modal, Form, Input, Select, Switch, Tag, message, Popconfirm, Card, Typography } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined, CheckCircleOutlined, CloseCircleOutlined, SearchOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getRules, createRule, updateRule, deleteRule, toggleRule } from '../services/rules';
 import type { BusinessRule } from '../services/rules';
@@ -13,6 +13,7 @@ const { Title, Text } = Typography;
 const Rules: React.FC = () => {
     const [isModalVisible, setIsModalVisible] = useState(false);
     const [editingId, setEditingId] = useState<number | null>(null);
+    const [searchText, setSearchText] = useState('');
     const [form] = Form.useForm();
     const queryClient = useQueryClient();
 
@@ -172,14 +173,34 @@ const Rules: React.FC = () => {
         <div>
             <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <h2 style={{ margin: 0 }}>Business Rules</h2>
-                <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
-                    Add New Rule
-                </Button>
+                <Space>
+                    <Input.Search
+                        placeholder="Search rules..."
+                        allowClear
+                        onSearch={value => setSearchText(value)}
+                        onChange={e => setSearchText(e.target.value)}
+                        style={{ width: 300 }}
+                    />
+                    <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
+                        Add New Rule
+                    </Button>
+                </Space>
             </div>
 
             <Table
                 columns={columns}
-                dataSource={data?.rules}
+                dataSource={data?.rules.filter((rule: BusinessRule) => {
+                    if (!searchText) return true;
+                    const lowerSearch = searchText.toLowerCase();
+                    return (
+                        rule.rule_code.toLowerCase().includes(lowerSearch) ||
+                        rule.rule_name.toLowerCase().includes(lowerSearch) ||
+                        (rule.table_name && rule.table_name.toLowerCase().includes(lowerSearch)) ||
+                        (rule.rule_description && rule.rule_description.toLowerCase().includes(lowerSearch)) ||
+                        (rule.example_correct && rule.example_correct.toLowerCase().includes(lowerSearch)) ||
+                        (rule.example_wrong && rule.example_wrong.toLowerCase().includes(lowerSearch))
+                    );
+                })}
                 rowKey="id"
                 loading={isLoading}
                 expandable={{

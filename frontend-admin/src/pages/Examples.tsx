@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Table, Button, Space, Modal, Form, Input, Select, Switch, Tag, message, Popconfirm, Card, Typography, Row, Col } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, CopyOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined, CopyOutlined, SearchOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getExamples, createExample, updateExample, deleteExample, getExampleCategories } from '../services/examples';
 import type { GoldenExample } from '../services/examples';
@@ -13,6 +13,7 @@ const { Text } = Typography;
 const Examples: React.FC = () => {
     const [isModalVisible, setIsModalVisible] = useState(false);
     const [editingId, setEditingId] = useState<number | null>(null);
+    const [searchText, setSearchText] = useState('');
     const [form] = Form.useForm();
     const queryClient = useQueryClient();
     const [selectedCategory, setSelectedCategory] = useState<string | undefined>(undefined);
@@ -163,14 +164,31 @@ const Examples: React.FC = () => {
         <div>
             <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <h2 style={{ margin: 0 }}>Golden Examples (Few-Shot)</h2>
-                <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
-                    Add New Example
-                </Button>
+                <Space>
+                    <Input.Search
+                        placeholder="Search question or SQL..."
+                        allowClear
+                        onSearch={value => setSearchText(value)}
+                        onChange={e => setSearchText(e.target.value)}
+                        style={{ width: 300 }}
+                    />
+                    <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
+                        Add New Example
+                    </Button>
+                </Space>
             </div>
 
             <Table
                 columns={columns}
-                dataSource={data?.examples}
+                dataSource={data?.examples.filter((ex: GoldenExample) => {
+                    if (!searchText) return true;
+                    const lowerSearch = searchText.toLowerCase();
+                    return (
+                        ex.question_pattern.toLowerCase().includes(lowerSearch) ||
+                        ex.expected_sql.toLowerCase().includes(lowerSearch) ||
+                        (ex.category && ex.category.toLowerCase().includes(lowerSearch))
+                    );
+                })}
                 rowKey="id"
                 loading={isLoading}
                 expandable={{
