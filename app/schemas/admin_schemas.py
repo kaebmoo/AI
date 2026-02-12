@@ -113,13 +113,18 @@ class BusinessRuleBase(BaseModel):
     """Base schema for business rule"""
     rule_code: str = Field(..., description="Unique rule code")
     rule_name: str = Field(..., description="Rule name")
-    rule_description: str = Field(..., description="Rule description")
+    rule_description: Optional[str] = Field("", description="Rule description")
     table_name: Optional[str] = Field(None, description="Applies to specific table (NULL = ALL)")
     applies_to: Optional[str] = Field(None, description="Comma-separated column names")
     example_correct: Optional[str] = Field(None, description="Correct SQL example")
     example_wrong: Optional[str] = Field(None, description="Wrong SQL example")
     severity: str = Field('warning', description="Severity: 'error', 'warning', 'info'")
     is_active: bool = Field(True, description="Is active")
+
+    @field_validator('rule_description', mode='before')
+    @classmethod
+    def set_description_default(cls, v):
+        return v or ""
 
 
 class BusinessRuleCreate(BusinessRuleBase):
@@ -291,33 +296,3 @@ class ViewMappingSuggestion(BaseModel):
     col: str
     suggested_alias: str
     reason: Optional[str] = None
-
-
-# ============================================================
-# Prompt Version Schemas
-# ============================================================
-
-class PromptVersionBase(BaseModel):
-    """Base schema for prompt version"""
-    system_prompt: str = Field(..., description="System instruction prompt")
-    notes: Optional[str] = Field(None, description="Release notes or description")
-
-class PromptVersionCreate(PromptVersionBase):
-    """Schema for creating prompt version"""
-    pass
-
-class PromptVersionResponse(PromptVersionBase):
-    """Schema for prompt version response"""
-    id: int
-    version: int
-    created_at: datetime
-    created_by: Optional[int] = None
-    is_active: bool = False
-    
-    class Config:
-        from_attributes = True
-
-class PromptVersionListResponse(BaseModel):
-    """Response for list of prompt versions"""
-    versions: List[PromptVersionResponse]
-    total: int

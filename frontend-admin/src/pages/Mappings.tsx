@@ -200,7 +200,16 @@ const Mappings: React.FC = () => {
     return (
         <div>
             <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h2 style={{ margin: 0 }}>Semantic Mappings</h2>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                    <h2 style={{ margin: 0 }}>Semantic Mappings</h2>
+                    <Input.Search
+                        placeholder="Search by keyword, target, or condition..."
+                        allowClear
+                        onSearch={value => setSearchText(value)}
+                        onChange={e => setSearchText(e.target.value)}
+                        style={{ width: 400 }}
+                    />
+                </div>
                 <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
                     Add New Mapping
                 </Button>
@@ -208,7 +217,16 @@ const Mappings: React.FC = () => {
 
             <Table
                 columns={columns}
-                dataSource={data?.mappings}
+                dataSource={data?.mappings.filter((mapping: SemanticMapping) => {
+                    if (!searchText) return true;
+                    const lowerSearch = searchText.toLowerCase();
+                    return (
+                        mapping.keyword.toLowerCase().includes(lowerSearch) ||
+                        (mapping.target_column && mapping.target_column.toLowerCase().includes(lowerSearch)) ||
+                        (mapping.target_condition && mapping.target_condition.toLowerCase().includes(lowerSearch)) ||
+                        (mapping.description && mapping.description.toLowerCase().includes(lowerSearch))
+                    );
+                })}
                 rowKey="id"
                 loading={isLoading}
                 scroll={{ x: 1000 }}

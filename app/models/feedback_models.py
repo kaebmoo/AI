@@ -1,24 +1,8 @@
 from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey, Enum, Index
 from sqlalchemy.orm import relationship, backref
-from sqlalchemy.dialects.sqlite import JSON
 from datetime import datetime
 from app.db.base_class import Base
 import enum
-
-class PromptVersion(Base):
-    __tablename__ = "prompt_versions"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    version = Column(Integer, nullable=False)
-    system_prompt = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    created_by = Column(Integer, ForeignKey("users.id"), nullable=True) # Admin user
-    is_active = Column(Boolean, default=False)
-    notes = Column(Text, nullable=True)
-    
-    # SQLite doesn't support JSON type natively in all versions, but SQLAlchemy handles it
-    # Storing few_shot_examples as JSON string or proper JSON type
-    few_shot_examples = Column(JSON, nullable=True)
 
 class GoldenExample(Base):
     __tablename__ = "golden_examples"

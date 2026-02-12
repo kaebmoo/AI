@@ -98,7 +98,7 @@ export default function ChatScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-gray-50 dark:bg-gray-900">
-      <View className="flex-1 w-full max-w-4xl mx-auto">
+      <View className="flex-1 w-full max-w-7xl mx-auto">
         {/* Header */}
         <View className="px-4 py-3 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 shadow-sm z-10 w-full">
           <View className="flex-row items-center justify-between">

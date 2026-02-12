@@ -20,7 +20,8 @@ celery_app.conf.update(
     timezone="Asia/Bangkok",
     enable_utc=True,
     # Ensure imports happen at startup
-    include=["app.workers.email_worker"]
+    include=["app.workers.email_worker"],
+    broker_connection_retry_on_startup=True
 )
 
 # Auto-discover tasks in packages

@@ -8,9 +8,10 @@ import Contexts from './pages/Contexts'
 import Analyzer from './pages/Analyzer'
 import Mappings from './pages/Mappings'
 import Rules from './pages/Rules'
-import Prompts from './pages/Prompts'
 import Examples from './pages/Examples'
 import ViewBuilder from './pages/ViewBuilder'
+import Providers from './pages/Providers'
+import Models from './pages/Models'
 import Settings from './pages/Settings'
 
 // Simple Auth Guard
@@ -37,9 +38,10 @@ function App() {
             <Route path="/analyzer" element={<Analyzer />} />
             <Route path="/mappings" element={<Mappings />} />
             <Route path="/rules" element={<Rules />} />
-            <Route path="/prompts" element={<Prompts />} />
             <Route path="/examples" element={<Examples />} />
             <Route path="/view-builder" element={<ViewBuilder />} />
+            <Route path="/providers" element={<Providers />} />
+            <Route path="/models" element={<Models />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
           </Route>

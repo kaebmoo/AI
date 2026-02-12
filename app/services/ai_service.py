@@ -28,7 +28,13 @@ import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from app.services.mcp_client import MCPClientService
-from app.services.vanna_service import VannaService
+# Optional import - VannaService may not be available
+try:
+    from app.services.vanna_service import VannaService
+    HAS_VANNA = True
+except ImportError:
+    HAS_VANNA = False
+    VannaService = None
 from app.config import settings
 
 logger = logging.getLogger(__name__)

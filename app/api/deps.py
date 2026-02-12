@@ -64,8 +64,6 @@ def get_mcp_client(request: Request) -> MCPClientService:
          raise HTTPException(status_code=500, detail="MCP Client not initialized")
     return request.app.state.mcp_client
 
-from app.services.prompt_manager import PromptManager
-
 from app.services.admin_config_service import AdminConfigService
 
 def get_ai_service(

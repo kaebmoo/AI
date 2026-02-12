@@ -7,10 +7,9 @@ from datetime import datetime
 
 from app.api import deps
 from app.models.user import User
-from app.models.feedback_models import FeedbackRating, FeedbackCategory, UserFeedback, PromptVersion
+from app.models.feedback_models import FeedbackRating, FeedbackCategory, UserFeedback
 from app.services.feedback_service import FeedbackService
 from app.services.trending_service import TrendingService
-from app.services.prompt_manager import PromptManager
 from app.services.ai_service import AIService
 
 router = APIRouter()
@@ -147,9 +146,8 @@ def get_admin_dashboard(
         "feedback_stats": stats,
         "pending_reviews": formatted_pending,
         "trending_queries": trending,
-        # Placeholder for future metrics like slow_queries, prompt_versions
-        "slow_queries": [],
-        "prompt_versions": [] 
+        # Placeholder for future metrics
+        "slow_queries": []
     }
 
 @router.post("/trending/update", response_model=dict)
@@ -166,73 +164,6 @@ def update_trending_queries(
     service = TrendingService(db)
     service.update_trending_queries()
     return {"status": "updated"}
-
-# -----------------------------------------------------------------------------
-# Prompt Management
-# -----------------------------------------------------------------------------
-
-class CreatePromptRequest(BaseModel):
-    system_prompt: str
-    notes: Optional[str] = None
-
-@router.get("/prompts", response_model=List[dict])
-def list_prompt_versions(
-    current_user: User = Depends(deps.get_current_user),
-    db: Session = Depends(deps.get_db)
-):
-    """List all prompt versions"""
-    if current_user.role != "admin":
-         raise HTTPException(status_code=403, detail="Not authorized")
-         
-    prompts = db.query(PromptVersion).order_by(PromptVersion.version.desc()).all()
-    return [
-        {
-            "id": p.id,
-            "version": p.version,
-            "created_at": p.created_at,
-            "is_active": p.is_active,
-            "notes": p.notes,
-            "created_by": p.created_by
-        }
-        for p in prompts
-    ]
-
-@router.post("/prompts", response_model=dict)
-def create_prompt_version(
-    request: CreatePromptRequest,
-    current_user: User = Depends(deps.get_current_user),
-    db: Session = Depends(deps.get_db)
-):
-    """Create new prompt version"""
-    if current_user.role != "admin":
-         raise HTTPException(status_code=403, detail="Not authorized")
-         
-    manager = PromptManager(db)
-    version = manager.create_new_version(
-        system_prompt=request.system_prompt,
-        notes=request.notes,
-        user_id=current_user.id
-    )
-    return {"id": version.id, "version": version.version, "status": "created"}
-
-@router.post("/prompts/{version_id}/activate", response_model=dict)
-def activate_prompt_version(
-    version_id: int,
-    current_user: User = Depends(deps.get_current_user),
-    db: Session = Depends(deps.get_db)
-):
-    """Activate a prompt version (Rollback)"""
-    if current_user.role != "admin":
-         raise HTTPException(status_code=403, detail="Not authorized")
-         
-    manager = PromptManager(db)
-    result = manager.activate_version(version_id)
-    
-    
-    if not result:
-        raise HTTPException(status_code=404, detail="Prompt version not found")
-        
-    return {"id": result.id, "version": result.version, "status": "activated"}
 
 @router.post("/{chat_id}", response_model=dict)
 def submit_feedback(
