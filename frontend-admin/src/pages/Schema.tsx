@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Table, Button, Space, Modal, Form, Input, Select, Switch, Tag, message, Popconfirm } from 'antd';
-import { EditOutlined, PlusOutlined, DeleteOutlined } from '@ant-design/icons';
+import { EditOutlined, PlusOutlined, DeleteOutlined, SearchOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getSchemaColumns, updateSchemaColumn, createSchemaColumn, deleteSchemaColumn } from '../services/schema';
 import type { SchemaMetadata } from '../services/schema';
@@ -12,6 +12,7 @@ const Schema: React.FC = () => {
     const [isModalVisible, setIsModalVisible] = useState(false);
     const [editingId, setEditingId] = useState<number | null>(null);
     const [isCreating, setIsCreating] = useState(false);
+    const [searchText, setSearchText] = useState('');
     const [form] = Form.useForm();
     const queryClient = useQueryClient();
 
@@ -180,14 +181,33 @@ const Schema: React.FC = () => {
                     <h2 style={{ margin: 0 }}>Schema Explorer</h2>
                     <p style={{ color: '#888', margin: 0 }}>Manage database column metadata for AI context.</p>
                 </div>
-                <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
-                    Add Column
-                </Button>
+                <Space>
+                    <Input.Search
+                        placeholder="Search table, column, or name..."
+                        allowClear
+                        onSearch={value => setSearchText(value)}
+                        onChange={e => setSearchText(e.target.value)}
+                        style={{ width: 300 }}
+                    />
+                    <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
+                        Add Column
+                    </Button>
+                </Space>
             </div>
 
             <Table
                 columns={columns}
-                dataSource={data?.columns}
+                dataSource={data?.columns.filter((col: SchemaMetadata) => {
+                    if (!searchText) return true;
+                    const lowerSearch = searchText.toLowerCase();
+                    return (
+                        col.table_name.toLowerCase().includes(lowerSearch) ||
+                        col.column_name.toLowerCase().includes(lowerSearch) ||
+                        (col.display_name_th && col.display_name_th.toLowerCase().includes(lowerSearch)) ||
+                        (col.display_name_en && col.display_name_en.toLowerCase().includes(lowerSearch)) ||
+                        (col.description && col.description.toLowerCase().includes(lowerSearch))
+                    );
+                })}
                 rowKey="id"
                 loading={isLoading}
                 scroll={{ x: 1000 }}
