@@ -13,7 +13,9 @@ import {
     DatabaseOutlined,
     BuildOutlined,
     FileTextOutlined,
-    SettingOutlined
+    SettingOutlined,
+    CloudOutlined,
+    ThunderboltOutlined
 } from '@ant-design/icons';
 import { Layout, Menu, Button, theme, Dropdown, Avatar, Space } from 'antd';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
@@ -97,17 +99,28 @@ const AppLayout: React.FC = () => {
         },
         {
             type: 'group',
+            label: 'AI Configuration',
+            children: [
+                {
+                    key: '/providers',
+                    icon: <CloudOutlined />,
+                    label: 'AI Providers',
+                },
+                {
+                    key: '/models',
+                    icon: <ThunderboltOutlined />,
+                    label: 'AI Models',
+                },
+            ]
+        },
+        {
+            type: 'group',
             label: 'System',
             children: [
                 {
                     key: '/settings',
                     icon: <SettingOutlined />,
                     label: 'Settings',
-                },
-                {
-                    key: '/prompts',
-                    icon: <FileTextOutlined />,
-                    label: 'Prompt Management',
                 },
                 {
                     key: '/users',
@@ -173,11 +186,12 @@ const AppLayout: React.FC = () => {
                 </Header>
                 <Content
                     style={{
-                        margin: '24px 16px',
-                        padding: 24,
+                        margin: '24px 24px',
+                        padding: '24px 32px',
                         minHeight: 280,
                         background: colorBgContainer,
                         borderRadius: borderRadiusLG,
+                        maxWidth: '100%',
                     }}
                 >
                     <Outlet />

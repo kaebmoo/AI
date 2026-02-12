@@ -13,7 +13,7 @@ from app.api import deps
 from app.services.ai_service import AIService
 from app.models.user import User
 from app.models.schema_models import SchemaMetadata, SchemaSemanticMapping, SchemaBusinessRule
-from app.models.feedback_models import GoldenExample, PromptVersion
+from app.models.feedback_models import GoldenExample
 from app.schemas.admin_schemas import (
     SchemaMetadataCreate, SchemaMetadataUpdate, SchemaMetadataResponse, SchemaMetadataListResponse,
     SemanticMappingCreate, SemanticMappingUpdate, SemanticMappingResponse, SemanticMappingListResponse,
@@ -21,11 +21,9 @@ from app.schemas.admin_schemas import (
     GoldenExampleCreate, GoldenExampleUpdate, GoldenExampleResponse, GoldenExampleListResponse,
     SchemaContextCreate, SchemaContextUpdate, SchemaContextResponse, SchemaContextListResponse,
     SchemaContextCreate, SchemaContextUpdate, SchemaContextResponse, SchemaContextListResponse,
-    ViewCreateRequest, ViewMappingSuggestion,
-    PromptVersionCreate, PromptVersionResponse, PromptVersionListResponse
+    ViewCreateRequest, ViewMappingSuggestion
 )
 from app.services.schema_service import SchemaService
-from app.services.prompt_manager import PromptManager
 from app.services.admin_config_service import AdminConfigService
 from app.config import settings
 
@@ -78,7 +76,8 @@ def get_schema_column(
 def create_schema_column(
     data: SchemaMetadataCreate,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_db),
+    schema_service: SchemaService = Depends(deps.get_schema_service)
 ):
     """
     Add new column metadata.
@@ -99,6 +98,10 @@ def create_schema_column(
     db.add(column)
     db.commit()
     db.refresh(column)
+
+    # 🔥 Auto-refresh cache after creating column metadata
+    schema_service.refresh_cache()
+
     return SchemaMetadataResponse.model_validate(column)
 
 
@@ -107,7 +110,8 @@ def update_schema_column(
     column_id: int,
     data: SchemaMetadataUpdate,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_db),
+    schema_service: SchemaService = Depends(deps.get_schema_service)
 ):
     """
     Update column metadata.
@@ -124,6 +128,10 @@ def update_schema_column(
     column.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(column)
+
+    # 🔥 Auto-refresh cache after updating column metadata
+    schema_service.refresh_cache()
+
     return SchemaMetadataResponse.model_validate(column)
 
 
@@ -131,7 +139,8 @@ def update_schema_column(
 def delete_schema_column(
     column_id: int,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_db),
+    schema_service: SchemaService = Depends(deps.get_schema_service)
 ):
     """
     Delete column metadata.
@@ -143,6 +152,10 @@ def delete_schema_column(
 
     db.delete(column)
     db.commit()
+
+    # 🔥 Auto-refresh cache after deleting column metadata
+    schema_service.refresh_cache()
+
     return None
 
 
@@ -195,7 +208,8 @@ def get_semantic_mapping(
 def create_semantic_mapping(
     data: SemanticMappingCreate,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_db),
+    schema_service: SchemaService = Depends(deps.get_schema_service)
 ):
     """
     Create semantic mapping.
@@ -215,6 +229,10 @@ def create_semantic_mapping(
     db.add(mapping)
     db.commit()
     db.refresh(mapping)
+
+    # 🔥 Auto-refresh cache after creating new mapping
+    schema_service.refresh_cache()
+
     return SemanticMappingResponse.model_validate(mapping)
 
 
@@ -223,7 +241,8 @@ def update_semantic_mapping(
     mapping_id: int,
     data: SemanticMappingUpdate,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_db),
+    schema_service: SchemaService = Depends(deps.get_schema_service)
 ):
     """
     Update semantic mapping.
@@ -252,6 +271,10 @@ def update_semantic_mapping(
     mapping.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(mapping)
+
+    # 🔥 Auto-refresh cache after updating mapping
+    schema_service.refresh_cache()
+
     return SemanticMappingResponse.model_validate(mapping)
 
 
@@ -259,7 +282,8 @@ def update_semantic_mapping(
 def delete_semantic_mapping(
     mapping_id: int,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_db),
+    schema_service: SchemaService = Depends(deps.get_schema_service)
 ):
     """
     Delete semantic mapping.
@@ -271,6 +295,10 @@ def delete_semantic_mapping(
 
     db.delete(mapping)
     db.commit()
+
+    # 🔥 Auto-refresh cache after deleting mapping
+    schema_service.refresh_cache()
+
     return None
 
 
@@ -326,7 +354,8 @@ def get_business_rule(
 def create_business_rule(
     data: BusinessRuleCreate,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_db),
+    schema_service: SchemaService = Depends(deps.get_schema_service)
 ):
     """
     Create new business rule.
@@ -346,6 +375,10 @@ def create_business_rule(
     db.add(rule)
     db.commit()
     db.refresh(rule)
+
+    # 🔥 Auto-refresh cache after creating business rule
+    schema_service.refresh_cache()
+
     return BusinessRuleResponse.model_validate(rule)
 
 
@@ -354,7 +387,8 @@ def update_business_rule(
     rule_id: int,
     data: BusinessRuleUpdate,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_db),
+    schema_service: SchemaService = Depends(deps.get_schema_service)
 ):
     """
     Update business rule.
@@ -371,6 +405,10 @@ def update_business_rule(
     rule.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(rule)
+
+    # 🔥 Auto-refresh cache after updating business rule
+    schema_service.refresh_cache()
+
     return BusinessRuleResponse.model_validate(rule)
 
 
@@ -378,7 +416,8 @@ def update_business_rule(
 def delete_business_rule(
     rule_id: int,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_db),
+    schema_service: SchemaService = Depends(deps.get_schema_service)
 ):
     """
     Delete business rule.
@@ -390,6 +429,10 @@ def delete_business_rule(
 
     db.delete(rule)
     db.commit()
+
+    # 🔥 Auto-refresh cache after deleting business rule
+    schema_service.refresh_cache()
+
     return None
 
 
@@ -397,7 +440,8 @@ def delete_business_rule(
 def toggle_business_rule(
     rule_id: int,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_db),
+    schema_service: SchemaService = Depends(deps.get_schema_service)
 ):
     """
     Toggle business rule active status.
@@ -411,6 +455,10 @@ def toggle_business_rule(
     rule.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(rule)
+
+    # 🔥 Auto-refresh cache after toggling business rule
+    schema_service.refresh_cache()
+
     return BusinessRuleResponse.model_validate(rule)
 
 
@@ -765,71 +813,6 @@ def get_dashboard_stats(
         total_rules=total_rules,
         total_columns=total_columns
     )
-
-
-# ============================================================
-# Prompt Management Endpoints
-# ============================================================
-
-@router.get("/prompts", response_model=PromptVersionListResponse)
-def list_prompt_versions(
-    current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
-):
-    """
-    List all prompt versions.
-    Admin only.
-    """
-    versions = db.query(PromptVersion).order_by(PromptVersion.version.desc()).all()
-    return PromptVersionListResponse(
-        versions=[PromptVersionResponse.model_validate(v) for v in versions],
-        total=len(versions)
-    )
-
-@router.post("/prompts", response_model=PromptVersionResponse, status_code=status.HTTP_201_CREATED)
-def create_prompt_version(
-    data: PromptVersionCreate,
-    current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
-):
-    """
-    Create new prompt version.
-    Admin only.
-    """
-    manager = PromptManager(db)
-    version = manager.create_new_version(
-        system_prompt=data.system_prompt,
-        notes=data.notes,
-        user_id=current_user.id
-    )
-    return PromptVersionResponse.model_validate(version)
-
-@router.get("/prompts/active", response_model=PromptVersionResponse)
-def get_active_prompt(
-    current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
-):
-    """
-    Get currently active prompt version.
-    """
-    manager = PromptManager(db)
-    version = manager.get_active_prompt()
-    return PromptVersionResponse.model_validate(version)
-
-@router.post("/prompts/{version_id}/activate", response_model=PromptVersionResponse)
-def activate_prompt_version(
-    version_id: int,
-    current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
-):
-    """
-    Activate a specific prompt version.
-    """
-    manager = PromptManager(db)
-    version = manager.activate_version(version_id)
-    if not version:
-        raise HTTPException(status_code=404, detail="Prompt version not found")
-    return PromptVersionResponse.model_validate(version)
 
 
 # ============================================================

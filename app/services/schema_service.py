@@ -241,6 +241,9 @@ class SchemaService:
                     params['keywords'] = json.dumps(value, ensure_ascii=False)
                 set_parts.append(f"{key} = :{key}")
                 
+            params['updated_at'] = datetime.utcnow()
+            set_parts.append("updated_at = :updated_at")
+
             sql = f"UPDATE schema_contexts SET {', '.join(set_parts)} WHERE id = :id"
             
             cursor = conn.execute(text(sql), params)
@@ -529,7 +532,26 @@ DATE เก็บเป็น Unix Timestamp (milliseconds) ต้องแป�
         if not mappings:
             return self._get_default_semantic_mappings()
 
-        text = "## Semantic Mappings (การแปลงความหมาย)\n\n"
+        text = "<semantic_mappings>\n"
+        text += "## 🔥 SEMANTIC MAPPINGS - MANDATORY USAGE 🔥\n\n"
+
+        text += "<rules>\n"
+        text += "1. ตรวจสอบ mappings ด้านล่างก่อนสร้าง SQL ทุกครั้ง\n"
+        text += "2. ถ้าเจอ keyword ที่ user ใช้ → COPY condition จาก mapping มาใช้ตามตัว\n"
+        text += "3. ห้าม improvise, ห้าม modify, ห้ามสร้าง pattern เอง\n"
+        text += "</rules>\n\n"
+
+        text += "<examples>\n"
+        text += "✅ CORRECT:\n"
+        text += "User: \"trunk radio\"\n"
+        text += "SQL: WHERE (UPPER(product_name) LIKE '%TRUNK%' OR UPPER(product_name) LIKE '%TRUNKED%' OR product_name LIKE '%วิทยุเฉพาะกิจ%')\n\n"
+
+        text += "❌ WRONG (DO NOT DO THIS):\n"
+        text += "User: \"trunk radio\"\n"
+        text += "SQL: WHERE UPPER(product_name) LIKE '%TRUNK RADIO%'\n"
+        text += "     OR UPPER(product_name) LIKE '%TRUNKED RADIO%'\n"
+        text += "Reason: ห้ามสร้าง pattern เอง ต้องใช้ mapping ที่มีอยู่\n"
+        text += "</examples>\n\n"
 
         # Group by keyword_type
         abbreviations = [m for m in mappings if m.get('keyword_type') == 'abbreviation']
@@ -538,28 +560,47 @@ DATE เก็บเป็น Unix Timestamp (milliseconds) ต้องแป�
 
         if abbreviations:
             text += "### คำย่อหน่วยงาน (Abbreviations)\n"
-            text += "| คำย่อ | Column | Condition | ความหมาย |\n"
-            text += "|-------|--------|-----------|----------|\n"
+            text += "| คำย่อ | SQL Condition | ความหมาย |\n"
+            text += "|-------|---------------|----------|\n"
             for m in abbreviations:
-                text += f"| {m['keyword']} | {m['target_column']} | {m['target_condition']} | {m.get('description', '')} |\n"
+                # Use full_condition if available, otherwise combine target_column + target_condition
+                condition = m.get('full_condition') or f"{m['target_column']} {m['target_condition']}"
+                text += f"| {m['keyword']} | `{condition}` | {m.get('description', '')} |\n"
             text += "\n"
 
         if terms:
             text += "### คำศัพท์ธุรกิจ (Business Terms)\n"
-            text += "| คำค้น | Column | Condition | ความหมาย |\n"
-            text += "|-------|--------|-----------|----------|\n"
+            text += "| คำค้น | SQL Condition | ความหมาย |\n"
+            text += "|-------|---------------|----------|\n"
             for m in terms:
-                text += f"| {m['keyword']} | {m['target_column']} | {m['target_condition']} | {m.get('description', '')} |\n"
+                # Use full_condition if available, otherwise combine target_column + target_condition
+                condition = m.get('full_condition') or f"{m['target_column']} {m['target_condition']}"
+                text += f"| {m['keyword']} | `{condition}` | {m.get('description', '')} |\n"
             text += "\n"
 
         if synonyms:
-            text += "### คำพ้องความหมาย (Synonyms)\n"
+            text += "### คำพ้องความหมาย (Synonyms) - MUST USE EXACTLY AS SHOWN\n"
+            text += "<synonym_mappings>\n"
             for m in synonyms:
-                text += f"- **{m['keyword']}** → `{m['target_column']} {m['target_condition']}`"
-                if m.get('description'):
-                    text += f" ({m['description']})"
-                text += "\n"
-            text += "\n"
+                # Use full_condition if available, otherwise combine target_column + target_condition
+                if m.get('full_condition'):
+                    condition = m['full_condition']
+                else:
+                    condition = f"{m['target_column']} {m['target_condition']}"
+
+                text += f"<mapping keyword=\"{m['keyword']}\">\n"
+                text += f"  SQL: {condition}\n"
+                text += f"  Note: {m.get('description', 'N/A')}\n"
+                text += f"</mapping>\n"
+            text += "</synonym_mappings>\n\n"
+
+        text += "</semantic_mappings>\n\n"
+        text += "<reminder>\n"
+        text += "⚠️ ก่อนสร้าง WHERE clause ทุกครั้ง:\n"
+        text += "1. หา keyword ที่ user ใช้ใน <semantic_mappings>\n"
+        text += "2. ถ้าเจอ → COPY SQL condition มาใช้เลย\n"
+        text += "3. ถ้าไม่เจอ → ค่อยสร้างเอง\n"
+        text += "</reminder>\n"
 
         return text
 
@@ -595,22 +636,28 @@ DATE เก็บเป็น Unix Timestamp (milliseconds) ต้องแป�
         context += self.build_schema_text(table_name=main_view)
         context += "\n\n" + self.build_business_rules_text(table_name=main_view)
 
-        # In Lite Mode (RAG Enabled), we skip heavy static mappings and samples
-        # BUT we must keep DATA_RANGE to prevent AI from querying future dates (e.g. 2026 when data ends 2025)
+        # In Lite Mode (RAG Enabled), we skip heavy static samples
+        # BUT we MUST ALWAYS keep semantic mappings (critical rules) and DATA_RANGE
         if not lite_mode:
+            # Full Mode: Include everything
             if include_semantic_mappings:
                 context += "\n\n" + self.build_semantic_mapping_text()
 
             if include_samples:
                 context += "\n\n" + self.build_sample_values_text(table_name=main_view)
         else:
-            # Lite Mode: Inject ONLY Data Range
+            # Lite Mode: ALWAYS include semantic mappings (they are rules, not data)
+            # Only skip the heavy sample values list
+            if include_semantic_mappings:
+                context += "\n\n" + self.build_semantic_mapping_text()
+
+            # Inject ONLY Data Range (skip detailed sample values)
             samples = self.get_sample_values(table_name=main_view)
             if 'DATA_RANGE' in samples:
                 dr = samples['DATA_RANGE']
                 context += f"\n\n## Available Values\n**Data Range:** {dr.get('min_year')}/{dr.get('min_month')} - {dr.get('max_year')}/{dr.get('max_month')}\n"
-            
-            context += "\n(Semantic mappings and detailed samples omitted for RAG optimization - relevant items will be injected)"
+
+            context += "\n(Detailed sample values omitted for RAG optimization - relevant items will be injected)"
 
         date_format = self.get_date_format(main_view)
         context += "\n\n" + self._get_date_instructions(date_format)
@@ -698,9 +745,9 @@ DATE เก็บเป็น Unix Timestamp (milliseconds) ต้องแป�
 
     def _build_thai_prompt(self, ai_provider: str, main_view: str, context_name: str, context_info: Dict = {}) -> str:
         """Build Thai language system prompt"""
-        
+
         syntax_rules = self._get_syntax_rules("thai")
-        
+
         # Context specific instructions
         context_instructions = ""
         if context_name == "revenue":
@@ -724,14 +771,34 @@ DATE เก็บเป็น Unix Timestamp (milliseconds) ต้องแป�
              """
         else:
              context_instructions = context_info.get('instruction_th') or ""
-        
-        return f"""คุณเป็น AI Assistant สำหรับวิเคราะห์ข้อมูลของ NT (National Telecom)
+
+        return f"""<system>
+คุณเป็น AI Assistant สำหรับวิเคราะห์ข้อมูลของ NT (National Telecom)
 บริบทปัจจุบัน: **{context_name.upper()}** (ตาราง: `{main_view}`)
+
+<critical_instructions>
+⚠️⚠️⚠️ MUST READ BEFORE GENERATING SQL ⚠️⚠️⚠️
+
+STEP 1: CHECK SEMANTIC MAPPINGS FIRST
+- ก่อนสร้าง WHERE condition ต้องตรวจสอบ <semantic_mappings> section ก่อนเสมอ
+- ถ้ามี keyword ที่ user ใช้ → COPY SQL condition จาก mapping นั้นมาใช้
+- ห้ามสร้าง condition เอง ห้าม improvise ห้าม hard-code
+
+STEP 2: SQL GENERATION RULES
+✅ ถูกต้อง: ใช้ condition จาก semantic mapping
+❌ ผิด: สร้าง LIKE pattern เอง เช่น LIKE '%TRUNK RADIO%'
+
+STEP 3: DOUBLE CHECK
+- Review SQL ที่สร้างแล้ว
+- ตรวจสอบว่า WHERE clause ตรงกับ semantic mapping หรือไม่
+- ถ้าไม่ตรง → แก้ไขให้ตรง
+</critical_instructions>
 
 ## หน้าที่ของคุณ
 1. รับคำถามภาษาไทย/อังกฤษ เกี่ยวกับ `{context_name}`
-2. สร้าง SQL Query ที่ถูกต้องเพื่อดึงข้อมูลจาก `{main_view}`
-3. อธิบายผลลัพธ์เป็นภาษาไทย
+2. ตรวจสอบ <semantic_mappings> ก่อนเสมอ
+3. สร้าง SQL Query โดยใช้ mapping ที่กำหนดไว้
+4. อธิบายผลลัพธ์เป็นภาษาไทย
 
 ## กฎการสร้าง SQL
 1. ใช้ SQLite syntax เท่านั้น

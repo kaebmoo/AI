@@ -147,10 +147,20 @@ export const DataTable = ({ data }: DataTableProps) => {
     console.log('[DataTable DEBUG] Data Sample:', data[0]);
 
     // 1. Hierarchy & Dimension Detection
-    const FIRST_COL_WIDTH = 180;
-    const COL_WIDTH = 160;
+    // Dynamic Column Width Calculation
+    const getColumnWidth = (key: string, isFirst: boolean = false) => {
+        const baseWidth = isFirst ? 160 : 140; // Slightly smaller base
+        const charWidth = 9; // Approx width per character (adjusted for typical font)
+        const padding = 32; // Cell padding
 
-    // Strict exclusion of measure terms from dimensions
+        // Calculate based on Header Length
+        const headerLength = key.length;
+        const requiredWidth = (headerLength * charWidth) + padding;
+
+        // Clamp: Min 140/160, Max 300
+        return Math.min(300, Math.max(baseWidth, requiredWidth));
+    };
+
     // Strict exclusion of measure terms from dimensions
     // IMPORTANT: Use word-boundary for 'count' to avoid matching 'account'
     const measurePatterns = ['total', 'revenue', 'amount', 'value', 'price', 'cost', 'profit', 'รายได้', 'ยอดรวม', 'จำนวน', 'expense', 'baht', 'บาท'];
@@ -407,9 +417,9 @@ export const DataTable = ({ data }: DataTableProps) => {
         const isNameColumn = (key: string): boolean => {
             const lower = key.toLowerCase();
             return lower.includes('name') ||
-                   lower.includes('ชื่อ') ||
-                   lower.includes('_desc') ||
-                   lower.includes('description');
+                lower.includes('ชื่อ') ||
+                lower.includes('_desc') ||
+                lower.includes('description');
         };
 
         const getSemanticScore = (key: string): number => {
@@ -557,13 +567,13 @@ export const DataTable = ({ data }: DataTableProps) => {
                 {/* Header Row */}
                 <View className="flex-row bg-blue-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
                     {/* Frozen First Column Header */}
-                    <TouchableOpacity onPress={() => handleSort('_rowLabel')} className="px-4 py-3 bg-blue-100/50 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex-row items-center justify-between" style={{ width: FIRST_COL_WIDTH }}>
+                    <TouchableOpacity onPress={() => handleSort('_rowLabel')} className="px-4 py-3 bg-blue-100/50 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex-row items-center justify-between" style={{ width: getColumnWidth(rowKey, true) }}>
                         <Text className="text-xs font-bold text-gray-700 dark:text-gray-200 uppercase">{rowKey}</Text>
                         {renderSortIcon('_rowLabel')}
                     </TouchableOpacity>
                     {/* Period Columns Header */}
                     {periodLabels.map((period, idx) => (
-                        <TouchableOpacity key={period} onPress={() => handleSort(period)} className="px-4 py-3 flex-row items-center justify-center" style={{ width: COL_WIDTH }}>
+                        <TouchableOpacity key={period} onPress={() => handleSort(period)} className="px-4 py-3 flex-row items-center justify-center" style={{ width: getColumnWidth(period) }}>
                             <Text className="text-xs font-bold text-gray-600 dark:text-gray-300 uppercase text-center">{period}</Text>
                             {renderSortIcon(period)}
                         </TouchableOpacity>
@@ -574,12 +584,12 @@ export const DataTable = ({ data }: DataTableProps) => {
                 {sortData(pivotedRows).map((row, rIdx) => (
                     <View key={rIdx} className={`flex-row border-b border-gray-100 dark:border-gray-800 ${rIdx % 2 === 0 ? 'bg-white dark:bg-gray-900' : 'bg-gray-50/50 dark:bg-gray-800/30'}`}>
                         {/* Frozen First Column Data */}
-                        <View className="px-4 py-3 bg-gray-50/80 dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700" style={{ width: FIRST_COL_WIDTH }}>
+                        <View className="px-4 py-3 bg-gray-50/80 dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700" style={{ width: getColumnWidth(rowKey, true) }}>
                             <Text className="text-xs font-semibold text-gray-800 dark:text-gray-200" numberOfLines={2}>{row._rowLabel}</Text>
                         </View>
                         {/* Period Data Cells */}
                         {periodLabels.map((period) => (
-                            <View key={period} className="px-4 py-3" style={{ width: COL_WIDTH }}>
+                            <View key={period} className="px-4 py-3" style={{ width: getColumnWidth(period) }}>
                                 <Text className="text-xs text-gray-700 dark:text-gray-300 text-right font-variant-numeric">
                                     {renderCell(period, row[period])}
                                 </Text>
@@ -610,7 +620,7 @@ export const DataTable = ({ data }: DataTableProps) => {
                         </View>
                         <View className="flex-row bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
                             {displayKeys.map((key, idx) => (
-                                <TouchableOpacity key={key} onPress={() => handleSort(key)} className="px-4 py-2 flex-row items-center justify-between" style={{ width: idx === 0 ? FIRST_COL_WIDTH : COL_WIDTH }}>
+                                <TouchableOpacity key={key} onPress={() => handleSort(key)} className="px-4 py-2 flex-row items-center justify-between" style={{ width: getColumnWidth(key, idx === 0) }}>
                                     <Text className="text-[10px] font-bold text-gray-500 uppercase">{key}</Text>
                                     {renderSortIcon(key)}
                                 </TouchableOpacity>
@@ -619,7 +629,7 @@ export const DataTable = ({ data }: DataTableProps) => {
                         {sortData(groupItems).map((row, rIdx) => (
                             <View key={rIdx} className={`flex-row border-b border-gray-100 dark:border-gray-800 ${rIdx % 2 === 0 ? 'bg-white dark:bg-gray-900' : 'bg-gray-50 dark:bg-gray-800/50'}`}>
                                 {displayKeys.map((key, cIdx) => (
-                                    <View key={key} className="px-4 py-2" style={{ width: cIdx === 0 ? FIRST_COL_WIDTH : COL_WIDTH }}>
+                                    <View key={key} className="px-4 py-2" style={{ width: getColumnWidth(key, cIdx === 0) }}>
                                         <Text className={`text-xs text-gray-700 dark:text-gray-300 ${isMeasure(key) || typeof row[key] === 'number' ? 'text-right' : ''}`}>
                                             {renderCell(key, row[key])}
                                         </Text>
@@ -639,7 +649,7 @@ export const DataTable = ({ data }: DataTableProps) => {
             <View>
                 <View className="flex-row bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
                     {keys.map((key, idx) => (
-                        <TouchableOpacity key={key} onPress={() => handleSort(key)} className="px-4 py-3 flex-row items-center justify-between" style={{ width: idx === 0 ? FIRST_COL_WIDTH : COL_WIDTH }}>
+                        <TouchableOpacity key={key} onPress={() => handleSort(key)} className="px-4 py-3 flex-row items-center justify-between" style={{ width: getColumnWidth(key, idx === 0) }}>
                             <Text className="text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wide">{key}</Text>
                             {renderSortIcon(key)}
                         </TouchableOpacity>
@@ -648,7 +658,7 @@ export const DataTable = ({ data }: DataTableProps) => {
                 {sortData(data).map((row, idx) => (
                     <View key={idx} className={`flex-row border-b border-gray-100 dark:border-gray-700/50 ${idx % 2 === 0 ? 'bg-white dark:bg-gray-900' : 'bg-gray-50/50 dark:bg-gray-800/30'}`}>
                         {keys.map((key, colIndex) => (
-                            <View key={`${idx}-${key}`} className="px-4 py-3" style={{ width: colIndex === 0 ? FIRST_COL_WIDTH : COL_WIDTH }}>
+                            <View key={`${idx}-${key}`} className="px-4 py-3" style={{ width: getColumnWidth(key, colIndex === 0) }}>
                                 <Text className={`text-sm text-gray-700 dark:text-gray-300 ${isMeasure(key) || typeof row[key] === 'number' ? 'text-right font-variant-numeric' : 'text-left'}`}>
                                     {renderCell(key, row[key])}
                                 </Text>

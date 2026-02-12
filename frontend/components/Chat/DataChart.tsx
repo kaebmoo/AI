@@ -354,8 +354,12 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
                 // Determine mode from AI visualization recommendation
                 // Determine mode from AI visualization recommendation
                 let mode: ChartMode = 'vertical_bar';
-                if (visualization === 'grouped_bar' || (finalSeriesKey && seriesValues.length >= 2 && hasRepeatedCategories)) {
+                if ((visualization === 'grouped_bar' && finalSeriesKey) || (finalSeriesKey && seriesValues.length >= 2 && hasRepeatedCategories)) {
                     mode = 'grouped_bar';
+                } else if (visualization === 'grouped_bar' && !finalSeriesKey) {
+                    // Fallback: AI asked for grouped_bar but didn't provide series column -> use vertical_bar
+                    console.warn('⚠️ DataChart: grouped_bar requested but no series_column found. Falling back to vertical_bar.');
+                    mode = 'vertical_bar';
                 } else if (visualization === 'stacked_bar') {
                     mode = 'stacked_bar';
                 } else if (visualization === 'line_chart') {
