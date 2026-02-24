@@ -700,11 +700,11 @@ class MatchaProvider(AIProvider):
         if openai_tools:
             payload['tools'] = openai_tools
         
-        async with httpx.AsyncClient(verify=False, timeout=60.0) as client:
+        async with httpx.AsyncClient(verify=settings.MATCHA_SSL_VERIFY, timeout=settings.MATCHA_TIMEOUT) as client:
             resp = await client.post(self.api_url, headers=headers, json=payload)
             resp.raise_for_status()
             result = resp.json()
-            
+
         return {
             "response": result, # Raw OpenAI response dict
             "tokens_used": result.get('usage', {}).get('total_tokens', 0)
@@ -921,7 +921,7 @@ Structure:
         }
 
         try:
-            async with httpx.AsyncClient(verify=False, timeout=60.0) as client:
+            async with httpx.AsyncClient(verify=settings.MATCHA_SSL_VERIFY, timeout=settings.MATCHA_TIMEOUT) as client:
                 logger.info(f"MatchaProvider: Calling API at {self.api_url}...")
                 resp = await client.post(self.api_url, headers=headers, json=payload)
                 resp.raise_for_status()
