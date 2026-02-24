@@ -185,6 +185,16 @@ class AdminConfigService:
 
             # API URLs (for display, not secrets)
             "matcha_api_url": self.get_config("matcha_api_url", settings.MATCHA_API_URL or ""),
+
+            # Claude Extended Thinking
+            "claude_extended_thinking": self.get_config(
+                "claude_extended_thinking",
+                "true" if settings.CLAUDE_EXTENDED_THINKING else "false"
+            ) == "true",
+            "claude_thinking_budget_tokens": int(self.get_config(
+                "claude_thinking_budget_tokens",
+                str(settings.CLAUDE_THINKING_BUDGET_TOKENS)
+            )),
         }
 
     def update_ai_config(
@@ -197,6 +207,8 @@ class AdminConfigService:
         gemini_model: Optional[str] = None,
         matcha_model: Optional[str] = None,
         matcha_api_url: Optional[str] = None,
+        claude_extended_thinking: Optional[bool] = None,
+        claude_thinking_budget_tokens: Optional[int] = None,
         updated_by: Optional[str] = None
     ) -> bool:
         """
@@ -221,6 +233,8 @@ class AdminConfigService:
             "gemini_model": gemini_model,
             "matcha_model": matcha_model,
             "matcha_api_url": matcha_api_url,
+            "claude_extended_thinking": "true" if claude_extended_thinking else "false" if claude_extended_thinking is False else None,
+            "claude_thinking_budget_tokens": str(claude_thinking_budget_tokens) if claude_thinking_budget_tokens is not None else None,
         }
 
         success = True
@@ -408,6 +422,14 @@ class AdminConfigService:
             "debug_mode": self.get_config("debug_mode", "false") == "true",
             "log_queries": self.get_config("log_queries", "true") == "true",
             "collect_feedback": self.get_config("collect_feedback", "true") == "true",
+            "two_pass_enabled": self.get_config(
+                "two_pass_enabled",
+                "true" if settings.TWO_PASS_ENABLED else "false"
+            ) == "true",
+            "value_lookup_enabled": self.get_config(
+                "value_lookup_enabled",
+                "true" if settings.VALUE_LOOKUP_ENABLED else "false"
+            ) == "true",
         }
 
     def toggle_feature(self, feature_name: str, enabled: bool, updated_by: Optional[str] = None) -> bool:

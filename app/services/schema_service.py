@@ -25,9 +25,12 @@ from sqlalchemy.engine import Engine, Connection
 from sqlalchemy.orm import Session
 import sqlite3
 import json
+import logging
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 class SchemaService:
     """Service สำหรับจัดการ schema metadata"""
@@ -165,19 +168,12 @@ class SchemaService:
                     self._context_cache[context_name] = context_info
                     return context_info
                 
-                # Fallback for common contexts
-                if context_name == 'revenue':
-                     return {'name': 'revenue', 'main_view': 'revenue_search', 'display_name': 'รายได้'}
-                elif context_name == 'expense':
-                     return {'name': 'expense', 'main_view': 'v_expense_mart', 'display_name': 'ค่าใช้จ่าย'}
+                # Context not found in DB
+                logger.warning(f"Context '{context_name}' not found in schema_contexts table")
                 return None
 
             except Exception as e:
-                # Fallback for bootstrapping
-                if context_name == 'revenue':
-                     return {'id': 1, 'name': 'revenue', 'main_view': 'revenue_search', 'display_name': 'รายได้', 'created_at': datetime.now(), 'keywords': [], 'is_active': True, 'priority': 0}
-                elif context_name == 'expense':
-                     return {'id': 2, 'name': 'expense', 'main_view': 'v_expense_mart', 'display_name': 'ค่าใช้จ่าย', 'created_at': datetime.now(), 'keywords': [], 'is_active': True, 'priority': 0}
+                logger.warning(f"Failed to query schema_contexts: {e}")
                 return None
 
 
@@ -196,8 +192,9 @@ class SchemaService:
                             ctx['keywords'] = []
                     contexts.append(ctx)
                 return contexts
-            except Exception:
-                return [{'id': 1, 'name': 'revenue', 'main_view': 'revenue_search', 'display_name': 'รายได้', 'created_at': datetime.now(), 'keywords': [], 'is_active': True, 'priority': 0}]
+            except Exception as e:
+                logger.warning(f"Failed to query schema_contexts: {e}")
+                return []
 
     def create_context(self, data: Dict) -> Dict:
         """Create new context"""
@@ -625,9 +622,12 @@ DATE เก็บเป็น Unix Timestamp (milliseconds) ต้องแป�
         # 1. Get Context Info
         context_info = self.get_context_info(context_name)
         if not context_info:
-            # Fallback to revenue
-            context_info = {'name': 'revenue', 'main_view': 'revenue_search', 'display_name': 'รายได้'}
-            
+            import logging
+            logging.getLogger(__name__).error(
+                f"get_schema_context: Context '{context_name}' not found in schema_contexts — returning empty context"
+            )
+            return f"# ERROR: Context '{context_name}' not configured in database.\n"
+
         main_view = context_info['main_view']
         display_name = context_info.get('display_name', context_name)
 
@@ -682,11 +682,10 @@ DATE เก็บเป็น Unix Timestamp (milliseconds) ต้องแป�
         # 1. Get Context Info
         context_info = self.get_context_info(context_name)
         if not context_info:
-            # Fallback based on requested context
-            if context_name == 'expense':
-                context_info = {'name': 'expense', 'main_view': 'v_expense_mart', 'display_name': 'ค่าใช้จ่าย'}
-            else:
-                context_info = {'name': 'revenue', 'main_view': 'revenue_search', 'display_name': 'รายได้'}
+            import logging
+            logging.getLogger(__name__).error(f"Context '{context_name}' not found in schema_contexts — cannot build prompt")
+            # Return minimal prompt with error
+            return f"ERROR: Context '{context_name}' not configured in database. Please add it via Admin UI."
         
         main_view = context_info['main_view']
         
@@ -709,9 +708,15 @@ DATE เก็บเป็น Unix Timestamp (milliseconds) ต้องแป�
     
     def get_default_instruction(self, ai_provider: str = "claude", language: str = "thai", context_name: str = "revenue") -> str:
         """Get default system instruction without schema context"""
-        context_info = self.get_context_info(context_name) or {'main_view': 'revenue_search'}
+        context_info = self.get_context_info(context_name)
+        if not context_info:
+            import logging
+            logging.getLogger(__name__).error(
+                f"get_default_instruction: Context '{context_name}' not found in schema_contexts"
+            )
+            return f"ERROR: Context '{context_name}' not configured in database."
         main_view = context_info['main_view']
-        
+
         if language == "thai":
             return self._build_thai_prompt(ai_provider, main_view, context_name, context_info)
         else:
@@ -937,6 +942,246 @@ DATE column is Unix Timestamp (ms). Use YEAR/MONTH columns instead."""
         return self._cache[cache_key]
 
 # =========================================================
+    # =========================================================
+    # Keyword Value Index — Smart Value Lookup
+    # =========================================================
+
+    def get_searchable_columns(self, context_name: str, table_name: str = None) -> List[str]:
+        """Get searchable/groupable columns from schema_metadata. Falls back to inspecting actual columns."""
+        import logging
+        _logger = logging.getLogger(__name__)
+
+        # 1. Try schema_metadata (is_groupable = 1)
+        # Map context_name → metadata table_name (metadata uses source table, not view)
+        metadata_tables = [context_name]
+        if table_name:
+            metadata_tables.append(table_name)
+
+        try:
+            with self.engine.connect() as conn:
+                for tbl in metadata_tables:
+                    rows = conn.execute(text(
+                        "SELECT column_name FROM schema_metadata WHERE table_name = :tbl AND is_groupable = 1"
+                    ), {"tbl": tbl}).fetchall()
+                    if rows:
+                        cols = [r[0] for r in rows]
+                        _logger.info(f"Searchable columns for '{context_name}' from schema_metadata: {len(cols)} columns")
+                        return cols
+        except Exception as e:
+            _logger.warning(f"Failed to get searchable columns from metadata: {e}")
+
+        # 2. Fallback: inspect actual table columns (all string-type columns)
+        if table_name:
+            try:
+                inspector = inspect(self.engine)
+                all_cols = inspector.get_columns(table_name)
+                cols = [c['name'] for c in all_cols if str(c.get('type', '')).upper() in ('TEXT', 'VARCHAR', 'NVARCHAR')]
+                if cols:
+                    _logger.info(f"Searchable columns for '{context_name}' from table inspection: {len(cols)} columns")
+                    return cols
+            except Exception:
+                pass
+
+        return []
+
+    # Thai prefixes to strip when generating keywords
+    STRIP_PREFIXES = [
+        "กลุ่มบริการ", "กลุ่ม", "บริการ", "สายงาน", "ฝ่าย", "ส่วน",
+        "รายได้", "ค่าใช้จ่าย", "หมวด",
+    ]
+
+    def build_keyword_index(self, context_name: str = "revenue", table_name: str = "revenue_search") -> int:
+        """
+        Scan searchable columns, extract keywords, and populate keyword_value_index table.
+        Returns number of keywords indexed.
+        """
+        import re
+        import logging
+        logger = logging.getLogger(__name__)
+
+        columns = self.get_searchable_columns(context_name, table_name)
+
+        inspector = inspect(self.engine)
+        try:
+            actual_cols = set(col['name'] for col in inspector.get_columns(table_name))
+        except Exception:
+            logger.error(f"Cannot inspect table {table_name}")
+            return 0
+
+        all_rows = []
+
+        with self.engine.begin() as conn:
+            # Clear existing index for this context
+            conn.execute(text(
+                "DELETE FROM keyword_value_index WHERE context_name = :ctx AND table_name = :tbl"
+            ), {"ctx": context_name, "tbl": table_name})
+
+            for col_name in columns:
+                matching_col = next((c for c in actual_cols if c.upper() == col_name.upper()), None)
+                if not matching_col:
+                    continue
+
+                try:
+                    result = conn.execute(text(
+                        f'SELECT DISTINCT "{matching_col}" FROM {table_name} WHERE "{matching_col}" IS NOT NULL'
+                    ))
+                    values = [row[0] for row in result.fetchall() if row[0]]
+                except Exception as e:
+                    logger.warning(f"Failed to scan {matching_col}: {e}")
+                    continue
+
+                for value in values:
+                    value_str = str(value).strip()
+                    if not value_str:
+                        continue
+
+                    # Generate keywords from the value
+                    keywords = self._extract_keywords(value_str)
+
+                    for kw in keywords:
+                        if len(kw) < 2:
+                            continue
+                        all_rows.append({
+                            "keyword": kw.lower(),
+                            "column_name": matching_col,
+                            "column_value": value_str,
+                            "table_name": table_name,
+                            "context_name": context_name,
+                        })
+
+            # Batch insert
+            if all_rows:
+                conn.execute(
+                    text("""
+                        INSERT INTO keyword_value_index (keyword, column_name, column_value, table_name, context_name)
+                        VALUES (:keyword, :column_name, :column_value, :table_name, :context_name)
+                    """),
+                    all_rows
+                )
+
+        logger.info(f"Keyword index built: {len(all_rows)} entries for context={context_name}, table={table_name}")
+        return len(all_rows)
+
+    def _extract_keywords(self, value: str) -> List[str]:
+        """Extract searchable keywords from a column value."""
+        import re
+
+        keywords = set()
+
+        # Add full value as keyword
+        keywords.add(value.strip())
+
+        # Strip Thai prefixes and add remainder
+        clean = value.strip()
+        for prefix in self.STRIP_PREFIXES:
+            if clean.startswith(prefix):
+                remainder = clean[len(prefix):].strip()
+                if remainder:
+                    keywords.add(remainder)
+
+        # Split by common delimiters and add individual words
+        parts = re.split(r'[\s\-&/()（）,]+', value)
+        for part in parts:
+            part = part.strip()
+            if len(part) >= 2:
+                keywords.add(part)
+
+        return list(keywords)
+
+    def search_keyword_index(self, keyword: str, context_name: str = "revenue", limit: int = 10) -> List[Dict]:
+        """
+        Search pre-built keyword index for matching values.
+        Returns list of {keyword, column_name, column_value, table_name}
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        results = []
+        kw_lower = keyword.lower().strip()
+        if not kw_lower:
+            return results
+
+        try:
+            with self.engine.connect() as conn:
+                rows = conn.execute(text("""
+                    SELECT DISTINCT column_name, column_value, table_name
+                    FROM keyword_value_index
+                    WHERE keyword LIKE :kw
+                      AND context_name = :ctx
+                    LIMIT :lim
+                """), {"kw": f"%{kw_lower}%", "ctx": context_name, "lim": limit}).fetchall()
+
+                for row in rows:
+                    results.append({
+                        "keyword": keyword,
+                        "column_name": row[0],
+                        "column_value": row[1],
+                        "table_name": row[2],
+                    })
+
+            if results:
+                logger.info(f"Keyword index: '{keyword}' → {len(results)} matches")
+            else:
+                logger.info(f"Keyword index: '{keyword}' → no matches")
+
+        except Exception as e:
+            logger.warning(f"Keyword index search failed: {e}")
+
+        return results
+
+    def search_db_for_keyword(self, keyword: str, table_name: str = "revenue_search", context_name: str = "revenue", limit: int = 10) -> List[Dict]:
+        """
+        Fallback: search actual DB columns for keyword match.
+        Slower than index but always comprehensive.
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        results = []
+        kw_pattern = f"%{keyword}%"
+
+        columns = self.get_searchable_columns(context_name, table_name)
+
+        inspector = inspect(self.engine)
+        try:
+            actual_cols = set(col['name'] for col in inspector.get_columns(table_name))
+        except Exception:
+            return results
+
+        with self.engine.connect() as conn:
+            for col_name in columns:
+                matching_col = next((c for c in actual_cols if c.upper() == col_name.upper()), None)
+                if not matching_col:
+                    continue
+
+                try:
+                    rows = conn.execute(text(f"""
+                        SELECT DISTINCT "{matching_col}"
+                        FROM {table_name}
+                        WHERE "{matching_col}" LIKE :kw
+                           OR UPPER("{matching_col}") LIKE UPPER(:kw)
+                        LIMIT :lim
+                    """), {"kw": kw_pattern, "lim": limit}).fetchall()
+
+                    for row in rows:
+                        if row[0]:
+                            results.append({
+                                "keyword": keyword,
+                                "column_name": matching_col,
+                                "column_value": str(row[0]),
+                                "table_name": table_name,
+                            })
+                except Exception:
+                    continue
+
+        if results:
+            logger.info(f"DB search: '{keyword}' → {len(results)} matches across columns")
+        else:
+            logger.info(f"DB search: '{keyword}' → no matches")
+
+        return results
+
+
 # Factory Functions
 # =========================================================
 

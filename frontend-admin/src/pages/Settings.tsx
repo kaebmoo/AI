@@ -7,14 +7,16 @@ import {
     Select,
     Button,
     Input,
+    InputNumber,
     message,
     Spin,
     Alert,
     Typography,
     Divider,
-    Space
+    Space,
+    Tooltip
 } from 'antd';
-import { SaveOutlined, ReloadOutlined, ClearOutlined } from '@ant-design/icons';
+import { SaveOutlined, ReloadOutlined, ClearOutlined, InfoCircleOutlined, DatabaseOutlined } from '@ant-design/icons';
 import { adminService } from '../services/adminService';
 import type { AIConfig, AIProvider, FeatureFlags } from '../services/adminService';
 
@@ -121,6 +123,24 @@ const Settings: React.FC = () => {
         }
     };
 
+    const [rebuildingIndex, setRebuildingIndex] = useState(false);
+
+    const handleRebuildKeywordIndex = async () => {
+        try {
+            setRebuildingIndex(true);
+            setError(null);
+
+            const result = await adminService.rebuildKeywordIndex();
+            message.success(`Keyword index rebuilt: ${result.total_entries || 0} entries`);
+
+        } catch (err: any) {
+            setError(err.message || 'Failed to rebuild keyword index');
+            message.error('Failed to rebuild keyword index');
+        } finally {
+            setRebuildingIndex(false);
+        }
+    };
+
     if (loading) {
         return (
             <div style={{ textAlign: 'center', marginTop: 100 }}>
@@ -201,7 +221,7 @@ const Settings: React.FC = () => {
                                 />
                             }
                         >
-                            <div>
+                            <div style={{ marginBottom: 16 }}>
                                 <Text>Model</Text>
                                 <Select
                                     value={aiConfig.claude_model}
@@ -214,6 +234,51 @@ const Settings: React.FC = () => {
                                     ))}
                                 </Select>
                             </div>
+
+                            <Divider style={{ margin: '12px 0' }} />
+
+                            {/* Extended Thinking */}
+                            <Row justify="space-between" align="middle" style={{ marginBottom: 12 }}>
+                                <Col>
+                                    <Space>
+                                        <Text strong>Extended Thinking</Text>
+                                        <Tooltip title="Claude จะใช้ internal reasoning ก่อนตอบ — ช่วยให้ SQL แม่นยำขึ้นสำหรับคำถามซับซ้อน รองรับเฉพาะ claude-sonnet-4 และ claude-opus-4">
+                                            <InfoCircleOutlined style={{ color: '#8c8c8c' }} />
+                                        </Tooltip>
+                                    </Space>
+                                    <br />
+                                    <Text type="secondary" style={{ fontSize: 12 }}>
+                                        เพิ่มความแม่นยำ SQL (เพิ่ม cost และ latency)
+                                    </Text>
+                                </Col>
+                                <Col>
+                                    <Switch
+                                        checked={aiConfig.claude_extended_thinking ?? false}
+                                        onChange={(checked) => setAiConfig({ ...aiConfig, claude_extended_thinking: checked })}
+                                        disabled={!aiConfig.claude_enabled}
+                                    />
+                                </Col>
+                            </Row>
+
+                            {aiConfig.claude_extended_thinking && (
+                                <div>
+                                    <Text>Thinking Budget (tokens)</Text>
+                                    <Tooltip title="จำนวน token สำหรับ internal reasoning (1,024 – 100,000) ยิ่งมาก ยิ่งคิดลึก แต่ใช้เวลาและ cost มากขึ้น">
+                                        <InfoCircleOutlined style={{ color: '#8c8c8c', marginLeft: 6 }} />
+                                    </Tooltip>
+                                    <InputNumber
+                                        value={aiConfig.claude_thinking_budget_tokens ?? 8000}
+                                        onChange={(value) => setAiConfig({ ...aiConfig, claude_thinking_budget_tokens: value ?? 8000 })}
+                                        min={1024}
+                                        max={100000}
+                                        step={1000}
+                                        disabled={!aiConfig.claude_enabled}
+                                        style={{ width: '100%', marginTop: 8 }}
+                                        formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                                        parser={(value) => parseInt(value?.replace(/,/g, '') ?? '8000') as any}
+                                    />
+                                </div>
+                            )}
                         </Card>
 
                         {/* Gemini Settings */}
@@ -375,23 +440,111 @@ const Settings: React.FC = () => {
                                 </Row>
                             </Card>
                         </Col>
+
+                        <Col span={24}>
+                            <Card type="inner">
+                                <Row justify="space-between" align="middle">
+                                    <Col>
+                                        <Space>
+                                            <Text strong>Two-Pass SQL Generation</Text>
+                                            <Tooltip title="Pass 1: AI วิเคราะห์คำถามเป็น structured intent (JSON) → Pass 2: AI สร้าง SQL จาก intent — ลด retry, เพิ่มความแม่นยำ, debug ง่าย (เพิ่ม API call 1 ครั้ง)">
+                                                <InfoCircleOutlined style={{ color: '#8c8c8c' }} />
+                                            </Tooltip>
+                                        </Space>
+                                        <br />
+                                        <Text type="secondary">
+                                            แยกขั้นตอนวิเคราะห์คำถาม (Pass 1) กับสร้าง SQL (Pass 2) เพิ่มความแม่นยำ
+                                        </Text>
+                                    </Col>
+                                    <Col>
+                                        <Switch
+                                            checked={featureFlags.two_pass_enabled}
+                                            onChange={(checked) => handleToggleFeature('two_pass_enabled', checked)}
+                                        />
+                                    </Col>
+                                </Row>
+                            </Card>
+                        </Col>
+
+                        <Col span={24}>
+                            <Card type="inner">
+                                <Row justify="space-between" align="middle">
+                                    <Col>
+                                        <Space>
+                                            <Text strong>Value Lookup</Text>
+                                            <Tooltip title="ค้นหาค่าจริงในฐานข้อมูล (keyword index) ก่อนสร้าง SQL — ช่วยให้ AI ใช้ column/value ที่ถูกต้อง แต่อาจทำให้ AI สับสนถ้า semantic mapping ถูกต้องอยู่แล้ว">
+                                                <InfoCircleOutlined style={{ color: '#8c8c8c' }} />
+                                            </Tooltip>
+                                        </Space>
+                                        <br />
+                                        <Text type="secondary">
+                                            ค้น keyword จากคำถามใน DB แล้ว inject ค่าจริงเข้า prompt (ใช้เมื่อ semantic mapping ไม่ครอบคลุม)
+                                        </Text>
+                                    </Col>
+                                    <Col>
+                                        <Switch
+                                            checked={featureFlags.value_lookup_enabled}
+                                            onChange={(checked) => handleToggleFeature('value_lookup_enabled', checked)}
+                                        />
+                                    </Col>
+                                </Row>
+                            </Card>
+                        </Col>
                     </Row>
                 )}
             </Card>
 
-            {/* Cache Management */}
-            <Card title="Cache Management">
-                <Paragraph>
-                    Clear the configuration cache to reload settings from the database.
-                </Paragraph>
-                <Button
-                    type="default"
-                    icon={<ClearOutlined />}
-                    onClick={handleClearCache}
-                    danger
-                >
-                    Clear Configuration Cache
-                </Button>
+            {/* Data & Cache Management */}
+            <Card title="Data & Cache Management">
+                <Row gutter={[16, 16]}>
+                    <Col span={24}>
+                        <Card type="inner">
+                            <Row justify="space-between" align="middle">
+                                <Col>
+                                    <Space>
+                                        <Text strong>Rebuild Keyword Index</Text>
+                                        <Tooltip title="Scan ค่าจริงในฐานข้อมูล (SERVICE_GROUP, PRODUCT_NAME, BUSINESS_GROUP ฯลฯ) แล้วสร้าง index สำหรับ Smart Value Lookup — ช่วยให้ AI หาค่าที่ตรงกับ keyword ของผู้ใช้ได้">
+                                            <InfoCircleOutlined style={{ color: '#8c8c8c' }} />
+                                        </Tooltip>
+                                    </Space>
+                                    <br />
+                                    <Text type="secondary">
+                                        สร้าง keyword index ใหม่จากข้อมูลล่าสุด (กด rebuild เมื่อมีการอัพเดทข้อมูล)
+                                    </Text>
+                                </Col>
+                                <Col>
+                                    <Button
+                                        icon={<DatabaseOutlined />}
+                                        onClick={handleRebuildKeywordIndex}
+                                        loading={rebuildingIndex}
+                                    >
+                                        Rebuild Index
+                                    </Button>
+                                </Col>
+                            </Row>
+                        </Card>
+                    </Col>
+                    <Col span={24}>
+                        <Card type="inner">
+                            <Row justify="space-between" align="middle">
+                                <Col>
+                                    <Text strong>Clear Configuration Cache</Text>
+                                    <br />
+                                    <Text type="secondary">ล้าง cache ค่า config เพื่อโหลดค่าล่าสุดจาก database</Text>
+                                </Col>
+                                <Col>
+                                    <Button
+                                        icon={<ClearOutlined />}
+                                        onClick={handleClearCache}
+                                        danger
+                                    >
+                                        Clear Cache
+                                    </Button>
+                                </Col>
+                            </Row>
+                        </Card>
+                    </Col>
+                </Row>
             </Card>
         </div>
     );

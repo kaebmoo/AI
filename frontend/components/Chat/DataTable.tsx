@@ -349,12 +349,26 @@ export const DataTable = ({ data }: DataTableProps) => {
                     rowMap[rVal] = { _rowLabel: rVal };
                 }
 
-                if (tLabel && periodLabels.includes(tLabel)) {
-                    // Sum up if duplicate (shouldn't happen often in SQL mart but safe to sum)
-                    const val = item[valueKey || keys[keys.length - 1]];
-                    const numVal = typeof val === 'number' ? val : parseFloat(String(val).replace(/,/g, '')) || 0;
+                // Normalize tLabel to match periodLabels format
+                // Handles: "1" vs "01", "1/2025" vs "01/2025"
+                if (tLabel) {
+                    const normalizePeriod = (s: string): string => {
+                        const parts = s.split('/');
+                        const m = parseInt(parts[0]);
+                        if (!isNaN(m) && m >= 1 && m <= 12) {
+                            const padded = String(m).padStart(2, '0');
+                            return parts.length > 1 ? `${padded}/${parts[1]}` : padded;
+                        }
+                        return s;
+                    };
+                    const normalizedLabel = normalizePeriod(tLabel);
+                    const matchedLabel = periodLabels.find(p => normalizePeriod(p) === normalizedLabel);
 
-                    rowMap[rVal][tLabel] = (rowMap[rVal][tLabel] || 0) + numVal;
+                    if (matchedLabel) {
+                        const val = item[valueKey || keys[keys.length - 1]];
+                        const numVal = typeof val === 'number' ? val : parseFloat(String(val).replace(/,/g, '')) || 0;
+                        rowMap[rVal][matchedLabel] = (rowMap[rVal][matchedLabel] || 0) + numVal;
+                    }
                 }
             });
 

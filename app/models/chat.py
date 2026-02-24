@@ -20,6 +20,7 @@ class ChatHistory(Base):
     tokens_used = Column(Integer, default=0)
     execution_time_ms = Column(Float, default=0.0)
     created_at = Column(DateTime, default=datetime.utcnow)
+    context_name = Column(String, nullable=True)  # data context: revenue, expense, etc.
     is_bookmarked = Column(Boolean, default=False)
     feedback_rating = Column(Integer, nullable=True) # 1-5
 

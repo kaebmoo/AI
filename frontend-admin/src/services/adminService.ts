@@ -26,6 +26,8 @@ export interface AIConfig {
     gemini_model: string;
     matcha_model: string;
     matcha_api_url: string;
+    claude_extended_thinking: boolean;
+    claude_thinking_budget_tokens: number;
 }
 
 export interface FeatureFlags {
@@ -34,6 +36,8 @@ export interface FeatureFlags {
     debug_mode: boolean;
     log_queries: boolean;
     collect_feedback: boolean;
+    two_pass_enabled: boolean;
+    value_lookup_enabled: boolean;
 }
 
 export const adminService = {
@@ -99,6 +103,13 @@ export const adminService = {
 
     clearConfigCache: async () => {
         const response = await axios.post(`${API_URL}/admin/config/cache/clear`, {}, {
+            headers: getAuthHeader()
+        });
+        return response.data;
+    },
+
+    rebuildKeywordIndex: async () => {
+        const response = await axios.post(`${API_URL}/admin/config/rebuild-keyword-index`, {}, {
             headers: getAuthHeader()
         });
         return response.data;
