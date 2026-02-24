@@ -15,6 +15,7 @@ from app.models.chat import ChatHistory
 from app.schemas.chat import ChatRequest, ChatResponse, DataWarning, TrainingRequest
 from app.services.ai_service import AIService, create_gemini_service, create_claude_service, create_matcha_service
 from app.services.schema_service import SchemaService
+from app.services.admin_config_service import AdminConfigService
 from app.config import settings
 
 
@@ -62,19 +63,7 @@ def refresh_metadata(
 # Auto-detect Context from Question
 # =============================================================================
 
-# Default keywords (fallback if DB doesn't have keywords configured)
-DEFAULT_CONTEXT_KEYWORDS = {
-    "expense": [
-        "ค่าใช้จ่าย", "expense", "งบประมาณ", "budget", "ต้นทุน", "cost",
-        "ค่าจ้าง", "เงินเดือน", "salary", "ค่าดำเนินการ", "operating",
-        "ค่าเช่า", "rent", "ค่าน้ำ", "ค่าไฟ", "utility", "ค่าโทรศัพท์",
-        "ใช้จ่าย", "จ่าย", "expenditure", "spending", "ค่าบริการ"
-    ],
-    "revenue": [
-        "รายได้", "revenue", "ยอดขาย", "sales", "income", "กำไร", "profit",
-        "ยอดรับ", "รายรับ", "earning", "ขาย", "sold"
-    ]
-}
+# No more hardcoded keywords — all loaded from schema_contexts.keywords in DB
 
 
 def detect_context_from_question(question: str, schema_service: SchemaService = None) -> str:
@@ -109,19 +98,21 @@ def detect_context_from_question(question: str, schema_service: SchemaService = 
         except Exception:
             pass
 
-    # 2. If no DB matches, use default keywords
-    if not context_scores:
-        for ctx_name, keywords in DEFAULT_CONTEXT_KEYWORDS.items():
-            score = sum(1 for kw in keywords if kw in question_lower)
-            if score > 0:
-                context_scores[ctx_name] = score
-
-    # 3. Return highest scoring context, or default to 'revenue'
+    # 2. Return highest scoring context, or default to highest-priority context from DB
     if context_scores:
         best_context = max(context_scores, key=context_scores.get)
         return best_context
 
-    return "revenue"
+    # 3. Default: use the highest-priority active context from DB
+    if schema_service:
+        try:
+            contexts = schema_service.get_all_contexts()
+            if contexts:
+                return contexts[0].get('name', 'revenue')  # Already sorted by priority DESC
+        except Exception:
+            pass
+
+    return "revenue"  # Last resort safety net
 
 
 # =============================================================================
@@ -186,7 +177,8 @@ def detect_data_warnings(data: List[Dict[str, Any]], sql_query: str = None) -> L
 async def detect_multiple_sources_warning(
     sql_query: str,
     mcp_client,
-    context_name: str = "revenue"
+    context_name: str = "revenue",
+    schema_service: SchemaService = None
 ) -> List[DataWarning]:
     """
     Detect when LIKE query matches multiple distinct values.
@@ -197,15 +189,21 @@ async def detect_multiple_sources_warning(
     if not sql_query:
         return warnings
 
-    # Group columns to check for multiple sources
-    GROUP_COLUMNS = [
-        'account_group_name', 'account_name',
-        'service_group', 'business_group', 'product_name',
-        'department', 'division', 'gl_group'
-    ]
+    # Get groupable columns from DB metadata (no hardcode)
+    GROUP_COLUMNS = []
+    table = context_name  # fallback
+    if schema_service:
+        context_info = schema_service.get_context_info(context_name)
+        if context_info:
+            table = context_info.get('main_view', context_name)
+        # Get groupable columns for this context
+        cols = schema_service.get_searchable_columns(context_name, table)
+        GROUP_COLUMNS = [c.lower() for c in cols]
+
+    if not GROUP_COLUMNS:
+        return warnings
 
     # Find LIKE conditions in SQL
-    # Pattern: column_name LIKE '%value%'
     like_pattern = r"(\w+)\s+LIKE\s+'%([^%]+)%'"
     matches = re.findall(like_pattern, sql_query, re.IGNORECASE)
 
@@ -216,12 +214,8 @@ async def detect_multiple_sources_warning(
     for column, search_value in matches:
         column_lower = column.lower()
 
-        # Only check group columns (not time columns like year, month)
         if column_lower not in GROUP_COLUMNS:
             continue
-
-        # Determine table based on context
-        table = "v_expense_mart" if context_name == "expense" else "revenue_search"
 
         # Query to find distinct values matching the LIKE
         check_sql = f"""
@@ -267,9 +261,6 @@ async def chat(
     current_request: Request,
     current_user: User = Depends(deps.get_current_user),
     db: Session = Depends(deps.get_db),
-    # By default use the system configured provider from deps
-    # If user specifies a provider override, we handle it below
-    default_ai_service: AIService = Depends(deps.get_ai_service)
 ):
     """
     Process a natural language question about revenue/sales.
@@ -306,40 +297,43 @@ async def chat(
                     content += f"\n\n```sql\n{chat_entry.generated_sql}\n```"
                 history.append({"role": "assistant", "content": content})
     
-    # 3. Instantiate AI Service based on provider (Override) or Default
-    ai_service = default_ai_service
-    
-    if request.provider and request.provider != settings.AI_PROVIDER:
-        # Override Provider - Need to get MCP client manually
-        mcp_client = deps.get_mcp_client(current_request)
-        
-        if request.provider == "claude":
-            if not settings.ANTHROPIC_API_KEY:
-                 raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
-            ai_service = create_claude_service(
-                api_key=settings.ANTHROPIC_API_KEY,
-                mcp_client=mcp_client,
-                model=settings.CLAUDE_MODEL
-            )
-        elif request.provider == "gemini":
-            if not settings.GOOGLE_AI_API_KEY:
-                 raise HTTPException(status_code=500, detail="GOOGLE_AI_API_KEY not configured")
-            ai_service = create_gemini_service(
-                api_key=settings.GOOGLE_AI_API_KEY,
-                mcp_client=mcp_client,
-                model=settings.GEMINI_MODEL
-            )
-        elif request.provider == "matcha":
-             if not settings.MATCHA_AI_API_KEY:
-                  raise HTTPException(status_code=500, detail="MATCHA config missing")
-             ai_service = create_matcha_service(
-                 api_key=settings.MATCHA_AI_API_KEY,
-                 api_url=settings.MATCHA_API_URL,
-                 mcp_client=mcp_client,
-                 model=settings.MATCHA_MODEL
-             )
-        else:
-             raise HTTPException(status_code=400, detail=f"Unknown provider: {request.provider}")
+    # 3. Instantiate AI Service based on provider selection
+    # If user explicitly selected a provider → always create that provider's service
+    # If no selection → use system default
+    _ai_cfg = AdminConfigService(db).get_ai_config()
+    selected_provider = request.provider or _ai_cfg.get("default_provider", settings.AI_PROVIDER)
+    mcp_client = deps.get_mcp_client(current_request)
+
+    if selected_provider == "claude":
+        if not settings.ANTHROPIC_API_KEY:
+             raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
+        ai_service = create_claude_service(
+            api_key=settings.ANTHROPIC_API_KEY,
+            mcp_client=mcp_client,
+            model=_ai_cfg.get("claude_model", settings.CLAUDE_MODEL),
+            extended_thinking=_ai_cfg.get("claude_extended_thinking", False),
+            thinking_budget_tokens=_ai_cfg.get("claude_thinking_budget_tokens", 8000),
+        )
+    elif selected_provider == "gemini":
+        if not settings.GOOGLE_AI_API_KEY:
+             raise HTTPException(status_code=500, detail="GOOGLE_AI_API_KEY not configured")
+        ai_service = create_gemini_service(
+            api_key=settings.GOOGLE_AI_API_KEY,
+            mcp_client=mcp_client,
+            model=_ai_cfg.get("gemini_model", settings.GEMINI_MODEL),
+        )
+    elif selected_provider == "matcha":
+         if not settings.MATCHA_AI_API_KEY:
+              raise HTTPException(status_code=500, detail="MATCHA config missing")
+         api_url = _ai_cfg.get("matcha_api_url") or settings.MATCHA_API_URL
+         ai_service = create_matcha_service(
+             api_key=settings.MATCHA_AI_API_KEY,
+             api_url=api_url,
+             mcp_client=mcp_client,
+             model=_ai_cfg.get("matcha_model", settings.MATCHA_MODEL),
+         )
+    else:
+         raise HTTPException(status_code=400, detail=f"Unknown provider: {selected_provider}")
 
     # 4. Context Logic
     # Create SchemaService once and reuse for context detection + prompt building
@@ -353,33 +347,31 @@ async def chat(
     if request.context:
         context_name = request.context
         logger.info(f"Using explicit context: {context_name}")
+
+        # If context changed from previous conversation → clear history
+        if history and previous_chats:
+            prev_context = getattr(previous_chats[0], 'context_name', None)
+            if prev_context and prev_context != context_name:
+                logger.info(f"Context changed: '{prev_context}' → '{context_name}' — clearing conversation history")
+                history = []
     else:
         # Check if follow-up question should maintain previous context
-        previous_context = None
-        if previous_chats:
-            # Get context from previous SQL (check which table was used)
-            last_sql = previous_chats[0].generated_sql or ""
-            if "v_expense_mart" in last_sql.lower() or "expense" in last_sql.lower():
-                previous_context = "expense"
-            elif "revenue_search" in last_sql.lower() or "revenue" in last_sql.lower():
-                previous_context = "revenue"
+        # Use context_name from ChatHistory (no SQL string parsing)
+        previous_context = getattr(previous_chats[0], 'context_name', None) if previous_chats else None
 
-        # Auto-detect from current question
+        # Auto-detect from current question (uses DB keywords)
         detected_context = detect_context_from_question(request.question, schema_service)
 
-        # Decide: maintain previous or use detected
-        question_lower = request.question.lower()
-        has_expense_keyword = any(kw in question_lower for kw in ["ค่าใช้จ่าย", "expense", "งบประมาณ", "cost"])
-        has_revenue_keyword = any(kw in question_lower for kw in ["รายได้", "revenue", "ยอดขาย", "sales"])
-
-        if previous_context and not has_expense_keyword and not has_revenue_keyword:
-            # Follow-up without explicit context -> maintain previous
+        # Decide: if detected context matches a strong keyword → use detected, else maintain previous
+        if detected_context and detected_context != previous_context:
+            context_name = detected_context
+            logger.info(f"Auto-detected context: {context_name} for question: {request.question[:50]}...")
+        elif previous_context:
             context_name = previous_context
             logger.info(f"Maintaining previous context: {context_name} for follow-up: {request.question[:50]}...")
         else:
-            # New topic or explicit context keywords
             context_name = detected_context
-            logger.info(f"Auto-detected context: {context_name} for question: {request.question[:50]}...")
+            logger.info(f"Using detected context: {context_name} for question: {request.question[:50]}...")
 
     # 5. Call AI Service with retry mechanism (Async)
 
@@ -407,6 +399,8 @@ async def chat(
             rag_enabled=True  # ENABLE RAG OPTIMIZATION: Use lite prompt, let AIService inject snippets
         )
 
+        _feature_flags = AdminConfigService(db).get_feature_flags()
+
         result = await ai_service.query_hybrid(
             question=request.question,
             system_prompt=system_prompt,
@@ -416,7 +410,9 @@ async def chat(
                 f"Hybrid status: attempt={status.attempt}/{status.max_attempts}, "
                 f"status={status.status}, message={status.message}"
             ),
-            context_name=context_name
+            context_name=context_name,
+            two_pass_enabled=_feature_flags.get("two_pass_enabled", False),
+            value_lookup_enabled=_feature_flags.get("value_lookup_enabled", False)
         )
     else:
         # MCP Mode: Full tool access (more expensive but more flexible)
@@ -464,7 +460,8 @@ async def chat(
         sql_result_summary=str(result.data)[:1000] if result.data else None,
         ai_response=ai_response_text if not result.error else f"Error: {result.error}",
         execution_time_ms=execution_time,
-        tokens_used=result.tokens_used
+        tokens_used=result.tokens_used,
+        context_name=context_name
     )
     db.add(chat_entry)
     db.commit()
@@ -501,7 +498,8 @@ async def chat(
             multiple_source_warnings = await detect_multiple_sources_warning(
                 result.sql_query,
                 mcp_client,
-                context_name
+                context_name,
+                schema_service=schema_service
             )
             warnings_response.extend([
                 {"code": w.code, "message": w.message, "severity": w.severity}

@@ -899,6 +899,8 @@ def update_ai_config(
         gemini_model=config_update.get("gemini_model"),
         matcha_model=config_update.get("matcha_model"),
         matcha_api_url=config_update.get("matcha_api_url"),
+        claude_extended_thinking=config_update.get("claude_extended_thinking"),
+        claude_thinking_budget_tokens=config_update.get("claude_thinking_budget_tokens"),
         updated_by=current_user.email
     )
 
@@ -1033,6 +1035,42 @@ def clear_config_cache(
     return {
         "status": "success",
         "message": "Configuration cache cleared"
+    }
+
+
+@router.post("/config/rebuild-keyword-index", response_model=dict)
+def rebuild_keyword_index(
+    current_user: User = Depends(deps.require_admin),
+    schema_service: SchemaService = Depends(deps.get_schema_service)
+):
+    """
+    Rebuild keyword value index for smart value lookup.
+    Scans all searchable columns and builds keyword → column/value mappings.
+    Admin only.
+    """
+    total = 0
+
+    # Build index for ALL active contexts from DB (no hardcode)
+    try:
+        contexts = schema_service.get_all_contexts()
+        for ctx in contexts:
+            ctx_name = ctx.get("name", "")
+            main_view = ctx.get("main_view", "")
+            if ctx_name and main_view:
+                try:
+                    count = schema_service.build_keyword_index(ctx_name, main_view)
+                    total += count
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).warning(f"Failed to build index for {ctx_name}: {e}")
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Failed to get contexts for index rebuild: {e}")
+
+    return {
+        "status": "success",
+        "message": f"Keyword index rebuilt: {total} entries",
+        "total_entries": total
     }
 
 

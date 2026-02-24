@@ -95,7 +95,9 @@ def get_ai_service(
         return create_claude_service(
             api_key=api_key,
             mcp_client=mcp_client,
-            model=ai_config.get("claude_model", settings.CLAUDE_MODEL)
+            model=ai_config.get("claude_model", settings.CLAUDE_MODEL),
+            extended_thinking=ai_config.get("claude_extended_thinking", False),
+            thinking_budget_tokens=ai_config.get("claude_thinking_budget_tokens", 8000),
         )
     elif default_provider == "matcha":
         if not api_key:

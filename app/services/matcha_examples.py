@@ -13,144 +13,124 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-# Static few-shot examples สำหรับ Matcha
-MATCHA_EXAMPLES = [
-    # === คำถามตรวจสอบข้อมูล (ไม่ต้อง exclude รายได้อื่น) ===
-    {
-        "question": "มีข้อมูลรายได้ไหม",
-        "sql": "SELECT COUNT(*) as total_records, MIN(year) as min_year, MAX(year) as max_year, MIN(month) as min_month, MAX(month) as max_month FROM revenue_search",
-        "explanation": "ตรวจสอบว่ามีข้อมูลรายได้ในระบบหรือไม่ และช่วงเวลาของข้อมูล"
-    },
-    {
-        "question": "ข้อมูลรายได้มีถึงเดือนอะไร",
-        "sql": "SELECT year, month, COUNT(*) as records FROM revenue_search GROUP BY year, month ORDER BY year DESC, month DESC LIMIT 5",
-        "explanation": "แสดง 5 เดือนล่าสุดที่มีข้อมูลรายได้"
-    },
-    {
-        "question": "มีข้อมูลกี่รายการ",
-        "sql": "SELECT COUNT(*) as total_records FROM revenue_search",
-        "explanation": "นับจำนวนรายการข้อมูลทั้งหมด"
-    },
-    # === คำถามรายได้รวม (ต้อง exclude รายได้อื่น) ===
-    {
-        "question": "รายได้รวมเดือนมกราคม 2568",
-        "sql": "SELECT SUM(revenue) as total_revenue FROM revenue_search WHERE year = 2025 AND month = 1 AND BUSINESS_GROUP != 'รายได้อื่น'",
-        "explanation": "รายได้รวมทั้งหมดในเดือนมกราคม 2568 (ค.ศ. 2025) ไม่รวมรายได้อื่น"
-    },
-    {
-        "question": "รายได้ นป. ปี 2568",
-        "sql": "SELECT SUM(revenue) as total_revenue FROM revenue_search WHERE organization_group_abbr = 'นป.' AND year = 2025",
-        "explanation": "รายได้ของกลุ่มขายและปฏิบัติการลูกค้า ภาคเหนือ (นป.) ในปี 2568"
-    },
-    {
-        "question": "รายได้แยกตามกลุ่มผลิตภัณฑ์",
-        "sql": "SELECT BUSINESS_GROUP, SUM(revenue) as total_revenue FROM revenue_search GROUP BY BUSINESS_GROUP ORDER BY total_revenue DESC",
-        "explanation": "รายได้แยกตามกลุ่มผลิตภัณฑ์ (Mobile, Fixed Line, Digital, etc.)"
-    },
-    {
-        "question": "รายได้อสังหาริมทรัพย์แยกตามฝ่าย",
-        "sql": "SELECT department, SUM(revenue) as total_revenue FROM revenue_search WHERE SERVICE_GROUP = 'กลุ่มบริการพัฒนาสินทรัพย์' GROUP BY department ORDER BY total_revenue DESC",
-        "explanation": "รายได้จากอสังหาริมทรัพย์/สินทรัพย์ แยกตามฝ่าย"
-    },
-    {
-        "question": "5 ฝ่ายที่มีรายได้สูงสุด",
-        "sql": "SELECT department, SUM(revenue) as total_revenue FROM revenue_search GROUP BY department ORDER BY total_revenue DESC LIMIT 5",
-        "explanation": "5 ฝ่ายที่มีรายได้สูงที่สุด"
-    },
-    {
-        "question": "หน่วยงานไหนมีรายได้มากที่สุด 5 อันดับแรก และน้อยที่สุด 5 อันดับแรก",
-        "sql": """SELECT 'มากสุด' as category, department, total FROM (
-    SELECT department, SUM(revenue) as total
-    FROM revenue_search
-    GROUP BY department
-    ORDER BY total DESC
-    LIMIT 5
-)
-UNION ALL
-SELECT 'น้อยสุด' as category, department, total FROM (
-    SELECT department, SUM(revenue) as total
-    FROM revenue_search
-    GROUP BY department
-    ORDER BY total ASC
-    LIMIT 5
-)""",
-        "explanation": "Top 5 และ Bottom 5 หน่วยงานตามรายได้"
-    },
-    {
-        "question": "รายได้ บชง. เดือน 1 ถึง 11 ปี 2568",
-        "sql": "SELECT month, SUM(revenue) as total_revenue FROM revenue_search WHERE department_abbr = 'บชง.' AND year = 2025 AND CAST(month AS INTEGER) BETWEEN 1 AND 11 GROUP BY month ORDER BY CAST(month AS INTEGER)",
-        "explanation": "รายได้ฝ่ายบัญชีบริหาร เดือน 1-11 ปี 2568"
-    },
-    {
-        "question": "รายได้มือถือ",
-        "sql": "SELECT SUM(revenue) as total_revenue FROM revenue_search WHERE BUSINESS_GROUP = 'Mobile'",
-        "explanation": "รายได้จากกลุ่มผลิตภัณฑ์มือถือ (Mobile)"
-    },
-    {
-        "question": "สัดส่วนรายได้ของกลุ่มธุรกิจ Fixed Line & Broadband",
-        "sql": """SELECT
-    'Fixed Line & Broadband' as BUSINESS_GROUP,
-    SUM(revenue) as group_revenue,
-    (SELECT SUM(revenue) FROM revenue_search WHERE BUSINESS_GROUP != 'รายได้อื่น') as total_revenue,
-    ROUND(SUM(revenue) * 100.0 / (SELECT SUM(revenue) FROM revenue_search WHERE BUSINESS_GROUP != 'รายได้อื่น'), 2) as percentage
-FROM revenue_search
-WHERE BUSINESS_GROUP = 'Fixed Line & Broadband'""",
-        "explanation": "สัดส่วนรายได้ Fixed Line & Broadband เทียบกับรายได้รวม (ไม่นับรายได้อื่น)"
-    },
-    {
-        "question": "รายได้รวมทั้งหมด (ไม่รวมรายได้อื่น)",
-        "sql": "SELECT SUM(revenue) as total_revenue FROM revenue_search WHERE BUSINESS_GROUP != 'รายได้อื่น'",
-        "explanation": "รายได้รวมจากธุรกิจหลัก ไม่รวมรายได้อื่นและผลตอบแทนทางการเงิน"
-    },
-    {
-        "question": "สัดส่วนรายได้แยกตามกลุ่มธุรกิจ",
-        "sql": """SELECT
+def _get_latest_year(db_path: str = None) -> int:
+    """ดึงปีล่าสุดจากฐานข้อมูลจริง ไม่ hardcode"""
+    if not db_path:
+        try:
+            from app.config import settings
+            db_path = settings.DATABASE_URL.replace("sqlite:///", "").replace("sqlite://", "")
+        except Exception:
+            db_path = "nt_fi_report.sqlite"
+    try:
+        conn = sqlite3.connect(db_path)
+        row = conn.execute("SELECT MAX(year) FROM revenue_search").fetchone()
+        conn.close()
+        return row[0] if row and row[0] else 2025
+    except Exception:
+        return 2025
+
+
+def _get_exclude_condition(db_path: str = None) -> str:
+    """ดึง exclude condition จาก schema_business_rules หรือ default"""
+    import re
+    if not db_path:
+        try:
+            from app.config import settings
+            db_path = settings.DATABASE_URL.replace("sqlite:///", "").replace("sqlite://", "")
+        except Exception:
+            db_path = "nt_fi_report.sqlite"
+    try:
+        conn = sqlite3.connect(db_path)
+        row = conn.execute(
+            "SELECT example_correct FROM schema_business_rules WHERE rule_code = 'EXCLUDE_OTHER_REVENUE' AND is_active = 1 LIMIT 1"
+        ).fetchone()
+        conn.close()
+        if row and row[0]:
+            # Extract the WHERE condition (e.g. "BUSINESS_GROUP != 'รายได้อื่น'")
+            match = re.search(r"([\w]+\s*!=\s*'[^']+')", row[0])
+            if match:
+                return match.group(1)
+    except Exception:
+        pass
+    return "BUSINESS_GROUP != 'รายได้อื่น'"  # Safety net default
+
+
+def build_examples(db_path: str = None) -> List[Dict]:
+    """สร้าง few-shot examples แบบ dynamic — ปี + business rules ดึงจาก DB จริง"""
+    Y = _get_latest_year(db_path)
+    Y_TH = Y + 543
+    EXCLUDE = _get_exclude_condition(db_path)
+
+    return [
+        # === คำถามตรวจสอบข้อมูล ===
+        {
+            "question": "มีข้อมูลรายได้ไหม",
+            "sql": "SELECT COUNT(*) as total_records, MIN(year) as min_year, MAX(year) as max_year, MIN(month) as min_month, MAX(month) as max_month FROM revenue_search",
+            "explanation": "ตรวจสอบว่ามีข้อมูลรายได้ในระบบหรือไม่ และช่วงเวลาของข้อมูล"
+        },
+        {
+            "question": "ข้อมูลรายได้มีถึงเดือนอะไร",
+            "sql": "SELECT year, month, COUNT(*) as records FROM revenue_search GROUP BY year, month ORDER BY year DESC, month DESC LIMIT 5",
+            "explanation": "แสดง 5 เดือนล่าสุดที่มีข้อมูลรายได้"
+        },
+        # === คำถามรายได้รวม ===
+        {
+            "question": f"รายได้รวมเดือนมกราคม {Y_TH}",
+            "sql": f"SELECT SUM(revenue) as total_revenue FROM revenue_search WHERE year = {Y} AND month = 1 AND {EXCLUDE}",
+            "explanation": f"รายได้รวมทั้งหมดในเดือนมกราคม {Y_TH} (ค.ศ. {Y}) ไม่รวมรายได้อื่น"
+        },
+        {
+            "question": f"รายได้ นป. ปี {Y_TH}",
+            "sql": f"SELECT SUM(revenue) as total_revenue FROM revenue_search WHERE organization_group_abbr = 'นป.' AND year = {Y}",
+            "explanation": f"รายได้ของกลุ่มขายและปฏิบัติการลูกค้า ภาคเหนือ (นป.) ในปี {Y_TH}"
+        },
+        {
+            "question": "รายได้แยกตามกลุ่มผลิตภัณฑ์",
+            "sql": "SELECT BUSINESS_GROUP, SUM(revenue) as total_revenue FROM revenue_search GROUP BY BUSINESS_GROUP ORDER BY total_revenue DESC",
+            "explanation": "รายได้แยกตามกลุ่มผลิตภัณฑ์"
+        },
+        {
+            "question": "5 ฝ่ายที่มีรายได้สูงสุด",
+            "sql": "SELECT department, SUM(revenue) as total_revenue FROM revenue_search GROUP BY department ORDER BY total_revenue DESC LIMIT 5",
+            "explanation": "5 ฝ่ายที่มีรายได้สูงที่สุด"
+        },
+        {
+            "question": f"รายได้ บชง. เดือน 1 ถึง 11 ปี {Y_TH}",
+            "sql": f"SELECT month, SUM(revenue) as total_revenue FROM revenue_search WHERE department_abbr = 'บชง.' AND year = {Y} AND CAST(month AS INTEGER) BETWEEN 1 AND 11 GROUP BY month ORDER BY CAST(month AS INTEGER)",
+            "explanation": f"รายได้ฝ่ายบัญชีบริหาร เดือน 1-11 ปี {Y_TH}"
+        },
+        {
+            "question": "สัดส่วนรายได้แยกตามกลุ่มธุรกิจ",
+            "sql": f"""SELECT
     BUSINESS_GROUP,
     SUM(revenue) as group_revenue,
-    ROUND(SUM(revenue) * 100.0 / (SELECT SUM(revenue) FROM revenue_search WHERE BUSINESS_GROUP != 'รายได้อื่น'), 2) as percentage
+    ROUND(SUM(revenue) * 100.0 / (SELECT SUM(revenue) FROM revenue_search WHERE {EXCLUDE}), 2) as percentage
 FROM revenue_search
-WHERE BUSINESS_GROUP != 'รายได้อื่น'
+WHERE {EXCLUDE}
 GROUP BY BUSINESS_GROUP
 ORDER BY group_revenue DESC""",
-        "explanation": "สัดส่วนรายได้แต่ละกลุ่มธุรกิจ (ไม่นับรายได้อื่น)"
-    },
-    # === คำถามแยกรายได้ตามกลุ่มธุรกิจ (ต้อง exclude รายได้อื่น) ===
-    {
-        "question": "ภาคเหนือมีรายได้จากอะไรบ้าง",
-        "sql": """SELECT
-    BUSINESS_GROUP as กลุ่มธุรกิจ,
-    SUM(revenue) as รายได้,
-    ROUND(SUM(revenue) * 100.0 / (SELECT SUM(revenue) FROM revenue_search WHERE organization_group_abbr = 'นป.' AND BUSINESS_GROUP != 'รายได้อื่น'), 2) as สัดส่วน
-FROM revenue_search
-WHERE organization_group_abbr = 'นป.' AND BUSINESS_GROUP != 'รายได้อื่น'
-GROUP BY BUSINESS_GROUP
-ORDER BY รายได้ DESC""",
-        "explanation": "รายได้ภาคเหนือ (นป.) แยกตามกลุ่มธุรกิจ ไม่รวมรายได้อื่นเพราะไม่ใช่รายได้จากธุรกิจหลัก"
-    },
-    {
-        "question": "รายได้แยกตามกลุ่มธุรกิจ",
-        "sql": """SELECT
-    BUSINESS_GROUP as กลุ่มธุรกิจ,
-    SUM(revenue) as รายได้,
-    ROUND(SUM(revenue) * 100.0 / (SELECT SUM(revenue) FROM revenue_search WHERE BUSINESS_GROUP != 'รายได้อื่น'), 2) as สัดส่วน
-FROM revenue_search
-WHERE BUSINESS_GROUP != 'รายได้อื่น'
-GROUP BY BUSINESS_GROUP
-ORDER BY รายได้ DESC""",
-        "explanation": "รายได้แยกตามกลุ่มธุรกิจ ไม่รวมรายได้อื่นเพราะไม่ใช่รายได้จากธุรกิจหลัก"
-    },
-    {
-        "question": "หน่วยงานนี้มีรายได้จากผลิตภัณฑ์อะไรบ้าง",
-        "sql": """SELECT
+            "explanation": "สัดส่วนรายได้แต่ละกลุ่มธุรกิจ (ไม่นับรายได้อื่น)"
+        },
+        {
+            "question": "หน่วยงานนี้มีรายได้จากผลิตภัณฑ์อะไรบ้าง",
+            "sql": f"""SELECT
     BUSINESS_GROUP as กลุ่มธุรกิจ,
     SUM(revenue) as รายได้
 FROM revenue_search
-WHERE department_abbr = 'XXX' AND BUSINESS_GROUP != 'รายได้อื่น'
+WHERE department_abbr = 'XXX' AND {EXCLUDE}
 GROUP BY BUSINESS_GROUP
 ORDER BY รายได้ DESC""",
-        "explanation": "รายได้หน่วยงานแยกตามกลุ่มธุรกิจ ไม่รวมรายได้อื่น"
-    }
-]
+            "explanation": "รายได้หน่วยงานแยกตามกลุ่มธุรกิจ ไม่รวมรายได้อื่น"
+        }
+    ]
+
+
+# Backward compatibility: MATCHA_EXAMPLES as lazy-loaded dynamic list
+def _get_examples():
+    return build_examples()
+
+# For code that imports MATCHA_EXAMPLES directly
+MATCHA_EXAMPLES = build_examples()
 
 
 class MatchaExamplesService:
@@ -312,7 +292,7 @@ class MatchaExamplesService:
         Returns:
             List of all examples
         """
-        all_examples = list(MATCHA_EXAMPLES)  # Copy static examples
+        all_examples = list(build_examples(self.db_path))  # Dynamic examples from DB year
 
         # Add golden examples from database
         golden = self.get_golden_examples()
@@ -331,13 +311,13 @@ def get_matcha_few_shot_prompt(examples: Optional[List[Dict]] = None) -> str:
     สร้าง few-shot examples prompt สำหรับ Matcha
 
     Args:
-        examples: List of examples หรือใช้ default MATCHA_EXAMPLES
+        examples: List of examples หรือใช้ build_examples()
 
     Returns:
         Formatted prompt text
     """
     if examples is None:
-        examples = MATCHA_EXAMPLES
+        examples = build_examples()
 
     prompt = "## ตัวอย่างคำถามและ SQL ที่ถูกต้อง\n\n"
 
@@ -355,13 +335,13 @@ def get_matcha_few_shot_messages(examples: Optional[List[Dict]] = None) -> List[
     สร้าง few-shot examples เป็น message format สำหรับ OpenAI-compatible API
 
     Args:
-        examples: List of examples หรือใช้ default MATCHA_EXAMPLES
+        examples: List of examples หรือใช้ build_examples()
 
     Returns:
         List of message dicts (user/assistant pairs)
     """
     if examples is None:
-        examples = MATCHA_EXAMPLES
+        examples = build_examples()
 
     messages = []
 
@@ -427,28 +407,44 @@ WHERE division_abbr = 'สญ.'
 """
 
 
-def get_business_term_reference() -> str:
+def get_business_term_reference(db_path: str = None) -> str:
     """
-    สร้าง reference text สำหรับคำศัพท์ธุรกิจ
-
-    Returns:
-        Reference text
+    สร้าง reference text สำหรับคำศัพท์ธุรกิจ — ดึงจาก schema_semantic_mapping ใน DB
     """
-    return """## คำศัพท์ธุรกิจและการแปลงเป็น SQL
+    if not db_path:
+        try:
+            from app.config import settings
+            db_path = settings.DATABASE_URL.replace("sqlite:///", "").replace("sqlite://", "")
+        except Exception:
+            db_path = "nt_fi_report.sqlite"
 
-### กลุ่มผลิตภัณฑ์ (BUSINESS_GROUP)
-- "มือถือ" / "mobile" → `BUSINESS_GROUP = 'Mobile'`
-- "โทรศัพท์บ้าน" / "fixed line" → `BUSINESS_GROUP = 'Fixed Line'`
-- "ดิจิทัล" / "digital" → `BUSINESS_GROUP = 'Digital'`
+    lines = ["## คำศัพท์ธุรกิจและการแปลงเป็น SQL (จาก Semantic Mappings)\n"]
 
-### กลุ่มบริการ (SERVICE_GROUP)
-- "อสังหาริมทรัพย์" / "ทรัพย์สิน" → `SERVICE_GROUP = 'กลุ่มบริการพัฒนาสินทรัพย์'`
-- "ค้าปลีก" / "retail" → `SERVICE_GROUP LIKE '%ค้าปลีก%'`
+    try:
+        conn = sqlite3.connect(db_path)
+        rows = conn.execute("""
+            SELECT keyword, target_column, target_condition, description
+            FROM schema_semantic_mapping
+            WHERE is_active = 1 AND keyword_type = 'term'
+            ORDER BY target_column, keyword
+        """).fetchall()
+        conn.close()
 
-### การค้นหาตามพื้นที่
-- "จังหวัด" → ใช้ column `section` เช่น `section LIKE '%จันทบุรี%'`
-- "ภาค" → ใช้ `organization_group_abbr` หรือ `organization_group`
-"""
+        if rows:
+            current_col = ""
+            for keyword, col, condition, desc in rows:
+                if col != current_col:
+                    lines.append(f"\n### {col}")
+                    current_col = col
+                desc_text = f" ({desc})" if desc else ""
+                lines.append(f'- "{keyword}" → `{col} {condition}`{desc_text}')
+        else:
+            lines.append("ยังไม่มี semantic mappings ในระบบ — เพิ่มได้ผ่าน Admin UI")
+
+    except Exception as e:
+        lines.append(f"ไม่สามารถโหลด mappings: {e}")
+
+    return "\n".join(lines)
 
 
 # Convenience function for backward compatibility

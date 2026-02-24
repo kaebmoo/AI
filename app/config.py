@@ -60,6 +60,16 @@ class Settings(BaseSettings):
     GEMINI_MODEL: str = "gemini-2.0-flash-exp"
     CLAUDE_MODEL: str = "claude-sonnet-4-20250514"
 
+    # Claude Extended Thinking
+    CLAUDE_EXTENDED_THINKING: bool = False
+    CLAUDE_THINKING_BUDGET_TOKENS: int = 8000
+
+    # Two-Pass SQL Generation
+    TWO_PASS_ENABLED: bool = False
+
+    # Value Lookup (keyword index search)
+    VALUE_LOOKUP_ENABLED: bool = False
+
     # Vanna AI (RAG) Settings
     VANNA_CHROMA_PATH: str = "./chroma_db"
     VANNA_DISTANCE_THRESHOLD: float = 1.8

@@ -133,10 +133,18 @@ class AIProvider(ABC):
 
 class ClaudeProvider(AIProvider):
     """Claude API provider"""
-    
-    def __init__(self, api_key: str, model: str = "claude-sonnet-4-20250514"):
+
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "claude-sonnet-4-20250514",
+        extended_thinking: bool = False,
+        thinking_budget_tokens: int = 8000,
+    ):
         self.api_key = api_key
         self.model = model
+        self.extended_thinking = extended_thinking
+        self.thinking_budget_tokens = thinking_budget_tokens
         self._client = None
     
     @property
@@ -298,13 +306,35 @@ Example for time comparison (grouped bar) - showing each category with bars for 
 
     @ai_retry
     async def generate_content(self, prompt: str, system_prompt: Optional[str] = None) -> str:
-        response = await self.client.messages.create(
-            model=self.model,
-            max_tokens=4000,
-            system=system_prompt or "",
-            messages=[{"role": "user", "content": prompt}]
-        )
-        return response.content[0].text
+        # Extended Thinking: รองรับ claude-sonnet-4 และ claude-opus-4 ขึ้นไป
+        # ไม่รองรับ: claude-haiku, claude-3-*
+        THINKING_SUPPORTED_PREFIXES = ("claude-sonnet-4", "claude-opus-4")
+        model_supports_thinking = any(self.model.startswith(p) for p in THINKING_SUPPORTED_PREFIXES)
+        use_thinking = self.extended_thinking and model_supports_thinking
+
+        kwargs = {
+            "model": self.model,
+            "system": system_prompt or "",
+            "messages": [{"role": "user", "content": prompt}],
+        }
+
+        if use_thinking:
+            # max_tokens ต้องมากกว่า budget_tokens อย่างน้อย 1
+            kwargs["max_tokens"] = self.thinking_budget_tokens + 2000
+            kwargs["thinking"] = {"type": "enabled", "budget_tokens": self.thinking_budget_tokens}
+            logger.info(f"ClaudeProvider: Extended Thinking enabled (budget={self.thinking_budget_tokens}, model={self.model})")
+        else:
+            kwargs["max_tokens"] = 4000
+            if self.extended_thinking and not model_supports_thinking:
+                logger.warning(f"ClaudeProvider: Extended Thinking requested but model={self.model} does not support it, using standard mode")
+
+        response = await self.client.messages.create(**kwargs)
+
+        # Extract text blocks only (skip thinking blocks)
+        for block in response.content:
+            if block.type == "text":
+                return block.text
+        return ""
 
 class GeminiProvider(AIProvider):
     """Google Gemini API provider"""
@@ -927,7 +957,12 @@ class AIService:
 
 
         if provider == "claude":
-            self.provider = ClaudeProvider(api_key, model) if model else ClaudeProvider(api_key)
+            self.provider = ClaudeProvider(
+                api_key,
+                model or "claude-sonnet-4-20250514",
+                extended_thinking=kwargs.get("extended_thinking", False),
+                thinking_budget_tokens=kwargs.get("thinking_budget_tokens", 8000),
+            )
         elif provider == "gemini":
             self.provider = GeminiProvider(api_key, model) if model else GeminiProvider(api_key)
         elif provider == "matcha":
@@ -1214,7 +1249,10 @@ class AIService:
         max_retries: int = 2,
         history: List[Dict] = None,
         on_status: Optional[Callable[[RetryStatus], None]] = None,
-        context_name: str = "revenue"
+        context_name: str = "revenue",
+        two_pass_enabled: bool = False,
+        value_lookup_enabled: bool = False,
+        **kwargs
     ) -> QueryResult:
         """
         Hybrid Mode: Static prompt + MCP validation/execution
@@ -1256,12 +1294,7 @@ class AIService:
             if on_status:
                 on_status(RetryStatus(attempt, max_retries, "generating", f"Generating SQL (attempt {attempt + 1})"))
 
-            # Build prompt for AI
-            # Get main table from context info (dynamic, not hardcoded)
-            context_table = "revenue_search"  # Default fallback
-            context_thai = "รายได้"  # Default fallback
-
-            # Try to get actual context info from schema_service
+            # Build prompt for AI — get table/display from DB (no hardcode)
             try:
                 from app.services.schema_service import SchemaService
                 from app.config import settings
@@ -1269,20 +1302,23 @@ class AIService:
                 temp_schema = SchemaService(db_path=db_path)
                 context_info = temp_schema.get_context_info(context_name)
                 if context_info:
-                    context_table = context_info.get('main_view', context_table)
+                    context_table = context_info.get('main_view', context_name)
                     context_thai = context_info.get('display_name', context_name)
                     logger.info(f"Hybrid Mode: Using context '{context_name}' -> table '{context_table}', display '{context_thai}'")
                 else:
-                    # Fallback for known contexts
-                    if context_name == "expense":
-                        context_table = "v_expense_mart"
-                        context_thai = "ค่าใช้จ่าย"
-                    logger.warning(f"Hybrid Mode: Context '{context_name}' not found, using fallback table '{context_table}'")
+                    logger.error(f"Hybrid Mode: Context '{context_name}' not found in schema_contexts table")
+                    return QueryResult(
+                        question=question, sql_query="", data=[],
+                        explanation=f"ไม่พบการตั้งค่า context '{context_name}' ในระบบ กรุณาตั้งค่าผ่าน Admin UI",
+                        tokens_used=0, provider=self.provider_name, error=f"Context '{context_name}' not configured"
+                    )
             except Exception as e:
-                logger.warning(f"Failed to get context info: {e}, using defaults")
-                if context_name == "expense":
-                    context_table = "v_expense_mart"
-                    context_thai = "ค่าใช้จ่าย"
+                logger.error(f"Failed to get context info: {e}")
+                return QueryResult(
+                    question=question, sql_query="", data=[],
+                    explanation=f"เกิดข้อผิดพลาดในการโหลดข้อมูล context: {e}",
+                    tokens_used=0, provider=self.provider_name, error=str(e)
+                )
 
             # Build conversation history context
             history_context = ""
@@ -1330,21 +1366,72 @@ class AIService:
                 except Exception as e:
                     logger.warning(f"Failed to get RAG context: {e}")
 
-                user_prompt = f"""คำถาม: {question}
+                # ★ Value Lookup — ดึง keyword จากคำถามตรงๆ (toggle ผ่าน feature flag) ★
+                value_lookup_text = ""
+                if value_lookup_enabled:
+                    try:
+                        value_matches = self._lookup_values_from_question(question, context_name, context_table)
+                        if value_matches:
+                            value_lookup_text = self._format_value_matches(value_matches)
+                    except Exception as e:
+                        logger.warning(f"Value Lookup failed: {e}")
+
+                # Two-Pass Mode: Extract intent first, then build SQL prompt from structured intent
+                if two_pass_enabled:
+                    logger.info("Two-Pass Mode: Starting Pass 1 (Intent Extraction)")
+                    if on_status:
+                        on_status(RetryStatus(attempt, max_retries, "analyzing", "Analyzing question (Pass 1)"))
+
+                    intent_json = await self._extract_intent(
+                        question=question,
+                        system_prompt=system_prompt,
+                        context_name=context_name,
+                        context_table=context_table,
+                        context_thai=context_thai,
+                        history_context=history_context,
+                        rag_context=rag_context
+                    )
+
+                    if intent_json:
+                        logger.info(f"Two-Pass Mode: Pass 1 success. Building Pass 2 prompt.")
+                        user_prompt = self._build_pass2_prompt(
+                            question=question,
+                            intent=intent_json,
+                            context_table=context_table,
+                            context_thai=context_thai,
+                            value_matches=value_matches if value_lookup_text else None
+                        )
+                    else:
+                        logger.warning("Two-Pass Mode: Pass 1 failed. Falling back to one-pass CoT prompt.")
+                        two_pass_enabled = False  # Disable for this request
+
+                # One-Pass Mode (default or fallback)
+                if not two_pass_enabled or attempt > 0:
+                    user_prompt = f"""คำถาม: {question}
 
 **บริบท:** ข้อมูล{context_thai} (ใช้ตาราง {context_table}){history_context}
 
 {rag_context}
 
-สร้าง SQL query และอธิบายผลลัพธ์เป็นภาษาไทย
-สำคัญ: ต้องใช้ตาราง {context_table} เท่านั้น
+{value_lookup_text}
 
-ตอบในรูปแบบ:
+---
+**ขั้นตอนที่ 1 — วิเคราะห์คำถาม (คิดก่อนเขียน SQL):**
+ก่อนสร้าง SQL ให้ตอบสั้นๆ:
+- ต้องการข้อมูลอะไร? (metric คืออะไร, dimension/group by คืออะไร, filter อะไร, ช่วงเวลาใด)
+- ถ้ามี "Actual Values Found" ข้างต้น → ใช้ column/value จากผลค้นหาจริง
+- มี semantic mapping ใดที่ตรงกับ keyword ในคำถาม?
+
+**ขั้นตอนที่ 2 — SQL:**
+สำคัญ: ต้องใช้ตาราง {context_table} เท่านั้น
+ถ้ามี "Actual Values Found" → ใช้ column/value จากนั้น ห้ามเดาเอง
+
 ```sql
-<SQL query here>
+<SQL ที่สร้างจากการวิเคราะห์ข้างต้น>
 ```
 
-**คำอธิบาย:** <explanation here>"""
+**ขั้นตอนที่ 3 — คำอธิบาย:**
+<คำอธิบายผลลัพธ์ภาษาไทย>"""
             else:
                 # Retry with error context
                 last_error = retry_history[-1] if retry_history else {}
@@ -1358,15 +1445,19 @@ SQL ก่อนหน้ามีปัญหา:
 ```
 Error: {last_error.get('error', '')}
 
-กรุณาแก้ไข SQL และอธิบายผลลัพธ์เป็นภาษาไทย
+---
+**วิเคราะห์ข้อผิดพลาด:**
+- Error นี้เกิดจากอะไร?
+- ต้องแก้ไขส่วนใดของ SQL?
+
+**SQL ที่แก้ไขแล้ว:**
 สำคัญ: ต้องใช้ตาราง {context_table} เท่านั้น
 
-ตอบในรูปแบบ:
 ```sql
-<SQL query ที่แก้ไขแล้ว>
+<SQL ที่แก้ไขแล้ว>
 ```
 
-**คำอธิบาย:** <explanation here>"""
+**คำอธิบาย:** <คำอธิบายภาษาไทย>"""
 
             try:
                 # Step 1: AI generates SQL (single call, no tools)
@@ -1657,6 +1748,330 @@ Error: {last_error.get('error', '')}
             logger.error(f"Error getting Vanna context: {e}")
             return ""
 
+    # ============================================================
+    # Smart Value Lookup
+    # ============================================================
+
+    def _extract_keywords_from_question(self, question: str) -> List[str]:
+        """Extract searchable keywords from raw question text (no AI needed).
+        Handles Thai text (no spaces) by stripping known prefixes."""
+        import re
+
+        # Thai prefixes to strip (longest first for greedy match)
+        strip_prefixes = [
+            "ค่าใช้จ่าย", "รายได้", "บริการ", "ค่า", "ยอด",
+            "ขอดู", "ขอ", "แสดง", "หา", "ดู", "สรุป",
+        ]
+        stop_words = {
+            "รายได้", "ค่าใช้จ่าย", "บริการ",
+            "เท่าไหร่", "เท่าไร", "อะไร", "อยากรู้",
+            "ทั้งหมด", "รวม", "แยก", "ตาม", "ราย", "เดือน", "ปี", "ไตรมาส",
+            "รายเดือน", "รายไตรมาส", "รายปี",
+            "เปรียบเทียบ", "เทียบ", "กับ", "และ", "ของ", "ที่", "ใน", "จาก",
+            "มี", "ให้", "ดู", "หา", "แสดง", "สรุป", "วิเคราะห์",
+            "the", "of", "and", "for", "by", "in", "to", "a", "is",
+            "total", "sum", "count", "group", "show", "revenue", "expense",
+        }
+
+        keywords = []
+
+        # Split by spaces
+        parts = re.split(r'[\s,;:?!()（）\[\]]+', question.strip())
+        for part in parts:
+            part = part.strip().strip('"\'')
+            if len(part) < 2 or part.lower() in stop_words:
+                continue
+
+            # Recursively strip prefixes to handle "รายได้ค่าเช่าพื้นที่" → "ค่าเช่าพื้นที่" → "เช่าพื้นที่"
+            candidates = [part]
+            current = part
+            for _ in range(3):  # Max 3 layers of stripping
+                stripped = False
+                for prefix in strip_prefixes:
+                    if current.startswith(prefix) and len(current) > len(prefix) + 1:
+                        current = current[len(prefix):]
+                        if current not in stop_words and len(current) >= 2:
+                            candidates.append(current)
+                        stripped = True
+                        break
+                if not stripped:
+                    break
+
+            for c in candidates:
+                if c not in stop_words and len(c) >= 2:
+                    keywords.append(c)
+
+        # Deduplicate
+        seen = set()
+        unique = []
+        for kw in keywords:
+            if kw.lower() not in seen:
+                seen.add(kw.lower())
+                unique.append(kw)
+        return unique
+
+    def _lookup_values_from_question(self, question: str, context_name: str, table_name: str) -> List[Dict]:
+        """
+        Look up actual database values for keywords extracted directly from question.
+        Works independently of Two-Pass — no AI needed.
+        Returns list of {keyword, column_name, column_value, table_name}
+        """
+        from app.services.schema_service import SchemaService
+        from app.config import settings
+        import time
+
+        t0 = time.perf_counter()
+        results = []
+
+        keywords = self._extract_keywords_from_question(question)
+        if not keywords:
+            return results
+
+        try:
+            db_path = settings.DATABASE_URL.replace("sqlite:///", "").replace("sqlite://", "")
+            schema_svc = SchemaService(db_path=db_path)
+
+            for kw in keywords:
+                # 1. Try keyword index first (fast)
+                matches = schema_svc.search_keyword_index(kw, context_name=context_name, limit=5)
+                if matches:
+                    results.extend(matches)
+                else:
+                    # 2. Fallback: search DB directly
+                    db_matches = schema_svc.search_db_for_keyword(kw, table_name=table_name, context_name=context_name, limit=5)
+                    results.extend(db_matches)
+
+            t_lookup = time.perf_counter() - t0
+            if results:
+                logger.info(f"Value Lookup: {len(keywords)} keywords → {len(results)} matches ({t_lookup:.3f}s)")
+            else:
+                logger.info(f"Value Lookup: {len(keywords)} keywords → no matches ({t_lookup:.3f}s)")
+
+        except Exception as e:
+            logger.warning(f"Value Lookup failed: {e}")
+
+        return results
+
+    @staticmethod
+    def _format_value_matches(value_matches: List[Dict]) -> str:
+        """Format value lookup results for injection into Pass 2 prompt."""
+        if not value_matches:
+            return ""
+
+        # Group by keyword
+        by_keyword: Dict[str, List[Dict]] = {}
+        for m in value_matches:
+            kw = m.get("keyword", "?")
+            by_keyword.setdefault(kw, []).append(m)
+
+        lines = ["**Actual Values Found in Database (ค่าจริงจากฐานข้อมูล):**"]
+        for kw, matches in by_keyword.items():
+            lines.append(f'- keyword "{kw}":')
+            for m in matches[:5]:  # Limit per keyword
+                lines.append(f'  - {m["column_name"]} = \'{m["column_value"]}\'')
+
+        lines.append("")
+        lines.append("⚠️ MUST USE these actual column/value pairs in WHERE clause — do NOT guess column names or values")
+
+        return "\n".join(lines)
+
+    # ============================================================
+    # Two-Pass SQL Generation
+    # ============================================================
+
+    def _parse_intent_json(self, text: str) -> Optional[Dict]:
+        """Parse intent JSON from AI response, handling markdown code blocks."""
+        if not text:
+            return None
+
+        # Try 1: pure JSON
+        try:
+            return json.loads(text.strip())
+        except json.JSONDecodeError:
+            pass
+
+        # Try 2: JSON in markdown code block
+        match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group(1))
+            except json.JSONDecodeError:
+                pass
+
+        # Try 3: Find first { and last }
+        match = re.search(r'(\{.*\})', text, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group(1))
+            except json.JSONDecodeError:
+                pass
+
+        return None
+
+    async def _extract_intent(
+        self,
+        question: str,
+        system_prompt: str,
+        context_name: str,
+        context_table: str,
+        context_thai: str,
+        history_context: str,
+        rag_context: str
+    ) -> Optional[Dict]:
+        """
+        Pass 1: Extract structured intent from user question.
+        Returns intent dict or None if extraction fails (fallback to one-pass).
+        """
+        intent_prompt = f"""คำถาม: {question}
+
+**บริบท:** ข้อมูล{context_thai} (ใช้ตาราง {context_table}){history_context}
+
+{rag_context}
+
+---
+**Task:** วิเคราะห์คำถามข้างต้นและส่งคืน JSON ที่มีโครงสร้างตามนี้เท่านั้น ห้ามมี text อื่นนอก JSON:
+
+```json
+{{
+  "intent_type": "aggregation | comparison | trend | detail | ranking | lookup",
+  "metrics": ["column_name_to_aggregate"],
+  "aggregate_function": "SUM | COUNT | AVG | MIN | MAX",
+  "dimensions": ["column_for_group_by"],
+  "filters": [
+    {{"column": "col_name", "operator": "= | LIKE | > | < | >= | <= | IN | BETWEEN", "value": "value_or_pattern"}}
+  ],
+  "time_range": {{"year": 2025, "month": null}},
+  "ordering": {{"column": "col_name_or_alias", "direction": "ASC | DESC"}},
+  "limit": null,
+  "matched_mappings": [
+    {{"keyword": "user_keyword", "sql_condition": "COLUMN operator 'value'"}}
+  ]
+}}
+```
+
+**กฎสำคัญ:**
+1. ตรวจสอบ semantic mappings ใน system prompt ก่อน -- ถ้ามี keyword ที่ตรง ให้ใส่ใน matched_mappings พร้อม sql_condition ที่คัดลอกมาจาก mapping
+2. ถ้า User ระบุปี พ.ศ. ให้แปลงเป็น ค.ศ. (พ.ศ. - 543) ใส่ใน time_range.year
+3. ถ้าไม่แน่ใจค่า filter ให้ใช้ LIKE operator
+4. ห้ามสร้าง SQL -- ระบุเฉพาะ intent เท่านั้น
+5. ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่น"""
+
+        try:
+            import time
+            t0 = time.perf_counter()
+            response_text = await self.provider.generate_content(intent_prompt, system_prompt)
+            t_intent = time.perf_counter() - t0
+
+            intent_json = self._parse_intent_json(response_text)
+
+            if intent_json:
+                logger.info(f"Two-Pass: Pass 1 complete ({t_intent:.2f}s). Intent: {json.dumps(intent_json, ensure_ascii=False)[:500]}")
+                return intent_json
+            else:
+                logger.warning(f"Two-Pass: Failed to parse intent JSON ({t_intent:.2f}s). Raw: {response_text[:300] if response_text else 'empty'}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Two-Pass: Intent extraction failed: {type(e).__name__}: {e}")
+            return None
+
+    def _build_pass2_prompt(
+        self,
+        question: str,
+        intent: Dict,
+        context_table: str,
+        context_thai: str,
+        value_matches: List[Dict] = None
+    ) -> str:
+        """Build Pass 2 prompt using structured intent from Pass 1."""
+
+        # ★ If value lookup found real columns → REPLACE intent's guessed filters ★
+        if value_matches:
+            # Group matches by keyword
+            by_keyword: Dict[str, List[Dict]] = {}
+            for m in value_matches:
+                by_keyword.setdefault(m.get("keyword", ""), []).append(m)
+
+            # Build filter lines from REAL values instead of intent's guessed ones
+            real_filter_lines = []
+            for kw, matches in by_keyword.items():
+                for m in matches[:5]:  # Top 5 per keyword — ครอบคลุมทุก column
+                    real_filter_lines.append(f"  - {m['column_name']} = '{m['column_value']}'  (ค่าจริง)")
+
+            if real_filter_lines:
+                filters_text = "\n".join(real_filter_lines)
+                # Also clear matched_mappings since we have real values
+                mappings_text = "  (ใช้ค่าจริงจาก Filters ข้างต้นแทน)"
+            else:
+                filters_text = "  ไม่มี filter"
+                mappings_text = "  ไม่พบ mapping ที่ตรง"
+        else:
+            # Fallback: use intent's filters as-is
+            filters_text = "  ไม่มี filter"
+            if intent.get("filters"):
+                lines = [f"  - {f['column']} {f['operator']} {f['value']}" for f in intent["filters"]]
+                filters_text = "\n".join(lines)
+
+            mappings_text = "  ไม่พบ mapping ที่ตรง"
+            if intent.get("matched_mappings"):
+                lines = [f"  - keyword '{m.get('keyword')}' → {m.get('sql_condition')}" for m in intent["matched_mappings"]]
+                mappings_text = "\n".join(lines)
+
+        # Format dimensions
+        dims = intent.get("dimensions", [])
+        dimensions_text = ", ".join(dims) if dims else "ไม่มี (ไม่ต้อง GROUP BY)"
+
+        # Format time range
+        time_text = "ไม่ระบุ"
+        tr = intent.get("time_range")
+        if tr:
+            parts = []
+            if tr.get("year"):
+                parts.append(f"ปี ค.ศ. {tr['year']} (พ.ศ. {tr['year'] + 543})")
+            if tr.get("month"):
+                parts.append(f"เดือน {tr['month']}")
+            if parts:
+                time_text = ", ".join(parts)
+
+        # Format ordering
+        ordering_text = "ไม่ระบุ"
+        if intent.get("ordering"):
+            o = intent["ordering"]
+            ordering_text = f"{o.get('column', '?')} {o.get('direction', 'DESC')}"
+
+        return f"""คำถาม: {question}
+
+**บริบท:** ข้อมูล{context_thai} (ใช้ตาราง {context_table})
+
+---
+**Structured Intent (วิเคราะห์จากคำถามแล้ว):**
+- Intent Type: {intent.get('intent_type', 'aggregation')}
+- Metrics: {intent.get('aggregate_function', 'SUM')}({', '.join(intent.get('metrics', ['REVENUE_VALUE']))})
+- Dimensions (GROUP BY): {dimensions_text}
+- Filters:
+{filters_text}
+- Time Range: {time_text}
+- Matched Semantic Mappings:
+{mappings_text}
+- Ordering: {ordering_text}
+- Limit: {intent.get('limit') or 'ไม่จำกัด'}
+
+---
+{self._format_value_matches(value_matches) if value_matches else ''}
+**สร้าง SQL จาก Structured Intent ข้างต้น:**
+สำคัญ:
+- ต้องใช้ตาราง {context_table} เท่านั้น
+- ถ้ามี "Actual Values Found" ข้างต้น → ใช้ column/value จากผลค้นหาจริง ห้ามเดาเอง
+- ถ้ามี Matched Semantic Mappings ให้ใช้ sql_condition จาก mapping โดยตรง
+- ห้าม FORMAT ตัวเลขใน SQL (ส่งค่าดิบ)
+
+```sql
+<SQL ที่สร้างจาก Structured Intent>
+```
+
+**คำอธิบาย:**
+<คำอธิบายผลลัพธ์ภาษาไทย>"""
+
     def train(self, question: str, sql_query: str) -> bool:
         """Train the RAG system with a verified Q&A pair"""
         try:
@@ -1753,8 +2168,18 @@ Error: {last_error.get('error', '')}
 
 
 # Factories
-def create_claude_service(api_key: str, mcp_client: MCPClientService, model: Optional[str] = None) -> AIService:
-    return AIService("claude", api_key, mcp_client, model)
+def create_claude_service(
+    api_key: str,
+    mcp_client: MCPClientService,
+    model: Optional[str] = None,
+    extended_thinking: bool = False,
+    thinking_budget_tokens: int = 8000,
+) -> AIService:
+    return AIService(
+        "claude", api_key, mcp_client, model,
+        extended_thinking=extended_thinking,
+        thinking_budget_tokens=thinking_budget_tokens,
+    )
 
 def create_gemini_service(api_key: str, mcp_client: MCPClientService, model: Optional[str] = None) -> AIService:
     return AIService("gemini", api_key, mcp_client, model)
