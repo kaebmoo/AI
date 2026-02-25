@@ -180,11 +180,11 @@ DANGEROUS_PATTERNS = [
 
 # SQL injection patterns
 INJECTION_PATTERNS = [
-    r';\s*--',           # Comment after semicolon
-    r';\s*DROP',         # Drop after semicolon
-    r'UNION\s+SELECT',   # Union injection
-    r'OR\s+1\s*=\s*1',   # Always true condition
-    r"OR\s+'[^']*'\s*=\s*'[^']*'",  # String comparison injection
+    r';\s*--',                          # Comment after semicolon
+    r';\s*DROP',                        # Drop after semicolon
+    r"'\s*UNION\s+SELECT",              # Union injection (after string literal only)
+    r'OR\s+1\s*=\s*1',                  # Always true condition
+    r"OR\s+'[^']*'\s*=\s*'[^']*'",     # String comparison injection
 ]
 
 
