@@ -10,6 +10,7 @@ export interface SemanticMapping {
     description?: string;
     is_active: boolean;
     priority: number;
+    context_name?: string | null;  // NULL = global (all contexts), string = scoped context
     created_at: string;
     updated_at?: string;
 }
@@ -23,6 +24,7 @@ export interface SemanticMappingCreate {
     description?: string;
     is_active?: boolean;
     priority?: number;
+    context_name?: string | null;  // NULL = global, e.g. 'transfer price', 'revenue', 'expense'
 }
 
 export interface SemanticMappingUpdate {
@@ -34,6 +36,7 @@ export interface SemanticMappingUpdate {
     description?: string;
     is_active?: boolean;
     priority?: number;
+    context_name?: string | null;
 }
 
 export interface SemanticMappingListResponse {
@@ -41,7 +44,11 @@ export interface SemanticMappingListResponse {
     total: number;
 }
 
-export const getMappings = async (params?: { keyword_type?: string; is_active?: boolean }) => {
+export const getMappings = async (params?: {
+    keyword_type?: string;
+    is_active?: boolean;
+    context_name?: string;
+}) => {
     const response = await api.get<SemanticMappingListResponse>('/admin/mappings', { params });
     return response.data;
 };

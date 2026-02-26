@@ -76,6 +76,10 @@ class SemanticMappingBase(BaseModel):
     description: Optional[str] = Field(None, description="Description")
     priority: int = Field(0, description="Priority (higher = more priority)")
     is_active: bool = Field(True, description="Is active")
+    context_name: Optional[str] = Field(
+        None,
+        description="Scope to a specific context (e.g. 'transfer price'). NULL = global (all contexts)."
+    )
 
 
 class SemanticMappingCreate(SemanticMappingBase):
@@ -93,6 +97,7 @@ class SemanticMappingUpdate(BaseModel):
     description: Optional[str] = None
     priority: Optional[int] = None
     is_active: Optional[bool] = None
+    context_name: Optional[str] = None
 
 
 class SemanticMappingResponse(SemanticMappingBase):
