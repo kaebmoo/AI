@@ -10,6 +10,7 @@ export interface SemanticMapping {
     description?: string;
     is_active: boolean;
     priority: number;
+    context_name?: string | null;  // NULL = global (all contexts), string = scoped context
     created_at: string;
     updated_at?: string;
 }
@@ -23,6 +24,7 @@ export interface SemanticMappingCreate {
     description?: string;
     is_active?: boolean;
     priority?: number;
+    context_name?: string | null;  // NULL = global, e.g. 'transfer price', 'revenue', 'expense'
 }
 
 export interface SemanticMappingUpdate {
@@ -34,6 +36,7 @@ export interface SemanticMappingUpdate {
     description?: string;
     is_active?: boolean;
     priority?: number;
+    context_name?: string | null;
 }
 
 export interface SemanticMappingListResponse {
@@ -41,7 +44,11 @@ export interface SemanticMappingListResponse {
     total: number;
 }
 
-export const getMappings = async (params?: { keyword_type?: string; is_active?: boolean }) => {
+export const getMappings = async (params?: {
+    keyword_type?: string;
+    is_active?: boolean;
+    context_name?: string;
+}) => {
     const response = await api.get<SemanticMappingListResponse>('/admin/mappings', { params });
     return response.data;
 };
@@ -63,4 +70,25 @@ export const updateMapping = async (id: number, data: SemanticMappingUpdate) => 
 
 export const deleteMapping = async (id: number) => {
     await api.delete(`/admin/mappings/${id}`);
+};
+
+// -----------------------------------------------
+// Context helpers (for dropdown in Mapping form)
+// -----------------------------------------------
+
+export interface SchemaContext {
+    id: number;
+    name: string;           // exact value to store in context_name e.g. 'transfer price'
+    display_name?: string;  // human label e.g. 'ราคาโอนระหว่างหน่วยงาน'
+    is_active: boolean;
+}
+
+export interface SchemaContextListResponse {
+    contexts: SchemaContext[];
+    total: number;
+}
+
+export const getContexts = async (): Promise<SchemaContext[]> => {
+    const response = await api.get<SchemaContextListResponse>('/admin/contexts');
+    return response.data.contexts.filter(c => c.is_active);
 };
