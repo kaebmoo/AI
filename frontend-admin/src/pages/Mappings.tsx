@@ -2,21 +2,20 @@ import React, { useState } from 'react';
 import { Table, Button, Space, Modal, Form, Input, Select, Switch, InputNumber, Tag, message, Popconfirm, Tooltip } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined, GlobalOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getMappings, createMapping, updateMapping, deleteMapping } from '../services/mappings';
-import type { SemanticMapping } from '../services/mappings';
+import { getMappings, createMapping, updateMapping, deleteMapping, getContexts } from '../services/mappings';
+import type { SemanticMapping, SchemaContext } from '../services/mappings';
 import type { ColumnsType } from 'antd/es/table';
 
 const { Option } = Select;
 const { TextArea } = Input;
 
-// Known context names — admin can also type a custom one
-const KNOWN_CONTEXTS = [
-    { value: '', label: 'Global (all contexts)' },
-    { value: 'revenue', label: 'revenue' },
-    { value: 'expense', label: 'expense' },
-    { value: 'transfer price', label: 'transfer price' },
-    { value: 'pl_costtype', label: 'pl_costtype' },
-];
+// Tag colours per context name (fallback to 'magenta' for unknown)
+const CONTEXT_COLORS: Record<string, string> = {
+    revenue: 'cyan',
+    expense: 'volcano',
+    'transfer price': 'geekblue',
+    pl_costtype: 'purple',
+};
 
 const Mappings: React.FC = () => {
     const [isModalVisible, setIsModalVisible] = useState(false);
@@ -26,9 +25,22 @@ const Mappings: React.FC = () => {
     const [searchText, setSearchText] = useState('');
     const [filterContext, setFilterContext] = useState<string | undefined>(undefined);
 
+    // ── Fetch active contexts from API (no hardcode) ──────────────────────────
+    const { data: contexts = [] } = useQuery<SchemaContext[]>({
+        queryKey: ['schema-contexts'],
+        queryFn: getContexts,
+        staleTime: 5 * 60 * 1000, // cache 5 min
+    });
+
+    // ── Mappings list ─────────────────────────────────────────────────────────
     const { data, isLoading } = useQuery({
         queryKey: ['mappings', filterContext],
-        queryFn: () => getMappings(filterContext !== undefined ? { context_name: filterContext || 'global' } : undefined)
+        queryFn: () =>
+            getMappings(
+                filterContext !== undefined
+                    ? { context_name: filterContext === '' ? 'global' : filterContext }
+                    : undefined
+            ),
     });
 
     const createMutation = useMutation({
@@ -41,7 +53,7 @@ const Mappings: React.FC = () => {
         },
         onError: (error: any) => {
             message.error(`Failed to create mapping: ${error.response?.data?.detail || error.message}`);
-        }
+        },
     });
 
     const updateMutation = useMutation({
@@ -55,7 +67,7 @@ const Mappings: React.FC = () => {
         },
         onError: (error: any) => {
             message.error(`Failed to update mapping: ${error.response?.data?.detail || error.message}`);
-        }
+        },
     });
 
     const deleteMutation = useMutation({
@@ -63,41 +75,25 @@ const Mappings: React.FC = () => {
         onSuccess: () => {
             message.success('Mapping deleted successfully');
             queryClient.invalidateQueries({ queryKey: ['mappings'] });
-        }
+        },
     });
 
     const handleAdd = () => {
         setEditingId(null);
         form.resetFields();
-        form.setFieldsValue({
-            is_active: true,
-            priority: 0,
-            keyword_type: 'term',
-            context_name: null,  // default: global
-        });
+        form.setFieldsValue({ is_active: true, priority: 0, keyword_type: 'term', context_name: null });
         setIsModalVisible(true);
     };
 
     const handleEdit = (record: SemanticMapping) => {
         setEditingId(record.id);
-        form.setFieldsValue({
-            ...record,
-            context_name: record.context_name ?? null,
-        });
+        form.setFieldsValue({ ...record, context_name: record.context_name ?? null });
         setIsModalVisible(true);
-    };
-
-    const handleDelete = (id: number) => {
-        deleteMutation.mutate(id);
     };
 
     const handleOk = () => {
         form.validateFields().then(values => {
-            // Convert empty string back to null for context_name
-            const payload = {
-                ...values,
-                context_name: values.context_name || null,
-            };
+            const payload = { ...values, context_name: values.context_name || null };
             if (editingId) {
                 updateMutation.mutate({ id: editingId, data: payload });
             } else {
@@ -106,6 +102,25 @@ const Mappings: React.FC = () => {
         });
     };
 
+    // ── Context tag renderer ──────────────────────────────────────────────────
+    const renderContextTag = (ctx: string | null | undefined, contextList: SchemaContext[]) => {
+        if (!ctx) {
+            return (
+                <Tooltip title="ใช้ได้กับทุก context">
+                    <Tag icon={<GlobalOutlined />} color="default">Global</Tag>
+                </Tooltip>
+            );
+        }
+        const found = contextList.find(c => c.name === ctx);
+        const label = found?.display_name ? `${ctx} (${found.display_name})` : ctx;
+        return (
+            <Tooltip title={label}>
+                <Tag color={CONTEXT_COLORS[ctx] ?? 'magenta'}>{ctx}</Tag>
+            </Tooltip>
+        );
+    };
+
+    // ── Table columns ─────────────────────────────────────────────────────────
     const columns: ColumnsType<SemanticMapping> = [
         {
             title: 'Keyword',
@@ -123,13 +138,7 @@ const Mappings: React.FC = () => {
                         style={{ marginBottom: 8, display: 'block' }}
                     />
                     <Space>
-                        <Button
-                            type="primary"
-                            onClick={() => confirm()}
-                            icon={<SearchOutlined />}
-                            size="small"
-                            style={{ width: 90 }}
-                        >
+                        <Button type="primary" onClick={() => confirm()} icon={<SearchOutlined />} size="small" style={{ width: 90 }}>
                             Search
                         </Button>
                         <Button onClick={() => clearFilters && clearFilters()} size="small" style={{ width: 90 }}>
@@ -156,29 +165,14 @@ const Mappings: React.FC = () => {
                 if (!type) return '-';
                 const color = type === 'abbreviation' ? 'blue' : type === 'synonym' ? 'green' : 'orange';
                 return <Tag color={color}>{type.toUpperCase()}</Tag>;
-            }
+            },
         },
         {
             title: 'Context',
             dataIndex: 'context_name',
             key: 'context_name',
-            width: 130,
-            render: (ctx: string | null | undefined) => {
-                if (!ctx) {
-                    return (
-                        <Tooltip title="ใช้ได้กับทุก context">
-                            <Tag icon={<GlobalOutlined />} color="default">Global</Tag>
-                        </Tooltip>
-                    );
-                }
-                const colorMap: Record<string, string> = {
-                    'revenue': 'cyan',
-                    'expense': 'volcano',
-                    'transfer price': 'geekblue',
-                    'pl_costtype': 'purple',
-                };
-                return <Tag color={colorMap[ctx] ?? 'magenta'}>{ctx}</Tag>;
-            }
+            width: 140,
+            render: (ctx: string | null | undefined) => renderContextTag(ctx, contexts),
         },
         {
             title: 'Target Column',
@@ -190,9 +184,8 @@ const Mappings: React.FC = () => {
             dataIndex: 'target_condition',
             key: 'target_condition',
             ellipsis: true,
-            render: (text: string, record: SemanticMapping) => (
-                record.full_condition ? <Tag color="purple">Complex</Tag> : text
-            )
+            render: (text: string, record: SemanticMapping) =>
+                record.full_condition ? <Tag color="purple">Complex</Tag> : text,
         },
         {
             title: 'Full Condition',
@@ -208,7 +201,7 @@ const Mappings: React.FC = () => {
             width: 80,
             render: (active: boolean) => (
                 <Tag color={active ? 'success' : 'error'}>{active ? 'Active' : 'Inactive'}</Tag>
-            )
+            ),
         },
         {
             title: 'Actions',
@@ -217,22 +210,15 @@ const Mappings: React.FC = () => {
             width: 120,
             render: (_, record) => (
                 <Space>
-                    <Button
-                        type="text"
-                        icon={<EditOutlined style={{ color: '#1890ff' }} />}
-                        onClick={() => handleEdit(record)}
-                    />
+                    <Button type="text" icon={<EditOutlined style={{ color: '#1890ff' }} />} onClick={() => handleEdit(record)} />
                     <Popconfirm
                         title="Delete Mapping"
                         description="Are you sure you want to delete this mapping?"
-                        onConfirm={() => handleDelete(record.id)}
+                        onConfirm={() => deleteMutation.mutate(record.id)}
                         okText="Yes"
                         cancelText="No"
                     >
-                        <Button
-                            type="text"
-                            icon={<DeleteOutlined style={{ color: '#ff4d4f' }} />}
-                        />
+                        <Button type="text" icon={<DeleteOutlined style={{ color: '#ff4d4f' }} />} />
                     </Popconfirm>
                 </Space>
             ),
@@ -241,9 +227,11 @@ const Mappings: React.FC = () => {
 
     return (
         <div>
+            {/* ── Toolbar ── */}
             <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                     <h2 style={{ margin: 0 }}>Semantic Mappings</h2>
+
                     <Input.Search
                         placeholder="Search by keyword, target, or condition..."
                         allowClear
@@ -251,36 +239,48 @@ const Mappings: React.FC = () => {
                         onChange={e => setSearchText(e.target.value)}
                         style={{ width: 350 }}
                     />
+
+                    {/* Context filter — built from API data */}
                     <Select
                         placeholder="Filter by context"
                         allowClear
-                        style={{ width: 180 }}
-                        onChange={(val) => setFilterContext(val)}
+                        style={{ width: 200 }}
+                        onChange={(val: string) => setFilterContext(val)}
                         onClear={() => setFilterContext(undefined)}
                     >
-                        <Option value="">Global only</Option>
-                        <Option value="revenue">revenue</Option>
-                        <Option value="expense">expense</Option>
-                        <Option value="transfer price">transfer price</Option>
-                        <Option value="pl_costtype">pl_costtype</Option>
+                        {/* Global-only option */}
+                        <Option value="">
+                            <GlobalOutlined /> Global only (ไม่ระบุ context)
+                        </Option>
+                        {/* Active contexts from DB */}
+                        {contexts.map(ctx => (
+                            <Option key={ctx.name} value={ctx.name}>
+                                <Tag color={CONTEXT_COLORS[ctx.name] ?? 'magenta'} style={{ marginRight: 4 }}>
+                                    {ctx.name}
+                                </Tag>
+                                {ctx.display_name}
+                            </Option>
+                        ))}
                     </Select>
                 </div>
+
                 <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
                     Add New Mapping
                 </Button>
             </div>
 
+            {/* ── Table ── */}
             <Table
                 columns={columns}
                 dataSource={data?.mappings.filter((mapping: SemanticMapping) => {
                     if (!searchText) return true;
-                    const lowerSearch = searchText.toLowerCase();
+                    const lower = searchText.toLowerCase();
                     return (
-                        mapping.keyword.toLowerCase().includes(lowerSearch) ||
-                        (mapping.target_column && mapping.target_column.toLowerCase().includes(lowerSearch)) ||
-                        (mapping.target_condition && mapping.target_condition.toLowerCase().includes(lowerSearch)) ||
-                        (mapping.description && mapping.description.toLowerCase().includes(lowerSearch)) ||
-                        (mapping.context_name && mapping.context_name.toLowerCase().includes(lowerSearch))
+                        mapping.keyword.toLowerCase().includes(lower) ||
+                        (mapping.target_column && mapping.target_column.toLowerCase().includes(lower)) ||
+                        (mapping.target_condition && mapping.target_condition.toLowerCase().includes(lower)) ||
+                        (mapping.description && mapping.description.toLowerCase().includes(lower)) ||
+                        (mapping.context_name && mapping.context_name.toLowerCase().includes(lower))
                     );
                 })}
                 rowKey="id"
@@ -289,25 +289,23 @@ const Mappings: React.FC = () => {
                 pagination={{ pageSize: 10 }}
             />
 
+            {/* ── Create / Edit Modal ── */}
             <Modal
-                title={editingId ? "Edit Mapping" : "Create New Mapping"}
+                title={editingId ? 'Edit Mapping' : 'Create New Mapping'}
                 open={isModalVisible}
                 onOk={handleOk}
                 onCancel={() => setIsModalVisible(false)}
-                okText={editingId ? "Update" : "Create"}
+                okText={editingId ? 'Update' : 'Create'}
                 confirmLoading={createMutation.isPending || updateMutation.isPending}
                 width={600}
             >
-                <Form
-                    form={form}
-                    layout="vertical"
-                >
+                <Form form={form} layout="vertical">
                     <Form.Item
                         name="keyword"
                         label="Keyword"
                         rules={[{ required: true, message: 'Please enter keyword' }]}
                     >
-                        <Input placeholder="e.g. ฝ่ายบริหารงานกลาง, นป., อสังหาริมทรัพย์" />
+                        <Input placeholder="เช่น ฝ่ายบริหารงานกลาง, นป., อสังหาริมทรัพย์" />
                     </Form.Item>
 
                     <Form.Item
@@ -322,19 +320,23 @@ const Mappings: React.FC = () => {
                         </Select>
                     </Form.Item>
 
+                    {/* ── Context dropdown — ดึงจาก API เสมอ ── */}
                     <Form.Item
                         name="context_name"
                         label="Context (ขอบเขต)"
-                        tooltip="ว่าง = Global ใช้ได้กับทุก context | ระบุชื่อ = ใช้เฉพาะ context นั้น เช่น 'transfer price'"
+                        tooltip="ไม่เลือก = Global ใช้ได้กับทุก context | เลือก = ใช้เฉพาะ context นั้น"
                     >
                         <Select
                             allowClear
-                            placeholder="Global (ว่าง = ใช้ได้ทุก context)"
-                            showSearch
-                            optionFilterProp="children"
+                            placeholder="— Global (ใช้ได้ทุก context) —"
                         >
-                            {KNOWN_CONTEXTS.filter(c => c.value !== '').map(ctx => (
-                                <Option key={ctx.value} value={ctx.value}>{ctx.label}</Option>
+                            {contexts.map(ctx => (
+                                <Option key={ctx.name} value={ctx.name}>
+                                    <Tag color={CONTEXT_COLORS[ctx.name] ?? 'magenta'} style={{ marginRight: 4 }}>
+                                        {ctx.name}
+                                    </Tag>
+                                    {ctx.display_name ?? ctx.name}
+                                </Option>
                             ))}
                         </Select>
                     </Form.Item>
@@ -345,7 +347,7 @@ const Mappings: React.FC = () => {
                         rules={[{ required: true, message: 'Please enter target column' }]}
                         tooltip="ชื่อ column ใน SQL เช่น DIVISION, owner_department, user_department"
                     >
-                        <Input placeholder="e.g. DIVISION, DEPARTMENT, owner_department" />
+                        <Input placeholder="เช่น DIVISION, DEPARTMENT, owner_department" />
                     </Form.Item>
 
                     <Form.Item
@@ -354,39 +356,34 @@ const Mappings: React.FC = () => {
                         rules={[{ required: true, message: 'Please enter SQL condition' }]}
                         tooltip="ส่วน condition เช่น = 'IT' หรือ LIKE '%value%'"
                     >
-                        <Input placeholder="e.g. = 'สายงานขาย'  หรือ  LIKE 'ฝ่าย%'" />
+                        <Input placeholder="เช่น = 'สายงานขาย'  หรือ  LIKE 'ฝ่าย%'" />
                     </Form.Item>
 
                     <Form.Item
                         name="full_condition"
                         label="Full SQL Condition (Advanced)"
-                        tooltip="Override target column+condition ด้วย SQL expression เต็มรูปแบบ ใช้เมื่อต้องการ OR หลาย column"
+                        tooltip="Override target column+condition ด้วย SQL expression เต็ม ใช้เมื่อต้องการ OR หลาย column"
                     >
-                        <TextArea rows={2} placeholder="e.g. (owner_department = 'ฝ่ายบริหารงานกลาง' OR user_department = 'ฝ่ายบริหารงานกลาง')" />
+                        <TextArea
+                            rows={2}
+                            placeholder="เช่น (owner_department = 'ฝ่ายบริหารงานกลาง' OR user_department = 'ฝ่ายบริหารงานกลาง')"
+                        />
                     </Form.Item>
 
-                    <Form.Item
-                        name="description"
-                        label="Description"
-                        tooltip="อธิบายความหมายของ mapping นี้"
-                    >
-                        <TextArea rows={2} placeholder="e.g. ฝ่ายบริหารงานกลาง — ใช้ใน Transfer Price context" />
+                    <Form.Item name="description" label="Description" tooltip="อธิบายความหมายของ mapping นี้">
+                        <TextArea rows={2} placeholder="เช่น ฝ่ายบริหารงานกลาง — ใช้ใน Transfer Price context" />
                     </Form.Item>
 
                     <Form.Item
                         name="priority"
                         label="Priority (ลำดับความสำคัญ)"
                         initialValue={0}
-                        tooltip="ค่าสูงกว่า = ถูกใช้ก่อน (0-100)"
+                        tooltip="ค่าสูงกว่า = ถูกใช้ก่อน (0–100)"
                     >
                         <InputNumber min={0} max={100} style={{ width: '100%' }} />
                     </Form.Item>
 
-                    <Form.Item
-                        name="is_active"
-                        label="Active Status"
-                        valuePropName="checked"
-                    >
+                    <Form.Item name="is_active" label="Active Status" valuePropName="checked">
                         <Switch checkedChildren="Active" unCheckedChildren="Inactive" />
                     </Form.Item>
                 </Form>
