@@ -79,12 +79,15 @@ class SchemaSemanticMapping(Base):
     description = Column(Text, nullable=True)  # Description for reference
     priority = Column(Integer, default=0)  # Higher = more priority
     is_active = Column(Boolean, default=True)
+    # NULL = global (all contexts), value = scoped to specific context e.g. 'transfer price'
+    context_name = Column(String(100), nullable=True, default=None)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     __table_args__ = (
         Index('ix_semantic_mapping_type', 'keyword_type'),
         Index('ix_semantic_mapping_active', 'is_active'),
+        Index('ix_semantic_mapping_context', 'context_name'),
     )
 
     def to_dict(self):
@@ -99,6 +102,7 @@ class SchemaSemanticMapping(Base):
             "description": self.description,
             "priority": self.priority,
             "is_active": self.is_active,
+            "context_name": self.context_name,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
