@@ -167,6 +167,7 @@ def delete_schema_column(
 def list_semantic_mappings(
     keyword_type: Optional[str] = Query(None, description="Filter by type (abbreviation, term, synonym)"),
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
+    context_name: Optional[str] = Query(None, description="Filter by context (None=all, 'revenue', 'transfer price', etc.)"),
     current_user: User = Depends(deps.require_admin),
     db: Session = Depends(deps.get_db)
 ):
@@ -179,6 +180,13 @@ def list_semantic_mappings(
         query = query.filter(SchemaSemanticMapping.keyword_type == keyword_type)
     if is_active is not None:
         query = query.filter(SchemaSemanticMapping.is_active == is_active)
+    if context_name is not None:
+        if context_name == "global":
+            # Show only global mappings (context_name IS NULL)
+            query = query.filter(SchemaSemanticMapping.context_name.is_(None))
+        else:
+            # Show mappings for this specific context only
+            query = query.filter(SchemaSemanticMapping.context_name == context_name)
 
     mappings = query.order_by(SchemaSemanticMapping.priority.desc(), SchemaSemanticMapping.keyword).all()
 

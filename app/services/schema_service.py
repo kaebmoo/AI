@@ -324,22 +324,40 @@ class SchemaService:
             except Exception:
                 return []
 
-    def get_semantic_mappings(self, keyword_type: Optional[str] = None) -> List[Dict]:
-        """Get semantic mappings from schema_semantic_mapping table"""
+    def get_semantic_mappings(
+        self,
+        keyword_type: Optional[str] = None,
+        context_name: Optional[str] = None
+    ) -> List[Dict]:
+        """Get semantic mappings from schema_semantic_mapping table.
+
+        Filtering logic:
+          - context_name=None  → return global (NULL) mappings only (default for admin list)
+          - context_name='all' → return all mappings regardless of context
+          - context_name='revenue' → return global (NULL) + 'revenue'-scoped mappings
+        """
         with self.engine.connect() as conn:
             try:
+                conditions = ["is_active = 1"]
+                params: dict = {}
+
                 if keyword_type:
-                    result = conn.execute(text("""
-                        SELECT * FROM schema_semantic_mapping
-                        WHERE is_active = 1 AND keyword_type = :keyword_type
-                        ORDER BY priority DESC, keyword
-                    """), {"keyword_type": keyword_type})
-                else:
-                    result = conn.execute(text("""
-                        SELECT * FROM schema_semantic_mapping
-                        WHERE is_active = 1
-                        ORDER BY priority DESC, keyword
-                    """))
+                    conditions.append("keyword_type = :keyword_type")
+                    params["keyword_type"] = keyword_type
+
+                if context_name and context_name != "all":
+                    # Include global mappings (NULL) + mappings scoped to this context
+                    conditions.append("(context_name IS NULL OR context_name = :context_name)")
+                    params["context_name"] = context_name
+                elif context_name is None:
+                    # Default: admin list — return all (no context filter)
+                    pass  # no extra condition
+
+                where_clause = " AND ".join(conditions)
+                result = conn.execute(
+                    text(f"SELECT * FROM schema_semantic_mapping WHERE {where_clause} ORDER BY priority DESC, keyword"),
+                    params
+                )
                 return [dict(row) for row in result.mappings().fetchall()]
             except Exception:
                 return []
@@ -521,10 +539,14 @@ DATE เก็บเป็น Unix Timestamp (milliseconds) ต้องแป�
 
         return text
 
-    def build_semantic_mapping_text(self) -> str:
-        """Build semantic mapping text for AI prompt"""
+    def build_semantic_mapping_text(self, context_name: Optional[str] = None) -> str:
+        """Build semantic mapping text for AI prompt.
 
-        mappings = self.get_semantic_mappings()
+        Pass context_name so only relevant mappings are included:
+          - global (NULL) mappings always included
+          - context-scoped mappings only included when context matches
+        """
+        mappings = self.get_semantic_mappings(context_name=context_name)
 
         if not mappings:
             return self._get_default_semantic_mappings()
@@ -641,7 +663,7 @@ DATE เก็บเป็น Unix Timestamp (milliseconds) ต้องแป�
         if not lite_mode:
             # Full Mode: Include everything
             if include_semantic_mappings:
-                context += "\n\n" + self.build_semantic_mapping_text()
+                context += "\n\n" + self.build_semantic_mapping_text(context_name=context_name)
 
             if include_samples:
                 context += "\n\n" + self.build_sample_values_text(table_name=main_view)
@@ -649,7 +671,7 @@ DATE เก็บเป็น Unix Timestamp (milliseconds) ต้องแป�
             # Lite Mode: ALWAYS include semantic mappings (they are rules, not data)
             # Only skip the heavy sample values list
             if include_semantic_mappings:
-                context += "\n\n" + self.build_semantic_mapping_text()
+                context += "\n\n" + self.build_semantic_mapping_text(context_name=context_name)
 
             # Inject ONLY Data Range (skip detailed sample values)
             samples = self.get_sample_values(table_name=main_view)
