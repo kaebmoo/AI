@@ -144,42 +144,134 @@ priority         : 8
 
 ---
 
+## 🌐 Field `context_name` — ขอบเขตของ Mapping
+
+> **เพิ่มใน Version 2.2** — แก้ปัญหา mapping ชุดเดียวถูกส่งให้ AI ทุก context
+
+### ปัญหาที่แก้ได้
+
+แต่ละ context (revenue, expense, transfer price, pl_costtype) ใช้ **ชื่อ column ต่างกัน** สำหรับ "ฝ่าย":
+
+| Context | Column "ฝ่าย" |
+|---------|--------------|
+| revenue / expense | `DEPARTMENT` |
+| transfer price | `owner_department`, `user_department` |
+| pl_costtype | ไม่มี column ฝ่าย |
+
+ถ้าส่ง mapping `ฝ่าย → DEPARTMENT` ไปให้ transfer price AI → AI จะ generate `WHERE DEPARTMENT = ...` ซึ่งไม่มีใน view `v_transfer_price` → ผลลัพธ์ผิด
+
+---
+
+### หลักการ `context_name`
+
+| ค่า context_name | ความหมาย | ตัวอย่าง |
+|-----------------|----------|---------|
+| `NULL` (ว่าง) | **Global** — ส่งให้ AI ทุก context | คำย่อ `นป.`, `บชง.` |
+| `'revenue'` | เฉพาะ context revenue | mapping เฉพาะรายได้ |
+| `'expense'` | เฉพาะ context expense | mapping เฉพาะค่าใช้จ่าย |
+| `'transfer price'` | เฉพาะ context transfer price | `owner_department`, `user_department` |
+| `'pl_costtype'` | เฉพาะ context pl_costtype | mapping เฉพาะ P&L |
+
+**Logic การ filter:**
+- context_name = **NULL** → ส่งไปทุก context (backward compatible)
+- context_name = **'transfer price'** → ส่งเฉพาะเมื่อ user ถามใน transfer price context
+
+---
+
+### ตัวอย่าง mapping ที่ถูกต้อง
+
+```
+keyword          : ฝ่าย
+keyword_type     : term
+target_column    : DEPARTMENT
+target_condition : LIKE 'ฝ่าย%'
+context_name     : (ว่าง / NULL)     ← global ใช้ได้กับ revenue, expense
+description      : ฝ่ายทั่วไป สำหรับ revenue/expense
+
+keyword          : ฝ่ายบริหารงานกลาง
+keyword_type     : synonym
+target_column    : owner_department
+full_condition   : (owner_department = 'ฝ่ายบริหารงานกลาง' OR user_department = 'ฝ่ายบริหารงานกลาง')
+context_name     : transfer price    ← เฉพาะ transfer price เท่านั้น
+description      : ฝ่ายบริหารงานกลาง ทั้งในฐานะเจ้าของและผู้ใช้
+
+keyword          : ฝ่ายเจ้าของ
+keyword_type     : synonym
+target_column    : owner_department
+full_condition   : owner_department LIKE '%'
+context_name     : transfer price    ← เฉพาะ transfer price เท่านั้น
+description      : owner_department ใน transfer price
+```
+
+---
+
+### ค่าที่ใช้ได้ใน context_name (ณ ปัจจุบัน)
+
+```
+(ว่าง / NULL)   → Global ใช้ได้ทุก context
+revenue          → context รายได้
+expense          → context ค่าใช้จ่าย
+transfer price   → context ราคาโอน (v_transfer_price)
+pl_costtype      → context P&L (v_pl_costtype_nt_mth_clean)
+```
+
+> **ค่า context_name ต้องตรงกับ `context_name` ใน table `schema_contexts`** ทุกตัวอักษร (case-sensitive)
+
+---
+
+### ดูค่า context ที่มีในระบบ
+
+```sql
+SELECT context_name, main_view FROM schema_contexts;
+```
+
+---
+
 ## 🔧 วิธีเพิ่ม Mapping ใหม่
 
 ### ผ่าน Web Admin UI:
 
 1. ไปที่ Settings → Semantic Mappings
-2. กด "Add New"
+2. กด **"Add New Mapping"**
 3. กรอกข้อมูล:
    ```
-   Keyword: ชื่อที่ user จะพิมพ์
-   Type: synonym/term/abbreviation
-   Target Column: (ปล่อยว่างถ้าใช้ full_condition)
-   Full Condition: SQL WHERE condition
-   Description: คำอธิบาย
-   Priority: 5-10 (สูง = สำคัญ)
+   Keyword      : ชื่อที่ user จะพิมพ์
+   Type         : abbreviation / term / synonym
+   Context      : เลือกจาก dropdown หรือปล่อยว่าง (= Global)
+   Target Column: column ใน SQL เช่น DEPARTMENT, owner_department
+   SQL Condition: เช่น = 'ฝ่ายบริหารงานกลาง' หรือ LIKE 'ฝ่าย%'
+   Full Condition: ใช้เมื่อต้องการ OR หลาย column (Advanced)
+   Description  : คำอธิบาย
+   Priority     : 5-10 (สูง = สำคัญ)
    ```
 4. บันทึก → Cache refresh อัตโนมัติ!
+
+**Filter ใน UI:**
+- ช่อง **Context dropdown** (ด้านบนตาราง) → กรอง Global / revenue / expense / transfer price / pl_costtype
+- คอลัมน์ **Context** ในตาราง แสดงสีต่างๆ ตาม context
+
+---
 
 ### ผ่าน SQL:
 
 ```sql
+-- Global mapping (ใช้ได้ทุก context)
 INSERT INTO schema_semantic_mapping (
-    keyword, 
-    keyword_type, 
-    target_column, 
-    full_condition, 
-    description, 
-    priority, 
-    is_active
+    keyword, keyword_type, target_column, target_condition,
+    description, priority, is_active, context_name
 ) VALUES (
-    'your_keyword',
-    'synonym',
-    '',
-    'your_sql_condition',
-    'คำอธิบาย',
-    8,
-    1
+    'ฝ่าย', 'term', 'DEPARTMENT', "LIKE 'ฝ่าย%'",
+    'ฝ่ายทั่วไป', 5, 1, NULL
+);
+
+-- Context-specific mapping (เฉพาะ transfer price)
+INSERT INTO schema_semantic_mapping (
+    keyword, keyword_type, target_column, full_condition,
+    description, priority, is_active, context_name
+) VALUES (
+    'ฝ่ายบริหารงานกลาง', 'synonym', 'owner_department',
+    "(owner_department = 'ฝ่ายบริหารงานกลาง' OR user_department = 'ฝ่ายบริหารงานกลาง')",
+    'ฝ่ายบริหารงานกลาง สำหรับ transfer price', 8, 1, 'transfer price'
 );
 ```
 
@@ -281,5 +373,5 @@ A: ไม่! cache refresh อัตโนมัติแล้ว (ถ้า�
 
 ---
 
-**Updated:** 2026-02-25
-**Version:** 2.1 (เพิ่มอธิบาย keyword_type และตัวอย่าง DEPARTMENT)
+**Updated:** 2026-02-26
+**Version:** 2.2 (เพิ่ม field `context_name` สำหรับ context-scoped mappings)

@@ -192,3 +192,6 @@ ADDform.docx
 tests/data_export_1770174160824.csv
 *.png
 *.sqlite
+# Claude Code worktrees and internal files
+.claude/
+ai_prompt_log.txt
