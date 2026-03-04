@@ -71,3 +71,24 @@ export const updateMapping = async (id: number, data: SemanticMappingUpdate) => 
 export const deleteMapping = async (id: number) => {
     await api.delete(`/admin/mappings/${id}`);
 };
+
+// -----------------------------------------------
+// Context helpers (for dropdown in Mapping form)
+// -----------------------------------------------
+
+export interface SchemaContext {
+    id: number;
+    name: string;           // exact value to store in context_name e.g. 'transfer price'
+    display_name?: string;  // human label e.g. 'ราคาโอนระหว่างหน่วยงาน'
+    is_active: boolean;
+}
+
+export interface SchemaContextListResponse {
+    contexts: SchemaContext[];
+    total: number;
+}
+
+export const getContexts = async (): Promise<SchemaContext[]> => {
+    const response = await api.get<SchemaContextListResponse>('/admin/contexts');
+    return response.data.contexts.filter(c => c.is_active);
+};
