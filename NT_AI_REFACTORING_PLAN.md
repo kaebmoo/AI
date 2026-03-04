@@ -874,9 +874,12 @@ OpenMiniCrew:
 
 - [x] สร้าง `app/services/warning_detector.py` — ย้าย warning logic จาก chat.py
 - [x] สร้าง `app/services/query_engine.py` — orchestrator
-- [x] แก้ `app/api/v1/chat.py` — added imports (QueryEngine ready to use)
-- [x] Run full test suite — 82 passed, 0 regressions
-- [ ] Optional: Migrate chat.py POST to use QueryEngine.query() directly
+- [x] แก้ `app/api/v1/chat.py` — ใช้ QueryEngine, ลบ duplicate code ทั้งหมด
+  - ลบ `DATA_WARNINGS`, `detect_data_warnings()`, `detect_multiple_sources_warning()`, `detect_context_from_question()`
+  - POST endpoint ลดเหลือ 43 บรรทัด (เป้า ~50)
+  - ลบ if/elif provider chain ออกหมด
+  - แยก helpers: `_get_conversation_history()`, `_save_history()`, `_format_response()`, `_resolve_context_with_history()`
+- [x] Run full test suite — 84 passed (+1 fixed), 0 regressions
 
 ### Phase 3 Checklist ✅ (completed 2026-03-04)
 

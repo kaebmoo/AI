@@ -32,6 +32,44 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
+def detect_context_from_question(question: str, schema_service: SchemaService = None) -> str:
+    """
+    Auto-detect context from user's question using DB keywords.
+
+    Standalone function — usable from chat.py or anywhere without QueryEngine instance.
+    """
+    question_lower = question.lower()
+    context_scores = {}
+
+    if schema_service:
+        try:
+            contexts = schema_service.get_all_contexts()
+            for ctx in contexts:
+                ctx_name = ctx.get('name')
+                ctx_keywords = ctx.get('keywords', [])
+                priority = ctx.get('priority', 0)
+
+                if isinstance(ctx_keywords, list) and ctx_keywords:
+                    score = sum(1 for kw in ctx_keywords if kw.lower() in question_lower)
+                    if score > 0:
+                        context_scores[ctx_name] = score + (priority * 0.1)
+        except Exception:
+            pass
+
+    if context_scores:
+        return max(context_scores, key=context_scores.get)
+
+    if schema_service:
+        try:
+            contexts = schema_service.get_all_contexts()
+            if contexts:
+                return contexts[0].get('name', 'revenue')
+        except Exception:
+            pass
+
+    return "revenue"
+
+
 @dataclass
 class QueryEngineResult:
     """Combined result from QueryEngine — wraps QueryResult + extras"""
@@ -226,33 +264,5 @@ class QueryEngine:
         return detected
 
     def _detect_context_from_question(self, question: str) -> str:
-        """Auto-detect context from user's question using DB keywords."""
-        question_lower = question.lower()
-        context_scores = {}
-
-        try:
-            contexts = self.schema_service.get_all_contexts()
-            for ctx in contexts:
-                ctx_name = ctx.get('name')
-                ctx_keywords = ctx.get('keywords', [])
-                priority = ctx.get('priority', 0)
-
-                if isinstance(ctx_keywords, list) and ctx_keywords:
-                    score = sum(1 for kw in ctx_keywords if kw.lower() in question_lower)
-                    if score > 0:
-                        context_scores[ctx_name] = score + (priority * 0.1)
-        except Exception:
-            pass
-
-        if context_scores:
-            return max(context_scores, key=context_scores.get)
-
-        # Default: highest-priority active context
-        try:
-            contexts = self.schema_service.get_all_contexts()
-            if contexts:
-                return contexts[0].get('name', 'revenue')
-        except Exception:
-            pass
-
-        return "revenue"
+        """Auto-detect context — delegates to standalone function."""
+        return detect_context_from_question(question, self.schema_service)

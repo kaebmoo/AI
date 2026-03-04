@@ -8,7 +8,8 @@ from app.db.session import SessionLocal
 from app.services.auth_service import AuthService
 from app.models.user import User
 from app.config import settings
-from app.services.ai_service import AIService, create_gemini_service, create_claude_service, create_matcha_service
+from app.services.ai_service import AIService
+from app.providers.registry import provider_registry
 from app.services.mcp_client import MCPClientService
 
 # Header scheme for session token
@@ -72,50 +73,39 @@ def get_ai_service(
 ) -> AIService:
     """
     Dependency to get initialized AIService based on config.
-    Prioritizes DB config > Env var > Default
+    Prioritizes DB config > Env var > Default.
+    Uses provider_registry for auto-discovery and fallback.
     """
     config_service = AdminConfigService(db)
     ai_config = config_service.get_ai_config()
     default_provider = ai_config.get("default_provider", "matcha")
-    
-    # Get API key using service (handles fallback)
+
+    # Build kwargs from config
+    provider_kwargs = {}
     api_key = config_service.get_provider_api_key(default_provider)
-    
-    if default_provider == "gemini":
-        if not api_key:
-             raise HTTPException(status_code=500, detail="GOOGLE_AI_API_KEY not configured")
-        return create_gemini_service(
-            api_key=api_key,
-            mcp_client=mcp_client,
-            model=ai_config.get("gemini_model", settings.GEMINI_MODEL)
-        )
-    elif default_provider == "claude":
-        if not api_key:
-             raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
-        return create_claude_service(
-            api_key=api_key,
-            mcp_client=mcp_client,
-            model=ai_config.get("claude_model", settings.CLAUDE_MODEL),
-            extended_thinking=ai_config.get("claude_extended_thinking", False),
-            thinking_budget_tokens=ai_config.get("claude_thinking_budget_tokens", 8000),
-        )
+    if not api_key:
+        raise HTTPException(status_code=500, detail=f"{default_provider.upper()} API key not configured")
+
+    provider_kwargs["api_key"] = api_key
+
+    if default_provider == "claude":
+        provider_kwargs["model"] = ai_config.get("claude_model", settings.CLAUDE_MODEL)
+        provider_kwargs["extended_thinking"] = ai_config.get("claude_extended_thinking", False)
+        provider_kwargs["thinking_budget_tokens"] = ai_config.get("claude_thinking_budget_tokens", 8000)
+    elif default_provider == "gemini":
+        provider_kwargs["model"] = ai_config.get("gemini_model", settings.GEMINI_MODEL)
     elif default_provider == "matcha":
-        if not api_key:
-             raise HTTPException(status_code=500, detail="MATCHA_AI_API_KEY not configured")
-        
-        # Matcha specific: Get URL from config or settings fallback
         api_url = ai_config.get("matcha_api_url") or settings.MATCHA_API_URL
         if not api_url:
-             raise HTTPException(status_code=500, detail="MATCHA_API_URL not configured")
-             
-        return create_matcha_service(
-            api_key=api_key,
-            api_url=api_url,
-            mcp_client=mcp_client,
-            model=ai_config.get("matcha_model", settings.MATCHA_MODEL)
-        )
-    else:
+            raise HTTPException(status_code=500, detail="MATCHA_API_URL not configured")
+        provider_kwargs["api_url"] = api_url
+        provider_kwargs["model"] = ai_config.get("matcha_model", settings.MATCHA_MODEL)
+
+    provider_instance = provider_registry.create_provider(default_provider, **provider_kwargs)
+    if not provider_instance:
         raise HTTPException(status_code=500, detail=f"Unknown AI Provider: {default_provider}")
+
+    return AIService(provider=provider_instance, mcp_client=mcp_client)
 
 def require_admin(current_user: User = Depends(get_current_user)) -> User:
     """
