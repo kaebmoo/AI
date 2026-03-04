@@ -16,6 +16,8 @@ from app.schemas.chat import ChatRequest, ChatResponse, DataWarning, TrainingReq
 from app.services.ai_service import AIService, create_gemini_service, create_claude_service, create_matcha_service
 from app.services.schema_service import SchemaService
 from app.services.admin_config_service import AdminConfigService
+from app.services.query_engine import QueryEngine
+from app.services.warning_detector import WarningDetector, detect_data_warnings, detect_multiple_sources_warning
 from app.config import settings
 
 

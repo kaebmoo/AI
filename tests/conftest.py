@@ -23,7 +23,7 @@ from app.models.user import User
 from app.models.session import UserSession
 from app.models.otp import OTPRequest
 from app.models.chat import ChatHistory
-from app.models.feedback_models import UserFeedback, PromptVersion, GoldenExample
+from app.models.feedback_models import UserFeedback, GoldenExample
 from app.config import settings
 
 
@@ -175,18 +175,18 @@ def test_feedback(db_session: Session, test_chat: ChatHistory) -> UserFeedback:
 
 
 @pytest.fixture
-def test_prompt_version(db_session: Session) -> PromptVersion:
-    """Create a test prompt version"""
-    prompt = PromptVersion(
-        version=1,
-        system_prompt="You are a SQL assistant for NT Revenue.",
+def test_golden_example(db_session: Session) -> GoldenExample:
+    """Create a test golden example"""
+    example = GoldenExample(
+        question_pattern="รายได้รวมเดือนมกราคม",
+        expected_sql="SELECT SUM(REVENUE_VALUE) FROM revenue WHERE MONTH=1",
+        category="revenue",
         is_active=True,
-        created_at=datetime.utcnow()
     )
-    db_session.add(prompt)
+    db_session.add(example)
     db_session.commit()
-    db_session.refresh(prompt)
-    return prompt
+    db_session.refresh(example)
+    return example
 
 
 # ============================================================

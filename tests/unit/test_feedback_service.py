@@ -11,7 +11,6 @@ from app.models.feedback_models import (
     UserFeedback,
     FeedbackRating,
     FeedbackCategory,
-    PromptVersion,
     GoldenExample
 )
 from app.models.chat import ChatHistory

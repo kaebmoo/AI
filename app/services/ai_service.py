@@ -10,22 +10,19 @@ Supports:
 - Matcha AI (OpenAI Compatible)
 
 Usage:
-    # Service should be instantiated with an active MCP Client
-    ai_service = AIService(provider="claude", api_key="...", mcp_client=global_mcp_client)
-    result = await ai_service.query("Request...")
+    # New style (recommended): use provider registry
+    from app.providers.registry import provider_registry
+    provider = provider_registry.create_provider("claude", api_key="...")
+    ai_service = AIService(provider=provider, mcp_client=global_mcp_client)
+
+    # Legacy style (still supported): use factory functions
+    ai_service = create_claude_service(api_key="...", mcp_client=global_mcp_client)
 """
 
 import json
-import sqlite3
 import re
 import logging
-import asyncio
 from typing import Dict, List, Optional, Any, Callable, Union
-from dataclasses import dataclass
-from abc import ABC, abstractmethod
-
-import httpx
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from app.services.mcp_client import MCPClientService
 # Optional import - VannaService may not be available
@@ -37,942 +34,71 @@ except ImportError:
     VannaService = None
 from app.config import settings
 
+# ============================================================
+# Re-export from providers package for backward compatibility
+# ============================================================
+from app.providers.base import AIProvider, ConfidenceResult, QueryResult, RetryStatus  # noqa: F401
+from app.providers.claude_provider import ClaudeProvider  # noqa: F401
+from app.providers.gemini_provider import GeminiProvider  # noqa: F401
+from app.providers.matcha_provider import MatchaProvider  # noqa: F401
+from app.providers.retry_config import ai_retry, create_retry_decorator  # noqa: F401
+
 logger = logging.getLogger(__name__)
-
-# Retry Configuration
-def create_retry_decorator():
-    """Create retry decorator with standard configuration"""
-    exceptions_to_retry = [
-        httpx.TimeoutException, 
-        httpx.ConnectError,
-        httpx.ReadTimeout
-    ]
-    
-    try:
-        import anthropic
-        exceptions_to_retry.extend([
-            anthropic.RateLimitError, 
-            anthropic.APIError,
-            anthropic.APIConnectionError
-        ])
-    except ImportError:
-        pass
-        
-    try:
-        from google.api_core import exceptions as google_exceptions
-        exceptions_to_retry.extend([
-            google_exceptions.ResourceExhausted,
-            google_exceptions.ServiceUnavailable,
-            google_exceptions.DeadlineExceeded,
-            google_exceptions.InternalServerError
-        ])
-    except ImportError:
-        pass
-
-    return retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
-        retry=retry_if_exception_type(tuple(exceptions_to_retry)),
-        reraise=True
-    )
-
-ai_retry = create_retry_decorator()
-
-@dataclass
-class ConfidenceResult:
-    """Confidence score for query result"""
-    score: int
-    level: str  # high, medium, low, very_low
-    level_th: str
-    color: str  # green, yellow, orange, red
-    factors: List[Dict]
-    recommendation: str
-
-@dataclass
-class QueryResult:
-    """Result from AI query"""
-    question: str
-    sql_query: str
-    data: List[Dict]
-    explanation: Union[str, Dict]  # Can be str or dict with visualization/chart_config
-    tokens_used: int
-    provider: str
-    raw_response: Optional[str] = None
-    error: Optional[str] = None
-    retry_count: int = 0
-    retry_history: Optional[List[Dict]] = None
-    confidence: Optional[ConfidenceResult] = None
-
-@dataclass
-class RetryStatus:
-    """Status update during retry process"""
-    attempt: int
-    max_attempts: int
-    status: str
-    message: str
-    sql_query: Optional[str] = None
-    error: Optional[str] = None
-
-class AIProvider(ABC):
-    """Abstract base class for AI providers"""
-    
-    @abstractmethod
-    async def generate_sql(self, question: str, system_prompt: str, tools: List[Dict], history: List[Dict] = []) -> Dict[str, Any]:
-        """Generate SQL from question using Tools"""
-        pass
-    
-    @abstractmethod
-    async def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str) -> str:
-        """Explain query result"""
-        pass
-
-    @abstractmethod
-    async def generate_content(self, prompt: str, system_prompt: Optional[str] = None) -> str:
-        """Generate generic content"""
-        pass
-
-class ClaudeProvider(AIProvider):
-    """Claude API provider"""
-
-    def __init__(
-        self,
-        api_key: str,
-        model: str = "claude-sonnet-4-20250514",
-        extended_thinking: bool = False,
-        thinking_budget_tokens: int = 8000,
-    ):
-        self.api_key = api_key
-        self.model = model
-        self.extended_thinking = extended_thinking
-        self.thinking_budget_tokens = thinking_budget_tokens
-        self._client = None
-    
-    @property
-    def client(self):
-        if self._client is None:
-            import anthropic
-            self._client = anthropic.AsyncAnthropic(api_key=self.api_key)
-        return self._client
-    
-    @ai_retry
-    async def generate_sql(self, question: str, system_prompt: str, tools: List[Dict], history: List[Dict] = []) -> Dict[str, Any]:
-        
-        system_prompt += "\nUse the provided tools to fetch database schema, find values, or execute SQL queries. Do not make up schema."
-
-        messages = []
-        for msg in history:
-            if msg.get("role") and msg.get("content"):
-                messages.append({"role": msg.get("role"), "content": msg.get("content")})
-        
-        messages.append({"role": "user", "content": question})
-
-        # Convert MCP tools format to Anthropic tools format if needed
-        # MCP tools are already relatively compatible but might need adjustment
-        # Anthropic expects: name, description, input_schema
-        # Sanitizing to permit only these fields to prevent 400 errors (e.g. from extra 'custom' fields)
-        sanitized_tools = []
-        for t in tools:
-            sanitized_tools.append({
-                "name": t["name"],
-                "description": t.get("description", ""),
-                "input_schema": t["input_schema"]
-            })
-        
-        response = await self.client.messages.create(
-            model=self.model,
-            max_tokens=2048,
-            system=system_prompt,
-            tools=sanitized_tools,
-            messages=messages
-        )
-        
-        return {
-            "response": response, 
-            "tokens_used": response.usage.input_tokens + response.usage.output_tokens
-        }
-    
-    @ai_retry
-    async def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str) -> str:
-        # Simplified explanation logic without complex token estimation for now
-        data_sample = data[:30]
-        prompt = f"""Question: {question}
-SQL: {sql}
-Results (First 30 rows):
-{json.dumps(data_sample, ensure_ascii=False, indent=2)}
-
-Format numbers nicely. Summary only if many rows.
-
-CRITICAL: You must analyze the data and recommend the best visualization type.
-Return the result as a JSON object with these keys:
-1. "explanation": The Thai explanation text.
-2. "visualization": One of ['bar_chart', 'horizontal_bar', 'line_chart', 'pie_chart', 'table', 'single_value', 'grouped_bar']
-3. "chart_config": Object with column mappings for the chart:
-   - "category_column": The column name for X-axis labels (the PRIMARY grouping)
-   - "measure_column": The column name for Y-axis values (e.g., total, sum, amount)
-   - "series_column": (optional) The column for SECONDARY grouping/comparison (e.g., month, year for time comparison)
-
-IMPORTANT for time-based comparisons:
-- **CRITICAL**: If a Time column exists (Month, Year, Date), YOU MUST USE IT AS 'category_column' (X-axis).
-- **Comparison**: Use the other dimension (Department, Account, Section) as 'series_column' (Legend).
-     - **Legend Rule**: Prefer DESCRIPTIVE columns (e.g., 'department_name', 'account_name') over ID/Code columns (e.g., 'gl_code', 'id') for better readability.
-     - If < 5 series: Suggest 'grouped_bar' or 'line_chart'
-     - If > 5 series: Suggest 'stacked_bar' (to avoid clutter)
-- **Exception**: Only use Time as Series if explicitly asked to "Compare Years" (Year-over-Year).
-
-Example for simple bar chart:
-{{
-  "explanation": "ยอดขายแยกตามแผนก...",
-  "visualization": "bar_chart",
-  "chart_config": {{
-    "category_column": "department_name",
-    "measure_column": "total_sales"
-  }}
-}}
-
-Example for time comparison (grouped bar) - showing each category with bars for each month:
-{{
-  "explanation": "ค่าใช้จ่ายรายหมวดบัญชี แยกตามเดือน...",
-  "visualization": "grouped_bar",
-  "chart_config": {{
-    "category_column": "เดือน",
-    "measure_column": "ยอดค่าใช้จ่าย",
-    "series_column": "หมวดบัญชี"
-  }}
-}}
-"""
-        response = await self.client.messages.create(
-            model=self.model,
-            max_tokens=2000,
-            system=system_prompt,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        content = response.content[0].text
-        # Parse JSON if possible, otherwise return text
-        parsed_result = {"explanation": content}
-        try:
-            # 1. Try pure JSON
-            parsed_result = json.loads(content)
-        except:
-            try:
-                # 2. Try to extract JSON from Markdown code blocks
-                match = re.search(r'```json\s*(\{.*?\})\s*```', content, re.DOTALL)
-                if match:
-                    parsed_result = json.loads(match.group(1))
-                else:
-                    # 3. Try to find first { and last }
-                    match = re.search(r'(\{.*\})', content, re.DOTALL)
-                    if match:
-                        parsed_result = json.loads(match.group(1))
-            except:
-                pass
-        
-        # Post-process to enforce Time-Series Rule (Code Level)
-        try:
-             # Ensure we have a dict
-             if isinstance(parsed_result, str):
-                  parsed_result = {"explanation": parsed_result}
-                  
-             if "chart_config" in parsed_result:
-                 config = parsed_result["chart_config"]
-                 cat = config.get("category_column", "").lower()
-                 series = config.get("series_column", "").lower()
-                 
-                 time_keys = ['month', 'year', 'date', 'day', 'time', 'quarter', 'week', 'hour', 'minute', 'second', 'เดือน', 'ปี', 'วันที่', 'ไตรมาส', 'งวด', 'เวลา']
-                 
-                 is_series_time = any(t in series for t in time_keys)
-                 is_cat_time = any(t in cat for t in time_keys)
-                 
-                 # If Series is Time BUT Category is NOT Time -> SWAP
-                 print(f"\n[DEBUG] Parsing Config: Cat='{cat}', Series='{series}'")
-                 print(f"[DEBUG] TimeKeys: {time_keys}")
-                 print(f"[DEBUG] IsSeriesTime={is_series_time}, IsCatTime={is_cat_time}")
-                 
-                 if is_series_time and not is_cat_time:
-                     print(f"[DEBUG] >>> SWAPPING DETECTED! <<<<")
-                     logger.info(f"Generated Chart Config violates Time-Series Rule. Swapping {cat} <-> {series}")
-                     config["category_column"] = config["series_column"]
-                     config["series_column"] = cat
-                     # Force Stacked Bar if swappping happened and was grouped_bar (optional, but safer)
-                     if parsed_result.get("visualization") == "grouped_bar":
-                          parsed_result["visualization"] = "stacked_bar"
-                 else:
-                     print(f"[DEBUG] No Swap Needed.")
-
-             return parsed_result
-        except Exception as e:
-            print(f"[DEBUG] CRITICAL ERROR IN PARSING: {e}")
-            logger.error(f"Error processing AI result: {e}")
-            return {"explanation": content}
-
-    @ai_retry
-    async def generate_content(self, prompt: str, system_prompt: Optional[str] = None) -> str:
-        # Extended Thinking: รองรับ claude-sonnet-4 และ claude-opus-4 ขึ้นไป
-        # ไม่รองรับ: claude-haiku, claude-3-*
-        THINKING_SUPPORTED_PREFIXES = ("claude-sonnet-4", "claude-opus-4")
-        model_supports_thinking = any(self.model.startswith(p) for p in THINKING_SUPPORTED_PREFIXES)
-        use_thinking = self.extended_thinking and model_supports_thinking
-
-        kwargs = {
-            "model": self.model,
-            "system": system_prompt or "",
-            "messages": [{"role": "user", "content": prompt}],
-        }
-
-        if use_thinking:
-            # max_tokens ต้องมากกว่า budget_tokens อย่างน้อย 1
-            kwargs["max_tokens"] = self.thinking_budget_tokens + 2000
-            kwargs["thinking"] = {"type": "enabled", "budget_tokens": self.thinking_budget_tokens}
-            logger.info(f"ClaudeProvider: Extended Thinking enabled (budget={self.thinking_budget_tokens}, model={self.model})")
-        else:
-            kwargs["max_tokens"] = 4000
-            if self.extended_thinking and not model_supports_thinking:
-                logger.warning(f"ClaudeProvider: Extended Thinking requested but model={self.model} does not support it, using standard mode")
-
-        response = await self.client.messages.create(**kwargs)
-
-        # Extract text blocks only (skip thinking blocks)
-        for block in response.content:
-            if block.type == "text":
-                return block.text
-        return ""
-
-class GeminiProvider(AIProvider):
-    """Google Gemini API provider"""
-    
-    def __init__(self, api_key: str, model: str = "gemini-3-flash-preview"):
-        self.api_key = api_key
-        self.model = model
-        self._client = None
-    
-    @property
-    def client(self):
-        if self._client is None:
-            # We use the Async client if available, or wrap calls
-            # google.genai 0.5+ has async support?
-            # For safety, let's assuming we might need to run in thread if SDK is sync
-            # checking SDK... google-genai Client is sync? 
-            # Actually, let's use the REST API via httpx for true async if SDK is problematic,
-            # BUT for now let's assume standard google.genai usage.
-            # If standard Client is sync, we wrap in asyncio.to_thread
-            from google import genai
-            self._client = genai.Client(api_key=self.api_key) 
-        return self._client
-    
-    async def _run_async(self, func, *args, **kwargs):
-        return await asyncio.to_thread(func, *args, **kwargs)
-
-    @ai_retry
-    async def generate_sql(self, question: str, system_prompt: str, tools: List[Dict], history: List[Dict] = []) -> Dict[str, Any]:
-        from google.genai import types
-        
-        # Convert tools to Gemini format
-        gemini_tools = []
-        for t in tools:
-            # MCP input_schema is JSON Schema
-            # Gemini expects specific structure
-            gemini_tools.append(types.Tool(function_declarations=[
-                types.FunctionDeclaration(
-                    name=t['name'],
-                    description=t['description'],
-                    parameters=t['input_schema'] 
-                )
-            ]))
-            
-        contents = []
-        contents = []
-        for msg in history:
-            role = msg.get("role")
-            
-            if role == "model":
-                parts = []
-                if "parts_raw" in msg:
-                    # Restore from raw dicts (preserving thought_signature)
-                    for p_dict in msg["parts_raw"]:
-                        # Try from_dict first (preserves all fields including thought_signature)
-                        try:
-                            if hasattr(types.Part, 'from_dict'):
-                                parts.append(types.Part.from_dict(p_dict))
-                                continue
-                        except Exception:
-                            pass
-
-                        # Fallback: Manual construction
-                        try:
-                            # Try direct instantiation with dict unpacking
-                            parts.append(types.Part(**p_dict))
-                            continue
-                        except Exception:
-                            pass
-
-                        # Last resort: Build Part manually
-                        part = types.Part()
-                        if "text" in p_dict:
-                            part.text = p_dict["text"]
-                        if "function_call" in p_dict:
-                            fc = p_dict["function_call"]
-                            part.function_call = types.FunctionCall(
-                                name=fc["name"],
-                                args=fc.get("args", {})
-                            )
-                        # Try to set thought_signature if the SDK supports it
-                        if "thought_signature" in p_dict:
-                            try:
-                                part.thought_signature = p_dict["thought_signature"]
-                            except AttributeError:
-                                pass
-                        parts.append(part)
-
-                elif "parts" in msg:
-                    # Legacy/Fallback manual construction
-                    for p in msg["parts"]:
-                        if "function_call" in p:
-                            fc = p["function_call"]
-                            parts.append(types.Part(
-                                function_call=types.FunctionCall(
-                                    name=fc["name"],
-                                    args=fc["args"]
-                                )
-                            ))
-                        elif "text" in p:
-                            parts.append(types.Part(text=p["text"]))
-                            
-                contents.append(types.Content(role="model", parts=parts))
-
-            elif role == "function":
-                # Reconstruct Function Response
-                # Must use role='tool' to be recognized as a Function Response Turn
-                # role='user' is treated as User Turn, leaving the previous Call hanging.
-                
-                parts = [types.Part(
-                    function_response=types.FunctionResponse(
-                        name=msg["name"],
-                        response=msg["content"] # Dict
-                    )
-                )]
-                contents.append(types.Content(role="tool", parts=parts))
-                
-            elif role == "user":
-                contents.append(types.Content(
-                    role="user",
-                    parts=[types.Part(text=msg.get("content", ""))]
-                ))
-            elif role == "model":
-                contents.append(types.Content(
-                    role="model",
-                    parts=[types.Part(text=msg.get("content", ""))]
-                ))
-
-        
-        # Determine if we should append the question
-        # If history already has the user question as the first item, we might not need to append it again if question is None
-        # But our loop logic passes 'working_question' which becomes None.
-        if question:
-             contents.append(types.Content(role="user", parts=[types.Part(text=question)]))
-
-        def call_api():
-            # Build config with thinking disabled to avoid thought_signature issues
-            config_kwargs = {
-                "system_instruction": system_prompt,
-                "tools": gemini_tools,
-                "temperature": 0.0
-            }
-
-            # Try to disable thinking for models that support it (Gemini 2.5+)
-            # This prevents thought_signature requirements in function calls
-            try:
-                config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
-            except (AttributeError, TypeError):
-                # SDK version doesn't support ThinkingConfig, skip
-                pass
-
-            return self.client.models.generate_content(
-                model=self.model,
-                contents=contents,
-                config=types.GenerateContentConfig(**config_kwargs)
-            )
-
-        response = await self._run_async(call_api)
-        
-        # Calculate tokens if available
-        tokens = 0
-        if response.usage_metadata:
-            tokens = response.usage_metadata.prompt_token_count + response.usage_metadata.candidates_token_count
-
-        return {
-            "response": response,
-            "tokens_used": tokens
-        }
-
-    @ai_retry
-    async def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str) -> str:
-        prompt = f"""Question: {question}
-SQL: {sql}
-Results: {json.dumps(data[:30], ensure_ascii=False)}
-
-Explain in Thai.
-CRITICAL: You must analyze the data and recommend the best visualization type.
-Return the result as a JSON object with these keys:
-1. "explanation": The Thai explanation text.
-2. "visualization": One of ['bar_chart', 'horizontal_bar', 'line_chart', 'pie_chart', 'donut_chart', 'table', 'single_value', 'grouped_bar']
-3. "chart_config": Object with column mappings for the chart:
-   - "category_column": The column name for X-axis labels (the PRIMARY grouping)
-   - "measure_column": The column name for Y-axis values (e.g., total, sum, amount)
-   - "series_column": (optional) The column for SECONDARY grouping/comparison
-
-IMPORTANT for time-based comparisons:
-- **CRITICAL**: If a Time column exists (Month, Year, Date), YOU MUST USE IT AS 'category_column' (X-axis).
-- **Comparison**: Use the other dimension (Department, Account, Section) as 'series_column' (Legend).
-     - **Legend Rule**: Prefer DESCRIPTIVE columns (e.g., 'department_name', 'account_name') over ID/Code columns (e.g., 'gl_code', 'id') for better readability.
-     - If < 5 series: Suggest 'grouped_bar' or 'line_chart'
-     - If > 5 series: Suggest 'stacked_bar' (to avoid clutter)
-- **Exception**: Only use Time as Series if explicitly asked to "Compare Years" (Year-over-Year).
-
-Example for simple bar chart:
-{{
-  "explanation": "ยอดขายแยกตามแผนก...",
-  "visualization": "bar_chart",
-  "chart_config": {{
-    "category_column": "department_name",
-    "measure_column": "total_sales"
-  }}
-}}
-
-Example for comparison (grouped bar):
-{{
-  "explanation": "เปรียบเทียบยอดขาย...",
-  "visualization": "grouped_bar",
-  "chart_config": {{
-    "category_column": "month",
-    "measure_column": "revenue",
-    "series_column": "department"
-  }}
-}}
-"""
-        
-        def call_api():
-            return self.client.models.generate_content(
-                model=self.model,
-                contents=prompt,
-                config={"system_instruction": system_prompt}
-            )
-            
-        response = await self._run_async(call_api)
-        text = response.text
-        # Parse JSON if possible, otherwise return text
-        parsed_result = {"explanation": text}
-        try:
-            # 1. Try pure JSON
-            parsed_result = json.loads(text)
-        except:
-            try:
-                # 2. Try to extract JSON from Markdown code blocks
-                match = re.search(r'```json\s*(\{.*?\})\s*```', text, re.DOTALL)
-                if match:
-                    parsed_result = json.loads(match.group(1))
-                else:
-                    # 3. Try to find first { and last }
-                    match = re.search(r'(\{.*\})', text, re.DOTALL)
-                    if match:
-                        parsed_result = json.loads(match.group(1))
-            except:
-                pass
-
-        # Post-process to enforce Time-Series Rule (Code Level)
-        try:
-             # Ensure we have a dict
-             if isinstance(parsed_result, str):
-                  parsed_result = {"explanation": parsed_result}
-                  
-             if "chart_config" in parsed_result:
-                 config = parsed_result["chart_config"]
-                 cat = config.get("category_column", "").lower()
-                 series = config.get("series_column", "").lower()
-                 
-                 time_keys = ['month', 'year', 'date', 'day', 'time', 'quarter', 'week', 'เดือน', 'ปี', 'วันที่']
-                 
-                 is_series_time = any(t in series for t in time_keys)
-                 is_cat_time = any(t in cat for t in time_keys)
-                 
-                 # If Series is Time BUT Category is NOT Time -> SWAP
-                 print(f"DEBUG CHECK: Cat={cat}, Series={series}, IsSeriesTime={is_series_time}, IsCatTime={is_cat_time}")
-                 if is_series_time and not is_cat_time:
-                     print(f"DEBUG: SWAPPING {cat} <-> {series}")
-                     logger.info(f"Generated Chart Config violates Time-Series Rule. Swapping {cat} <-> {series}")
-                     config["category_column"] = config["series_column"]
-                     config["series_column"] = cat
-                     # Force Stacked Bar if swappping happened and was grouped_bar (optional, but safer)
-                     if parsed_result.get("visualization") == "grouped_bar":
-                          parsed_result["visualization"] = "stacked_bar"
-
-             return parsed_result
-        except Exception as e:
-            print(f"DEBUG ERROR: {e}")
-            logger.error(f"Error processing AI result: {e}")
-            return {"explanation": text}
-
-    @ai_retry
-    async def generate_content(self, prompt: str, system_prompt: Optional[str] = None) -> str:
-        """Generate content using Gemini API"""
-        logger.info(f"GeminiProvider.generate_content called")
-        logger.info(f"  - model: {self.model}")
-        logger.info(f"  - prompt length: {len(prompt) if prompt else 0}")
-        logger.info(f"  - system_prompt length: {len(system_prompt) if system_prompt else 0}")
-
-        def call_api():
-            try:
-                from google.genai import types
-                logger.info("GeminiProvider: Creating config...")
-
-                # Build config properly
-                config = types.GenerateContentConfig(
-                    system_instruction=system_prompt
-                ) if system_prompt else None
-
-                logger.info(f"GeminiProvider: Calling API with model={self.model}...")
-                result = self.client.models.generate_content(
-                    model=self.model,
-                    contents=prompt,
-                    config=config
-                )
-
-                response_text = result.text if result and hasattr(result, 'text') else ""
-                logger.info(f"GeminiProvider: API returned, text length={len(response_text)}")
-                return result
-
-            except Exception as e:
-                logger.error(f"GeminiProvider: API call failed: {type(e).__name__}: {e}")
-                raise
-
-        try:
-            response = await self._run_async(call_api)
-            text = response.text if response and hasattr(response, 'text') else ""
-            logger.info(f"GeminiProvider: Returning text length={len(text)}")
-            return text
-        except Exception as e:
-            logger.error(f"GeminiProvider: _run_async failed: {type(e).__name__}: {e}")
-            raise
-
-class MatchaProvider(AIProvider):
-    """Matcha AI (OpenAI Compatible)"""
-    
-    def __init__(self, api_key: str, api_url: str, model: str = "gpt-4o"):
-        self.api_key = api_key
-        self.api_url = api_url
-        self.model = model
-        
-    @ai_retry
-    async def generate_sql(self, question: Optional[str], system_prompt: str, tools: List[Dict], history: List[Dict] = []) -> Dict[str, Any]:
-        
-        # Convert tools to OpenAI format
-        openai_tools = []
-        for t in tools:
-            openai_tools.append({
-                "type": "function",
-                "function": {
-                    "name": t["name"],
-                    "description": t["description"],
-                    "parameters": t["input_schema"]
-                }
-            })
-
-        messages = [{"role": "system", "content": system_prompt}]
-        for msg in history:
-            # PRESERVE CRITICAL FIELDS for OpenAI/Matcha
-            # Simpler copy to avoid missing fields
-            new_msg = {k: v for k, v in msg.items() if k in ['role', 'content', 'tool_calls', 'tool_call_id', 'name']}
-            messages.append(new_msg)
-            
-        if question:
-            messages.append({"role": "user", "content": question})
-
-        headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {self.api_key}'
-        }
-        
-        payload = {
-            'model': self.model,
-            'messages': messages,
-            'tool_choice': 'auto',
-            'temperature': 0.1
-        }
-        
-        if openai_tools:
-            payload['tools'] = openai_tools
-        
-        async with httpx.AsyncClient(verify=settings.MATCHA_SSL_VERIFY, timeout=settings.MATCHA_TIMEOUT) as client:
-            resp = await client.post(self.api_url, headers=headers, json=payload)
-            resp.raise_for_status()
-            result = resp.json()
-
-        return {
-            "response": result, # Raw OpenAI response dict
-            "tokens_used": result.get('usage', {}).get('total_tokens', 0)
-        }
-
-    # ... Implement explain and generate_content similarly using AsyncClient ...
-    async def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str) -> Dict[str, Any]:
-        """Explain result using Matcha/OpenAI and return Config"""
-        
-        # 1. Prepare Data Preview
-        data_preview = json.dumps(data[:5], ensure_ascii=False, default=str)
-        
-        # 2. Construct Prompt
-        prompt = f"""
-Query: {question}
-SQL: {sql}
-
-Data Preview:
-{data_preview}
-
-Based on the data, provide:
-1. A brief explanation of the trends/values (in Thai).
-2. The BEST chart type to visualize this (bar_chart, line_chart, pie_chart, grouped_bar, stacked_bar, table, single_value).
-3. The configuration:
-   - category_column: X-axis (Grouping). Rule: Use 'month' for trends, 'department'/'group' for comparison.
-   - measure_column: Y-axis (Value).
-   - series_column: Comparison/Legend (Optional). Rule: If comparing multiple groups over time, use this. Prefer NAME columns over CODE columns.
-
-IMPORTANT: Return VALID JSON only. Do not wrap in markdown unless necessary.
-Structure:
-{{
-  "explanation": "...",
-  "visualization": "...",
-  "chart_config": {{
-      "category_column": "...",
-      "measure_column": "...",
-      "series_column": "..."
-  }}
-}}
-"""
-        # 3. Call API
-        response_text = await self.generate_content(prompt, system_prompt)
-        
-        # 4. Parse JSON
-        parsed_result = {"explanation": response_text}
-        json_str = response_text
-        
-        try:
-            # 4.1 Check for Markdown Code Block
-            match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response_text, re.DOTALL)
-            if match:
-                json_str = match.group(1)
-            else:
-                # 4.2 Check for raw JSON object (brackets)
-                match = re.search(r'(\{.*\})', response_text, re.DOTALL)
-                if match:
-                    json_str = match.group(1)
-            
-            # Clean up potential trailing commas or comments if necessary (basic check)
-            parsed_result = json.loads(json_str)
-
-        except Exception as e:
-            logger.warning(f"Matcha: JSON parsing failed: {e}. Raw: {response_text[:100]}...")
-
-        # 5. Post-process to enforce Time-Series Rule (Code Level)
-        try:
-             # Ensure we have a dict
-             if isinstance(parsed_result, str):
-                  parsed_result = {"explanation": parsed_result}
-                  
-             if "chart_config" in parsed_result:
-                 config = parsed_result["chart_config"]
-                 # Normalize keys to lower case for comparison
-                 cat = str(config.get("category_column", "")).lower()
-                 series = str(config.get("series_column", "")).lower()
-                 
-                 time_keys = ['month', 'year', 'date', 'day', 'time', 'quarter', 'week', 'hour', 'minute', 'second', 'เดือน', 'ปี', 'วันที่', 'ไตรมาส', 'งวด', 'เวลา']
-                 
-                 is_series_time = any(t in series for t in time_keys)
-                 is_cat_time = any(t in cat for t in time_keys)
-                 
-                 # If Series is Time BUT Category is NOT Time -> SWAP
-                 print(f"DEBUG CHECK (Matcha): Cat={cat}, Series={series}, IsSeriesTime={is_series_time}, IsCatTime={is_cat_time}")
-                 if is_series_time and not is_cat_time:
-                     print(f"DEBUG (Matcha): SWAPPING {cat} <-> {series}")
-                     logger.info(f"Matcha: Generated Chart Config violates Time-Series Rule. Swapping {cat} <-> {series}")
-                     config["category_column"] = config["series_column"]
-                     config["series_column"] = cat
-                     # Force Stacked Bar if swappping happened and was grouped_bar
-                     if parsed_result.get("visualization") == "grouped_bar":
-                          parsed_result["visualization"] = "stacked_bar"
-
-             # 6. Fallback: If no chart_config, try to infer from data
-             if "chart_config" not in parsed_result and data and len(data) > 0:
-                 logger.info("Matcha: No chart_config found, attempting auto-detection")
-                 keys = list(data[0].keys())
-
-                 # Find measure column - prioritize by name patterns, exclude time dimensions
-                 measure_col = None
-                 numeric_cols = []
-                 measure_patterns = ['revenue', 'value', 'amount', 'total', 'sum', 'count', 'baht', 'รายได้', 'จำนวน', 'ยอด']
-                 dimension_patterns = ['year', 'month', 'date', 'day', 'week', 'quarter', 'ปี', 'เดือน', 'วันที่', 'id']
-
-                 for key in keys:
-                     sample_val = data[0][key]
-                     is_numeric = isinstance(sample_val, (int, float)) or (isinstance(sample_val, str) and sample_val.replace(',', '').replace('.', '').replace('-', '').isdigit())
-                     if is_numeric:
-                         numeric_cols.append(key)
-
-                 # Priority 1: Find column with measure-like name
-                 for col in numeric_cols:
-                     if any(p in col.lower() for p in measure_patterns):
-                         measure_col = col
-                         logger.info(f"Matcha: Found measure by pattern: {col}")
-                         break
-
-                 # Priority 2: Find numeric column that's NOT a dimension
-                 if not measure_col:
-                     for col in reversed(numeric_cols):  # Prefer last column (often the value)
-                         if not any(p in col.lower() for p in dimension_patterns):
-                             measure_col = col
-                             logger.info(f"Matcha: Found measure by exclusion: {col}")
-                             break
-
-                 # Priority 3: Use last numeric column as fallback
-                 if not measure_col and numeric_cols:
-                     measure_col = numeric_cols[-1]
-                     logger.info(f"Matcha: Using last numeric col as measure: {measure_col}")
-
-                 # Find category column - Smarter Selection
-                 category_col = None
-                 series_col = None
-                 
-                 potential_cats = [k for k in keys if k != measure_col]
-                 
-                 # Rule: Prefer 'month', 'date' over 'year' for Category if both exist
-                 has_month = any('month' in k.lower() for k in potential_cats)
-                 has_year = any('year' in k.lower() for k in potential_cats)
-                 
-                 if has_month:
-                     category_col = next((k for k in potential_cats if 'month' in k.lower()), potential_cats[0])
-                 elif has_year:
-                     category_col = next((k for k in potential_cats if 'year' in k.lower()), potential_cats[0])
-                 elif potential_cats:
-                     category_col = potential_cats[0]
-                 
-                 # Infer Series Column - prefer string columns over numeric for series
-                 if len(potential_cats) >= 2:
-                     remaining_cols = [k for k in potential_cats if k != category_col]
-                     # Prefer string columns as series (like SERVICE_GROUP, product_name, etc.)
-                     string_cols = []
-                     for col in remaining_cols:
-                         sample_val = data[0].get(col)
-                         if isinstance(sample_val, str):
-                             # Check it has reasonable cardinality for a series (2-30 unique values)
-                             unique_vals = set(str(row.get(col, '')) for row in data[:50])
-                             if 2 <= len(unique_vals) <= 30:
-                                 string_cols.append(col)
-                                 logger.info(f"Matcha: Found string series candidate: {col} ({len(unique_vals)} unique values)")
-
-                     if string_cols:
-                         series_col = string_cols[0]
-                     else:
-                         # Fallback: first remaining column (but avoid picking 'year' if there are other options)
-                         non_year_cols = [k for k in remaining_cols if 'year' not in k.lower()]
-                         series_col = non_year_cols[0] if non_year_cols else remaining_cols[0] if remaining_cols else None
-                 
-                 # Determine visualization type
-                 time_patterns = ['month', 'year', 'date', 'เดือน', 'ปี', 'วันที่']
-                 is_time_category = category_col and any(pattern in category_col.lower() for pattern in time_patterns)
-
-                 viz_type = "bar_chart"
-                 if series_col and is_time_category:
-                     viz_type = "line_chart"  # Time-based category with series = line chart
-                 elif series_col:
-                     viz_type = "stacked_bar"  # Non-time category with series = stacked bar
-                 elif is_time_category and len(data) > 10:
-                     viz_type = "line_chart"  # Time-based category without series = line chart
-
-                 logger.info(f"Matcha: viz_type={viz_type}, is_time_category={is_time_category}, series_col={series_col}")
-
-                 parsed_result["visualization"] = viz_type
-                 parsed_result["chart_config"] = {
-                     "category_column": category_col,
-                     "measure_column": measure_col,
-                     "series_column": series_col or ""
-                 }
-                 logger.info(f"Matcha: Auto-detected chart config: {parsed_result['chart_config']}")
-
-             return parsed_result
-        except Exception as e:
-            logger.error(f"Matcha: Error processing result: {e}")
-            return {"explanation": response_text}
-    async def generate_content(self, prompt: str, system_prompt: Optional[str] = None) -> str:
-        """Generate content using Matcha/OpenAI-compatible API"""
-        logger.info(f"MatchaProvider.generate_content called")
-        logger.info(f"  - model: {self.model}")
-        logger.info(f"  - prompt length: {len(prompt) if prompt else 0}")
-
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
-
-        headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {self.api_key}'
-        }
-
-        payload = {
-            'model': self.model,
-            'messages': messages,
-            'temperature': 0.1
-        }
-
-        try:
-            async with httpx.AsyncClient(verify=settings.MATCHA_SSL_VERIFY, timeout=settings.MATCHA_TIMEOUT) as client:
-                logger.info(f"MatchaProvider: Calling API at {self.api_url}...")
-                resp = await client.post(self.api_url, headers=headers, json=payload)
-                resp.raise_for_status()
-                result = resp.json()
-
-            content = result['choices'][0]['message']['content']
-            logger.info(f"MatchaProvider: API returned, text length={len(content)}")
-            return content
-
-        except Exception as e:
-            logger.error(f"MatchaProvider: API call failed: {type(e).__name__}: {e}")
-            raise
 
 
 class AIService:
     """Async AI Service integrating MCP"""
-    
+
     def __init__(
         self,
-        provider: str,
-        api_key: str,
-        mcp_client: MCPClientService,
+        provider,  # AIProvider instance OR str (legacy)
+        api_key: str = None,
+        mcp_client: MCPClientService = None,
         model: Optional[str] = None,
         **kwargs
     ):
-        self.provider_name = provider
-        self.mcp_client = mcp_client
-        # Initialize Vanna RAG with config from settings
-        self.vanna = VannaService(config={
-            "path": settings.VANNA_CHROMA_PATH,
-            "distance_threshold": settings.VANNA_DISTANCE_THRESHOLD
-        })
+        # Support both new and legacy constructors
+        if isinstance(provider, str):
+            # Legacy: provider is a string name
+            self.provider_name = provider
+            self.mcp_client = mcp_client if mcp_client is not None else api_key  # legacy compat: api_key might be mcp_client
+            self._init_legacy_provider(provider, api_key, model, **kwargs)
+        elif isinstance(provider, AIProvider):
+            # New style: provider is an AIProvider instance
+            self.provider = provider
+            self.provider_name = provider.name
+            self.mcp_client = mcp_client if mcp_client is not None else api_key
+        else:
+            raise ValueError(f"provider must be str or AIProvider, got {type(provider)}")
 
+        # Initialize Vanna RAG
+        try:
+            self.vanna = VannaService(config={
+                "path": settings.VANNA_CHROMA_PATH,
+                "distance_threshold": settings.VANNA_DISTANCE_THRESHOLD
+            })
+        except Exception:
+            self.vanna = None
 
-        if provider == "claude":
+    def _init_legacy_provider(self, provider_name: str, api_key: str, model: Optional[str], **kwargs):
+        """Legacy constructor: create provider from string name"""
+        if provider_name == "claude":
             self.provider = ClaudeProvider(
                 api_key,
                 model or "claude-sonnet-4-20250514",
                 extended_thinking=kwargs.get("extended_thinking", False),
                 thinking_budget_tokens=kwargs.get("thinking_budget_tokens", 8000),
             )
-        elif provider == "gemini":
+        elif provider_name == "gemini":
             self.provider = GeminiProvider(api_key, model) if model else GeminiProvider(api_key)
-        elif provider == "matcha":
-             self.provider = MatchaProvider(api_key, kwargs.get("api_url"), model) if model else MatchaProvider(api_key, kwargs.get("api_url"))
+        elif provider_name == "matcha":
+            self.provider = MatchaProvider(api_key, kwargs.get("api_url"), model) if model else MatchaProvider(api_key, kwargs.get("api_url"))
         else:
-            raise ValueError(f"Unknown provider: {provider}")
+            raise ValueError(f"Unknown provider: {provider_name}")
 
     async def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str) -> str:
         return await self.provider.explain_result(question, sql, data, system_prompt)
-            
+
     async def query_with_retry(
         self,
         question: str,
@@ -982,25 +108,23 @@ class AIService:
         explain: bool = True,
         context_name: str = "revenue"
     ) -> QueryResult:
-        
+
         # 1. Get Tools
         tools = await self.mcp_client.get_tools()
-        
+
         # 2. Main Loop (Model <-> Tools)
-        # We handle up to max_turns for tool usage (e.g. get_schema -> get_values -> execute_sql)
         max_turns = 20
         current_history = list(history)
-        
-        # Initial System Prompt
+
         system_prompt = "You are a helpful data assistant. Use the available tools to answer the user's question. Always validate your understanding of the schema first."
-        
+
         sql_query = None
         data = []
         explanation = ""
         total_tokens = 0
-        
+
         working_question = question
-        
+
         # Inject Vanna RAG Context into System Prompt
         try:
             rag_context = self._get_vanna_context_string(question)
@@ -1010,41 +134,35 @@ class AIService:
         except Exception as e:
             logger.error(f"Failed to get Vanna context: {e}")
 
-
         for turn in range(max_turns):
             logger.info(f"AIService Turn {turn}/{max_turns} for provider {self.provider_name}")
-            
+
             # Call AI
             result = await self.provider.generate_sql(working_question, system_prompt, tools, current_history)
             response = result["response"]
             total_tokens += result["tokens_used"]
-            
+
             # Check for tool calls
             tool_calls = []
-            
+
             # Parse response based on provider
             if self.provider_name == "claude":
-                # Anthropic object
                 for content in response.content:
                     if content.type == "text" and content.text:
-                         pass # Just thought process
+                        pass
                     elif content.type == "tool_use":
                         tool_calls.append({
                             "id": content.id,
                             "name": content.name,
                             "args": content.input
                         })
-                
-                # Check if done (no tool calls, just text?) 
-                # Actually Claude stops at tool_use. We must run tool and recurse.
+
                 if not tool_calls:
-                     # Final answer
-                     text = response.content[0].text if response.content else ""
-                     explanation = text
-                     break
-                     
+                    text = response.content[0].text if response.content else ""
+                    explanation = text
+                    break
+
             elif self.provider_name == "gemini":
-                # Google object
                 candidate = response.candidates[0]
                 for part in candidate.content.parts:
                     if part.function_call:
@@ -1053,22 +171,18 @@ class AIService:
                             "args": part.function_call.args
                         })
                 if not tool_calls:
-                     # Final answer
-                     explanation = candidate.content.parts[0].text if candidate.content.parts else ""
-                     break
-            
+                    explanation = candidate.content.parts[0].text if candidate.content.parts else ""
+                    break
+
             elif self.provider_name == "matcha":
-                # OpenAI Dict
                 msg = response['choices'][0]['message']
                 if msg.get('tool_calls'):
-                    # Ensure User question is in history before tools if it's the first turn
                     if turn == 0 and working_question:
                         current_history.append({"role": "user", "content": working_question})
                         working_question = None
 
-                    # Append Assistant Message ONCE containing all tool calls
                     current_history.append(msg)
-                    
+
                     for tc in msg['tool_calls']:
                         tool_calls.append({
                             "id": tc['id'],
@@ -1081,150 +195,100 @@ class AIService:
 
             # Execute Tools
             for call in tool_calls:
-                 # Notify status
-                 if on_status:
-                     on_status(RetryStatus(turn, max_turns, "executing", f"Calling tool: {call['name']}"))
-                 
-                 # Capture SQL if this is execution
-                 if call['name'] == 'execute_query':
-                     sql_query = call['args'].get('sql') or call['args'].get('query')
-                     
-                 try:
-                     logger.info(f"Calling tool {call['name']} with args: {call['args']}")
-                     tool_result = await self.mcp_client.call_tool(call['name'], call['args'])
-                     
-                     # If execute query, we got data!
-                     if call['name'] == 'execute_query':
-                         try:
-                             if isinstance(tool_result, str): # Parse JSON if it looks like one
-                                 import ast
-                                 # Or json.loads
-                                 data = json.loads(tool_result)
-                         except:
-                             pass
-                 except Exception as e:
-                     tool_result = f"Error: {str(e)}"
-                     logger.error(f"Tool execution error: {tool_result}")
+                if on_status:
+                    on_status(RetryStatus(turn, max_turns, "executing", f"Calling tool: {call['name']}"))
 
-                 # Add to history for next turn
-                 if self.provider_name == "claude":
-                     current_history.append({"role": "assistant", "content": [
-                         {"type": "tool_use", "id": call['id'], "name": call['name'], "input": call['args']}
-                     ]})
-                     current_history.append({"role": "user", "content": [
-                         {"type": "tool_result", "tool_use_id": call['id'], "content": str(tool_result)}
-                     ]})
-                 
-                 elif self.provider_name == "gemini":
-                     # Gemini uses 'user' role for function responses
-                     # We need to store enough info for generate_sql to reconstruct types.Part
-                     
-                     # 1. Store the Model's Function Call (if not already stored explicitly)
-                     # In Gemini, the 'response' object itself contains the candidate execution.
-                     # We need to make sure we keep track of what the model *just* said.
-                     # But current_history logic is additive.
-                     
-                     # Check if we just added the model's turn?
-                     # Distinct from Matcha/Claude, Gemini SDK often manages history via ChatSession.
-                     # But here we are doing stateless generate_content calls.
-                     
-                     # Ensure User question is the VERY FIRST item in history if this is the first turn
-                     if turn == 0 and working_question:
-                         current_history.append({"role": "user", "content": working_question})
-                         working_question = None
+                if call['name'] == 'execute_query':
+                    sql_query = call['args'].get('sql') or call['args'].get('query')
 
-                     # We need to append the MODEL's function call message first if this is the first tool in this turn
-                     # But tool_calls list comes from ONE model response.
-                     # So we should append the model response ONCE.
-                     
-                     # Check if the last message in history is this model response
-                     last_msg = current_history[-1] if current_history else None
-                     model_msg_marker = f"__gemini_model_turn_{turn}__"
-                     
-                     if not last_msg or last_msg.get("internal_id") != model_msg_marker:
-                         # Store the ORIGINAL parts from the candidate to preserve thought_signature
-                         # We can't easily serialize types.Part but we can try to keep it in memory
-                         # or serialize to dict if the SDK supports it.
-                         # Better: Store the whole part if possible, or convert to dict using .to_dict()
-                         
-                         model_parts_data = []
-                         # We iterate through the original response parts to find the function calls
-                         # The 'response' object is available here
-                         # CAUTION: 'response' variable holds the GenerateContentResponse
-                         
-                         matched_parts = []
-                         if response.candidates and response.candidates[0].content:
-                             for p in response.candidates[0].content.parts:
-                                 # We want to keep all parts (thought + function_call)
-                                 # We need to serialize them for history
-                                 # Check if .to_dict() exists
-                                 # Try to serialize using to_dict() first (preserves thought_signature)
-                                 try:
-                                     if hasattr(p, "to_dict"):
-                                         matched_parts.append(p.to_dict())
-                                         continue
-                                 except Exception:
-                                     pass
+                try:
+                    logger.info(f"Calling tool {call['name']} with args: {call['args']}")
+                    tool_result = await self.mcp_client.call_tool(call['name'], call['args'])
 
-                                 # Fallback manual construction - include thought_signature if present
-                                 part_dict = {}
+                    if call['name'] == 'execute_query':
+                        try:
+                            if isinstance(tool_result, str):
+                                data = json.loads(tool_result)
+                        except Exception:
+                            pass
+                except Exception as e:
+                    tool_result = f"Error: {str(e)}"
+                    logger.error(f"Tool execution error: {tool_result}")
 
-                                 if p.function_call:
-                                     part_dict["function_call"] = {
-                                         "name": p.function_call.name,
-                                         "args": dict(p.function_call.args) if p.function_call.args else {}
-                                     }
+                # Add to history for next turn
+                if self.provider_name == "claude":
+                    current_history.append({"role": "assistant", "content": [
+                        {"type": "tool_use", "id": call['id'], "name": call['name'], "input": call['args']}
+                    ]})
+                    current_history.append({"role": "user", "content": [
+                        {"type": "tool_result", "tool_use_id": call['id'], "content": str(tool_result)}
+                    ]})
 
-                                 if hasattr(p, 'text') and p.text:
-                                     part_dict["text"] = p.text
+                elif self.provider_name == "gemini":
+                    if turn == 0 and working_question:
+                        current_history.append({"role": "user", "content": working_question})
+                        working_question = None
 
-                                 # CRITICAL: Preserve thought_signature if present
-                                 if hasattr(p, 'thought_signature') and p.thought_signature:
-                                     part_dict["thought_signature"] = p.thought_signature
+                    last_msg = current_history[-1] if current_history else None
+                    model_msg_marker = f"__gemini_model_turn_{turn}__"
 
-                                 # Also check for thought field
-                                 if hasattr(p, 'thought') and p.thought:
-                                     part_dict["thought"] = p.thought
+                    if not last_msg or last_msg.get("internal_id") != model_msg_marker:
+                        matched_parts = []
+                        if response.candidates and response.candidates[0].content:
+                            for p in response.candidates[0].content.parts:
+                                try:
+                                    if hasattr(p, "to_dict"):
+                                        matched_parts.append(p.to_dict())
+                                        continue
+                                except Exception:
+                                    pass
 
-                                 if part_dict:
-                                     matched_parts.append(part_dict)
-                         
-                         if matched_parts:
+                                part_dict = {}
+                                if p.function_call:
+                                    part_dict["function_call"] = {
+                                        "name": p.function_call.name,
+                                        "args": dict(p.function_call.args) if p.function_call.args else {}
+                                    }
+                                if hasattr(p, 'text') and p.text:
+                                    part_dict["text"] = p.text
+                                if hasattr(p, 'thought_signature') and p.thought_signature:
+                                    part_dict["thought_signature"] = p.thought_signature
+                                if hasattr(p, 'thought') and p.thought:
+                                    part_dict["thought"] = p.thought
+
+                                if part_dict:
+                                    matched_parts.append(part_dict)
+
+                        if matched_parts:
                             current_history.append({
                                 "role": "model",
-                                "parts_raw": matched_parts, # Store raw dicts
+                                "parts_raw": matched_parts,
                                 "internal_id": model_msg_marker
                             })
-                     
-                     # 2. Append the Tool Response
-                     # Gemini expects response in 'user' role usually, or specific structure
-                     # Ensure content is a Dict
-                     tool_content = tool_result
-                     if isinstance(tool_result, str):
-                         try:
-                             tool_content = json.loads(tool_result)
-                         except:
-                             pass
-                     
-                     # Check if it is a list or primitive, wrap it
-                     if not isinstance(tool_content, dict):
-                         tool_content = {"result": tool_content}
 
-                     current_history.append({
-                         "role": "function", # Internal marker we process in generate_sql
-                         "name": call['name'],
-                         "content": tool_content
-                     })
+                    tool_content = tool_result
+                    if isinstance(tool_result, str):
+                        try:
+                            tool_content = json.loads(tool_result)
+                        except Exception:
+                            pass
 
-                 elif self.provider_name == "matcha":
-                     # For Matcha, we ONLY append the tool output here
-                     # The Assistant message was already appended before the loop
-                     current_history.append({
-                         "role": "tool",
-                         "tool_call_id": call['id'],
-                         "content": str(tool_result)
-                     })
-        
+                    if not isinstance(tool_content, dict):
+                        tool_content = {"result": tool_content}
+
+                    current_history.append({
+                        "role": "function",
+                        "name": call['name'],
+                        "content": tool_content
+                    })
+
+                elif self.provider_name == "matcha":
+                    current_history.append({
+                        "role": "tool",
+                        "tool_call_id": call['id'],
+                        "content": str(tool_result)
+                    })
+
         # Fallback if loop finished without explanation
         if not explanation and total_tokens > 0:
             explanation = "I apologize, but I was unable to complete the analysis within the allowed number of steps. The request required exploring too much schema information."
@@ -1267,9 +331,8 @@ class AIService:
         """
         import time
         start_request = time.perf_counter()
-        
-        sql_query = None
 
+        sql_query = None
         data = []
         explanation = ""
         total_tokens = 0
@@ -1294,11 +357,11 @@ class AIService:
             if on_status:
                 on_status(RetryStatus(attempt, max_retries, "generating", f"Generating SQL (attempt {attempt + 1})"))
 
-            # Build prompt for AI — get table/display from DB (no hardcode)
+            # Build prompt for AI
             try:
                 from app.services.schema_service import SchemaService
-                from app.config import settings
-                db_path = settings.DATABASE_URL.replace("sqlite:///", "").replace("sqlite://", "")
+                from app.config import settings as app_settings
+                db_path = app_settings.DATABASE_URL.replace("sqlite:///", "").replace("sqlite://", "")
                 temp_schema = SchemaService(db_path=db_path)
                 context_info = temp_schema.get_context_info(context_name)
                 if context_info:
@@ -1324,26 +387,21 @@ class AIService:
             history_context = ""
             if history and len(history) > 0:
                 history_lines = []
-                for i, msg in enumerate(history[-6:]):  # Last 3 pairs (6 messages)
+                for i, msg in enumerate(history[-6:]):
                     role = msg.get("role", "")
                     content = msg.get("content", "")
                     if role == "user":
                         history_lines.append(f"คำถามก่อนหน้า: {content}")
                     elif role == "assistant":
-                        # Extract SQL from previous response if available
-                        # Try markdown format first
                         sql_match = re.search(r'```sql\s*(.*?)\s*```', content, re.DOTALL | re.IGNORECASE)
                         if sql_match:
                             sql_preview = sql_match.group(1).strip()
-                            # Show full SQL (truncated if too long) so AI can see filters
                             history_lines.append(f"SQL ที่ใช้:\n{sql_preview[:500]}")
                         else:
-                            # Try old format (Context SQL: ...)
                             old_format = re.search(r'\(Context SQL:\s*(.*?)\)', content, re.DOTALL)
                             if old_format:
                                 history_lines.append(f"SQL ที่ใช้:\n{old_format.group(1).strip()[:500]}")
                             else:
-                                # Just show summary of response
                                 history_lines.append(f"คำตอบ: {content[:150]}...")
 
                 if history_lines:
@@ -1366,7 +424,7 @@ class AIService:
                 except Exception as e:
                     logger.warning(f"Failed to get RAG context: {e}")
 
-                # ★ Value Lookup — ดึง keyword จากคำถามตรงๆ (toggle ผ่าน feature flag) ★
+                # Value Lookup
                 value_lookup_text = ""
                 if value_lookup_enabled:
                     try:
@@ -1376,7 +434,7 @@ class AIService:
                     except Exception as e:
                         logger.warning(f"Value Lookup failed: {e}")
 
-                # Two-Pass Mode: Extract intent first, then build SQL prompt from structured intent
+                # Two-Pass Mode
                 if two_pass_enabled:
                     logger.info("Two-Pass Mode: Starting Pass 1 (Intent Extraction)")
                     if on_status:
@@ -1403,7 +461,7 @@ class AIService:
                         )
                     else:
                         logger.warning("Two-Pass Mode: Pass 1 failed. Falling back to one-pass CoT prompt.")
-                        two_pass_enabled = False  # Disable for this request
+                        two_pass_enabled = False
 
                 # One-Pass Mode (default or fallback)
                 if not two_pass_enabled or attempt > 0:
@@ -1460,9 +518,8 @@ Error: {last_error.get('error', '')}
 **คำอธิบาย:** <คำอธิบายภาษาไทย>"""
 
             try:
-                # Step 1: AI generates SQL (single call, no tools)
+                # Step 1: AI generates SQL
                 logger.info(f"Hybrid Mode: Generating SQL (attempt {attempt + 1})")
-                logger.info(f"Hybrid Mode: Provider={self.provider_name}, user_prompt_len={len(user_prompt)}, system_prompt_len={len(system_prompt) if system_prompt else 0}")
 
                 try:
                     t0 = time.perf_counter()
@@ -1475,9 +532,7 @@ Error: {last_error.get('error', '')}
                     continue
 
                 logger.info(f"Hybrid Mode: Got response_text (len={len(response_text) if response_text else 0})")
-                if response_text:
-                    logger.info(f"Hybrid Mode: response_text preview: {response_text[:300]}...")
-                total_tokens += 500  # Estimate, actual depends on provider
+                total_tokens += 500  # Estimate
 
                 # Step 2: Parse SQL from response
                 sql_query = self._extract_sql(response_text)
@@ -1496,20 +551,16 @@ Error: {last_error.get('error', '')}
 
                 try:
                     validation_result = await self.mcp_client.call_tool("validate_sql", {"sql": sql_query})
-                    logger.info(f"Hybrid Mode: Validation result: {validation_result}")
 
                     if not validation_result:
-                        logger.warning("Empty validation result from MCP")
                         retry_history.append({"sql": sql_query, "error": "MCP validation returned empty result"})
                         continue
 
                     validation = json.loads(validation_result) if isinstance(validation_result, str) else validation_result
                 except json.JSONDecodeError as e:
-                    logger.error(f"Failed to parse validation result: {e}")
                     retry_history.append({"sql": sql_query, "error": f"Validation parse error: {str(e)}"})
                     continue
                 except Exception as e:
-                    logger.error(f"Validation tool call failed: {e}")
                     retry_history.append({"sql": sql_query, "error": f"Validation error: {str(e)}"})
                     continue
 
@@ -1530,44 +581,26 @@ Error: {last_error.get('error', '')}
                     exec_result = await self.mcp_client.call_tool("execute_query", {
                         "sql": sql_query,
                         "limit": 1000,
-                        "validate_first": False  # Already validated
+                        "validate_first": False
                     })
                     t_exec = time.perf_counter() - t0
                     logger.info(f"Hybrid Mode: SQL Execution in DB took {t_exec:.4f}s")
-                    logger.info(f"Hybrid Mode: Execution result length: {len(exec_result) if exec_result else 0}")
-                    logger.info(f"Hybrid Mode: Execution result preview: {exec_result[:500] if exec_result else 'None'}...")
 
                     if not exec_result:
-                        logger.warning("Empty execution result from MCP")
                         retry_history.append({"sql": sql_query, "error": "MCP execution returned empty result"})
                         continue
 
                     exec_data = json.loads(exec_result) if isinstance(exec_result, str) else exec_result
-                    
-                    # Logic to warn user if LIMIT is hit
+
+                    # Limit Warning
                     if isinstance(exec_data, list) and len(exec_data) >= 1000:
                         logger.warning("Query hit the 1000 row limit.")
-                        limit_warning = "\n\n⚠️ **คำเตือน:** ข้อมูลมีจำนวนมากและถูกจำกัดการแสดงผลที่ 1,000 รายการ อาจมีข้อมูลบางส่วนขาดหายไป กรุณาเพิ่มเงื่อนไขการค้นหา (เช่น ระบุเดือน หรือ ฝ่าย) เพื่อให้ได้ข้อมูลที่ครบถ้วนครับ"
-                        # We will append this to the final explanation later or store it
-                        # For now, let's prepend/append it to any explanation generated subsequently
-                        # Or set a flag. Ideally, explanation is generated in next turn or extracted.
-                        # Simplest: Append to the LAST tool result content so that the Model *sees* it and explains it?
-                        # No, the user wants to see it.
-                        # Let's append it to the explanation variable if it exists, or ensure it's added to the final output.
-                        # Since explanation comes from the Model *reading* the data, the Model *might* not mention it unless told.
-                        # Better strategy: Inject it into the system explanation logic OR directly modify the result object if possible.
-                        # But QueryResult is just data.
-                        # Let's modify the 'explanation' string at the end of the method.
-                        
-                        # Hack: Store it in a temporary variable to append at the return statement
-                        self._pending_limit_warning = limit_warning
+                        self._pending_limit_warning = "\n\n⚠️ **คำเตือน:** ข้อมูลมีจำนวนมากและถูกจำกัดการแสดงผลที่ 1,000 รายการ อาจมีข้อมูลบางส่วนขาดหายไป กรุณาเพิ่มเงื่อนไขการค้นหา (เช่น ระบุเดือน หรือ ฝ่าย) เพื่อให้ได้ข้อมูลที่ครบถ้วนครับ"
 
                 except json.JSONDecodeError as e:
-                    logger.error(f"Failed to parse execution result: {e}")
                     retry_history.append({"sql": sql_query, "error": f"Execution parse error: {str(e)}"})
                     continue
                 except Exception as e:
-                    logger.error(f"Execution tool call failed: {e}")
                     retry_history.append({"sql": sql_query, "error": f"Execution error: {str(e)}"})
                     continue
 
@@ -1581,33 +614,23 @@ Error: {last_error.get('error', '')}
                 data = exec_data.get("data", [])
                 row_count = exec_data.get("row_count", 0)
                 columns = exec_data.get("columns", [])
-                logger.info(f"Hybrid Mode: Success! Got {len(data)} rows (row_count={row_count}, columns={columns})")
+                logger.info(f"Hybrid Mode: Success! Got {len(data)} rows")
 
-                # Log sample data if available
-                if data:
-                    logger.info(f"Hybrid Mode: First row sample: {data[0]}")
-                else:
-                    logger.warning(f"Hybrid Mode: Query returned 0 rows - SQL may not match any data")
-
-                # Enhance explanation based on actual data
+                # Enhance explanation
                 if not data:
-                    # No data found - add note to explanation
                     explanation = f"ไม่พบข้อมูลที่ตรงกับเงื่อนไข\n\nSQL ที่ใช้:\n```sql\n{sql_query}\n```\n\nอาจเป็นเพราะ:\n- ไม่มีข้อมูลที่ตรงกับคำค้นหา\n- ชื่อคอลัมน์หรือค่าที่ใช้ค้นหาอาจไม่ถูกต้อง"
                 elif len(data) > 0:
-                    # Call explain_result to get visualization and chart_config
                     try:
                         t0 = time.perf_counter()
-                        # Use lightweight system prompt for explanation to save tokens/time
                         simple_system_prompt = "You are a data visualization assistant. Analyze the data and provide a Thai explanation and chart recommendation."
                         explanation = await self.provider.explain_result(question, sql_query, data, simple_system_prompt)
                         t_explain = time.perf_counter() - t0
                         logger.info(f"Hybrid Mode: Explanation Generation took {t_explain:.4f}s")
-                        logger.info(f"Hybrid Mode: Got explanation with visualization: {type(explanation)}")
                     except Exception as explain_error:
                         logger.warning(f"Could not get explanation: {explain_error}")
                         explanation = f"พบข้อมูล {len(data)} รายการ"
 
-                # Step 5: Calculate confidence score using validation MCP
+                # Step 5: Confidence score
                 confidence_result = None
                 try:
                     if "nt-validation" in self.mcp_client.servers:
@@ -1617,7 +640,7 @@ Error: {last_error.get('error', '')}
                                 "sql": sql_query,
                                 "question": question,
                                 "context_name": context_name,
-                                "has_similar_example": False,  # TODO: Check golden examples
+                                "has_similar_example": False,
                                 "example_similarity": 0.0,
                                 "execution_success": True,
                                 "result_row_count": len(data)
@@ -1634,13 +657,12 @@ Error: {last_error.get('error', '')}
                                 factors=conf.get("factors", []),
                                 recommendation=conf.get("recommendation", "")
                             )
-                            logger.info(f"Hybrid Mode: Confidence score = {confidence_result.score}% ({confidence_result.level})")
                 except Exception as conf_error:
                     logger.warning(f"Could not calculate confidence: {conf_error}")
 
                 t_total = time.perf_counter() - start_request
                 logger.info(f"Hybrid Mode: Total Request Time: {t_total:.4f}s")
-                
+
                 return QueryResult(
                     question=question,
                     sql_query=sql_query,
@@ -1672,23 +694,17 @@ Error: {last_error.get('error', '')}
 
     def _extract_sql(self, text: str) -> Optional[str]:
         """Extract SQL from AI response"""
-        import re
-
-        # Try to find SQL in code block
         sql_match = re.search(r'```sql\s*(.*?)\s*```', text, re.DOTALL | re.IGNORECASE)
         if sql_match:
             return sql_match.group(1).strip()
 
-        # Try generic code block
         code_match = re.search(r'```\s*(SELECT.*?)\s*```', text, re.DOTALL | re.IGNORECASE)
         if code_match:
             return code_match.group(1).strip()
 
-        # Try to find SELECT statement directly
         select_match = re.search(r'(SELECT\s+.*?(?:;|$))', text, re.DOTALL | re.IGNORECASE)
         if select_match:
             sql = select_match.group(1).strip()
-            # Remove trailing explanation if any
             if '\n\n' in sql:
                 sql = sql.split('\n\n')[0]
             return sql.rstrip(';') + '' if not sql.endswith(';') else sql
@@ -1697,52 +713,44 @@ Error: {last_error.get('error', '')}
 
     def _extract_explanation(self, text: str) -> str:
         """Extract explanation from AI response"""
-        import re
-
-        # Remove SQL code blocks
         text_without_sql = re.sub(r'```sql.*?```', '', text, flags=re.DOTALL | re.IGNORECASE)
         text_without_sql = re.sub(r'```.*?```', '', text_without_sql, flags=re.DOTALL)
 
-        # Look for explanation marker
         explanation_match = re.search(r'\*\*คำอธิบาย:?\*\*\s*(.*)', text_without_sql, re.DOTALL)
         if explanation_match:
             return explanation_match.group(1).strip()
 
-        # Return remaining text as explanation
         cleaned = text_without_sql.strip()
         if cleaned:
             return cleaned
 
         return "ดำเนินการสำเร็จ"
-    
-    
+
     def _get_vanna_context_string(self, question: str) -> str:
         """Retrieve and format RAG context from Vanna"""
         try:
+            if not self.vanna:
+                return ""
             contexts = self.vanna.get_rag_context(question)
-            
+
             parts = []
-            
-            # 1. DDL
+
             if contexts.get('ddl'):
                 parts.append("### Relevant Tables (Schema):")
                 parts.extend(contexts['ddl'])
-                
-            # 2. Documentation (Rules & Mappings)
+
             if contexts.get('doc'):
                 parts.append("\n### Relevant Rules & Dictionary:")
                 parts.extend(contexts['doc'])
-                
-            # 3. Golden Examples (Few-Shot)
+
             if contexts.get('sql'):
                 parts.append("\n### Similar Examples (Golden SQL):")
                 for sql in contexts['sql']:
-                    # sql is a string from ChromaDB, not a dict
                     parts.append(f"- {sql}")
-                    
+
             if not parts:
                 return ""
-                
+
             return "\n".join(parts)
         except Exception as e:
             logger.error(f"Error getting Vanna context: {e}")
@@ -1753,11 +761,7 @@ Error: {last_error.get('error', '')}
     # ============================================================
 
     def _extract_keywords_from_question(self, question: str) -> List[str]:
-        """Extract searchable keywords from raw question text (no AI needed).
-        Handles Thai text (no spaces) by stripping known prefixes."""
-        import re
-
-        # Thai prefixes to strip (longest first for greedy match)
+        """Extract searchable keywords from raw question text (no AI needed)."""
         strip_prefixes = [
             "ค่าใช้จ่าย", "รายได้", "บริการ", "ค่า", "ยอด",
             "ขอดู", "ขอ", "แสดง", "หา", "ดู", "สรุป",
@@ -1775,17 +779,15 @@ Error: {last_error.get('error', '')}
 
         keywords = []
 
-        # Split by spaces
         parts = re.split(r'[\s,;:?!()（）\[\]]+', question.strip())
         for part in parts:
             part = part.strip().strip('"\'')
             if len(part) < 2 or part.lower() in stop_words:
                 continue
 
-            # Recursively strip prefixes to handle "รายได้ค่าเช่าพื้นที่" → "ค่าเช่าพื้นที่" → "เช่าพื้นที่"
             candidates = [part]
             current = part
-            for _ in range(3):  # Max 3 layers of stripping
+            for _ in range(3):
                 stripped = False
                 for prefix in strip_prefixes:
                     if current.startswith(prefix) and len(current) > len(prefix) + 1:
@@ -1801,7 +803,6 @@ Error: {last_error.get('error', '')}
                 if c not in stop_words and len(c) >= 2:
                     keywords.append(c)
 
-        # Deduplicate
         seen = set()
         unique = []
         for kw in keywords:
@@ -1811,13 +812,9 @@ Error: {last_error.get('error', '')}
         return unique
 
     def _lookup_values_from_question(self, question: str, context_name: str, table_name: str) -> List[Dict]:
-        """
-        Look up actual database values for keywords extracted directly from question.
-        Works independently of Two-Pass — no AI needed.
-        Returns list of {keyword, column_name, column_value, table_name}
-        """
+        """Look up actual database values for keywords extracted directly from question."""
         from app.services.schema_service import SchemaService
-        from app.config import settings
+        from app.config import settings as app_settings
         import time
 
         t0 = time.perf_counter()
@@ -1828,24 +825,20 @@ Error: {last_error.get('error', '')}
             return results
 
         try:
-            db_path = settings.DATABASE_URL.replace("sqlite:///", "").replace("sqlite://", "")
+            db_path = app_settings.DATABASE_URL.replace("sqlite:///", "").replace("sqlite://", "")
             schema_svc = SchemaService(db_path=db_path)
 
             for kw in keywords:
-                # 1. Try keyword index first (fast)
                 matches = schema_svc.search_keyword_index(kw, context_name=context_name, limit=5)
                 if matches:
                     results.extend(matches)
                 else:
-                    # 2. Fallback: search DB directly
                     db_matches = schema_svc.search_db_for_keyword(kw, table_name=table_name, context_name=context_name, limit=5)
                     results.extend(db_matches)
 
             t_lookup = time.perf_counter() - t0
             if results:
                 logger.info(f"Value Lookup: {len(keywords)} keywords → {len(results)} matches ({t_lookup:.3f}s)")
-            else:
-                logger.info(f"Value Lookup: {len(keywords)} keywords → no matches ({t_lookup:.3f}s)")
 
         except Exception as e:
             logger.warning(f"Value Lookup failed: {e}")
@@ -1854,11 +847,10 @@ Error: {last_error.get('error', '')}
 
     @staticmethod
     def _format_value_matches(value_matches: List[Dict]) -> str:
-        """Format value lookup results for injection into Pass 2 prompt."""
+        """Format value lookup results for injection into prompt."""
         if not value_matches:
             return ""
 
-        # Group by keyword
         by_keyword: Dict[str, List[Dict]] = {}
         for m in value_matches:
             kw = m.get("keyword", "?")
@@ -1867,7 +859,7 @@ Error: {last_error.get('error', '')}
         lines = ["**Actual Values Found in Database (ค่าจริงจากฐานข้อมูล):**"]
         for kw, matches in by_keyword.items():
             lines.append(f'- keyword "{kw}":')
-            for m in matches[:5]:  # Limit per keyword
+            for m in matches[:5]:
                 lines.append(f'  - {m["column_name"]} = \'{m["column_value"]}\'')
 
         lines.append("")
@@ -1880,17 +872,15 @@ Error: {last_error.get('error', '')}
     # ============================================================
 
     def _parse_intent_json(self, text: str) -> Optional[Dict]:
-        """Parse intent JSON from AI response, handling markdown code blocks."""
+        """Parse intent JSON from AI response."""
         if not text:
             return None
 
-        # Try 1: pure JSON
         try:
             return json.loads(text.strip())
         except json.JSONDecodeError:
             pass
 
-        # Try 2: JSON in markdown code block
         match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
         if match:
             try:
@@ -1898,7 +888,6 @@ Error: {last_error.get('error', '')}
             except json.JSONDecodeError:
                 pass
 
-        # Try 3: Find first { and last }
         match = re.search(r'(\{.*\})', text, re.DOTALL)
         if match:
             try:
@@ -1918,10 +907,7 @@ Error: {last_error.get('error', '')}
         history_context: str,
         rag_context: str
     ) -> Optional[Dict]:
-        """
-        Pass 1: Extract structured intent from user question.
-        Returns intent dict or None if extraction fails (fallback to one-pass).
-        """
+        """Pass 1: Extract structured intent from user question."""
         intent_prompt = f"""คำถาม: {question}
 
 **บริบท:** ข้อมูล{context_thai} (ใช้ตาราง {context_table}){history_context}
@@ -1968,7 +954,7 @@ Error: {last_error.get('error', '')}
                 logger.info(f"Two-Pass: Pass 1 complete ({t_intent:.2f}s). Intent: {json.dumps(intent_json, ensure_ascii=False)[:500]}")
                 return intent_json
             else:
-                logger.warning(f"Two-Pass: Failed to parse intent JSON ({t_intent:.2f}s). Raw: {response_text[:300] if response_text else 'empty'}")
+                logger.warning(f"Two-Pass: Failed to parse intent JSON ({t_intent:.2f}s).")
                 return None
 
         except Exception as e:
@@ -1985,28 +971,23 @@ Error: {last_error.get('error', '')}
     ) -> str:
         """Build Pass 2 prompt using structured intent from Pass 1."""
 
-        # ★ If value lookup found real columns → REPLACE intent's guessed filters ★
         if value_matches:
-            # Group matches by keyword
             by_keyword: Dict[str, List[Dict]] = {}
             for m in value_matches:
                 by_keyword.setdefault(m.get("keyword", ""), []).append(m)
 
-            # Build filter lines from REAL values instead of intent's guessed ones
             real_filter_lines = []
             for kw, matches in by_keyword.items():
-                for m in matches[:5]:  # Top 5 per keyword — ครอบคลุมทุก column
+                for m in matches[:5]:
                     real_filter_lines.append(f"  - {m['column_name']} = '{m['column_value']}'  (ค่าจริง)")
 
             if real_filter_lines:
                 filters_text = "\n".join(real_filter_lines)
-                # Also clear matched_mappings since we have real values
                 mappings_text = "  (ใช้ค่าจริงจาก Filters ข้างต้นแทน)"
             else:
                 filters_text = "  ไม่มี filter"
                 mappings_text = "  ไม่พบ mapping ที่ตรง"
         else:
-            # Fallback: use intent's filters as-is
             filters_text = "  ไม่มี filter"
             if intent.get("filters"):
                 lines = [f"  - {f['column']} {f['operator']} {f['value']}" for f in intent["filters"]]
@@ -2017,11 +998,9 @@ Error: {last_error.get('error', '')}
                 lines = [f"  - keyword '{m.get('keyword')}' → {m.get('sql_condition')}" for m in intent["matched_mappings"]]
                 mappings_text = "\n".join(lines)
 
-        # Format dimensions
         dims = intent.get("dimensions", [])
         dimensions_text = ", ".join(dims) if dims else "ไม่มี (ไม่ต้อง GROUP BY)"
 
-        # Format time range
         time_text = "ไม่ระบุ"
         tr = intent.get("time_range")
         if tr:
@@ -2033,7 +1012,6 @@ Error: {last_error.get('error', '')}
             if parts:
                 time_text = ", ".join(parts)
 
-        # Format ordering
         ordering_text = "ไม่ระบุ"
         if intent.get("ordering"):
             o = intent["ordering"]
@@ -2078,30 +1056,20 @@ Error: {last_error.get('error', '')}
             if not self.vanna:
                 logger.warning("Vanna service not initialized, skipping training")
                 return False
-                
+
             return self.vanna.train(question=question, sql=sql_query)
         except Exception as e:
             logger.error(f"Error in AIService.train: {e}")
             return False
 
     async def suggest_mappings(self, columns: List[Dict], samples: Dict[str, List]) -> List[Dict[str, str]]:
-        """
-        Suggest column name mappings (aliases) using AI.
-
-        Args:
-            columns: List of column info dicts with 'name' and 'type'
-            samples: Dict mapping column names to sample values
-
-        Returns:
-            List of suggestions with 'col', 'alias', and 'reason'
-        """
+        """Suggest column name mappings (aliases) using AI."""
         try:
-            # Build prompt
             column_info = []
             for col in columns:
                 col_name = col['name']
                 col_type = col['type']
-                sample_vals = samples.get(col_name, [])[:3]  # First 3 samples
+                sample_vals = samples.get(col_name, [])[:3]
                 column_info.append(f"- {col_name} ({col_type}): {sample_vals}")
 
             column_text = "\n".join(column_info)
@@ -2123,28 +1091,20 @@ Error: {last_error.get('error', '')}
 ]
 ```"""
 
-            # Call AI with simple prompt (no tools needed)
             result = await self.provider.generate_content(prompt, system_prompt="คุณเป็น AI ที่ช่วยตั้งชื่อคอลัมน์ภาษาไทยให้เหมาะสม")
 
-            # Extract JSON from response
-            import json
-            import re
-
-            # Find JSON block
             json_match = re.search(r'```json\s*(\[.*?\])\s*```', result, re.DOTALL)
             if json_match:
                 suggestions = json.loads(json_match.group(1))
                 return suggestions
 
-            # Try parsing whole response as JSON
             try:
                 suggestions = json.loads(result)
                 if isinstance(suggestions, list):
                     return suggestions
-            except:
+            except Exception:
                 pass
 
-            # Fallback: generate simple mappings
             return [
                 {
                     'col': col['name'],
@@ -2156,7 +1116,6 @@ Error: {last_error.get('error', '')}
 
         except Exception as e:
             logger.error(f"Error in suggest_mappings: {e}")
-            # Fallback: return original names
             return [
                 {
                     'col': col['name'],
@@ -2167,23 +1126,50 @@ Error: {last_error.get('error', '')}
             ]
 
 
-# Factories
+# ============================================================
+# Factory Functions (backward compatible)
+# ============================================================
+
 def create_claude_service(
     api_key: str,
-    mcp_client: MCPClientService,
+    mcp_client: MCPClientService = None,
     model: Optional[str] = None,
     extended_thinking: bool = False,
     thinking_budget_tokens: int = 8000,
+    **kwargs
 ) -> AIService:
-    return AIService(
-        "claude", api_key, mcp_client, model,
+    provider = ClaudeProvider(
+        api_key=api_key,
+        model=model or settings.CLAUDE_MODEL,
         extended_thinking=extended_thinking,
         thinking_budget_tokens=thinking_budget_tokens,
     )
+    return AIService(provider=provider, mcp_client=mcp_client)
 
-def create_gemini_service(api_key: str, mcp_client: MCPClientService, model: Optional[str] = None) -> AIService:
-    return AIService("gemini", api_key, mcp_client, model)
 
-def create_matcha_service(api_key: str, api_url: str, mcp_client: MCPClientService, model: Optional[str] = None) -> AIService:
-    return AIService("matcha", api_key, mcp_client, model, api_url=api_url)
+def create_gemini_service(
+    api_key: str,
+    mcp_client: MCPClientService = None,
+    model: Optional[str] = None,
+    **kwargs
+) -> AIService:
+    provider = GeminiProvider(
+        api_key=api_key,
+        model=model or settings.GEMINI_MODEL,
+    )
+    return AIService(provider=provider, mcp_client=mcp_client)
 
+
+def create_matcha_service(
+    api_key: str,
+    api_url: str = None,
+    mcp_client: MCPClientService = None,
+    model: Optional[str] = None,
+    **kwargs
+) -> AIService:
+    provider = MatchaProvider(
+        api_key=api_key,
+        api_url=api_url or settings.MATCHA_API_URL or "",
+        model=model or settings.MATCHA_MODEL,
+    )
+    return AIService(provider=provider, mcp_client=mcp_client)
