@@ -199,13 +199,17 @@ def _format_response(
             "recommendation": result.confidence.recommendation
         }
 
-    # Visualization
+    # Visualization + display hints
     visualization_response = None
     chart_config_response = None
+    display_hint_response = None
+    hierarchy_columns_response = None
     if isinstance(result.explanation, dict):
         visualization_response = result.explanation.get("visualization")
         chart_config_response = result.explanation.get("chart_config")
-        logger.info(f"AI Response - visualization: {visualization_response}, chart_config: {chart_config_response}")
+        display_hint_response = result.explanation.get("display_hint")
+        hierarchy_columns_response = result.explanation.get("hierarchy_columns")
+        logger.info(f"AI Response - visualization: {visualization_response}, display_hint: {display_hint_response}, hierarchy_columns: {hierarchy_columns_response}")
 
     return {
         "id": chat_entry.id,
@@ -220,7 +224,9 @@ def _format_response(
         "warnings": warnings_response,
         "confidence": confidence_response,
         "visualization": visualization_response,
-        "chart_config": chart_config_response
+        "chart_config": chart_config_response,
+        "display_hint": display_hint_response,
+        "hierarchy_columns": hierarchy_columns_response,
     }
 
 

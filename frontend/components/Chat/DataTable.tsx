@@ -8,6 +8,8 @@ import { Ionicons } from '@expo/vector-icons';
 
 interface DataTableProps {
     data: Record<string, any>[];
+    displayHint?: 'hierarchical' | 'crosstab' | 'flat';
+    hierarchyColumns?: string[]; // Ordered from parent→child (provided by LLM)
 }
 
 // Helper: Smart Month Sorting (Enhanced to handle Years)
@@ -81,7 +83,7 @@ const smartMonthSort = (values: string[]): string[] => {
     });
 };
 
-export const DataTable = ({ data }: DataTableProps) => {
+export const DataTable = ({ data, displayHint, hierarchyColumns }: DataTableProps) => {
     const isDark = useColorScheme() === 'dark';
     const [sortConfig, setSortConfig] = React.useState<{ key: string | null; direction: 'asc' | 'desc' }>({ key: null, direction: 'asc' });
 
@@ -531,9 +533,206 @@ export const DataTable = ({ data }: DataTableProps) => {
         }
     }
 
-    // Fallback Parent Detection (Grouped List)
+    // ─── Multi-level Hierarchy Detection ───────────────────────────────────
+    // Used when LLM sends display_hint='hierarchical' OR auto-detected from data.
+    let hierarchyKeys: string[] = []; // Ordered parent→child column names
+    let hierarchyValueKey: string = valueKey || '';
+
+    const detectMultiLevelHierarchy = (): string[] => {
+        // 1. LLM explicitly provided ordering → trust it
+        if (hierarchyColumns && hierarchyColumns.length >= 2) {
+            // Validate all columns exist in data
+            const valid = hierarchyColumns.filter(c => keys.includes(c));
+            if (valid.length >= 2) return valid;
+        }
+
+        // 2. Auto-detect: find dimension columns with strict 1:N parent-child relationships
+        const nonMeasureDims = dimensionKeys.filter(k => {
+            const lower = k.toLowerCase();
+            const timeKeywords = ['year', 'month', 'date', 'time', 'quarter', 'week', 'day',
+                'ปี', 'เดือน', 'วันที่', 'ไตรมาส', 'สัปดาห์', 'วัน', 'เวลา', 'พ.ศ.', 'ค.ศ.'];
+            return !timeKeywords.some(t => lower.includes(t));
+        });
+
+        if (nonMeasureDims.length < 2) return [];
+
+        // Get cardinality
+        const cardinalityMap = nonMeasureDims.map(k => ({
+            key: k,
+            unique: new Set(data.map(d => String(d[k] || ''))).size,
+        }));
+
+        // Sort ascending (fewest unique = highest in hierarchy)
+        cardinalityMap.sort((a, b) => a.unique - b.unique);
+
+        // Verify strict 1:N between adjacent levels: for each child value, it maps to exactly 1 parent
+        const candidate: string[] = [];
+        for (let i = 0; i < cardinalityMap.length; i++) {
+            if (candidate.length === 0) {
+                candidate.push(cardinalityMap[i].key);
+                continue;
+            }
+            const parentKey = candidate[candidate.length - 1];
+            const childKey = cardinalityMap[i].key;
+
+            // Check: each unique childKey value → exactly 1 parentKey value
+            const childToParent: Record<string, Set<string>> = {};
+            data.forEach(row => {
+                const child = String(row[childKey] || '');
+                const parent = String(row[parentKey] || '');
+                if (!childToParent[child]) childToParent[child] = new Set();
+                childToParent[child].add(parent);
+            });
+
+            const isStrictOneToMany = Object.values(childToParent).every(parents => parents.size === 1);
+            if (isStrictOneToMany) {
+                candidate.push(childKey);
+            }
+        }
+
+        return candidate.length >= 2 ? candidate : [];
+    };
+
+    // Determine if we should use hierarchical mode
+    // Priority: 0. LLM hint='hierarchical' or 'flat' overrides, 1-5 existing rules
+    const isHierarchicalHint = displayHint === 'hierarchical';
+    const isCrosstabHint = displayHint === 'crosstab';
+    const isFlatHint = displayHint === 'flat';
+
+    if (!isCrosstab && !isFlatHint && !isCrosstabHint) {
+        hierarchyKeys = detectMultiLevelHierarchy();
+        if (hierarchyKeys.length >= 2) {
+            hierarchyValueKey = valueKey || keys.find(k => typeof data[0][k] === 'number' && !k.toLowerCase().includes('id')) || keys[keys.length - 1];
+        }
+    }
+
+    const isHierarchical = !isCrosstab && hierarchyKeys.length >= 2;
+
+    // ─── Render: HIERARCHICAL GROUPED ROWS ────────────────────────────────
+    const renderHierarchicalTable = () => {
+        // Build nested tree: { parentVal: { childVal: { grandChildVal: rows[] } } ... }
+        const levels = hierarchyKeys;
+        const leafLevel = levels.length - 1;
+        const measureKeys = keys.filter(k => k !== hierarchyValueKey && isMeasure(k));
+        // Non-hierarchy, non-measure display columns
+        const extraCols = keys.filter(k => !levels.includes(k) && k !== hierarchyValueKey && !measureKeys.includes(k));
+        const valueCols = [hierarchyValueKey, ...measureKeys].filter(Boolean);
+
+        // Recursively build grouped structure
+        type TreeNode = { rows: Record<string, any>[]; children: Record<string, TreeNode> };
+        const buildTree = (rows: Record<string, any>[], levelIdx: number): Record<string, TreeNode> => {
+            if (levelIdx > leafLevel) return {};
+            const grouped: Record<string, TreeNode> = {};
+            rows.forEach(row => {
+                const key = String(row[levels[levelIdx]] ?? '—');
+                if (!grouped[key]) grouped[key] = { rows: [], children: {} };
+                grouped[key].rows.push(row);
+            });
+            if (levelIdx < leafLevel) {
+                Object.keys(grouped).forEach(k => {
+                    grouped[k].children = buildTree(grouped[k].rows, levelIdx + 1);
+                });
+            }
+            return grouped;
+        };
+
+        const sumRows = (rows: Record<string, any>[]): Record<string, number> => {
+            const totals: Record<string, number> = {};
+            valueCols.forEach(col => {
+                totals[col] = rows.reduce((s, r) => s + (parseFloat(String(r[col]).replace(/,/g, '')) || 0), 0);
+            });
+            return totals;
+        };
+
+        const levelColors = [
+            isDark ? '#1E3A5F' : '#DBEAFE', // Level 0 — deep blue
+            isDark ? '#1A3A2A' : '#DCFCE7', // Level 1 — green
+            isDark ? '#3B2F18' : '#FEF9C3', // Level 2 — amber
+            isDark ? '#2D1A3A' : '#F3E8FF', // Level 3 — purple
+        ];
+        const levelTextColors = [
+            isDark ? '#93C5FD' : '#1D4ED8',
+            isDark ? '#86EFAC' : '#15803D',
+            isDark ? '#FCD34D' : '#92400E',
+            isDark ? '#C084FC' : '#6B21A8',
+        ];
+
+        const tree = buildTree(data, 0);
+
+        const renderNode = (node: TreeNode, levelIdx: number, groupName: string): React.ReactElement => {
+            const isLeaf = levelIdx === leafLevel;
+            const bgColor = levelColors[Math.min(levelIdx, levelColors.length - 1)];
+            const textColor = levelTextColors[Math.min(levelIdx, levelTextColors.length - 1)];
+            const indent = levelIdx * 12;
+            const subtotals = sumRows(node.rows);
+
+            return (
+                <View key={`${levelIdx}-${groupName}`}>
+                    {/* Group header row */}
+                    <View style={{ backgroundColor: bgColor, paddingLeft: 12 + indent, paddingRight: 12, paddingVertical: 7, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: isDark ? '#374151' : '#E5E7EB' }}>
+                        <Text style={{ flex: 1, fontSize: levelIdx === 0 ? 13 : 12, fontWeight: '700', color: textColor }} numberOfLines={2}>
+                            {levelIdx === 0 ? '▸ ' : '  ▸ '}{groupName}
+                        </Text>
+                        {/* Subtotals per measure column at header */}
+                        {valueCols.map(col => (
+                            <Text key={col} style={{ width: getColumnWidth(col), fontSize: 12, fontWeight: '600', color: textColor, textAlign: 'right' }}>
+                                {subtotals[col] !== undefined ? subtotals[col].toLocaleString('th-TH', { maximumFractionDigits: 2 }) : ''}
+                            </Text>
+                        ))}
+                    </View>
+                    {/* Children: either sub-groups or leaf rows */}
+                    {isLeaf
+                        ? sortData(node.rows).map((row, rIdx) => (
+                            <View key={rIdx} style={{ flexDirection: 'row', paddingLeft: 16 + indent + 12, paddingRight: 12, paddingVertical: 6, backgroundColor: rIdx % 2 === 0 ? (isDark ? '#111827' : '#FFFFFF') : (isDark ? 'rgba(55,65,81,0.3)' : '#F9FAFB'), borderBottomWidth: 1, borderBottomColor: isDark ? '#1F2937' : '#F3F4F6' }}>
+                                {/* Extra non-hierarchy, non-measure cols */}
+                                {extraCols.length > 0 ? extraCols.map(col => (
+                                    <Text key={col} style={{ width: getColumnWidth(col, true), fontSize: 12, color: isDark ? '#D1D5DB' : '#374151' }} numberOfLines={2}>
+                                        {renderCell(col, row[col])}
+                                    </Text>
+                                )) : null}
+                                {/* Value cols */}
+                                {valueCols.map(col => (
+                                    <Text key={col} style={{ width: getColumnWidth(col), fontSize: 12, color: isDark ? '#E5E7EB' : '#1F2937', textAlign: 'right', fontVariant: ['tabular-nums'] }}>
+                                        {renderCell(col, row[col])}
+                                    </Text>
+                                ))}
+                            </View>
+                        ))
+                        : Object.entries(node.children)
+                            .sort(([a], [b]) => a.localeCompare(b, 'th'))
+                            .map(([childName, childNode]) => renderNode(childNode, levelIdx + 1, childName))
+                    }
+                </View>
+            );
+        };
+
+        // Column header
+        return (
+            <View>
+                {/* Header */}
+                <View style={{ flexDirection: 'row', backgroundColor: isDark ? '#1F2937' : '#F1F5F9', paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 2, borderBottomColor: isDark ? '#374151' : '#CBD5E1' }}>
+                    <Text style={{ flex: 1, fontSize: 11, fontWeight: '700', color: isDark ? '#9CA3AF' : '#475569', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                        {levels.join(' › ')}
+                    </Text>
+                    {valueCols.map(col => (
+                        <TouchableOpacity key={col} onPress={() => handleSort(col)} style={{ width: getColumnWidth(col), flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end' }}>
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: isDark ? '#9CA3AF' : '#475569', textTransform: 'uppercase', textAlign: 'right' }}>{col}</Text>
+                            {renderSortIcon(col)}
+                        </TouchableOpacity>
+                    ))}
+                </View>
+                {/* Tree rows */}
+                {Object.entries(tree)
+                    .sort(([a], [b]) => a.localeCompare(b, 'th'))
+                    .map(([groupName, node]) => renderNode(node, 0, groupName))}
+            </View>
+        );
+    };
+
+    // ─── Fallback: Single-level Grouped List (parentKey) ─────────────────
+    // Used when NOT crosstab AND NOT hierarchical — groups by one parent column
     let parentKey = '';
-    if (!isCrosstab && dimensionKeys.length >= 2) {
+    if (!isCrosstab && !isHierarchical && dimensionKeys.length >= 2) {
         const uniqueCounts = dimensionKeys.map(k => ({
             key: k,
             count: new Set(data.map(d => d[k])).size
@@ -778,7 +977,13 @@ export const DataTable = ({ data }: DataTableProps) => {
                 <View className="flex-row items-center space-x-2">
                     <Text className="text-base">🔢</Text>
                     <Text className="text-sm font-semibold text-gray-800 dark:text-gray-200">
-                        {isCrosstab ? `${rowKey} × ${colKey}` : parentKey ? `ตารางแยกตาม ${parentKey}` : 'ตารางข้อมูล'}
+                        {isCrosstab
+                            ? `${rowKey} × ${colKey}`
+                            : isHierarchical
+                                ? `${hierarchyKeys.join(' › ')}`
+                                : parentKey
+                                    ? `ตารางแยกตาม ${parentKey}`
+                                    : 'ตารางข้อมูล'}
                     </Text>
                 </View>
                 <View className="flex-row items-center gap-2">
@@ -795,7 +1000,13 @@ export const DataTable = ({ data }: DataTableProps) => {
             </View>
 
             <ScrollView horizontal showsHorizontalScrollIndicator={true} className="w-full">
-                {isCrosstab ? renderCrosstabTable() : (parentKey ? renderGroupedTable() : renderFlatTable())}
+                {isCrosstab
+                    ? renderCrosstabTable()
+                    : isHierarchical
+                        ? renderHierarchicalTable()
+                        : parentKey
+                            ? renderGroupedTable()
+                            : renderFlatTable()}
             </ScrollView>
         </View>
     );

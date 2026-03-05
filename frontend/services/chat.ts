@@ -58,6 +58,8 @@ export interface ChatResponse {
     confidence?: Confidence;           // Confidence score from validation MCP
     visualization?: string;            // AI recommended visualization type
     chart_config?: ChartConfig;        // AI recommended chart columns
+    display_hint?: 'hierarchical' | 'crosstab' | 'flat'; // AI recommended table display mode
+    hierarchy_columns?: string[];      // Ordered column names for hierarchical display (parent→child)
 }
 
 export interface TrainingRequest {

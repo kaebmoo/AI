@@ -193,6 +193,12 @@ Return the result as a JSON object with these keys:
    - "category_column": The column name for X-axis labels (the PRIMARY grouping)
    - "measure_column": The column name for Y-axis values (e.g., total, sum, amount)
    - "series_column": (optional) The column for SECONDARY grouping/comparison
+4. "display_hint": How to display the TABLE (separate from chart). One of:
+   - 'hierarchical': data has parent→child structure (e.g., business_unit > service_group > product, or division > department > section). Use when multiple non-time dimension columns form a hierarchy.
+   - 'crosstab': data is best compared across dimensions (e.g., group × month). Use when time or comparison axis exists.
+   - 'flat': simple flat list of rows.
+5. "hierarchy_columns": (REQUIRED if display_hint='hierarchical') Array of column names ordered from HIGHEST to LOWEST level.
+   Example: ["business_unit", "service_group", "product_name"]
 
 IMPORTANT for time-based comparisons:
 - **CRITICAL**: If a Time column exists (Month, Year, Date), YOU MUST USE IT AS 'category_column' (X-axis).
@@ -202,14 +208,16 @@ IMPORTANT for time-based comparisons:
      - If > 5 series: Suggest 'stacked_bar' (to avoid clutter)
 - **Exception**: Only use Time as Series if explicitly asked to "Compare Years" (Year-over-Year).
 
-Example for simple bar chart:
+Example for hierarchical data:
 {{
   "explanation": "### ยอดขายแยกตามแผนก\n\nยอดขายรวม...",
   "visualization": "bar_chart",
   "chart_config": {{
-    "category_column": "department_name",
-    "measure_column": "total_sales"
-  }}
+    "category_column": "service_group",
+    "measure_column": "total_revenue"
+  }},
+  "display_hint": "hierarchical",
+  "hierarchy_columns": ["business_unit", "service_group", "product_name"]
 }}
 
 Example for comparison (grouped bar):
@@ -220,7 +228,8 @@ Example for comparison (grouped bar):
     "category_column": "month",
     "measure_column": "revenue",
     "series_column": "department"
-  }}
+  }},
+  "display_hint": "crosstab"
 }}
 """
 

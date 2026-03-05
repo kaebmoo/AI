@@ -30,6 +30,8 @@ export interface Message {
     confidence?: ConfidenceData;   // Confidence score
     visualization?: string;        // AI Recommended visualization
     chartConfig?: ChartConfig;     // AI Recommended chart columns
+    displayHint?: 'hierarchical' | 'crosstab' | 'flat'; // AI recommended table display mode
+    hierarchyColumns?: string[];   // Ordered column names for hierarchical display (parent→child)
     question?: string;             // Original question (needed for training)
 }
 
@@ -249,7 +251,11 @@ export const ChatBubble = ({ message, onTrain }: ChatBubbleProps) => {
 
                         {/* Query Result Data - Data Grid / Table */}
                         {message.data && message.data.length > 0 && (message.data.length > 1 || Object.keys(message.data[0]).length > 2) && (
-                            <DataTable data={dataToShow} />
+                            <DataTable
+                                data={dataToShow}
+                                displayHint={message.displayHint}
+                                hierarchyColumns={message.hierarchyColumns}
+                            />
                         )}
                         {/* Show More/Less Button */}
                         {hasMoreData && (

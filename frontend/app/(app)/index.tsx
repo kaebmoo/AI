@@ -63,7 +63,9 @@ export default function ChatScreen() {
         data: response.data,
         confidence: response.confidence as any,           // Confidence score from validation MCP
         visualization: response.visualization,     // AI recommended visualization type
-        chartConfig: response.chart_config         // AI recommended chart columns
+        chartConfig: response.chart_config,        // AI recommended chart columns
+        displayHint: response.display_hint,        // AI recommended table display mode
+        hierarchyColumns: response.hierarchy_columns, // Ordered parent→child columns
       };
 
       setMessages((prev) => [...prev, aiMessage]);

@@ -118,6 +118,13 @@ Return the result as a JSON object with these keys:
    - "category_column": The column name for X-axis labels (the PRIMARY grouping)
    - "measure_column": The column name for Y-axis values (e.g., total, sum, amount)
    - "series_column": (optional) The column for SECONDARY grouping/comparison (e.g., month, year for time comparison)
+4. "display_hint": How to display the TABLE (separate from chart). One of:
+   - 'hierarchical': data has parent→child structure (e.g., business_unit > service_group > product, or division > department > section). Use when multiple non-time dimension columns form a hierarchy.
+   - 'crosstab': data is best compared across dimensions (e.g., group × month). Use when time or comparison axis exists.
+   - 'flat': simple flat list of rows — use for single-dimension or already-aggregated data.
+5. "hierarchy_columns": (REQUIRED if display_hint='hierarchical') Array of column names ordered from HIGHEST to LOWEST level (parent first). Must be actual column names in the data.
+   Example: ["business_unit", "service_group", "product_name"]
+   Example: ["division", "department", "section"]
 
 IMPORTANT for time-based comparisons:
 - **CRITICAL**: If a Time column exists (Month, Year, Date), YOU MUST USE IT AS 'category_column' (X-axis).
@@ -127,14 +134,16 @@ IMPORTANT for time-based comparisons:
      - If > 5 series: Suggest 'stacked_bar' (to avoid clutter)
 - **Exception**: Only use Time as Series if explicitly asked to "Compare Years" (Year-over-Year).
 
-Example for simple bar chart:
+Example for hierarchical data (show all services inside each group):
 {{
   "explanation": "### ยอดขายแยกตามแผนก\n\nยอดขายรวม...",
   "visualization": "bar_chart",
   "chart_config": {{
-    "category_column": "department_name",
-    "measure_column": "total_sales"
-  }}
+    "category_column": "service_group",
+    "measure_column": "total_revenue"
+  }},
+  "display_hint": "hierarchical",
+  "hierarchy_columns": ["business_unit", "service_group", "product_name"]
 }}
 
 Example for time comparison (grouped bar) - showing each category with bars for each month:
@@ -145,7 +154,8 @@ Example for time comparison (grouped bar) - showing each category with bars for 
     "category_column": "เดือน",
     "measure_column": "ยอดค่าใช้จ่าย",
     "series_column": "หมวดบัญชี"
-  }}
+  }},
+  "display_hint": "crosstab"
 }}
 """
         response = await self.client.messages.create(

@@ -116,6 +116,12 @@ Based on the data, provide:
    - category_column: X-axis (Grouping). Rule: Use 'month' for trends, 'department'/'group' for comparison.
    - measure_column: Y-axis (Value).
    - series_column: Comparison/Legend (Optional). Rule: If comparing multiple groups over time, use this. Prefer NAME columns over CODE columns.
+4. display_hint: How to render the table. One of:
+   - 'hierarchical': data has parent→child structure (e.g., business_unit > service_group > product, or division > department > section)
+   - 'crosstab': data is for comparison across dimensions (e.g., groups × months)
+   - 'flat': simple flat rows
+5. hierarchy_columns: (REQUIRED if display_hint='hierarchical') Array of column names, HIGHEST to LOWEST level.
+   Example: ["business_unit", "service_group", "product_name"]
 
 IMPORTANT: Return VALID JSON only. Do not wrap in markdown unless necessary.
 Structure:
@@ -126,7 +132,9 @@ Structure:
       "category_column": "...",
       "measure_column": "...",
       "series_column": "..."
-  }}
+  }},
+  "display_hint": "hierarchical",
+  "hierarchy_columns": ["...", "...", "..."]
 }}
 """
         response_text = await self.generate_content(prompt, system_prompt)
