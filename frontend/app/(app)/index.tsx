@@ -142,7 +142,7 @@ export default function ChatScreen() {
           {/* Disclaimer */}
           <View className="px-4 py-2 bg-amber-50 dark:bg-amber-900/20 border-t border-amber-200 dark:border-amber-800">
             <Text className="text-xs text-amber-700 dark:text-amber-300 text-center">
-              หมายเหตุ: ข้อมูล "รายได้อื่น" เป็นรายได้ที่ยังไม่สุทธิ"
+              หมายเหตุ: ข้อมูล &quot;รายได้อื่น&quot; เป็นรายได้ที่ยังไม่สุทธิ
             </Text>
           </View>
 

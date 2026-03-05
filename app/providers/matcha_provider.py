@@ -107,6 +107,10 @@ Data Preview:
 
 Based on the data, provide:
 1. A brief explanation of the trends/values (in Thai).
+   - IMPORTANT: Format the explanation as **beautiful Markdown**.
+   - Use `###` for headings, **bold text** for important metrics/numbers.
+   - Use bullet points (`-`) for multiple items.
+   - Use blockquotes (`>`) to emphasize key insights.
 2. The BEST chart type to visualize this (bar_chart, line_chart, pie_chart, grouped_bar, stacked_bar, table, single_value).
 3. The configuration:
    - category_column: X-axis (Grouping). Rule: Use 'month' for trends, 'department'/'group' for comparison.
@@ -116,7 +120,7 @@ Based on the data, provide:
 IMPORTANT: Return VALID JSON only. Do not wrap in markdown unless necessary.
 Structure:
 {{
-  "explanation": "...",
+  "explanation": "### สรุปข้อมูล\\n\\nรายได้รวม **...",
   "visualization": "...",
   "chart_config": {{
       "category_column": "...",

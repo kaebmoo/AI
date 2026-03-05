@@ -154,7 +154,40 @@ export const ChatBubble = ({ message, onTrain }: ChatBubbleProps) => {
             paddingHorizontal: 12,
             paddingVertical: 8,
             marginVertical: 8,
-            borderRadius: 4,
+            borderRadius: 8,
+        },
+        strong: {
+            fontWeight: '700',
+            color: isDark ? '#60A5FA' : '#2563EB', // Highlighting bold text with primary color for emphasis
+        },
+        em: {
+            fontStyle: 'italic',
+            color: isDark ? '#D1D5DB' : '#4B5563',
+        },
+        hr: {
+            backgroundColor: isDark ? '#374151' : '#E5E7EB',
+            height: 1,
+            marginVertical: 16,
+        },
+        table: {
+            borderWidth: 1,
+            borderColor: isDark ? '#374151' : '#E5E7EB',
+            borderRadius: 8,
+        },
+        thead: {
+            backgroundColor: isDark ? '#1F2937' : '#F9FAFB',
+        },
+        th: {
+            padding: 8,
+            fontWeight: '600',
+            color: isDark ? '#F3F4F6' : '#111827',
+            borderBottomWidth: 1,
+            borderColor: isDark ? '#374151' : '#E5E7EB',
+        },
+        td: {
+            padding: 8,
+            borderBottomWidth: 1,
+            borderColor: isDark ? '#374151' : '#E5E7EB',
         }
     };
 

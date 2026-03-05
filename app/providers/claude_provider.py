@@ -100,9 +100,19 @@ Results (First 30 rows):
 Format numbers nicely. Summary only if many rows.
 {family_prompt}
 
+Ensure the "explanation" value is formatted as **beautiful Markdown**:
+- Use `###` for main summaries and `####` for subsections.
+- Use **bold text** (`**value**`) to highlight key metrics and numbers.
+- Use bullet points (`-`) when listing multiple items (e.g., breakdown by group).
+- Use blockquotes (`>`) to emphasize key insights or the most important finding.
+- Keep the language natural and strictly in **Thai**.
+
+Example of good Markdown formatting for "explanation":
+"### สรุปยอดขาย\n\nยอดขายรวมทั้งหมดคือ **1,500,000 บาท** โดยแบ่งตามแผนกดังนี้:\n- **แผนก IT**: 800,000 บาท\n- **แผนก HR**: 500,000 บาท\n- **แผนก Sales**: 200,000 บาท\n\n> 💡 **Highlight**: แผนก IT มียอดขายสูงสุด คิดเป็นสัดส่วนมากกว่า 50% ของยอดขายทั้งหมด"
+
 CRITICAL: You must analyze the data and recommend the best visualization type.
 Return the result as a JSON object with these keys:
-1. "explanation": The Thai explanation text.
+1. "explanation": The beautifully formatted Thai markdown explanation.
 2. "visualization": One of ['bar_chart', 'horizontal_bar', 'line_chart', 'pie_chart', 'table', 'single_value', 'grouped_bar']
 3. "chart_config": Object with column mappings for the chart:
    - "category_column": The column name for X-axis labels (the PRIMARY grouping)
@@ -119,7 +129,7 @@ IMPORTANT for time-based comparisons:
 
 Example for simple bar chart:
 {{
-  "explanation": "ยอดขายแยกตามแผนก...",
+  "explanation": "### ยอดขายแยกตามแผนก\n\nยอดขายรวม...",
   "visualization": "bar_chart",
   "chart_config": {{
     "category_column": "department_name",
@@ -129,7 +139,7 @@ Example for simple bar chart:
 
 Example for time comparison (grouped bar) - showing each category with bars for each month:
 {{
-  "explanation": "ค่าใช้จ่ายรายหมวดบัญชี แยกตามเดือน...",
+  "explanation": "### ค่าใช้จ่ายแยกตามเดือน\n\nค่าใช้จ่ายรวม...",
   "visualization": "grouped_bar",
   "chart_config": {{
     "category_column": "เดือน",
