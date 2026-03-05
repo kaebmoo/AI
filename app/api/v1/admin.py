@@ -21,7 +21,12 @@ from app.schemas.admin_schemas import (
     GoldenExampleCreate, GoldenExampleUpdate, GoldenExampleResponse, GoldenExampleListResponse,
     SchemaContextCreate, SchemaContextUpdate, SchemaContextResponse, SchemaContextListResponse,
     SchemaContextCreate, SchemaContextUpdate, SchemaContextResponse, SchemaContextListResponse,
-    ViewCreateRequest, ViewMappingSuggestion
+    ViewCreateRequest, ViewMappingSuggestion,
+    ViewColumnMappingResponse, ViewMappingsListResponse, PropagateMetadataResponse,
+    ViewSummaryItem, ViewSummaryListResponse,
+    DimensionFamilyListResponse, DimensionFamilyItem, DimensionFamilyColumn,
+    DimensionFamilyAnalyzeRequest, DimensionFamilyAnalyzeResponse, DimensionFamilySuggestion,
+    DimensionFamilyBatchUpdate, DimensionFamilyBatchUpdateResponse,
 )
 from app.services.schema_service import SchemaService
 from app.services.admin_config_service import AdminConfigService
@@ -720,12 +725,13 @@ def create_view(
     Create a new view from a source table.
     """
     try:
+        mapping_dicts = [m.model_dump() for m in data.mapping]
         service.create_custom_view(
             view_name=data.view_name,
             source_table=data.source_table,
-            mapping=[m.model_dump() for m in data.mapping]
+            mapping=mapping_dicts
         )
-        return {"status": "success", "message": f"View {data.view_name} created successfully"}
+        return {"status": "success", "message": f"View {data.view_name} created with column mappings and metadata propagated"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -772,6 +778,263 @@ async def suggest_view_mapping(
                 reason=f"Fallback error: {str(e)}"
             ) for col in columns
         ]
+
+# ============================================================
+# View Column Mapping Endpoints
+# ============================================================
+
+@router.get("/schema/views/summary", response_model=ViewSummaryListResponse)
+def list_views_summary(
+    current_user: User = Depends(deps.require_admin),
+    service: SchemaService = Depends(deps.get_schema_service)
+):
+    """List all views with column mapping summary (mapping count, metadata coverage)."""
+    views = service.list_views_with_mappings()
+    return ViewSummaryListResponse(
+        views=[ViewSummaryItem(**v) for v in views],
+        total=len(views)
+    )
+
+@router.get("/schema/views/{view_name}/mappings", response_model=ViewMappingsListResponse)
+def get_view_mappings(
+    view_name: str,
+    current_user: User = Depends(deps.require_admin),
+    service: SchemaService = Depends(deps.get_schema_service)
+):
+    """Get column mappings for a view (view column → source table column)."""
+    mappings = service.get_view_column_mappings(view_name)
+    return ViewMappingsListResponse(
+        view_name=view_name,
+        mappings=[ViewColumnMappingResponse(**m) for m in mappings],
+        total=len(mappings)
+    )
+
+@router.post("/schema/views/{view_name}/propagate-metadata", response_model=PropagateMetadataResponse)
+def propagate_view_metadata(
+    view_name: str,
+    current_user: User = Depends(deps.require_admin),
+    service: SchemaService = Depends(deps.get_schema_service)
+):
+    """Propagate metadata from source table(s) to a view using saved column mappings."""
+    result = service.propagate_metadata_to_view(view_name)
+    missing = result.get("missing_columns", [])
+    msg = f"Propagated: {result['created']} created, {result['updated']} updated, {result.get('skipped', 0)} skipped"
+    if missing:
+        msg += f". {len(missing)} columns have no source metadata: {', '.join(m['view_column'] for m in missing)}"
+    return PropagateMetadataResponse(
+        view_name=view_name,
+        created=result["created"],
+        updated=result["updated"],
+        skipped=result.get("skipped", 0),
+        missing_columns=missing,
+        message=msg,
+    )
+
+# ============================================================
+# Dimension Family Endpoints
+# ============================================================
+
+@router.get("/schema/dimension-families", response_model=DimensionFamilyListResponse)
+def get_dimension_families(
+    table_name: str = Query(..., description="Table name to get families for"),
+    current_user: User = Depends(deps.require_admin),
+    service: SchemaService = Depends(deps.get_schema_service)
+):
+    """Get merged dimension families (auto-detect + DB overrides) with source tracking."""
+    families_data = service.get_dimension_families_with_source(table_name)
+    families = [
+        DimensionFamilyItem(
+            family_name=f["family_name"],
+            columns=[DimensionFamilyColumn(**c) for c in f["columns"]],
+            source=f["source"],
+        )
+        for f in families_data
+    ]
+    return DimensionFamilyListResponse(
+        table_name=table_name,
+        families=families,
+        total=len(families),
+    )
+
+
+@router.post("/schema/dimension-families/analyze", response_model=DimensionFamilyAnalyzeResponse)
+async def analyze_dimension_families(
+    request: DimensionFamilyAnalyzeRequest,
+    current_user: User = Depends(deps.require_admin),
+    service: SchemaService = Depends(deps.get_schema_service),
+    ai_service: AIService = Depends(deps.get_ai_service)
+):
+    """LLM analyzes columns + sample values and suggests dimension families (preview only)."""
+    import json as _json, re as _re
+
+    columns = service.get_table_info(request.table_name)
+    samples = service.get_sample_values(request.table_name)
+
+    column_info = []
+    for col in columns:
+        name = col["name"]
+        sample_vals = samples.get(name, [])[:3]
+        column_info.append(f"- {name} ({col['type']}): {sample_vals}")
+
+    column_text = "\n".join(column_info)
+
+    prompt = f"""วิเคราะห์คอลัมน์ในตาราง "{request.table_name}" แล้วจัดกลุ่ม Dimension Family
+(คอลัมน์ที่เกี่ยวข้องกันควรอยู่กลุ่มเดียวกัน เช่น SECTION + SECTION_ABBR, GL_CODE + GL_NAME + GL_GROUP)
+
+คอลัมน์ทั้งหมด:
+{column_text}
+
+ตอบในรูปแบบ JSON:
+```json
+{{
+  "families": [
+    {{"family_name": "org_section", "columns": ["SECTION", "SECTION_ABBR"]}},
+    ...
+  ],
+  "reasoning": "อธิบายเหตุผลสั้นๆ"
+}}
+```"""
+
+    try:
+        result = await ai_service.provider.generate_content(
+            prompt,
+            system_prompt="คุณเป็น data analyst ที่เชี่ยวชาญการจัดกลุ่มคอลัมน์"
+        )
+
+        json_match = _re.search(r'```json\s*(\{.*?\})\s*```', result, _re.DOTALL)
+        if json_match:
+            parsed = _json.loads(json_match.group(1))
+        else:
+            parsed = _json.loads(result)
+
+        suggested = [
+            DimensionFamilySuggestion(family_name=f["family_name"], columns=f["columns"])
+            for f in parsed.get("families", [])
+        ]
+        reasoning = parsed.get("reasoning", "")
+    except Exception as e:
+        suggested = []
+        reasoning = f"LLM analysis failed: {str(e)}"
+
+    return DimensionFamilyAnalyzeResponse(
+        table_name=request.table_name,
+        suggested_families=suggested,
+        llm_reasoning=reasoning,
+        provider_used=getattr(ai_service.provider, "name", "unknown"),
+    )
+
+
+def _ensure_metadata_rows(db: Session, table_name: str, column_names: list, service: SchemaService):
+    """Ensure schema_metadata rows exist for given columns (creates missing ones).
+
+    Views often have no metadata rows yet — this creates minimal rows so
+    dimension_group can be saved.
+    """
+    existing = {
+        row.column_name
+        for row in db.query(SchemaMetadata.column_name).filter(
+            SchemaMetadata.table_name == table_name
+        ).all()
+    }
+    # Get type info from inspector
+    col_types = {}
+    try:
+        for col in service.get_table_info(table_name):
+            col_types[col["name"]] = col.get("type", "TEXT")
+    except Exception:
+        pass
+
+    for col_name in column_names:
+        if col_name not in existing:
+            db.add(SchemaMetadata(
+                table_name=table_name,
+                column_name=col_name,
+                data_type=col_types.get(col_name, "TEXT"),
+            ))
+    db.flush()
+
+
+@router.put("/schema/dimension-families", response_model=DimensionFamilyBatchUpdateResponse)
+def batch_update_dimension_families(
+    request: DimensionFamilyBatchUpdate,
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db),
+    service: SchemaService = Depends(deps.get_schema_service)
+):
+    """Batch save dimension_group assignments to DB."""
+    # Ensure metadata rows exist for all columns being updated
+    col_names = [a.column_name for a in request.assignments]
+    _ensure_metadata_rows(db, request.table_name, col_names, service)
+
+    updated = 0
+    for assignment in request.assignments:
+        row = db.query(SchemaMetadata).filter(
+            SchemaMetadata.table_name == request.table_name,
+            SchemaMetadata.column_name == assignment.column_name,
+        ).first()
+        if row:
+            row.dimension_group = assignment.dimension_group
+            updated += 1
+
+    db.commit()
+
+    # Return updated families
+    families_data = service.get_dimension_families_with_source(request.table_name)
+    families = [
+        DimensionFamilyItem(
+            family_name=f["family_name"],
+            columns=[DimensionFamilyColumn(**c) for c in f["columns"]],
+            source=f["source"],
+        )
+        for f in families_data
+    ]
+    return DimensionFamilyBatchUpdateResponse(updated_count=updated, families=families)
+
+
+@router.post("/schema/dimension-families/auto-populate", response_model=DimensionFamilyBatchUpdateResponse)
+def auto_populate_dimension_families(
+    table_name: str = Query(..., description="Table/view name"),
+    overwrite: bool = Query(False, description="Overwrite existing DB assignments"),
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db),
+    service: SchemaService = Depends(deps.get_schema_service)
+):
+    """Run auto-detect and save results to DB."""
+    from app.services.dimension_detector import detect_families
+
+    columns = service.get_table_info(table_name)
+    all_col_names = [c["name"] for c in columns]
+    auto_families = detect_families(all_col_names)
+
+    # Ensure metadata rows exist for all columns in detected families
+    all_family_cols = [col for cols in auto_families.values() for col in cols]
+    _ensure_metadata_rows(db, table_name, all_family_cols, service)
+
+    updated = 0
+    for family_name, cols in auto_families.items():
+        for col_name in cols:
+            row = db.query(SchemaMetadata).filter(
+                SchemaMetadata.table_name == table_name,
+                SchemaMetadata.column_name == col_name,
+            ).first()
+            if row:
+                if overwrite or not row.dimension_group:
+                    row.dimension_group = family_name
+                    updated += 1
+
+    db.commit()
+
+    families_data = service.get_dimension_families_with_source(table_name)
+    families = [
+        DimensionFamilyItem(
+            family_name=f["family_name"],
+            columns=[DimensionFamilyColumn(**c) for c in f["columns"]],
+            source=f["source"],
+        )
+        for f in families_data
+    ]
+    return DimensionFamilyBatchUpdateResponse(updated_count=updated, families=families)
+
 
 # ============================================================
 # Refresh Cache Endpoint

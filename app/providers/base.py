@@ -78,6 +78,7 @@ class AIProvider(ABC):
         sql: str,
         data: List[Dict],
         system_prompt: str,
+        dimension_families: Optional[Dict[str, List[str]]] = None,
     ) -> Union[str, Dict]:
         """Explain query result"""
         pass

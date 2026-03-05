@@ -96,8 +96,8 @@ class AIService:
         else:
             raise ValueError(f"Unknown provider: {provider_name}")
 
-    async def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str) -> str:
-        return await self.provider.explain_result(question, sql, data, system_prompt)
+    async def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str, dimension_families: Optional[Dict[str, List[str]]] = None) -> str:
+        return await self.provider.explain_result(question, sql, data, system_prompt, dimension_families=dimension_families)
 
     async def query_with_retry(
         self,
@@ -424,15 +424,14 @@ class AIService:
                 except Exception as e:
                     logger.warning(f"Failed to get RAG context: {e}")
 
-                # Value Lookup
+                # Value Lookup — always-on (searches actual DB values for keywords in question)
                 value_lookup_text = ""
-                if value_lookup_enabled:
-                    try:
-                        value_matches = self._lookup_values_from_question(question, context_name, context_table)
-                        if value_matches:
-                            value_lookup_text = self._format_value_matches(value_matches)
-                    except Exception as e:
-                        logger.warning(f"Value Lookup failed: {e}")
+                try:
+                    value_matches = self._lookup_values_from_question(question, context_name, context_table)
+                    if value_matches:
+                        value_lookup_text = self._format_value_matches(value_matches)
+                except Exception as e:
+                    logger.warning(f"Value Lookup failed: {e}")
 
                 # Two-Pass Mode
                 if two_pass_enabled:
@@ -616,6 +615,13 @@ Error: {last_error.get('error', '')}
                 columns = exec_data.get("columns", [])
                 logger.info(f"Hybrid Mode: Success! Got {len(data)} rows")
 
+                # Load dimension families for chart axis validation
+                dim_families = None
+                try:
+                    dim_families = temp_schema.get_dimension_families(context_table)
+                except Exception as df_err:
+                    logger.warning(f"Could not load dimension families: {df_err}")
+
                 # Enhance explanation
                 if not data:
                     explanation = f"ไม่พบข้อมูลที่ตรงกับเงื่อนไข\n\nSQL ที่ใช้:\n```sql\n{sql_query}\n```\n\nอาจเป็นเพราะ:\n- ไม่มีข้อมูลที่ตรงกับคำค้นหา\n- ชื่อคอลัมน์หรือค่าที่ใช้ค้นหาอาจไม่ถูกต้อง"
@@ -623,7 +629,7 @@ Error: {last_error.get('error', '')}
                     try:
                         t0 = time.perf_counter()
                         simple_system_prompt = "You are a data visualization assistant. Analyze the data and provide a Thai explanation and chart recommendation."
-                        explanation = await self.provider.explain_result(question, sql_query, data, simple_system_prompt)
+                        explanation = await self.provider.explain_result(question, sql_query, data, simple_system_prompt, dimension_families=dim_families)
                         t_explain = time.perf_counter() - t0
                         logger.info(f"Hybrid Mode: Explanation Generation took {t_explain:.4f}s")
                     except Exception as explain_error:
@@ -857,13 +863,22 @@ Error: {last_error.get('error', '')}
             by_keyword.setdefault(kw, []).append(m)
 
         lines = ["**Actual Values Found in Database (ค่าจริงจากฐานข้อมูล):**"]
+        lines.append("ค่าด้านล่างเป็นค่าจริงจากตารางที่กำลังใช้ — ใช้ LIKE pattern ในการค้นหา")
+        lines.append("")
+
         for kw, matches in by_keyword.items():
             lines.append(f'- keyword "{kw}":')
             for m in matches[:5]:
-                lines.append(f'  - {m["column_name"]} = \'{m["column_value"]}\'')
+                col = m["column_name"]
+                val = m["column_value"]
+                lines.append(f'  - column: `{col}`, actual value: `{val}`')
+                lines.append(f'    → recommended: `{col} LIKE \'%{kw}%\'`')
 
         lines.append("")
-        lines.append("⚠️ MUST USE these actual column/value pairs in WHERE clause — do NOT guess column names or values")
+        lines.append("⚠️ IMPORTANT:")
+        lines.append("- ใช้ LIKE '%keyword%' สำหรับ text columns (ห้ามใช้ = กับค่าข้อความ)")
+        lines.append("- ค่า actual value ข้างบนเป็นตัวอย่างจริงจาก DB — ถ้าต้องการ exact match ให้ใช้ค่านี้")
+        lines.append("- ถ้า Actual Values ขัดกับ Semantic Mapping → ให้เชื่อ Actual Values (เพราะมาจาก DB จริง)")
 
         return "\n".join(lines)
 

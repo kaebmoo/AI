@@ -10,7 +10,12 @@ from typing import Dict, List, Optional, Any, Union
 
 from app.providers.base import AIProvider
 from app.providers.retry_config import ai_retry
-from app.providers.chart_postprocessor import parse_explanation_response, enforce_time_series_rule
+from app.providers.chart_postprocessor import (
+    parse_explanation_response,
+    enforce_time_series_rule,
+    enforce_dimension_family_rule,
+    build_dimension_family_prompt,
+)
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -84,14 +89,16 @@ class ClaudeProvider(AIProvider):
         }
 
     @ai_retry
-    async def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str) -> Union[str, Dict]:
+    async def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str, dimension_families: Optional[Dict[str, List[str]]] = None) -> Union[str, Dict]:
         data_sample = data[:30]
+        family_prompt = build_dimension_family_prompt(dimension_families) if dimension_families else ""
         prompt = f"""Question: {question}
 SQL: {sql}
 Results (First 30 rows):
 {json.dumps(data_sample, ensure_ascii=False, indent=2)}
 
 Format numbers nicely. Summary only if many rows.
+{family_prompt}
 
 CRITICAL: You must analyze the data and recommend the best visualization type.
 Return the result as a JSON object with these keys:
@@ -142,6 +149,7 @@ Example for time comparison (grouped bar) - showing each category with bars for 
         # Use shared post-processor
         parsed_result = parse_explanation_response(content)
         parsed_result = enforce_time_series_rule(parsed_result)
+        parsed_result = enforce_dimension_family_rule(parsed_result, dimension_families)
         return parsed_result
 
     @ai_retry

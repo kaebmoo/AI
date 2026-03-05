@@ -83,7 +83,8 @@ class SchemaService:
     def create_custom_view(self, view_name: str, source_table: str, mapping: List[Dict[str, str]]) -> bool:
         """
         Create a SQL View from source table with column aliasing.
-        
+        After creation, saves column mappings and propagates metadata from source table.
+
         Args:
             view_name: Name of the view to create (e.g., 'v_sales_2024')
             source_table: Source table name
@@ -92,7 +93,7 @@ class SchemaService:
         # Validate inputs
         if not view_name.replace("_", "").isalnum():
              raise ValueError("Invalid view name")
-             
+
         # Build SELECT clause
         select_parts = []
         for m in mapping:
@@ -102,18 +103,299 @@ class SchemaService:
                 select_parts.append(f'"{col}" AS "{alias}"')
             else:
                 select_parts.append(f'"{col}"')
-        
+
         select_clause = ", ".join(select_parts)
-        
+
         # DDL Execution
         sql = f"CREATE VIEW {view_name} AS SELECT {select_clause} FROM {source_table}"
-        
+
         with self.engine.begin() as conn:
-            # Drop if exists (optional, maybe dangerous? for now lets match implementation plan implies creation)
-            conn.execute(text(f"DROP VIEW IF EXISTS {view_name}")) 
+            conn.execute(text(f"DROP VIEW IF EXISTS {view_name}"))
             conn.execute(text(sql))
-            
+
+        # Save column mappings and propagate metadata
+        try:
+            self.save_view_column_mappings(view_name, source_table, mapping)
+            self.propagate_metadata_to_view(view_name)
+        except Exception as e:
+            logger.warning(f"View created but mapping/propagation failed: {e}")
+
         return True
+
+    # =========================================================
+    # View Column Mappings
+    # =========================================================
+
+    def list_views_with_mappings(self) -> List[Dict]:
+        """List all views that have column mappings, with summary stats."""
+        with self.engine.connect() as conn:
+            try:
+                result = conn.execute(text("""
+                    SELECT
+                        vcm.view_name,
+                        vcm.source_table,
+                        COUNT(vcm.id) as mapping_count,
+                        COUNT(sm.id) as metadata_with_thai_count
+                    FROM view_column_mappings vcm
+                    LEFT JOIN schema_metadata sm
+                        ON sm.table_name = vcm.view_name
+                        AND sm.column_name = vcm.view_column
+                        AND sm.display_name_th IS NOT NULL
+                        AND sm.display_name_th != ''
+                    GROUP BY vcm.view_name, vcm.source_table
+                    ORDER BY vcm.view_name
+                """))
+                return [dict(row) for row in result.mappings().fetchall()]
+            except Exception as e:
+                logger.warning(f"Failed to list views with mappings: {e}")
+                return []
+
+    def save_view_column_mappings(self, view_name: str, source_table: str, mappings: List[Dict[str, str]]) -> int:
+        """
+        Save column mappings for a view.
+        Replaces any existing mappings for the view.
+
+        Args:
+            view_name: Name of the view
+            source_table: Source table name
+            mappings: List of dicts [{'col': 'SOURCE_COL', 'alias': 'view_col'}]
+
+        Returns:
+            Number of mappings saved
+        """
+        with self.engine.begin() as conn:
+            # Delete existing mappings for this view
+            conn.execute(
+                text("DELETE FROM view_column_mappings WHERE view_name = :vn"),
+                {"vn": view_name}
+            )
+
+            count = 0
+            for m in mappings:
+                source_col = m['col']
+                view_col = m.get('alias') or source_col
+                mapping_type = 'alias' if view_col != source_col else 'passthrough'
+
+                conn.execute(text("""
+                    INSERT INTO view_column_mappings (view_name, view_column, source_table, source_column, mapping_type)
+                    VALUES (:vn, :vc, :st, :sc, :mt)
+                """), {
+                    "vn": view_name,
+                    "vc": view_col,
+                    "st": source_table,
+                    "sc": source_col,
+                    "mt": mapping_type,
+                })
+                count += 1
+
+        logger.info(f"Saved {count} column mappings for view '{view_name}'")
+        return count
+
+    def get_view_column_mappings(self, view_name: str) -> List[Dict]:
+        """Get all column mappings for a view."""
+        with self.engine.connect() as conn:
+            try:
+                result = conn.execute(
+                    text("SELECT * FROM view_column_mappings WHERE view_name = :vn ORDER BY id"),
+                    {"vn": view_name}
+                )
+                return [dict(row) for row in result.mappings().fetchall()]
+            except Exception as e:
+                logger.warning(f"Failed to get view column mappings: {e}")
+                return []
+
+    def _find_source_metadata(self, conn, source_table: str, source_column: str) -> Optional[Dict]:
+        """
+        Find metadata for a source column with chain resolution.
+        If source_table has no metadata, try to find it through intermediate views.
+
+        Chain: raw_table → intermediate_view → final_view
+        If raw_table has no metadata but intermediate_view does, follow the chain.
+        """
+        # 1. Direct lookup
+        result = conn.execute(text("""
+            SELECT * FROM schema_metadata
+            WHERE table_name = :st AND column_name = :sc
+        """), {"st": source_table, "sc": source_column})
+        row = result.mappings().fetchone()
+        if row:
+            return dict(row)
+
+        # 2. Chain resolution: find views that map FROM source_table
+        #    and check if THOSE views have metadata for the source_column
+        try:
+            result = conn.execute(text("""
+                SELECT DISTINCT vcm2.view_name, vcm2.view_column
+                FROM view_column_mappings vcm2
+                WHERE vcm2.source_table = :st AND vcm2.source_column = :sc
+            """), {"st": source_table, "sc": source_column})
+            for chain_row in result.mappings().fetchall():
+                chain_view = chain_row['view_name']
+                chain_col = chain_row['view_column']
+                meta_result = conn.execute(text("""
+                    SELECT * FROM schema_metadata
+                    WHERE table_name = :tv AND column_name = :tc
+                    AND display_name_th IS NOT NULL AND display_name_th != ''
+                """), {"tv": chain_view, "tc": chain_col})
+                meta_row = meta_result.mappings().fetchone()
+                if meta_row:
+                    logger.info(f"Chain resolved: {source_table}.{source_column} → {chain_view}.{chain_col}")
+                    return dict(meta_row)
+        except Exception:
+            pass
+
+        # 3. Fallback: check if any view has metadata stored under the raw column name
+        #    (handles legacy data where metadata was saved with raw column names under a view name)
+        try:
+            result = conn.execute(text("""
+                SELECT * FROM schema_metadata
+                WHERE column_name = :sc
+                AND display_name_th IS NOT NULL AND display_name_th != ''
+                AND table_name != :exclude
+                ORDER BY table_name
+                LIMIT 1
+            """), {"sc": source_column, "exclude": source_table})
+            row = result.mappings().fetchone()
+            if row:
+                logger.info(f"Fallback found: metadata for '{source_column}' from table '{row['table_name']}'")
+                return dict(row)
+        except Exception:
+            pass
+
+        return None
+
+    def propagate_metadata_to_view(self, view_name: str) -> Dict:
+        """
+        Propagate metadata from source tables to a view using view_column_mappings.
+        For each mapping: find source metadata (with chain resolution) → UPSERT schema_metadata row.
+
+        Returns:
+            Dict with 'created', 'updated', 'skipped', 'missing_columns' for diagnostics
+        """
+        mappings = self.get_view_column_mappings(view_name)
+        if not mappings:
+            logger.warning(f"No column mappings found for view '{view_name}'")
+            return {"created": 0, "updated": 0, "skipped": 0, "missing_columns": []}
+
+        created = 0
+        updated = 0
+        skipped = 0
+        missing_columns = []
+
+        with self.engine.begin() as conn:
+            for m in mappings:
+                source_table = m['source_table']
+                source_column = m['source_column']
+                view_column = m['view_column']
+
+                # Find source metadata (with chain resolution)
+                source_meta = self._find_source_metadata(conn, source_table, source_column)
+
+                # Check if view metadata already exists
+                result = conn.execute(text("""
+                    SELECT id, display_name_th FROM schema_metadata
+                    WHERE table_name = :vn AND column_name = :vc
+                """), {"vn": view_name, "vc": view_column})
+                existing = result.mappings().fetchone()
+
+                if source_meta:
+                    sm = source_meta
+                    if existing:
+                        # Update only if display_name_th is empty
+                        if not existing['display_name_th']:
+                            conn.execute(text("""
+                                UPDATE schema_metadata SET
+                                    display_name_th = :display_name_th,
+                                    display_name_en = COALESCE(display_name_en, :display_name_en),
+                                    description = COALESCE(description, :description),
+                                    data_type = COALESCE(data_type, :data_type),
+                                    is_summable = :is_summable,
+                                    is_groupable = :is_groupable,
+                                    hierarchy_level = COALESCE(hierarchy_level, :hierarchy_level),
+                                    special_notes = COALESCE(special_notes, :special_notes),
+                                    conversion_sql = COALESCE(conversion_sql, :conversion_sql),
+                                    dimension_group = COALESCE(dimension_group, :dimension_group),
+                                    updated_at = :updated_at
+                                WHERE table_name = :vn AND column_name = :vc
+                            """), {
+                                "display_name_th": sm.get('display_name_th'),
+                                "display_name_en": sm.get('display_name_en'),
+                                "description": sm.get('description'),
+                                "data_type": sm.get('data_type'),
+                                "is_summable": sm.get('is_summable', False),
+                                "is_groupable": sm.get('is_groupable', True),
+                                "hierarchy_level": sm.get('hierarchy_level'),
+                                "special_notes": sm.get('special_notes'),
+                                "conversion_sql": sm.get('conversion_sql'),
+                                "dimension_group": sm.get('dimension_group'),
+                                "updated_at": datetime.utcnow(),
+                                "vn": view_name,
+                                "vc": view_column,
+                            })
+                            updated += 1
+                        else:
+                            skipped += 1
+                    else:
+                        # Insert new metadata row for the view
+                        conn.execute(text("""
+                            INSERT INTO schema_metadata (
+                                table_name, column_name, display_name_th, display_name_en,
+                                description, data_type, format_hint, example_value,
+                                is_summable, is_groupable, hierarchy_level,
+                                special_notes, conversion_sql, dimension_group
+                            ) VALUES (
+                                :table_name, :column_name, :display_name_th, :display_name_en,
+                                :description, :data_type, :format_hint, :example_value,
+                                :is_summable, :is_groupable, :hierarchy_level,
+                                :special_notes, :conversion_sql, :dimension_group
+                            )
+                        """), {
+                            "table_name": view_name,
+                            "column_name": view_column,
+                            "display_name_th": sm.get('display_name_th'),
+                            "display_name_en": sm.get('display_name_en'),
+                            "description": sm.get('description'),
+                            "data_type": sm.get('data_type'),
+                            "format_hint": sm.get('format_hint'),
+                            "example_value": sm.get('example_value'),
+                            "is_summable": sm.get('is_summable', False),
+                            "is_groupable": sm.get('is_groupable', True),
+                            "hierarchy_level": sm.get('hierarchy_level'),
+                            "special_notes": sm.get('special_notes'),
+                            "conversion_sql": sm.get('conversion_sql'),
+                            "dimension_group": sm.get('dimension_group'),
+                        })
+                        created += 1
+                else:
+                    # No source metadata found anywhere
+                    missing_columns.append({
+                        "view_column": view_column,
+                        "source_table": source_table,
+                        "source_column": source_column,
+                    })
+                    if not existing:
+                        # Create minimal row so the column appears
+                        conn.execute(text("""
+                            INSERT INTO schema_metadata (table_name, column_name, data_type)
+                            VALUES (:table_name, :column_name, :data_type)
+                        """), {
+                            "table_name": view_name,
+                            "column_name": view_column,
+                            "data_type": "TEXT",
+                        })
+                        created += 1
+
+        logger.info(
+            f"Propagated metadata to '{view_name}': "
+            f"{created} created, {updated} updated, {skipped} skipped, "
+            f"{len(missing_columns)} missing source"
+        )
+        return {
+            "created": created,
+            "updated": updated,
+            "skipped": skipped,
+            "missing_columns": missing_columns,
+        }
 
     # =========================================================
     # Context Management
@@ -323,6 +605,123 @@ class SchemaService:
                 return [dict(row) for row in result.mappings().fetchall()]
             except Exception:
                 return []
+
+    def get_dimension_families(self, table_name: str) -> Dict[str, List[str]]:
+        """Get dimension families — groups of related columns that must stay on the same axis.
+
+        Uses hybrid resolution:
+          1. DB overrides (admin-set) win
+          2. Auto-detect fills gaps for unassigned columns
+          3. Only returns groups with 2+ members
+
+        Returns:
+            Dict mapping group name to list of column names, e.g.
+            {'org_section': ['SECTION', 'SECTION_ABBR'], ...}
+        """
+        from app.services.dimension_detector import detect_families
+
+        # 1. Query DB overrides
+        db_families: Dict[str, List[str]] = {}
+        db_assigned_cols: set = set()
+        with self.engine.connect() as conn:
+            try:
+                result = conn.execute(text("""
+                    SELECT dimension_group, column_name
+                    FROM schema_metadata
+                    WHERE table_name = :table_name
+                      AND dimension_group IS NOT NULL
+                    ORDER BY dimension_group, column_name
+                """), {"table_name": table_name})
+                for row in result.mappings().fetchall():
+                    group = row["dimension_group"]
+                    col = row["column_name"]
+                    db_families.setdefault(group, []).append(col)
+                    db_assigned_cols.add(col)
+            except Exception:
+                pass
+
+        # 2. Get all column names and auto-detect
+        try:
+            columns = self.get_table_info(table_name)
+            all_col_names = [c["name"] for c in columns]
+        except Exception:
+            all_col_names = []
+
+        auto_families = detect_families(all_col_names) if all_col_names else {}
+
+        # 3. Merge: DB wins, auto-detect fills gaps
+        merged: Dict[str, List[str]] = {}
+
+        # Start with DB families
+        for group, cols in db_families.items():
+            merged[group] = list(cols)
+
+        # Add auto-detected families for columns NOT already assigned in DB
+        for group, cols in auto_families.items():
+            unassigned = [c for c in cols if c not in db_assigned_cols]
+            if unassigned:
+                merged.setdefault(group, []).extend(unassigned)
+
+        # Only return groups with 2+ members
+        return {g: cols for g, cols in merged.items() if len(cols) >= 2}
+
+    def get_dimension_families_with_source(self, table_name: str) -> List[Dict]:
+        """Get dimension families with source tracking (db/auto).
+
+        Returns list of {family_name, columns: [{column_name, source}]}.
+        """
+        from app.services.dimension_detector import detect_families
+
+        # DB overrides
+        db_map: Dict[str, str] = {}  # column_name → dimension_group
+        with self.engine.connect() as conn:
+            try:
+                result = conn.execute(text("""
+                    SELECT dimension_group, column_name
+                    FROM schema_metadata
+                    WHERE table_name = :table_name
+                      AND dimension_group IS NOT NULL
+                """), {"table_name": table_name})
+                for row in result.mappings().fetchall():
+                    db_map[row["column_name"]] = row["dimension_group"]
+            except Exception:
+                pass
+
+        # Auto-detect
+        try:
+            columns = self.get_table_info(table_name)
+            all_col_names = [c["name"] for c in columns]
+        except Exception:
+            all_col_names = []
+
+        auto_families = detect_families(all_col_names) if all_col_names else {}
+
+        # Build merged result with source tracking
+        families: Dict[str, List[Dict]] = {}
+
+        # DB columns first
+        for col, group in db_map.items():
+            families.setdefault(group, []).append({"column_name": col, "source": "db"})
+
+        # Auto-detect for unassigned columns
+        for group, cols in auto_families.items():
+            for col in cols:
+                if col not in db_map:
+                    families.setdefault(group, []).append({"column_name": col, "source": "auto"})
+
+        # Build response list, filter 2+ members
+        result = []
+        for family_name, columns in sorted(families.items()):
+            if len(columns) >= 2:
+                source = "db" if all(c["source"] == "db" for c in columns) else \
+                         "auto" if all(c["source"] == "auto" for c in columns) else "mixed"
+                result.append({
+                    "family_name": family_name,
+                    "columns": sorted(columns, key=lambda c: c["column_name"]),
+                    "source": source,
+                })
+
+        return result
 
     def get_semantic_mappings(
         self,
@@ -552,12 +951,13 @@ DATE เก็บเป็น Unix Timestamp (milliseconds) ต้องแป�
             return self._get_default_semantic_mappings()
 
         text = "<semantic_mappings>\n"
-        text += "## 🔥 SEMANTIC MAPPINGS - MANDATORY USAGE 🔥\n\n"
+        text += "## 🔥 SEMANTIC MAPPINGS - REFERENCE GUIDE 🔥\n\n"
 
         text += "<rules>\n"
         text += "1. ตรวจสอบ mappings ด้านล่างก่อนสร้าง SQL ทุกครั้ง\n"
-        text += "2. ถ้าเจอ keyword ที่ user ใช้ → COPY condition จาก mapping มาใช้ตามตัว\n"
-        text += "3. ห้าม improvise, ห้าม modify, ห้ามสร้าง pattern เอง\n"
+        text += "2. ถ้าเจอ keyword → ใช้ mapping เป็น **reference** สำหรับหา column ที่ถูกต้อง\n"
+        text += "3. ⚠️ ถ้ามี 'Actual Values Found' section → **ให้เชื่อค่าจาก Actual Values** เพราะมาจาก DB จริง\n"
+        text += "4. สำหรับ text columns: ใช้ LIKE '%keyword%' เสมอ ยกเว้น mapping ระบุ LIKE pattern ไว้แล้ว\n"
         text += "</rules>\n\n"
 
         text += "<examples>\n"
@@ -616,9 +1016,9 @@ DATE เก็บเป็น Unix Timestamp (milliseconds) ต้องแป�
         text += "</semantic_mappings>\n\n"
         text += "<reminder>\n"
         text += "⚠️ ก่อนสร้าง WHERE clause ทุกครั้ง:\n"
-        text += "1. หา keyword ที่ user ใช้ใน <semantic_mappings>\n"
-        text += "2. ถ้าเจอ → COPY SQL condition มาใช้เลย\n"
-        text += "3. ถ้าไม่เจอ → ค่อยสร้างเอง\n"
+        text += "1. ถ้ามี 'Actual Values Found' → ใช้ค่าจากนั้นเป็นหลัก (มาจาก DB จริง)\n"
+        text += "2. หา keyword ที่ user ใช้ใน <semantic_mappings> เพื่อหา column ที่ถูกต้อง\n"
+        text += "3. สำหรับ text columns: ใช้ LIKE '%keyword%' เสมอ\n"
         text += "</reminder>\n"
 
         return text
@@ -806,19 +1206,18 @@ DATE เก็บเป็น Unix Timestamp (milliseconds) ต้องแป�
 <critical_instructions>
 ⚠️⚠️⚠️ MUST READ BEFORE GENERATING SQL ⚠️⚠️⚠️
 
-STEP 1: CHECK SEMANTIC MAPPINGS FIRST
-- ก่อนสร้าง WHERE condition ต้องตรวจสอบ <semantic_mappings> section ก่อนเสมอ
-- ถ้ามี keyword ที่ user ใช้ → COPY SQL condition จาก mapping นั้นมาใช้
-- ห้ามสร้าง condition เอง ห้าม improvise ห้าม hard-code
+STEP 1: CHECK FOR ACTUAL VALUES FIRST
+- ถ้ามี "Actual Values Found" section ใน user message → ใช้ค่าจากนั้น (มาจาก DB จริง)
+- ใช้ LIKE '%keyword%' สำหรับ text columns เสมอ
 
-STEP 2: SQL GENERATION RULES
-✅ ถูกต้อง: ใช้ condition จาก semantic mapping
-❌ ผิด: สร้าง LIKE pattern เอง เช่น LIKE '%TRUNK RADIO%'
+STEP 2: CHECK SEMANTIC MAPPINGS
+- ถ้าไม่มี Actual Values → ตรวจ <semantic_mappings> section
+- ใช้ mapping เป็น reference สำหรับหา column ที่ถูกต้อง
+- สำหรับ text columns: แปลง = เป็น LIKE '%keyword%' เสมอ
 
-STEP 3: DOUBLE CHECK
-- Review SQL ที่สร้างแล้ว
-- ตรวจสอบว่า WHERE clause ตรงกับ semantic mapping หรือไม่
-- ถ้าไม่ตรง → แก้ไขให้ตรง
+STEP 3: FALLBACK
+- ถ้าไม่มี Actual Values และไม่มี mapping → สร้าง LIKE pattern เอง
+- ห้ามใช้ = กับ text columns ยกเว้นมั่นใจ 100% ว่าค่าตรงเป๊ะ
 </critical_instructions>
 
 ## หน้าที่ของคุณ

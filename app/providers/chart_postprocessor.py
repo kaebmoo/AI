@@ -2,7 +2,8 @@
 NT AI Assistant - Chart Post-Processor
 ========================================
 Shared logic for parsing AI chart/visualization responses
-and enforcing the Time-Series Rule across all providers.
+and enforcing the Time-Series Rule and Dimension Family Rule
+across all providers.
 """
 
 import json
@@ -96,6 +97,88 @@ def enforce_time_series_rule(parsed_result: Dict) -> Dict:
     except Exception as e:
         logger.error(f"Error in enforce_time_series_rule: {e}")
         return parsed_result
+
+
+def enforce_dimension_family_rule(
+    parsed_result: Dict,
+    families: Optional[Dict[str, List[str]]] = None,
+) -> Dict:
+    """
+    Post-process chart config to ensure columns from the same dimension family
+    are never split across category_column and series_column.
+
+    If category_column and series_column belong to the same family:
+    - Clear series_column (keep category only)
+    - Downgrade grouped_bar/stacked_bar → bar_chart
+
+    Args:
+        parsed_result: Parsed AI response dict (may contain chart_config)
+        families: Dimension families dict, e.g. {'org_section': ['SECTION', 'SECTION_ABBR']}
+    """
+    try:
+        if not families or not isinstance(parsed_result, dict):
+            return parsed_result
+
+        if "chart_config" not in parsed_result:
+            return parsed_result
+
+        config = parsed_result["chart_config"]
+        cat = str(config.get("category_column", "")).upper()
+        series = str(config.get("series_column", "")).upper()
+
+        if not cat or not series:
+            return parsed_result
+
+        # Build reverse lookup: column_upper → group
+        col_to_group: Dict[str, str] = {}
+        for group, cols in families.items():
+            for col in cols:
+                col_to_group[col.upper()] = group
+
+        cat_group = col_to_group.get(cat)
+        series_group = col_to_group.get(series)
+
+        if cat_group and series_group and cat_group == series_group:
+            logger.info(
+                f"Dimension Family Rule violated: '{config.get('category_column')}' and "
+                f"'{config.get('series_column')}' both belong to family '{cat_group}'. "
+                f"Clearing series_column."
+            )
+            config["series_column"] = ""
+            viz = parsed_result.get("visualization", "")
+            if viz in ("grouped_bar", "stacked_bar"):
+                parsed_result["visualization"] = "bar_chart"
+
+        return parsed_result
+    except Exception as e:
+        logger.error(f"Error in enforce_dimension_family_rule: {e}")
+        return parsed_result
+
+
+def build_dimension_family_prompt(families: Dict[str, List[str]]) -> str:
+    """
+    Generate a prompt snippet listing dimension families for LLM awareness.
+
+    Args:
+        families: Dict mapping group name to list of column names
+
+    Returns:
+        Prompt text to append to the explain_result system prompt,
+        or empty string if no families.
+    """
+    if not families:
+        return ""
+
+    lines = [
+        "\n\nDIMENSION FAMILY RULE (CRITICAL):",
+        "Columns in the same family represent the SAME entity (code/abbreviation/name).",
+        "They MUST be on the SAME axis. NEVER put one as category_column and another as series_column.",
+        "Families:"
+    ]
+    for group, cols in sorted(families.items()):
+        lines.append(f"  - {group}: {', '.join(cols)}")
+
+    return "\n".join(lines)
 
 
 def auto_detect_chart_config(data: List[Dict], parsed_result: Dict = None) -> Dict:

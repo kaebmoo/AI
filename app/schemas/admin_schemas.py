@@ -29,6 +29,7 @@ class SchemaMetadataBase(BaseModel):
     sample_values: Optional[List[str]] = Field(None, description="Sample values")
     special_notes: Optional[str] = Field(None, description="Special notes for AI")
     conversion_sql: Optional[str] = Field(None, description="SQL for conversion")
+    dimension_group: Optional[str] = Field(None, description="Dimension family group name")
 
 
 class SchemaMetadataCreate(SchemaMetadataBase):
@@ -50,6 +51,7 @@ class SchemaMetadataUpdate(BaseModel):
     sample_values: Optional[List[str]] = None
     special_notes: Optional[str] = None
     conversion_sql: Optional[str] = None
+    dimension_group: Optional[str] = None
 
 
 class SchemaMetadataResponse(SchemaMetadataBase):
@@ -301,3 +303,99 @@ class ViewMappingSuggestion(BaseModel):
     col: str
     suggested_alias: str
     reason: Optional[str] = None
+
+
+# ============================================================
+# View Column Mapping Response Schemas
+# ============================================================
+
+class ViewColumnMappingResponse(BaseModel):
+    """Response for a single view-to-source column mapping"""
+    id: int
+    view_name: str
+    view_column: str
+    source_table: str
+    source_column: str
+    mapping_type: str = "alias"
+    expression_sql: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+class ViewMappingsListResponse(BaseModel):
+    """Response for listing all mappings of a view"""
+    view_name: str
+    mappings: List[ViewColumnMappingResponse]
+    total: int
+
+class MissingColumnInfo(BaseModel):
+    """Info about a column with no source metadata"""
+    view_column: str
+    source_table: str
+    source_column: str
+
+class PropagateMetadataResponse(BaseModel):
+    """Response for metadata propagation"""
+    view_name: str
+    created: int
+    updated: int
+    skipped: int = 0
+    missing_columns: List[MissingColumnInfo] = []
+    message: str
+
+class ViewSummaryItem(BaseModel):
+    """Summary of a single view's mapping status"""
+    view_name: str
+    source_table: str
+    mapping_count: int
+    metadata_with_thai_count: int
+
+class ViewSummaryListResponse(BaseModel):
+    """Response for listing all views with mapping summary"""
+    views: List[ViewSummaryItem]
+    total: int
+
+
+# ============================================================
+# Dimension Family Schemas
+# ============================================================
+
+class DimensionFamilyColumn(BaseModel):
+    column_name: str
+    source: str = Field(..., description="Source: 'db', 'auto', or 'ai'")
+
+class DimensionFamilyItem(BaseModel):
+    family_name: str
+    columns: List[DimensionFamilyColumn]
+    source: str = Field(..., description="Overall source: 'db', 'auto', or 'mixed'")
+
+class DimensionFamilyListResponse(BaseModel):
+    table_name: str
+    families: List[DimensionFamilyItem]
+    total: int
+
+class DimensionFamilyAnalyzeRequest(BaseModel):
+    table_name: str = Field(..., description="Table to analyze")
+    context_name: Optional[str] = Field(None, description="Optional context for analysis")
+
+class DimensionFamilySuggestion(BaseModel):
+    family_name: str
+    columns: List[str]
+
+class DimensionFamilyAnalyzeResponse(BaseModel):
+    table_name: str
+    suggested_families: List[DimensionFamilySuggestion]
+    llm_reasoning: str = ""
+    provider_used: str = ""
+
+class DimensionFamilyAssignment(BaseModel):
+    column_name: str
+    dimension_group: Optional[str] = Field(None, description="Family name, or null to clear")
+
+class DimensionFamilyBatchUpdate(BaseModel):
+    table_name: str
+    assignments: List[DimensionFamilyAssignment]
+
+class DimensionFamilyBatchUpdateResponse(BaseModel):
+    updated_count: int
+    families: List[DimensionFamilyItem]

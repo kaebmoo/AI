@@ -10,6 +10,8 @@ import Mappings from './pages/Mappings'
 import Rules from './pages/Rules'
 import Examples from './pages/Examples'
 import ViewBuilder from './pages/ViewBuilder'
+import ViewManager from './pages/ViewManager'
+import DimensionFamilies from './pages/DimensionFamilies'
 import Providers from './pages/Providers'
 import Models from './pages/Models'
 import Settings from './pages/Settings'
@@ -40,6 +42,8 @@ function App() {
             <Route path="/rules" element={<Rules />} />
             <Route path="/examples" element={<Examples />} />
             <Route path="/view-builder" element={<ViewBuilder />} />
+            <Route path="/view-manager" element={<ViewManager />} />
+            <Route path="/dimension-families" element={<DimensionFamilies />} />
             <Route path="/providers" element={<Providers />} />
             <Route path="/models" element={<Models />} />
             <Route path="/settings" element={<Settings />} />

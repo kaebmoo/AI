@@ -16,6 +16,8 @@ from app.providers.retry_config import ai_retry
 from app.providers.chart_postprocessor import (
     parse_explanation_response,
     enforce_time_series_rule,
+    enforce_dimension_family_rule,
+    build_dimension_family_prompt,
     auto_detect_chart_config,
 )
 from app.config import settings
@@ -89,10 +91,11 @@ class MatchaProvider(AIProvider):
             "tokens_used": result.get('usage', {}).get('total_tokens', 0)
         }
 
-    async def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str) -> Dict[str, Any]:
+    async def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str, dimension_families: Optional[Dict[str, List[str]]] = None) -> Dict[str, Any]:
         """Explain result using Matcha/OpenAI and return Config"""
 
         data_preview = json.dumps(data[:5], ensure_ascii=False, default=str)
+        family_prompt = build_dimension_family_prompt(dimension_families) if dimension_families else ""
 
         prompt = f"""
 Query: {question}
@@ -100,6 +103,7 @@ SQL: {sql}
 
 Data Preview:
 {data_preview}
+{family_prompt}
 
 Based on the data, provide:
 1. A brief explanation of the trends/values (in Thai).
@@ -126,6 +130,7 @@ Structure:
         # Use shared post-processor
         parsed_result = parse_explanation_response(response_text)
         parsed_result = enforce_time_series_rule(parsed_result)
+        parsed_result = enforce_dimension_family_rule(parsed_result, dimension_families)
 
         # Fallback: If no chart_config, try to infer from data
         if "chart_config" not in parsed_result and data and len(data) > 0:

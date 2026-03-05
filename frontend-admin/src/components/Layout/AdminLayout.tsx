@@ -15,7 +15,9 @@ import {
     FileTextOutlined,
     SettingOutlined,
     CloudOutlined,
-    ThunderboltOutlined
+    ThunderboltOutlined,
+    ApartmentOutlined,
+    SwapOutlined
 } from '@ant-design/icons';
 import { Layout, Menu, Button, theme, Dropdown, Avatar, Space } from 'antd';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
@@ -73,6 +75,16 @@ const AppLayout: React.FC = () => {
                     key: '/view-builder',
                     icon: <BuildOutlined />,
                     label: 'View Builder',
+                },
+                {
+                    key: '/view-manager',
+                    icon: <SwapOutlined />,
+                    label: 'View Manager',
+                },
+                {
+                    key: '/dimension-families',
+                    icon: <ApartmentOutlined />,
+                    label: 'Dimension Families',
                 },
             ]
         },

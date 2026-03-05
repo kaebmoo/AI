@@ -5,7 +5,7 @@ SQLAlchemy models for schema metadata, semantic mappings, and business rules.
 Used by Admin API and SchemaService for AI context management.
 """
 
-from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, Index
+from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, Index, UniqueConstraint
 from sqlalchemy.dialects.sqlite import JSON
 from datetime import datetime
 from app.db.base_class import Base
@@ -33,6 +33,7 @@ class SchemaMetadata(Base):
     sample_values = Column(JSON, nullable=True)  # JSON array of sample values
     special_notes = Column(Text, nullable=True)  # Special notes for AI
     conversion_sql = Column(Text, nullable=True)  # SQL for value conversion
+    dimension_group = Column(String(100), nullable=True)  # Family group for related columns
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -58,6 +59,7 @@ class SchemaMetadata(Base):
             "sample_values": self.sample_values,
             "special_notes": self.special_notes,
             "conversion_sql": self.conversion_sql,
+            "dimension_group": self.dimension_group,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -112,6 +114,41 @@ class SchemaSemanticMapping(Base):
         if self.full_condition:
             return self.full_condition
         return f"{self.target_column} {self.target_condition}"
+
+
+class ViewColumnMapping(Base):
+    """
+    Maps view columns back to source table columns.
+    Enables metadata propagation from raw tables to views.
+    """
+    __tablename__ = "view_column_mappings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    view_name = Column(String(100), nullable=False, index=True)
+    view_column = Column(String(100), nullable=False)
+    source_table = Column(String(100), nullable=False)
+    source_column = Column(String(100), nullable=False)
+    mapping_type = Column(String(20), default='alias')  # alias | expression | passthrough
+    expression_sql = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint('view_name', 'view_column', name='uq_view_column_mapping'),
+    )
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "view_name": self.view_name,
+            "view_column": self.view_column,
+            "source_table": self.source_table,
+            "source_column": self.source_column,
+            "mapping_type": self.mapping_type,
+            "expression_sql": self.expression_sql,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
 
 
 class SchemaBusinessRule(Base):
