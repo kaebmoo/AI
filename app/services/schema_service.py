@@ -1210,6 +1210,12 @@ STEP 1: CHECK FOR ACTUAL VALUES FIRST
 - ถ้ามี "Actual Values Found" section ใน user message → ใช้ค่าจากนั้น (มาจาก DB จริง)
 - ใช้ LIKE '%keyword%' สำหรับ text columns เสมอ
 
+STEP 1.5: HIERARCHY RULE (ห้าม OR ข้ามระดับ)
+- ข้อมูลมีลำดับชั้น: กลุ่มธุรกิจ > กลุ่มบริการ > บริการ/ผลิตภัณฑ์
+- ถ้า Actual Values มีข้อมูลจากหลาย level → ใช้เฉพาะ level ที่ user ถามถึง
+- ห้าม: WHERE service_group LIKE '%x%' OR product_name LIKE '%x%' (OR ข้ามระดับ)
+- การ OR ข้ามระดับทำให้ตัวเลขผิดเพี้ยนอย่างมาก (สูงเกินจริงหลายสิบเท่า)
+
 STEP 2: CHECK SEMANTIC MAPPINGS
 - ถ้าไม่มี Actual Values → ตรวจ <semantic_mappings> section
 - ใช้ mapping เป็น reference สำหรับหา column ที่ถูกต้อง

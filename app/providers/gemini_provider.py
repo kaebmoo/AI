@@ -193,12 +193,17 @@ Return the result as a JSON object with these keys:
    - "category_column": The column name for X-axis labels (the PRIMARY grouping)
    - "measure_column": The column name for Y-axis values (e.g., total, sum, amount)
    - "series_column": (optional) The column for SECONDARY grouping/comparison
-4. "display_hint": How to display the TABLE (separate from chart). One of:
-   - 'hierarchical': data has parent→child structure (e.g., business_unit > service_group > product, or division > department > section). Use when multiple non-time dimension columns form a hierarchy.
-   - 'crosstab': data is best compared across dimensions (e.g., group × month). Use when time or comparison axis exists.
-   - 'flat': simple flat list of rows.
-5. "hierarchy_columns": (REQUIRED if display_hint='hierarchical') Array of column names ordered from HIGHEST to LOWEST level.
-   Example: ["business_unit", "service_group", "product_name"]
+4. "display_hint": How to display the TABLE (separate from chart). Choose ONE:
+   - 'hierarchical': Use when data has MULTIPLE categorical (non-time) columns where one is the parent of another.
+     Rule: If the columns represent a HIERARCHY (e.g., BUSINESS_GROUP > SERVICE_GROUP, or division > department > section),
+     always use 'hierarchical' — even if there are only 2 levels.
+     Do NOT use 'crosstab' for parent-child hierarchy data without time dimension.
+   - 'crosstab': Use ONLY when comparing values ACROSS a time dimension (month, quarter, year) OR when
+     the question explicitly asks to compare one distinct category against another.
+   - 'flat': Use for single-dimension data or when already aggregated to one level.
+5. "hierarchy_columns": (REQUIRED if display_hint='hierarchical') Array of actual column names ordered HIGHEST (parent) to LOWEST (child).
+   Example: BUSINESS_GROUP is parent, SERVICE_GROUP is child → ["BUSINESS_GROUP", "SERVICE_GROUP"]
+   Example: division > department > section → ["division", "department", "section"]
 
 IMPORTANT for time-based comparisons:
 - **CRITICAL**: If a Time column exists (Month, Year, Date), YOU MUST USE IT AS 'category_column' (X-axis).

@@ -382,7 +382,8 @@ export const DataTable = ({ data, displayHint, hierarchyColumns }: DataTableProp
 
     // === NEW: Category × Category Crosstab Detection ===
     // If no time-based crosstab, try to detect Category × Category pattern
-    if (!isCrosstab && categoryKeys.length >= 2 && valueKey) {
+    // SKIP if LLM explicitly requested hierarchical display
+    if (!isCrosstab && categoryKeys.length >= 2 && valueKey && displayHint !== 'hierarchical') {
         // Analyze each category's cardinality
         const categoryStats = categoryKeys.map(k => ({
             key: k,

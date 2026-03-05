@@ -116,12 +116,16 @@ Based on the data, provide:
    - category_column: X-axis (Grouping). Rule: Use 'month' for trends, 'department'/'group' for comparison.
    - measure_column: Y-axis (Value).
    - series_column: Comparison/Legend (Optional). Rule: If comparing multiple groups over time, use this. Prefer NAME columns over CODE columns.
-4. display_hint: How to render the table. One of:
-   - 'hierarchical': data has parent→child structure (e.g., business_unit > service_group > product, or division > department > section)
-   - 'crosstab': data is for comparison across dimensions (e.g., groups × months)
-   - 'flat': simple flat rows
-5. hierarchy_columns: (REQUIRED if display_hint='hierarchical') Array of column names, HIGHEST to LOWEST level.
-   Example: ["business_unit", "service_group", "product_name"]
+4. display_hint: How to render the table. Choose ONE:
+   - 'hierarchical': Use when data has MULTIPLE categorical (non-time) columns where one is the parent of another.
+     Rule: If the columns represent a HIERARCHY (e.g., BUSINESS_GROUP > SERVICE_GROUP, or division > department > section),
+     always use 'hierarchical' — even if there are only 2 levels.
+     Do NOT use crosstab for parent-child hierarchy data without time dimension.
+   - 'crosstab': Use ONLY when comparing values ACROSS a time dimension (month, quarter, year) OR when
+     user explicitly asks to compare one category against another.
+   - 'flat': simple flat rows — single dimension or already one-level data.
+5. hierarchy_columns: (REQUIRED if display_hint='hierarchical') Actual column names ordered HIGHEST (parent) to LOWEST (child).
+   Example: BUSINESS_GROUP > SERVICE_GROUP → ["BUSINESS_GROUP", "SERVICE_GROUP"]
 
 IMPORTANT: Return VALID JSON only. Do not wrap in markdown unless necessary.
 Structure:

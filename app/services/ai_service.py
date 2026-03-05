@@ -45,6 +45,36 @@ from app.providers.retry_config import ai_retry, create_retry_decorator  # noqa:
 
 logger = logging.getLogger(__name__)
 
+# ============================================================
+# Column Hierarchies — ป้องกัน OR ข้ามระดับ
+# ============================================================
+# Hierarchy: level 0 (broadest) → level N (most specific)
+# AI must filter on ONLY ONE level; cross-level OR inflates results.
+COLUMN_HIERARCHIES: Dict[str, List[Dict]] = {
+    "pl_costtype": [
+        {"level": 0, "columns": ["business_unit"],
+         "label_th": "กลุ่มธุรกิจ", "label_en": "Business Unit",
+         "detection_keywords": ["กลุ่มธุรกิจ", "business unit", "ธุรกิจ"]},
+        {"level": 1, "columns": ["service_group"],
+         "label_th": "กลุ่มบริการ", "label_en": "Service Group",
+         "detection_keywords": ["กลุ่มบริการ", "service group"]},
+        {"level": 2, "columns": ["product_name"],
+         "label_th": "ผลิตภัณฑ์/บริการ", "label_en": "Product",
+         "detection_keywords": ["ผลิตภัณฑ์", "product", "สินค้า"]},
+    ],
+    "revenue": [
+        {"level": 0, "columns": ["BUSINESS"],
+         "label_th": "กลุ่มธุรกิจ", "label_en": "Business",
+         "detection_keywords": ["กลุ่มธุรกิจ", "ธุรกิจ", "business"]},
+        {"level": 1, "columns": ["SERVICE_GROUP"],
+         "label_th": "กลุ่มบริการ", "label_en": "Service Group",
+         "detection_keywords": ["กลุ่มบริการ", "service group"]},
+        {"level": 2, "columns": ["PRODUCT_NAME", "PRODUCT"],
+         "label_th": "ผลิตภัณฑ์", "label_en": "Product",
+         "detection_keywords": ["ผลิตภัณฑ์", "product", "สินค้า"]},
+    ],
+}
+
 
 class AIService:
     """Async AI Service integrating MCP"""
@@ -426,10 +456,17 @@ class AIService:
 
                 # Value Lookup — always-on (searches actual DB values for keywords in question)
                 value_lookup_text = ""
+                detected_level = None
                 try:
                     value_matches = self._lookup_values_from_question(question, context_name, context_table)
                     if value_matches:
-                        value_lookup_text = self._format_value_matches(value_matches)
+                        hierarchy = COLUMN_HIERARCHIES.get(context_name)
+                        detected_level = self._detect_hierarchy_level(question, context_name)
+                        if hierarchy and detected_level:
+                            logger.info(f"Hierarchy: level {detected_level['level']} ({detected_level['label_en']})")
+                        value_lookup_text = self._format_value_matches(
+                            value_matches, hierarchy=hierarchy, detected_level=detected_level
+                        )
                 except Exception as e:
                     logger.warning(f"Value Lookup failed: {e}")
 
@@ -456,7 +493,9 @@ class AIService:
                             intent=intent_json,
                             context_table=context_table,
                             context_thai=context_thai,
-                            value_matches=value_matches if value_lookup_text else None
+                            value_matches=value_matches if value_lookup_text else None,
+                            hierarchy=COLUMN_HIERARCHIES.get(context_name),
+                            detected_level=detected_level
                         )
                     else:
                         logger.warning("Two-Pass Mode: Pass 1 failed. Falling back to one-pass CoT prompt.")
@@ -852,8 +891,100 @@ Error: {last_error.get('error', '')}
         return results
 
     @staticmethod
-    def _format_value_matches(value_matches: List[Dict]) -> str:
-        """Format value lookup results for injection into prompt."""
+    def _detect_hierarchy_level(question: str, context_name: str) -> Optional[Dict]:
+        """Detect user's intended hierarchy level from question keywords.
+
+        Uses longest-match to avoid 'บริการ' matching product when
+        user said 'กลุ่มบริการ'.
+        """
+        hierarchy = COLUMN_HIERARCHIES.get(context_name)
+        if not hierarchy:
+            return None
+
+        question_lower = question.lower()
+        candidates = []
+        for level_info in hierarchy:
+            for kw in level_info["detection_keywords"]:
+                if kw.lower() in question_lower:
+                    candidates.append((len(kw), level_info))
+
+        if not candidates:
+            return None
+
+        # Longest match wins (e.g. "กลุ่มบริการ" > "บริการ")
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        return candidates[0][1]
+
+    @staticmethod
+    def _format_value_matches(value_matches: List[Dict], hierarchy=None, detected_level=None) -> str:
+        """Format value lookup results for injection into prompt.
+
+        When hierarchy info is available, groups matches by level and marks
+        the intended level so AI doesn't OR across hierarchy levels.
+        """
+        if not value_matches:
+            return ""
+
+        # No hierarchy → flat format (original behavior)
+        if not hierarchy:
+            return AIService._format_value_matches_flat(value_matches)
+
+        # --- Hierarchy-aware format ---
+        # Build column → level mapping
+        col_to_level: Dict[str, Dict] = {}
+        for level_info in hierarchy:
+            for col in level_info["columns"]:
+                col_to_level[col.lower()] = level_info
+
+        # Group matches by hierarchy level
+        by_level: Dict[int, List[Dict]] = {}
+        for m in value_matches:
+            level_info = col_to_level.get(m["column_name"].lower())
+            lvl = level_info["level"] if level_info else 999
+            by_level.setdefault(lvl, []).append(m)
+
+        # If none of the matches belong to any hierarchy column, fall back to flat
+        if not by_level or (len(by_level) == 1 and 999 in by_level):
+            return AIService._format_value_matches_flat(value_matches)
+
+        intended_level_num = detected_level["level"] if detected_level else None
+
+        lines = ["**Actual Values Found in Database (ค่าจริงจากฐานข้อมูล):**"]
+        lines.append("ค่าด้านล่างจัดกลุ่มตามลำดับชั้น (Hierarchy) — ใช้เฉพาะระดับที่ตรงกับคำถาม")
+        lines.append("")
+
+        for level_info in sorted(hierarchy, key=lambda l: l["level"]):
+            matches = by_level.get(level_info["level"], [])
+            if not matches:
+                continue
+            is_intended = (intended_level_num == level_info["level"])
+            marker = " ← **ระดับที่ตรงกับคำถาม (USE THIS LEVEL)**" if is_intended else ""
+            lines.append(f'### Level {level_info["level"]}: {level_info["label_th"]} ({level_info["label_en"]}){marker}')
+
+            by_kw: Dict[str, List[Dict]] = {}
+            for m in matches:
+                by_kw.setdefault(m.get("keyword", "?"), []).append(m)
+            for kw, kw_matches in by_kw.items():
+                lines.append(f'  keyword "{kw}":')
+                for m in kw_matches[:5]:
+                    col, val = m["column_name"], m["column_value"]
+                    if is_intended:
+                        lines.append(f'    - column: `{col}`, value: `{val}`')
+                        lines.append(f'      → **USE THIS**: `{col} LIKE \'%{kw}%\'`')
+                    else:
+                        lines.append(f'    - column: `{col}`, value: `{val}` (different level — do NOT use)')
+            lines.append("")
+
+        lines.append("⚠️ HIERARCHY RULES (สำคัญมาก!):")
+        lines.append("1. ถ้ามี **USE THIS LEVEL** → ใช้ column จาก level นั้นเท่านั้น")
+        lines.append("2. ห้าม OR ข้าม level เด็ดขาด (ทำให้ตัวเลขผิดเพี้ยนหลายสิบเท่า)")
+        lines.append("3. ถ้าไม่มี USE THIS LEVEL → ใช้ level สูงสุด (parent) ที่มี match")
+        lines.append("4. ใช้ LIKE '%keyword%' สำหรับ text columns เสมอ")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_value_matches_flat(value_matches: List[Dict]) -> str:
+        """Format value matches without hierarchy awareness (original flat format)."""
         if not value_matches:
             return ""
 
@@ -982,11 +1113,18 @@ Error: {last_error.get('error', '')}
         intent: Dict,
         context_table: str,
         context_thai: str,
-        value_matches: List[Dict] = None
+        value_matches: List[Dict] = None,
+        hierarchy: List[Dict] = None,
+        detected_level: Optional[Dict] = None
     ) -> str:
         """Build Pass 2 prompt using structured intent from Pass 1."""
 
         if value_matches:
+            # Determine which columns belong to the intended hierarchy level
+            intended_cols = None
+            if hierarchy and detected_level:
+                intended_cols = {c.lower() for c in detected_level["columns"]}
+
             by_keyword: Dict[str, List[Dict]] = {}
             for m in value_matches:
                 by_keyword.setdefault(m.get("keyword", ""), []).append(m)
@@ -994,11 +1132,17 @@ Error: {last_error.get('error', '')}
             real_filter_lines = []
             for kw, matches in by_keyword.items():
                 for m in matches[:5]:
-                    real_filter_lines.append(f"  - {m['column_name']} = '{m['column_value']}'  (ค่าจริง)")
+                    col = m['column_name']
+                    # Skip columns from other hierarchy levels
+                    if intended_cols and col.lower() not in intended_cols:
+                        continue
+                    level_label = detected_level['label_th'] if detected_level else "DB"
+                    real_filter_lines.append(f"  - {col} LIKE '%{kw}%'  (ค่าจริงจาก {level_label})")
 
             if real_filter_lines:
                 filters_text = "\n".join(real_filter_lines)
-                mappings_text = "  (ใช้ค่าจริงจาก Filters ข้างต้นแทน)"
+                level_label = detected_level['label_th'] if detected_level else "DB"
+                mappings_text = f"  (ใช้ค่าจริงจาก Filters — ระดับ: {level_label})"
             else:
                 filters_text = "  ไม่มี filter"
                 mappings_text = "  ไม่พบ mapping ที่ตรง"
@@ -1032,6 +1176,12 @@ Error: {last_error.get('error', '')}
             o = intent["ordering"]
             ordering_text = f"{o.get('column', '?')} {o.get('direction', 'DESC')}"
 
+        value_matches_text = ""
+        if value_matches:
+            value_matches_text = self._format_value_matches(
+                value_matches, hierarchy=hierarchy, detected_level=detected_level
+            )
+
         return f"""คำถาม: {question}
 
 **บริบท:** ข้อมูล{context_thai} (ใช้ตาราง {context_table})
@@ -1050,13 +1200,14 @@ Error: {last_error.get('error', '')}
 - Limit: {intent.get('limit') or 'ไม่จำกัด'}
 
 ---
-{self._format_value_matches(value_matches) if value_matches else ''}
+{value_matches_text}
 **สร้าง SQL จาก Structured Intent ข้างต้น:**
 สำคัญ:
 - ต้องใช้ตาราง {context_table} เท่านั้น
 - ถ้ามี "Actual Values Found" ข้างต้น → ใช้ column/value จากผลค้นหาจริง ห้ามเดาเอง
 - ถ้ามี Matched Semantic Mappings ให้ใช้ sql_condition จาก mapping โดยตรง
 - ห้าม FORMAT ตัวเลขใน SQL (ส่งค่าดิบ)
+- ห้าม OR ข้ามระดับ hierarchy (เช่น service_group OR product_name)
 
 ```sql
 <SQL ที่สร้างจาก Structured Intent>

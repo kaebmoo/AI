@@ -118,13 +118,18 @@ Return the result as a JSON object with these keys:
    - "category_column": The column name for X-axis labels (the PRIMARY grouping)
    - "measure_column": The column name for Y-axis values (e.g., total, sum, amount)
    - "series_column": (optional) The column for SECONDARY grouping/comparison (e.g., month, year for time comparison)
-4. "display_hint": How to display the TABLE (separate from chart). One of:
-   - 'hierarchical': data has parent→child structure (e.g., business_unit > service_group > product, or division > department > section). Use when multiple non-time dimension columns form a hierarchy.
-   - 'crosstab': data is best compared across dimensions (e.g., group × month). Use when time or comparison axis exists.
-   - 'flat': simple flat list of rows — use for single-dimension or already-aggregated data.
-5. "hierarchy_columns": (REQUIRED if display_hint='hierarchical') Array of column names ordered from HIGHEST to LOWEST level (parent first). Must be actual column names in the data.
-   Example: ["business_unit", "service_group", "product_name"]
-   Example: ["division", "department", "section"]
+4. "display_hint": How to display the TABLE (separate from chart). Choose ONE:
+   - 'hierarchical': Use when data has MULTIPLE categorical (non-time) columns where one is the parent of another.
+     Rule: If the columns represent a HIERARCHY (e.g., BUSINESS_GROUP > SERVICE_GROUP, or division > department > section),
+     always use 'hierarchical' — even if there are only 2 levels.
+     This is the correct choice when the question asks to show data grouped by a higher-level category.
+   - 'crosstab': Use ONLY when comparing values ACROSS a time dimension (month, quarter, year) OR when
+     the question explicitly asks to compare one category against another (e.g., "compare groups by section").
+     Do NOT use 'crosstab' for parent-child hierarchy data.
+   - 'flat': Use for single-dimension data or when already aggregated to one level.
+5. "hierarchy_columns": (REQUIRED if display_hint='hierarchical') Array of actual column names ordered from HIGHEST (parent) to LOWEST (child) level.
+   Example: BUSINESS_GROUP is parent, SERVICE_GROUP is child → ["BUSINESS_GROUP", "SERVICE_GROUP"]
+   Example: division > department > section → ["division", "department", "section"]
 
 IMPORTANT for time-based comparisons:
 - **CRITICAL**: If a Time column exists (Month, Year, Date), YOU MUST USE IT AS 'category_column' (X-axis).
