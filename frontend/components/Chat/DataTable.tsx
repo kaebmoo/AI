@@ -688,6 +688,25 @@ export const DataTable = ({ data, displayHint, hierarchyColumns }: DataTableProp
             const indent = levelIdx * 12;
             const subtotals = sumRows(node.rows);
 
+            // Sort child groups by their subtotal if a sort is active
+            const sortedChildEntries = (entries: [string, TreeNode][]) => {
+                if (!sortConfig.key || !valueCols.includes(sortConfig.key)) {
+                    return entries.sort(([a], [b]) => a.localeCompare(b, 'th'));
+                }
+                return entries.sort(([, nodeA], [, nodeB]) => {
+                    const totA = sumRows(nodeA.rows)[sortConfig.key!] ?? 0;
+                    const totB = sumRows(nodeB.rows)[sortConfig.key!] ?? 0;
+                    return sortConfig.direction === 'asc' ? totA - totB : totB - totA;
+                });
+            };
+
+            // Leaf rows: only show when there are extra columns beyond hierarchy+measure
+            // If extraCols is empty, the subtotal in the header already shows all info
+            const hasExtraInfo = extraCols.length > 0;
+            // Also show leaf rows when a leaf group has multiple raw rows that differ (detail rows)
+            const leafHasMultipleDistinctRows = isLeaf && node.rows.length > 1;
+            const showLeafRows = isLeaf && (hasExtraInfo || leafHasMultipleDistinctRows);
+
             return (
                 <View key={`${levelIdx}-${groupName}`}>
                     {/* Group header row */}
@@ -695,24 +714,24 @@ export const DataTable = ({ data, displayHint, hierarchyColumns }: DataTableProp
                         <Text style={{ flex: 1, fontSize: levelIdx === 0 ? 13 : 12, fontWeight: '700', color: textColor }} numberOfLines={2}>
                             {levelIdx === 0 ? '▸ ' : '  ▸ '}{groupName}
                         </Text>
-                        {/* Subtotals per measure column at header */}
+                        {/* Subtotals per value column */}
                         {valueCols.map(col => (
                             <Text key={col} style={{ width: getColumnWidth(col), fontSize: 12, fontWeight: '600', color: textColor, textAlign: 'right' }}>
                                 {subtotals[col] !== undefined ? subtotals[col].toLocaleString('th-TH', { maximumFractionDigits: 2 }) : ''}
                             </Text>
                         ))}
                     </View>
-                    {/* Children: either sub-groups or leaf rows */}
-                    {isLeaf
+                    {/* Children: either sub-groups or leaf rows (only when there are extra columns to show) */}
+                    {showLeafRows
                         ? sortData(node.rows).map((row, rIdx) => (
                             <View key={rIdx} style={{ flexDirection: 'row', paddingLeft: 16 + indent + 12, paddingRight: 12, paddingVertical: 6, backgroundColor: rIdx % 2 === 0 ? (isDark ? '#111827' : '#FFFFFF') : (isDark ? 'rgba(55,65,81,0.3)' : '#F9FAFB'), borderBottomWidth: 1, borderBottomColor: isDark ? '#1F2937' : '#F3F4F6' }}>
                                 {/* Extra non-hierarchy, non-measure cols */}
-                                {extraCols.length > 0 ? extraCols.map(col => (
+                                {extraCols.map(col => (
                                     <Text key={col} style={{ width: getColumnWidth(col, true), fontSize: 12, color: isDark ? '#D1D5DB' : '#374151' }} numberOfLines={2}>
                                         {renderCell(col, row[col])}
                                     </Text>
-                                )) : null}
-                                {/* Value cols */}
+                                ))}
+                                {/* Value cols (only if extra cols exist to differentiate rows) */}
                                 {valueCols.map(col => (
                                     <Text key={col} style={{ width: getColumnWidth(col), fontSize: 12, color: isDark ? '#E5E7EB' : '#1F2937', textAlign: 'right', fontVariant: ['tabular-nums'] }}>
                                         {renderCell(col, row[col])}
@@ -720,12 +739,25 @@ export const DataTable = ({ data, displayHint, hierarchyColumns }: DataTableProp
                                 ))}
                             </View>
                         ))
-                        : Object.entries(node.children)
-                            .sort(([a], [b]) => a.localeCompare(b, 'th'))
-                            .map(([childName, childNode]) => renderNode(childNode, levelIdx + 1, childName))
+                        : !isLeaf
+                            ? sortedChildEntries(Object.entries(node.children))
+                                .map(([childName, childNode]) => renderNode(childNode, levelIdx + 1, childName))
+                            : null
                     }
                 </View>
             );
+        };
+
+        // Sort top-level groups by subtotal if sort is active on a value column
+        const sortTopLevel = (entries: [string, TreeNode][]) => {
+            if (!sortConfig.key || !valueCols.includes(sortConfig.key)) {
+                return entries.sort(([a], [b]) => a.localeCompare(b, 'th'));
+            }
+            return entries.sort(([, nodeA], [, nodeB]) => {
+                const totA = sumRows(nodeA.rows)[sortConfig.key!] ?? 0;
+                const totB = sumRows(nodeB.rows)[sortConfig.key!] ?? 0;
+                return sortConfig.direction === 'asc' ? totA - totB : totB - totA;
+            });
         };
 
         // Column header
@@ -743,9 +775,8 @@ export const DataTable = ({ data, displayHint, hierarchyColumns }: DataTableProp
                         </TouchableOpacity>
                     ))}
                 </View>
-                {/* Tree rows */}
-                {Object.entries(tree)
-                    .sort(([a], [b]) => a.localeCompare(b, 'th'))
+                {/* Tree rows — sorted by subtotal when sort is active */}
+                {sortTopLevel(Object.entries(tree))
                     .map(([groupName, node]) => renderNode(node, 0, groupName))}
             </View>
         );
