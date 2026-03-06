@@ -488,14 +488,35 @@ export const DataTable = ({ data, displayHint, hierarchyColumns }: DataTableProp
         const rowCandidates = categoryStats.filter(c => c.key !== colCandidate?.key);
 
         if (colCandidate && rowCandidates.length > 0) {
-            // Check if data has the expected pattern (row × col combinations)
-            // Rough check: total rows vs (unique rows * unique cols)
-            // But with multi-dimensions, unique rows = unique combinations of all row keys
-            const isSuitableForCrosstab = colCandidate.uniqueCount <= 20; // Relaxed check for multi-dim
+            const allRowKeys = rowCandidates.map(r => r.key);
+            const primaryRowKey = allRowKeys[0];
 
-            if (isSuitableForCrosstab) {
+            // ─── KEY CHECK: Distinguish 1:N hierarchy from true matrix ───────
+            // In a hierarchy: each ROW value maps to exactly 1 COL value
+            //   e.g. SERVICE_GROUP → exactly 1 BUSINESS_GROUP (hierarchy → show as rows)
+            // In a true matrix crosstab: each ROW value can appear across MULTIPLE COL values
+            //   e.g. department_name appears for multiple months (time comparison)
+            const rowToColMap: Record<string, Set<string>> = {};
+            data.forEach(row => {
+                const rVal = String(row[primaryRowKey] || '');
+                const cVal = String(row[colCandidate.key] || '');
+                if (!rowToColMap[rVal]) rowToColMap[rVal] = new Set();
+                rowToColMap[rVal].add(cVal);
+            });
+            const isOneToNHierarchy = Object.values(rowToColMap).every(s => s.size === 1);
+
+            // Use crosstab ONLY if:
+            // (a) LLM explicitly requested crosstab, OR
+            // (b) Data is NOT a 1:N hierarchy (true matrix / time comparison)
+            const useCrosstab = (displayHint === 'crosstab') ||
+                (!isOneToNHierarchy && colCandidate.uniqueCount <= 20);
+
+            if (isOneToNHierarchy && displayHint !== 'crosstab') {
+                console.log(`[DataTable] Detected 1:N hierarchy (${primaryRowKey} → ${colCandidate.key}) → using hierarchical mode instead of crosstab`);
+            }
+
+            if (useCrosstab) {
                 isCrosstab = true;
-                const allRowKeys = rowCandidates.map(r => r.key);
                 rowKey = allRowKeys.join(' / '); // Display Label
                 colKey = colCandidate.key;
 
