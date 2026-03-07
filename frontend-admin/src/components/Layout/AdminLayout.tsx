@@ -86,6 +86,11 @@ const AppLayout: React.FC = () => {
                     icon: <ApartmentOutlined />,
                     label: 'Dimension Families',
                 },
+                {
+                    key: '/hierarchy',
+                    icon: <ApartmentOutlined />,
+                    label: 'Master Data',
+                },
             ]
         },
         {

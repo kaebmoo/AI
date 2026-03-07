@@ -94,6 +94,10 @@ class Settings(BaseSettings):
     # Value Lookup (keyword index search)
     VALUE_LOOKUP_ENABLED: bool = False
 
+    # Conversation History
+    MAX_HISTORY_MESSAGES: int = 10  # Max conversation turns to keep as context
+    DEDUP_TTL_SECONDS: float = 5.0  # Ignore duplicate questions within N seconds
+
     # Vanna AI (RAG) Settings
     VANNA_CHROMA_PATH: str = "./chroma_db"
     VANNA_DISTANCE_THRESHOLD: float = 1.8

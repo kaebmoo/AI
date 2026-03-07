@@ -255,13 +255,29 @@ Example for comparison (grouped bar):
         return parsed_result
 
     @ai_retry
-    async def generate_content(self, prompt: str, system_prompt: Optional[str] = None) -> str:
-        """Generate content using Gemini API"""
+    async def generate_content(self, prompt: str, system_prompt: Optional[str] = None, history: Optional[List[Dict]] = None) -> str:
+        """Generate content using Gemini API with optional native multi-turn history."""
         logger.info(f"GeminiProvider.generate_content called")
 
         def call_api():
             try:
                 from google.genai import types
+
+                # Build native multi-turn contents
+                contents = []
+                if history:
+                    for msg in history:
+                        role = "model" if msg.get("role") == "assistant" else "user"
+                        content = msg.get("content", "")
+                        if content:
+                            contents.append(types.Content(
+                                role=role,
+                                parts=[types.Part(text=content)]
+                            ))
+                contents.append(types.Content(
+                    role="user",
+                    parts=[types.Part(text=prompt)]
+                ))
 
                 config = types.GenerateContentConfig(
                     system_instruction=system_prompt
@@ -269,7 +285,7 @@ Example for comparison (grouped bar):
 
                 result = self.client.models.generate_content(
                     model=self.model,
-                    contents=prompt,
+                    contents=contents,
                     config=config
                 )
 

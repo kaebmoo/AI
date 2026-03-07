@@ -155,13 +155,19 @@ Structure:
 
         return parsed_result
 
-    async def generate_content(self, prompt: str, system_prompt: Optional[str] = None) -> str:
-        """Generate content using Matcha/OpenAI-compatible API"""
+    async def generate_content(self, prompt: str, system_prompt: Optional[str] = None, history: Optional[List[Dict]] = None) -> str:
+        """Generate content using Matcha/OpenAI-compatible API with optional native multi-turn history."""
         logger.info(f"MatchaProvider.generate_content called")
 
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
+        if history:
+            for msg in history:
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+                if role in ("user", "assistant") and content:
+                    messages.append({"role": role, "content": content})
         messages.append({"role": "user", "content": prompt})
 
         headers = {

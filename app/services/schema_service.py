@@ -1090,7 +1090,7 @@ DATE เก็บเป็น Unix Timestamp (milliseconds) ต้องแป�
         return context
 
     def build_system_prompt(
-        self, 
+        self,
         ai_provider: str = "claude",
         include_samples: bool = True,
         language: str = "thai",
@@ -1098,9 +1098,17 @@ DATE เก็บเป็น Unix Timestamp (milliseconds) ต้องแป�
         rag_enabled: bool = False
     ) -> str:
         """
-        Build complete system prompt for AI
+        Build complete system prompt for AI.
+        Results are cached in-memory keyed by (provider, context, language, rag_enabled).
+        Cache is invalidated on refresh_cache() or after 6 hours.
         """
-        
+        import time as _time
+        cache_key = f"prompt|{ai_provider}|{context_name}|{language}|{include_samples}|{rag_enabled}"
+        cached = self._cache.get(cache_key)
+        if cached and (_time.time() - cached.get("_ts", 0)) < 21600:  # 6 hours
+            logger.debug(f"System prompt cache HIT: {cache_key}")
+            return cached["value"]
+
         # 1. Get Context Info
         context_info = self.get_context_info(context_name)
         if not context_info:
@@ -1126,7 +1134,11 @@ DATE เก็บเป็น Unix Timestamp (milliseconds) ต้องแป�
             lite_mode=rag_enabled
         )
         
-        return f"{instruction}\n\n{context_text}"
+        import time as _time
+        result = f"{instruction}\n\n{context_text}"
+        self._cache[cache_key] = {"value": result, "_ts": _time.time()}
+        logger.debug(f"System prompt cached: {cache_key} ({len(result)} chars)")
+        return result
     
     def get_default_instruction(self, ai_provider: str = "claude", language: str = "thai", context_name: str = "revenue") -> str:
         """Get default system instruction without schema context"""

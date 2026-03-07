@@ -1566,3 +1566,256 @@ def delete_model(
     return None
 
 
+# ============================================================
+# Hierarchy Management Endpoints
+# ============================================================
+
+from fastapi import UploadFile, File
+from app.services.hierarchy_service import hierarchy_service
+from app.schemas.hierarchy_schemas import (
+    HierarchyLevelCreate, HierarchyLevelUpdate, HierarchyLevelResponse,
+    HierarchyValueCreate, HierarchyValueUpdate, HierarchyValueResponse,
+    HierarchyContextSummary, HierarchySearchResult,
+    HierarchyDiff, HierarchyExtractResult, UnmatchedKeyword,
+)
+
+
+# --- Public (used by AI pipeline) ---
+
+@router.get("/hierarchy/{context_name}/search", response_model=List[HierarchySearchResult])
+def search_hierarchy(
+    context_name: str,
+    q: str = Query(..., min_length=1, description="Search keyword"),
+    limit: int = Query(10, le=50),
+):
+    """Search hierarchy values by alias match. Public — used by AI pipeline."""
+    return hierarchy_service.search_aliases(context_name, q, limit)
+
+
+# --- Admin: Context & Level management ---
+
+@router.get("/hierarchy", response_model=List[HierarchyContextSummary])
+def list_hierarchy_contexts(
+    current_user: User = Depends(deps.require_admin),
+):
+    """List all hierarchy contexts with summary."""
+    return hierarchy_service.list_contexts()
+
+
+@router.get("/hierarchy/{context_name}/levels", response_model=List[HierarchyLevelResponse])
+def get_hierarchy_levels(
+    context_name: str,
+    current_user: User = Depends(deps.require_admin),
+):
+    """Get hierarchy levels for a context."""
+    return hierarchy_service.get_levels(context_name)
+
+
+@router.post("/hierarchy/{context_name}/levels")
+def create_hierarchy_level(
+    context_name: str,
+    body: HierarchyLevelCreate,
+    current_user: User = Depends(deps.require_admin),
+):
+    """Create or update a hierarchy level."""
+    return hierarchy_service.upsert_level(context_name, body.level, body.model_dump())
+
+
+@router.put("/hierarchy/{context_name}/levels/{level}")
+def update_hierarchy_level(
+    context_name: str,
+    level: int,
+    body: HierarchyLevelUpdate,
+    current_user: User = Depends(deps.require_admin),
+):
+    """Update a hierarchy level."""
+    data = {k: v for k, v in body.model_dump().items() if v is not None}
+    return hierarchy_service.upsert_level(context_name, level, data)
+
+
+@router.delete("/hierarchy/{context_name}/levels/{level}", status_code=204)
+def delete_hierarchy_level(
+    context_name: str,
+    level: int,
+    current_user: User = Depends(deps.require_admin),
+):
+    """Soft-delete a hierarchy level."""
+    hierarchy_service.delete_level(context_name, level)
+    return None
+
+
+# --- Admin: Value management ---
+
+@router.get("/hierarchy/{context_name}/values")
+def get_hierarchy_values(
+    context_name: str,
+    level: Optional[int] = None,
+    parent_value: Optional[str] = None,
+    search: Optional[str] = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=1, le=500),
+    current_user: User = Depends(deps.require_admin),
+):
+    """Get hierarchy values with filtering and pagination."""
+    return hierarchy_service.get_values(context_name, level, parent_value, search, page, page_size)
+
+
+@router.post("/hierarchy/{context_name}/values")
+def create_hierarchy_value(
+    context_name: str,
+    body: HierarchyValueCreate,
+    current_user: User = Depends(deps.require_admin),
+):
+    """Create a hierarchy value (source='manual')."""
+    return hierarchy_service.create_value(context_name, body.model_dump())
+
+
+@router.put("/hierarchy/values/{value_id}")
+def update_hierarchy_value(
+    value_id: int,
+    body: HierarchyValueUpdate,
+    current_user: User = Depends(deps.require_admin),
+):
+    """Update a hierarchy value."""
+    data = {k: v for k, v in body.model_dump().items() if v is not None}
+    return hierarchy_service.update_value(value_id, data)
+
+
+@router.delete("/hierarchy/values/{value_id}", status_code=204)
+def delete_hierarchy_value(
+    value_id: int,
+    current_user: User = Depends(deps.require_admin),
+):
+    """Soft-delete a hierarchy value."""
+    hierarchy_service.delete_value(value_id)
+    return None
+
+
+# --- Admin: Extract & Sync ---
+
+@router.post("/hierarchy/extract", response_model=List[HierarchyExtractResult])
+def extract_hierarchy(
+    context_name: Optional[str] = None,
+    current_user: User = Depends(deps.require_admin),
+):
+    """Trigger auto-extract hierarchy from data."""
+    return hierarchy_service.auto_extract(context_name)
+
+
+@router.post("/hierarchy/bootstrap")
+def bootstrap_hierarchy(
+    context_name: str = Query(..., description="New context name"),
+    view_name: str = Query(..., description="View/table to extract from"),
+    current_user: User = Depends(deps.require_admin),
+):
+    """
+    Bootstrap a new hierarchy context from scratch.
+
+    Auto-detects hierarchy columns from the view, creates levels, and extracts values.
+    No pre-existing config needed — solves the chicken-and-egg problem.
+    """
+    result = hierarchy_service.bootstrap_from_view(context_name, view_name)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    hierarchy_service._invalidate_cache()
+    return result
+
+
+@router.get("/hierarchy/views")
+def list_available_views(
+    current_user: User = Depends(deps.require_admin),
+):
+    """List available views/tables that can be used for hierarchy extraction."""
+    return hierarchy_service.get_available_views()
+
+
+@router.post("/hierarchy/{context_name}/import-csv")
+async def import_csv_hierarchy(
+    context_name: str,
+    file: UploadFile = File(...),
+    level: int = Query(..., description="Target hierarchy level"),
+    value_column: str = Query(..., description="CSV column containing the value"),
+    parent_column: Optional[str] = Query(None, description="CSV column containing the parent value"),
+    alias_columns: Optional[str] = Query(None, description="Comma-separated CSV columns to use as aliases"),
+    current_user: User = Depends(deps.require_admin),
+):
+    """
+    Import hierarchy values from an uploaded CSV file.
+
+    Flexible: admin specifies which CSV columns map to value, parent, and aliases.
+    Works with any CSV format — no hardcoded column expectations.
+    """
+    import csv, io
+    content = await file.read()
+    text = content.decode("utf-8-sig")
+    reader = csv.DictReader(io.StringIO(text))
+    rows = list(reader)
+
+    if not rows:
+        raise HTTPException(400, "CSV file is empty")
+
+    # Validate columns exist
+    csv_columns = list(rows[0].keys())
+    if value_column not in csv_columns:
+        raise HTTPException(400, f"Column '{value_column}' not found. Available: {csv_columns}")
+    if parent_column and parent_column not in csv_columns:
+        raise HTTPException(400, f"Column '{parent_column}' not found. Available: {csv_columns}")
+
+    alias_cols = [c.strip() for c in alias_columns.split(",")] if alias_columns else []
+    for ac in alias_cols:
+        if ac not in csv_columns:
+            raise HTTPException(400, f"Alias column '{ac}' not found. Available: {csv_columns}")
+
+    imported = 0
+    for row in rows:
+        value = (row.get(value_column) or "").strip()
+        if not value:
+            continue
+        parent = (row.get(parent_column) or "").strip() if parent_column else None
+
+        aliases = [value.lower()]
+        for ac in alias_cols:
+            alias_val = (row.get(ac) or "").strip()
+            if alias_val and alias_val.lower() not in aliases:
+                aliases.append(alias_val.lower())
+
+        hierarchy_service.create_value(context_name, {
+            "level": level, "value": value,
+            "parent_value": parent or None,
+            "aliases": sorted(aliases),
+        })
+        imported += 1
+
+    return {"success": True, "imported": imported, "filename": file.filename}
+
+
+@router.get("/hierarchy/{context_name}/diff", response_model=HierarchyDiff)
+def get_hierarchy_diff(
+    context_name: str,
+    current_user: User = Depends(deps.require_admin),
+):
+    """Compare master hierarchy vs actual data — show new/missing values."""
+    return hierarchy_service.detect_changes(context_name)
+
+
+# --- Admin: Unmatched keywords ---
+
+@router.get("/hierarchy/unmatched", response_model=List[UnmatchedKeyword])
+def get_unmatched_keywords(
+    context_name: Optional[str] = None,
+    limit: int = Query(50, le=200),
+    current_user: User = Depends(deps.require_admin),
+):
+    """Get unmatched keywords that AI used LIKE for but had no alias match."""
+    return hierarchy_service.get_unmatched_keywords(context_name, limit)
+
+
+@router.post("/hierarchy/unmatched/{keyword}/resolve")
+def resolve_unmatched_keyword(
+    keyword: str,
+    context_name: str = Query(...),
+    current_user: User = Depends(deps.require_admin),
+):
+    """Mark an unmatched keyword as resolved."""
+    hierarchy_service.resolve_unmatched_keyword(keyword, context_name)
+    return {"success": True}

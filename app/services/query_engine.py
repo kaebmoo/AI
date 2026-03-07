@@ -9,6 +9,7 @@ Usage:
     result = await engine.query("รายได้เดือนนี้เท่าไหร่")
 """
 
+import hashlib
 import time
 import uuid
 import logging
@@ -68,6 +69,60 @@ def detect_context_from_question(question: str, schema_service: SchemaService = 
             pass
 
     return "revenue"
+
+
+# ---------------------------------------------------------------------------
+# In-memory query result cache (TTL-based)
+# ---------------------------------------------------------------------------
+_query_cache: Dict[str, Dict[str, Any]] = {}
+_QUERY_CACHE_TTL = 300  # 5 minutes
+_QUERY_CACHE_MAX = 200  # max entries before eviction
+
+
+def _cache_key(question: str, provider: str, context: str) -> str:
+    """Create a deterministic cache key from question + provider + context."""
+    raw = f"{question.strip().lower()}|{provider}|{context}"
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def _cache_get(key: str) -> Optional[Any]:
+    """Get from cache if not expired."""
+    entry = _query_cache.get(key)
+    if entry and (time.time() - entry["ts"]) < _QUERY_CACHE_TTL:
+        return entry["result"]
+    if entry:
+        del _query_cache[key]
+    return None
+
+
+def _cache_set(key: str, result: Any) -> None:
+    """Store result in cache. Evict oldest if over limit."""
+    if len(_query_cache) >= _QUERY_CACHE_MAX:
+        oldest_key = min(_query_cache, key=lambda k: _query_cache[k]["ts"])
+        del _query_cache[oldest_key]
+    _query_cache[key] = {"result": result, "ts": time.time()}
+
+
+# ---------------------------------------------------------------------------
+# Request dedup — prevent identical questions within a short window
+# ---------------------------------------------------------------------------
+_dedup_store: Dict[str, float] = {}
+
+
+def _dedup_check(user_question: str, provider: str) -> bool:
+    """Return True if this is a duplicate request within DEDUP_TTL_SECONDS."""
+    from app.config import settings as _settings
+    ttl = getattr(_settings, "DEDUP_TTL_SECONDS", 5.0)
+    key = hashlib.md5(f"{user_question.strip().lower()}|{provider}".encode()).hexdigest()
+    now = time.time()
+    # Prune expired entries (lazy cleanup)
+    expired = [k for k, ts in _dedup_store.items() if now - ts > ttl]
+    for k in expired:
+        del _dedup_store[k]
+    if key in _dedup_store:
+        return True
+    _dedup_store[key] = now
+    return False
 
 
 @dataclass
@@ -140,6 +195,30 @@ class QueryEngine:
         # Load config once
         ai_config = self.admin_config.get_ai_config() if self.admin_config else {}
         feature_flags = self.admin_config.get_feature_flags() if self.admin_config else {}
+
+        # --- Query Result Cache: check for identical recent query ---
+        selected_provider_name = provider or ai_config.get("default_provider", settings.AI_PROVIDER)
+        context_name_for_cache = context or "auto"
+        qcache_key = _cache_key(question, selected_provider_name, context_name_for_cache)
+        cached = _cache_get(qcache_key)
+        if cached is not None:
+            logger.info(f"QueryEngine: Cache HIT for question (key={qcache_key[:12]}…)")
+            cached.execution_time_ms = (time.time() - start_time) * 1000
+            return cached
+
+        # --- Request dedup: block identical requests within N seconds ---
+        if _dedup_check(question, selected_provider_name):
+            logger.warning(f"QueryEngine: Dedup — duplicate request blocked: {question[:50]}…")
+            return QueryEngineResult(
+                query_result=QueryResult(
+                    question=question, sql_query="", data=[],
+                    explanation="คำถามซ้ำ กรุณารอสักครู่แล้วลองใหม่",
+                    tokens_used=0, provider=selected_provider_name,
+                    error="duplicate_request"
+                ),
+                execution_time_ms=(time.time() - start_time) * 1000,
+                provider_used=selected_provider_name,
+            )
 
         # 1. Resolve provider
         selected_provider = provider or ai_config.get("default_provider", settings.AI_PROVIDER)
@@ -229,13 +308,20 @@ class QueryEngine:
         execution_time = (time.time() - start_time) * 1000
 
         # 6. Return combined result
-        return QueryEngineResult(
+        engine_result = QueryEngineResult(
             query_result=result,
             context_name=context_name,
             warnings=warnings,
             execution_time_ms=execution_time,
             provider_used=selected_provider,
         )
+
+        # --- Query Result Cache: store successful result ---
+        if result.data and not result.error:
+            _cache_set(qcache_key, engine_result)
+            logger.info(f"QueryEngine: Cached result (key={qcache_key[:12]}…, rows={len(result.data)})")
+
+        return engine_result
 
     def _resolve_context(
         self,

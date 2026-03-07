@@ -48,9 +48,57 @@ logger = logging.getLogger(__name__)
 # ============================================================
 # Column Hierarchies — ป้องกัน OR ข้ามระดับ
 # ============================================================
-# Hierarchy: level 0 (broadest) → level N (most specific)
-# AI must filter on ONLY ONE level; cross-level OR inflates results.
-COLUMN_HIERARCHIES: Dict[str, List[Dict]] = {
+# Loaded from master_hierarchy table (DB-driven).
+# Fallback to hardcoded defaults if DB not available.
+# Admin can edit via Admin UI or import_master_data.py.
+
+_HIERARCHY_CACHE: Dict[str, List[Dict]] = {}
+_HIERARCHY_CACHE_TS: float = 0.0
+_HIERARCHY_CACHE_TTL: float = 3600.0  # 1 hour
+
+
+def _load_hierarchies_from_db() -> Dict[str, List[Dict]]:
+    """Load hierarchy definitions from master_hierarchy table."""
+    import time as _time
+    global _HIERARCHY_CACHE, _HIERARCHY_CACHE_TS
+
+    now = _time.time()
+    if _HIERARCHY_CACHE and (now - _HIERARCHY_CACHE_TS) < _HIERARCHY_CACHE_TTL:
+        return _HIERARCHY_CACHE
+
+    try:
+        import sqlite3
+        db_path = settings.DATABASE_URL.replace("sqlite:///", "").replace("sqlite://", "")
+        conn = sqlite3.connect(db_path)
+        rows = conn.execute(
+            "SELECT context_name, level, level_label_th, level_label_en, level_columns, detection_keywords "
+            "FROM master_hierarchy WHERE is_active = 1 ORDER BY context_name, level"
+        ).fetchall()
+        conn.close()
+
+        result: Dict[str, List[Dict]] = {}
+        for ctx, level, label_th, label_en, columns_json, keywords_json in rows:
+            result.setdefault(ctx, []).append({
+                "level": level,
+                "columns": json.loads(columns_json),
+                "label_th": label_th,
+                "label_en": label_en,
+                "detection_keywords": json.loads(keywords_json),
+            })
+
+        if result:
+            _HIERARCHY_CACHE = result
+            _HIERARCHY_CACHE_TS = now
+            logger.info(f"Loaded hierarchies from DB: {list(result.keys())}")
+            return result
+    except Exception as e:
+        logger.warning(f"Could not load hierarchies from DB: {e}, using fallback")
+
+    return _HARDCODED_HIERARCHIES
+
+
+# Fallback if master_hierarchy table doesn't exist yet
+_HARDCODED_HIERARCHIES: Dict[str, List[Dict]] = {
     "pl_costtype": [
         {"level": 0, "columns": ["business_unit"],
          "label_th": "กลุ่มธุรกิจ", "label_en": "Business Unit",
@@ -63,17 +111,26 @@ COLUMN_HIERARCHIES: Dict[str, List[Dict]] = {
          "detection_keywords": ["ผลิตภัณฑ์", "product", "สินค้า"]},
     ],
     "revenue": [
-        {"level": 0, "columns": ["BUSINESS"],
-         "label_th": "กลุ่มธุรกิจ", "label_en": "Business",
-         "detection_keywords": ["กลุ่มธุรกิจ", "ธุรกิจ", "business"]},
+        {"level": 0, "columns": ["BUSINESS_GROUP", "BUSINESS"],
+         "label_th": "กลุ่มธุรกิจ", "label_en": "Business Group",
+         "detection_keywords": ["กลุ่มธุรกิจ", "ธุรกิจ", "business group", "business"]},
         {"level": 1, "columns": ["SERVICE_GROUP"],
          "label_th": "กลุ่มบริการ", "label_en": "Service Group",
-         "detection_keywords": ["กลุ่มบริการ", "service group"]},
+         "detection_keywords": ["กลุ่มบริการ", "service group", "กลุ่ม"]},
         {"level": 2, "columns": ["PRODUCT_NAME", "PRODUCT"],
-         "label_th": "ผลิตภัณฑ์", "label_en": "Product",
-         "detection_keywords": ["ผลิตภัณฑ์", "product", "สินค้า"]},
+         "label_th": "ผลิตภัณฑ์/บริการ", "label_en": "Product/Service",
+         "detection_keywords": ["ผลิตภัณฑ์", "product", "สินค้า", "บริการ", "แต่ละบริการ", "รายบริการ", "service"]},
     ],
 }
+
+
+def get_column_hierarchies() -> Dict[str, List[Dict]]:
+    """Get hierarchy definitions — DB-first with hardcoded fallback."""
+    return _load_hierarchies_from_db()
+
+
+# Backward compat alias
+COLUMN_HIERARCHIES = _HARDCODED_HIERARCHIES  # static reference for imports
 
 
 class AIService:
@@ -413,34 +470,10 @@ class AIService:
                     tokens_used=0, provider=self.provider_name, error=str(e)
                 )
 
-            # Build conversation history context
-            history_context = ""
-            if history and len(history) > 0:
-                history_lines = []
-                for i, msg in enumerate(history[-6:]):
-                    role = msg.get("role", "")
-                    content = msg.get("content", "")
-                    if role == "user":
-                        history_lines.append(f"คำถามก่อนหน้า: {content}")
-                    elif role == "assistant":
-                        sql_match = re.search(r'```sql\s*(.*?)\s*```', content, re.DOTALL | re.IGNORECASE)
-                        if sql_match:
-                            sql_preview = sql_match.group(1).strip()
-                            history_lines.append(f"SQL ที่ใช้:\n{sql_preview[:500]}")
-                        else:
-                            old_format = re.search(r'\(Context SQL:\s*(.*?)\)', content, re.DOTALL)
-                            if old_format:
-                                history_lines.append(f"SQL ที่ใช้:\n{old_format.group(1).strip()[:500]}")
-                            else:
-                                history_lines.append(f"คำตอบ: {content[:150]}...")
-
-                if history_lines:
-                    history_context = "\n\n**บริบทจากการสนทนาก่อนหน้า:**\n" + "\n".join(history_lines)
-                    history_context += "\n\n**กฎจัดการ Filter (ดูจาก SQL ก่อนหน้า):**\n"
-                    history_context += "- ถ้า User ระบุค่าใหม่สำหรับ Column เดิม → **REPLACE** filter นั้น\n"
-                    history_context += "- ถ้า User เพิ่มเงื่อนไข Column ใหม่ → **MERGE** (AND) เข้าไป\n"
-                    history_context += "- ถ้า User พูดว่า 'ทั้งหมด/ภาพรวม' → **RESET** filter ทั้งหมด"
-                    logger.info(f"Hybrid Mode: Using conversation history with {len(history_lines)} context items")
+            # Native history: passed directly to generate_content() as multi-turn messages
+            # Filter management rules are already in system prompt (schema_service)
+            if history:
+                logger.info(f"Hybrid Mode: Using native conversation history ({len(history)} messages)")
 
             if attempt == 0:
                 # Get RAG Context
@@ -460,7 +493,7 @@ class AIService:
                 try:
                     value_matches = self._lookup_values_from_question(question, context_name, context_table)
                     if value_matches:
-                        hierarchy = COLUMN_HIERARCHIES.get(context_name)
+                        hierarchy = get_column_hierarchies().get(context_name)
                         detected_level = self._detect_hierarchy_level(question, context_name)
                         if hierarchy and detected_level:
                             logger.info(f"Hierarchy: level {detected_level['level']} ({detected_level['label_en']})")
@@ -482,7 +515,7 @@ class AIService:
                         context_name=context_name,
                         context_table=context_table,
                         context_thai=context_thai,
-                        history_context=history_context,
+                        history_context="",
                         rag_context=rag_context
                     )
 
@@ -494,7 +527,7 @@ class AIService:
                             context_table=context_table,
                             context_thai=context_thai,
                             value_matches=value_matches if value_lookup_text else None,
-                            hierarchy=COLUMN_HIERARCHIES.get(context_name),
+                            hierarchy=get_column_hierarchies().get(context_name),
                             detected_level=detected_level
                         )
                     else:
@@ -505,7 +538,7 @@ class AIService:
                 if not two_pass_enabled or attempt > 0:
                     user_prompt = f"""คำถาม: {question}
 
-**บริบท:** ข้อมูล{context_thai} (ใช้ตาราง {context_table}){history_context}
+**บริบท:** ข้อมูล{context_thai} (ใช้ตาราง {context_table})
 
 {rag_context}
 
@@ -533,7 +566,7 @@ class AIService:
                 last_error = retry_history[-1] if retry_history else {}
                 user_prompt = f"""คำถาม: {question}
 
-**บริบท:** ข้อมูล{context_thai} (ใช้ตาราง {context_table}){history_context}
+**บริบท:** ข้อมูล{context_thai} (ใช้ตาราง {context_table})
 
 SQL ก่อนหน้ามีปัญหา:
 ```sql
@@ -561,7 +594,9 @@ Error: {last_error.get('error', '')}
 
                 try:
                     t0 = time.perf_counter()
-                    response_text = await self.provider.generate_content(user_prompt, system_prompt)
+                    # Pass native multi-turn history on first attempt only
+                    native_history = history if (attempt == 0 and history) else None
+                    response_text = await self.provider.generate_content(user_prompt, system_prompt, history=native_history)
                     t_gen = time.perf_counter() - t0
                     logger.info(f"Hybrid Mode: SQL Generation took {t_gen:.4f}s")
                 except Exception as gen_error:
@@ -582,6 +617,18 @@ Error: {last_error.get('error', '')}
                     continue
 
                 logger.info(f"Extracted SQL: {sql_query[:100]}...")
+
+                # Phase 4: Log unmatched LIKE keywords for admin review
+                try:
+                    like_patterns = re.findall(r"LIKE\s+'%(.+?)%'", sql_query, re.IGNORECASE)
+                    if like_patterns:
+                        from app.services.hierarchy_service import hierarchy_service
+                        for pattern in like_patterns:
+                            existing = hierarchy_service.search_aliases(context_name, pattern, limit=1)
+                            if not existing:
+                                hierarchy_service.log_unmatched_keyword(pattern, context_name, question)
+                except Exception:
+                    pass  # non-critical
 
                 # Step 3: Validate SQL using MCP
                 if on_status:
@@ -662,13 +709,22 @@ Error: {last_error.get('error', '')}
                     logger.warning(f"Could not load dimension families: {df_err}")
 
                 # Enhance explanation
+                # Build enriched question with conversation context for better explanation
+                enriched_question = question
+                if history:
+                    # Include last user question for context in follow-up queries
+                    prev_questions = [m["content"] for m in history if m.get("role") == "user"]
+                    if prev_questions:
+                        last_q = prev_questions[-1][:200]
+                        enriched_question = f"(บริบทก่อนหน้า: {last_q})\nคำถามปัจจุบัน: {question}"
+
                 if not data:
                     explanation = f"ไม่พบข้อมูลที่ตรงกับเงื่อนไข\n\nSQL ที่ใช้:\n```sql\n{sql_query}\n```\n\nอาจเป็นเพราะ:\n- ไม่มีข้อมูลที่ตรงกับคำค้นหา\n- ชื่อคอลัมน์หรือค่าที่ใช้ค้นหาอาจไม่ถูกต้อง"
                 elif len(data) > 0:
                     try:
                         t0 = time.perf_counter()
                         simple_system_prompt = "You are a data visualization assistant. Analyze the data and provide a Thai explanation and chart recommendation."
-                        explanation = await self.provider.explain_result(question, sql_query, data, simple_system_prompt, dimension_families=dim_families)
+                        explanation = await self.provider.explain_result(enriched_question, sql_query, data, simple_system_prompt, dimension_families=dim_families)
                         t_explain = time.perf_counter() - t0
                         logger.info(f"Hybrid Mode: Explanation Generation took {t_explain:.4f}s")
                     except Exception as explain_error:
@@ -873,13 +929,32 @@ Error: {last_error.get('error', '')}
             db_path = app_settings.DATABASE_URL.replace("sqlite:///", "").replace("sqlite://", "")
             schema_svc = SchemaService(db_path=db_path)
 
+            # Phase 2: also search master_hierarchy_values aliases
+            try:
+                from app.services.hierarchy_service import hierarchy_service
+                has_hierarchy = True
+            except Exception:
+                has_hierarchy = False
+
             for kw in keywords:
                 matches = schema_svc.search_keyword_index(kw, context_name=context_name, limit=5)
                 if matches:
                     results.extend(matches)
                 else:
-                    db_matches = schema_svc.search_db_for_keyword(kw, table_name=table_name, context_name=context_name, limit=5)
-                    results.extend(db_matches)
+                    # Try hierarchy alias search first (more precise)
+                    if has_hierarchy:
+                        hier_matches = hierarchy_service.search_aliases(context_name, kw, limit=3)
+                        for hm in hier_matches:
+                            results.append({
+                                "keyword": kw,
+                                "column_name": hm["column_name"],
+                                "column_value": hm["value"],
+                                "source": "hierarchy_alias",
+                            })
+                    # Fallback to direct DB search
+                    if not any(r.get("keyword") == kw for r in results):
+                        db_matches = schema_svc.search_db_for_keyword(kw, table_name=table_name, context_name=context_name, limit=5)
+                        results.extend(db_matches)
 
             t_lookup = time.perf_counter() - t0
             if results:
@@ -892,28 +967,43 @@ Error: {last_error.get('error', '')}
 
     @staticmethod
     def _detect_hierarchy_level(question: str, context_name: str) -> Optional[Dict]:
-        """Detect user's intended hierarchy level from question keywords.
+        """Detect user's intended hierarchy FILTER level from question keywords.
 
         Uses longest-match to avoid 'บริการ' matching product when
         user said 'กลุ่มบริการ'.
+
+        Drill-down pattern: when both parent and child keywords are present
+        (e.g. "กลุ่ม fixed line แต่ละบริการ"), returns the PARENT level
+        (for WHERE filter), not the child level (for GROUP BY).
+        The AI is instructed via DRILL-DOWN PATTERN rules to use child for GROUP BY.
         """
-        hierarchy = COLUMN_HIERARCHIES.get(context_name)
+        hierarchy = get_column_hierarchies().get(context_name)
         if not hierarchy:
             return None
 
         question_lower = question.lower()
-        candidates = []
+
+        # Collect all matching levels with their longest keyword match
+        matched_levels: Dict[int, tuple] = {}  # level_num → (keyword_len, level_info)
         for level_info in hierarchy:
             for kw in level_info["detection_keywords"]:
                 if kw.lower() in question_lower:
-                    candidates.append((len(kw), level_info))
+                    lvl = level_info["level"]
+                    if lvl not in matched_levels or len(kw) > matched_levels[lvl][0]:
+                        matched_levels[lvl] = (len(kw), level_info)
 
-        if not candidates:
+        if not matched_levels:
             return None
 
-        # Longest match wins (e.g. "กลุ่มบริการ" > "บริการ")
-        candidates.sort(key=lambda x: x[0], reverse=True)
-        return candidates[0][1]
+        # Single level matched → return it
+        if len(matched_levels) == 1:
+            return list(matched_levels.values())[0][1]
+
+        # Multiple levels matched (drill-down pattern)
+        # Return the PARENT level (lower level number) for WHERE filter
+        # The AI will use the child level for GROUP BY via DRILL-DOWN PATTERN rules
+        parent_level = min(matched_levels.keys())
+        return matched_levels[parent_level][1]
 
     @staticmethod
     def _format_value_matches(value_matches: List[Dict], hierarchy=None, detected_level=None) -> str:
@@ -976,10 +1066,17 @@ Error: {last_error.get('error', '')}
             lines.append("")
 
         lines.append("⚠️ HIERARCHY RULES (สำคัญมาก!):")
-        lines.append("1. ถ้ามี **USE THIS LEVEL** → ใช้ column จาก level นั้นเท่านั้น")
+        lines.append("1. ถ้ามี **USE THIS LEVEL** → ใช้ column จาก level นั้นเป็น WHERE filter")
         lines.append("2. ห้าม OR ข้าม level เด็ดขาด (ทำให้ตัวเลขผิดเพี้ยนหลายสิบเท่า)")
         lines.append("3. ถ้าไม่มี USE THIS LEVEL → ใช้ level สูงสุด (parent) ที่มี match")
         lines.append("4. ใช้ LIKE '%keyword%' สำหรับ text columns เสมอ")
+        lines.append("")
+        lines.append("⚠️ DRILL-DOWN PATTERN (สำคัญ!):")
+        lines.append("ถ้าคำถามมีรูปแบบ 'แต่ละ X ของ Y' หรือ 'X ใน Y มีอะไรบ้าง':")
+        lines.append("- Y = parent level → ใช้เป็น WHERE filter")
+        lines.append("- X = child level → ใช้เป็น GROUP BY / SELECT")
+        lines.append("ตัวอย่าง: 'แต่ละบริการของกลุ่ม Fixed Line' →")
+        lines.append("  WHERE SERVICE_GROUP LIKE '%Fixed Line%' GROUP BY PRODUCT_NAME")
         return "\n".join(lines)
 
     @staticmethod

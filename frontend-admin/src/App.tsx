@@ -15,6 +15,7 @@ import DimensionFamilies from './pages/DimensionFamilies'
 import Providers from './pages/Providers'
 import Models from './pages/Models'
 import Settings from './pages/Settings'
+import HierarchyManager from './pages/HierarchyManager'
 
 // Simple Auth Guard
 const ProtectedRoute = () => {
@@ -44,6 +45,7 @@ function App() {
             <Route path="/view-builder" element={<ViewBuilder />} />
             <Route path="/view-manager" element={<ViewManager />} />
             <Route path="/dimension-families" element={<DimensionFamilies />} />
+            <Route path="/hierarchy" element={<HierarchyManager />} />
             <Route path="/providers" element={<Providers />} />
             <Route path="/models" element={<Models />} />
             <Route path="/settings" element={<Settings />} />

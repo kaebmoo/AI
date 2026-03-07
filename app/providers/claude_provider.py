@@ -75,17 +75,40 @@ class ClaudeProvider(AIProvider):
                 "input_schema": t["input_schema"]
             })
 
+        # Prompt caching: system prompt as content blocks with cache_control
+        system_with_cache = [
+            {
+                "type": "text",
+                "text": system_prompt,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+
+        # Prompt caching: mark last tool with cache_control as breakpoint
+        if sanitized_tools:
+            sanitized_tools[-1]["cache_control"] = {"type": "ephemeral"}
+
         response = await self.client.messages.create(
             model=self.model,
             max_tokens=2048,
-            system=system_prompt,
+            system=system_with_cache,
             tools=sanitized_tools,
             messages=messages
         )
 
+        # Log prompt caching metrics
+        tokens_used = response.usage.input_tokens + response.usage.output_tokens
+        cache_created = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+        cache_read = getattr(response.usage, "cache_read_input_tokens", 0) or 0
+        if cache_created or cache_read:
+            logger.info(
+                f"Claude cache — created: {cache_created}, "
+                f"read: {cache_read}, input: {response.usage.input_tokens}"
+            )
+
         return {
             "response": response,
-            "tokens_used": response.usage.input_tokens + response.usage.output_tokens
+            "tokens_used": tokens_used
         }
 
     @ai_retry
@@ -163,12 +186,31 @@ Example for time comparison (grouped bar) - showing each category with bars for 
   "display_hint": "crosstab"
 }}
 """
+        # Prompt caching: system prompt with cache_control
+        system_with_cache = [
+            {
+                "type": "text",
+                "text": system_prompt,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+
         response = await self.client.messages.create(
             model=self.model,
             max_tokens=2000,
-            system=system_prompt,
+            system=system_with_cache,
             messages=[{"role": "user", "content": prompt}]
         )
+
+        # Log prompt caching metrics
+        cache_created = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+        cache_read = getattr(response.usage, "cache_read_input_tokens", 0) or 0
+        if cache_created or cache_read:
+            logger.info(
+                f"Claude cache (explain) — created: {cache_created}, "
+                f"read: {cache_read}, input: {response.usage.input_tokens}"
+            )
+
         content = response.content[0].text
 
         # Use shared post-processor
@@ -178,16 +220,37 @@ Example for time comparison (grouped bar) - showing each category with bars for 
         return parsed_result
 
     @ai_retry
-    async def generate_content(self, prompt: str, system_prompt: Optional[str] = None) -> str:
+    async def generate_content(self, prompt: str, system_prompt: Optional[str] = None, history: Optional[List[Dict]] = None) -> str:
         # Extended Thinking support
         THINKING_SUPPORTED_PREFIXES = ("claude-sonnet-4", "claude-opus-4")
         model_supports_thinking = any(self.model.startswith(p) for p in THINKING_SUPPORTED_PREFIXES)
         use_thinking = self.extended_thinking and model_supports_thinking
 
+        # Prompt caching: system prompt with cache_control
+        sys_content = system_prompt or ""
+        if sys_content:
+            sys_content = [
+                {
+                    "type": "text",
+                    "text": sys_content,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
+
+        # Build messages: native multi-turn history + current prompt
+        messages = []
+        if history:
+            for msg in history:
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+                if role in ("user", "assistant") and content:
+                    messages.append({"role": role, "content": content})
+        messages.append({"role": "user", "content": prompt})
+
         kwargs = {
             "model": self.model,
-            "system": system_prompt or "",
-            "messages": [{"role": "user", "content": prompt}],
+            "system": sys_content,
+            "messages": messages,
         }
 
         if use_thinking:

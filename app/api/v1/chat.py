@@ -63,24 +63,38 @@ def _get_conversation_history(
     conversation_id: str,
     user_id: int,
 ) -> tuple:
-    """Get conversation history and previous chats from DB."""
+    """
+    Get conversation history as native multi-turn messages.
+
+    Each assistant turn is a concise summary (SQL + brief result) so the LLM
+    sees real conversation turns instead of a flattened text blob.
+    Window size is configurable via MAX_HISTORY_MESSAGES.
+    """
     history = []
     previous_chats = []
 
     if conversation_id:
+        limit = settings.MAX_HISTORY_MESSAGES
         previous_chats = db.query(ChatHistory).filter(
             ChatHistory.conversation_id == conversation_id,
             ChatHistory.user_id == user_id
-        ).order_by(ChatHistory.created_at.desc()).limit(5).all()
+        ).order_by(ChatHistory.created_at.desc()).limit(limit).all()
 
         for chat_entry in reversed(previous_chats):
             if chat_entry.question:
                 history.append({"role": "user", "content": chat_entry.question})
-            if chat_entry.ai_response:
-                content = chat_entry.ai_response
+            # Build concise assistant message: SQL + brief result summary
+            if chat_entry.generated_sql or chat_entry.ai_response:
+                parts = []
                 if chat_entry.generated_sql:
-                    content += f"\n\n```sql\n{chat_entry.generated_sql}\n```"
-                history.append({"role": "assistant", "content": content})
+                    parts.append(f"```sql\n{chat_entry.generated_sql}\n```")
+                if chat_entry.ai_response:
+                    # Keep explanation concise — first 300 chars
+                    explanation = chat_entry.ai_response[:300]
+                    if len(chat_entry.ai_response) > 300:
+                        explanation += "…"
+                    parts.append(explanation)
+                history.append({"role": "assistant", "content": "\n\n".join(parts)})
 
     return history, previous_chats
 

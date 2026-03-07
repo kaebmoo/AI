@@ -88,6 +88,7 @@ class AIProvider(ABC):
         self,
         prompt: str,
         system_prompt: Optional[str] = None,
+        history: Optional[List[Dict]] = None,
     ) -> str:
-        """Generate generic content"""
+        """Generate content with optional native multi-turn history."""
         pass
