@@ -42,10 +42,24 @@ export interface ChartConfig {
     category_column?: string;
     measure_column?: string;
     series_column?: string;
+    // Extended fields from enrich_chart_config
+    suggested_type?: string;
+    available_types?: string[];
+    column_roles?: Array<{
+        column: string;
+        role: 'category' | 'measure' | 'series' | 'secondary_measure';
+        label?: string;
+        format?: 'number' | 'currency_thb' | 'percent' | 'date';
+        axis?: 'left' | 'right';
+    }>;
+    title?: string;
+    sort_by?: string;
+    show_data_labels?: boolean;
+    warning?: string;
 }
 
 export interface ChatResponse {
-    id: number;
+    id?: number;
     conversation_id: string;
     question: string;
     answer: string;
@@ -60,6 +74,7 @@ export interface ChatResponse {
     chart_config?: ChartConfig;        // AI recommended chart columns
     display_hint?: 'hierarchical' | 'crosstab' | 'flat'; // AI recommended table display mode
     hierarchy_columns?: string[];      // Ordered column names for hierarchical display (parent→child)
+    is_chart_only?: boolean;           // True when chart-only re-render (no SQL re-executed)
 }
 
 export interface TrainingRequest {
@@ -81,7 +96,7 @@ export interface SSECallbacks {
     onStatus?: (status: string, message: string) => void;
     onDataReady?: (data: any[], sqlQuery: string) => void;
     onAnswer?: (response: ChatResponse) => void;
-    onDone?: (id: number, conversationId: string) => void;
+    onDone?: (id: number | undefined, conversationId: string) => void;
     onError?: (error: string) => void;
 }
 

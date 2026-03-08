@@ -151,16 +151,32 @@ export const DataTable = ({ data, displayHint, hierarchyColumns }: DataTableProp
     // 1. Hierarchy & Dimension Detection
     // Dynamic Column Width Calculation
     const getColumnWidth = (key: string, isFirst: boolean = false) => {
-        const baseWidth = isFirst ? 160 : 140; // Slightly smaller base
-        const charWidth = 9; // Approx width per character (adjusted for typical font)
-        const padding = 32; // Cell padding
+        const baseWidth = isFirst ? 160 : 140;
+        const charWidth = 9;
+        const padding = 32;
 
         // Calculate based on Header Length
         const headerLength = key.length;
-        const requiredWidth = (headerLength * charWidth) + padding;
+        const headerWidth = (headerLength * charWidth) + padding;
 
-        // Clamp: Min 140/160, Max 300
-        return Math.min(300, Math.max(baseWidth, requiredWidth));
+        // Also check actual data values (formatted numbers can be wider than headers)
+        let dataWidth = 0;
+        const sampleSize = Math.min(data.length, 10);
+        for (let i = 0; i < sampleSize; i++) {
+            const val = data[i]?.[key];
+            let formattedLen = 0;
+            if (typeof val === 'number') {
+                formattedLen = val.toLocaleString('th-TH', { maximumFractionDigits: 2 }).length;
+            } else if (typeof val === 'string') {
+                formattedLen = Math.min(val.length, 30);
+            }
+            dataWidth = Math.max(dataWidth, (formattedLen * charWidth) + padding);
+        }
+
+        const requiredWidth = Math.max(headerWidth, dataWidth);
+
+        // Clamp: Min 140/160, Max 350
+        return Math.min(350, Math.max(baseWidth, requiredWidth));
     };
 
     // Strict exclusion of measure terms from dimensions

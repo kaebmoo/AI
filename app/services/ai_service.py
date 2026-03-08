@@ -1416,43 +1416,19 @@ Error: {last_error.get('error', '')}
     ) -> str:
         """Build Pass 2 prompt using structured intent from Pass 1."""
 
-        if value_matches:
-            # Determine which columns belong to the intended hierarchy level
-            intended_cols = None
-            if hierarchy and detected_level:
-                intended_cols = {c.lower() for c in detected_level["columns"]}
+        # --- Filters section: ALWAYS from intent (authoritative) ---
+        # Value matches must NOT replace intent filters
+        intent_dimensions = {d.lower() for d in intent.get("dimensions", [])}
 
-            by_keyword: Dict[str, List[Dict]] = {}
-            for m in value_matches:
-                by_keyword.setdefault(m.get("keyword", ""), []).append(m)
+        filters_text = "  ไม่มี filter"
+        if intent.get("filters"):
+            lines = [f"  - {f['column']} {f['operator']} {f['value']}" for f in intent["filters"]]
+            filters_text = "\n".join(lines)
 
-            real_filter_lines = []
-            for kw, matches in by_keyword.items():
-                for m in matches[:5]:
-                    col = m['column_name']
-                    # Skip columns from other hierarchy levels
-                    if intended_cols and col.lower() not in intended_cols:
-                        continue
-                    level_label = detected_level['label_th'] if detected_level else "DB"
-                    real_filter_lines.append(f"  - {col} LIKE '%{kw}%'  (ค่าจริงจาก {level_label})")
-
-            if real_filter_lines:
-                filters_text = "\n".join(real_filter_lines)
-                level_label = detected_level['label_th'] if detected_level else "DB"
-                mappings_text = f"  (ใช้ค่าจริงจาก Filters — ระดับ: {level_label})"
-            else:
-                filters_text = "  ไม่มี filter"
-                mappings_text = "  ไม่พบ mapping ที่ตรง"
-        else:
-            filters_text = "  ไม่มี filter"
-            if intent.get("filters"):
-                lines = [f"  - {f['column']} {f['operator']} {f['value']}" for f in intent["filters"]]
-                filters_text = "\n".join(lines)
-
-            mappings_text = "  ไม่พบ mapping ที่ตรง"
-            if intent.get("matched_mappings"):
-                lines = [f"  - keyword '{m.get('keyword')}' → {m.get('sql_condition')}" for m in intent["matched_mappings"]]
-                mappings_text = "\n".join(lines)
+        mappings_text = "  ไม่พบ mapping ที่ตรง"
+        if intent.get("matched_mappings"):
+            lines = [f"  - keyword '{m.get('keyword')}' → {m.get('sql_condition')}" for m in intent["matched_mappings"]]
+            mappings_text = "\n".join(lines)
 
         dims = intent.get("dimensions", [])
         dimensions_text = ", ".join(dims) if dims else "ไม่มี (ไม่ต้อง GROUP BY)"
@@ -1473,10 +1449,23 @@ Error: {last_error.get('error', '')}
             o = intent["ordering"]
             ordering_text = f"{o.get('column', '?')} {o.get('direction', 'DESC')}"
 
-        value_matches_text = ""
+        # Filter value_matches: exclude matches on dimension columns (GROUP BY, not WHERE)
+        # Keep only matches on columns that are in intent.filters (confirms exact values)
+        intent_filter_cols = {f['column'].lower() for f in intent.get("filters", [])}
+        filtered_value_matches = None
         if value_matches:
+            filtered_value_matches = [
+                m for m in value_matches
+                if m['column_name'].lower() not in intent_dimensions
+                and m['column_name'].lower() in intent_filter_cols
+            ]
+            if not filtered_value_matches:
+                filtered_value_matches = None
+
+        value_matches_text = ""
+        if filtered_value_matches:
             value_matches_text = self._format_value_matches(
-                value_matches, hierarchy=hierarchy, detected_level=detected_level
+                filtered_value_matches, hierarchy=hierarchy, detected_level=detected_level
             )
 
         return f"""คำถาม: {question}
@@ -1501,7 +1490,10 @@ Error: {last_error.get('error', '')}
 **สร้าง SQL จาก Structured Intent ข้างต้น:**
 สำคัญ:
 - ต้องใช้ตาราง {context_table} เท่านั้น
-- ถ้ามี "Actual Values Found" ข้างต้น → ใช้ column/value จากผลค้นหาจริง ห้ามเดาเอง
+- **ยึดตาม Structured Intent เป็นหลัก** — Dimensions คือ GROUP BY, Filters คือ WHERE
+- ห้ามเพิ่ม WHERE filter ที่ไม่อยู่ใน Filters ข้างต้น (ยกเว้น time_range)
+- Dimensions (GROUP BY) columns ห้ามใช้เป็น WHERE filter
+- ถ้ามี "Actual Values Found" → ใช้เป็นค่าอ้างอิงสำหรับ filter ที่ระบุไว้แล้วเท่านั้น
 - ถ้ามี Matched Semantic Mappings ให้ใช้ sql_condition จาก mapping โดยตรง
 - ห้าม FORMAT ตัวเลขใน SQL (ส่งค่าดิบ)
 - ห้าม OR ข้ามระดับ hierarchy (เช่น service_group OR product_name)

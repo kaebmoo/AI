@@ -274,7 +274,8 @@ Ensure the "explanation" value is formatted as **beautiful Markdown**:
 CRITICAL: You must analyze the data and recommend the best visualization type.
 Return the result as a JSON object with these keys:
 1. "explanation": The beautifully formatted Thai markdown explanation.
-2. "visualization": One of ['bar_chart', 'horizontal_bar', 'line_chart', 'pie_chart', 'donut_chart', 'table', 'single_value', 'grouped_bar', 'stacked_bar']
+2. "visualization": One of ['bar_chart', 'horizontal_bar', 'line_chart', 'pie_chart', 'donut_chart', 'table', 'single_value', 'grouped_bar', 'stacked_bar', 'waterfall', 'mixed_bar_line']
+2b. "chart_title": (optional) Short Thai title for the chart, e.g. "รายได้ตามกลุ่มธุรกิจ Q1/2567"
 3. "chart_config": Object with column mappings for the chart:
    - "category_column": The column name for X-axis labels (the PRIMARY grouping)
    - "measure_column": The column name for Y-axis values (e.g., total, sum, amount)
@@ -449,3 +450,124 @@ def auto_detect_chart_config(data: List[Dict], parsed_result: Dict = None,
     }
 
     return parsed_result
+
+
+# ── enrich_chart_config: Step 4 in post-processing pipeline ──────────────────
+
+# Money-related column keywords
+_MONEY_KW = [
+    'revenue', 'income', 'expense', 'cost', 'profit', 'amount',
+    'total', 'sum', 'budget', 'value', 'baht',
+    'รายได้', 'ค่าใช้จ่าย', 'กำไร', 'ยอด', 'งบ', 'มูลค่า',
+]
+_PCT_KW = ['percent', 'rate', 'ratio', 'pct', 'เปอร์เซ็น', 'อัตรา', '%']
+
+
+def _detect_col_format(col: str) -> str:
+    lower = col.lower()
+    if any(k in lower for k in _PCT_KW):
+        return 'percent'
+    if any(k in lower for k in _MONEY_KW):
+        return 'currency_thb'
+    return 'number'
+
+
+def _suggest_available_types(
+    n_categories: int,
+    has_series: bool,
+    has_time_category: bool,
+) -> list:
+    """Rule-based available_types suggestion."""
+    if not has_series:
+        if n_categories <= 8:
+            return ['bar_chart', 'horizontal_bar', 'line_chart', 'pie_chart', 'donut_chart']
+        else:
+            return ['bar_chart', 'horizontal_bar', 'line_chart']
+    else:
+        if has_time_category:
+            return ['line_chart', 'multi_line', 'grouped_bar', 'stacked_bar', 'area']
+        else:
+            return ['grouped_bar', 'stacked_bar', 'stacked_bar_100', 'bar_chart']
+
+
+def enrich_chart_config(
+    parsed_result: Dict,
+    data: List[Dict],
+    schema_metadata: Optional[List[Dict]] = None,
+    chart_title: str = "",
+) -> Dict:
+    """
+    Step 4 in post-processing pipeline — AFTER enforce_dimension_family_rule().
+
+    Adds: suggested_type (ECharts-ready), available_types, column_roles,
+          title, sort_by, show_data_labels, warning.
+
+    Does NOT change: category_column, measure_column, series_column,
+                     visualization (backend string), or any existing rules output.
+    """
+    try:
+        from app.models.chart import VISUALIZATION_TO_ECHARTS
+
+        if not isinstance(parsed_result, dict):
+            return parsed_result
+
+        config = parsed_result.get("chart_config")
+        if not config:
+            return parsed_result
+
+        viz = parsed_result.get("visualization", "")
+        cat_col = config.get("category_column") or ""
+        msr_col = config.get("measure_column") or ""
+        ser_col = config.get("series_column") or ""
+
+        # --- ECharts-ready type ---
+        echarts_type = VISUALIZATION_TO_ECHARTS.get(viz)
+        if echarts_type == "line" and ser_col:
+            echarts_type = "multi_line"
+
+        # --- Column roles ---
+        roles = []
+        if cat_col:
+            roles.append({
+                "column": cat_col, "role": "category",
+                "label": cat_col,
+                "format": "date" if any(t in cat_col.lower() for t in TIME_KEYS) else "number",
+            })
+        if ser_col:
+            roles.append({"column": ser_col, "role": "series", "label": ser_col})
+        if msr_col:
+            roles.append({
+                "column": msr_col, "role": "measure", "label": msr_col,
+                "format": _detect_col_format(msr_col), "axis": "left",
+            })
+
+        # --- Stats for suggestions ---
+        n_categories = len(set(str(row.get(cat_col, '')) for row in data[:100])) if cat_col and data else 1
+        has_time_cat = bool(cat_col) and any(t in cat_col.lower() for t in TIME_KEYS)
+        has_series = bool(ser_col)
+
+        # --- Warnings ---
+        warning = None
+        if viz in ('pie_chart', 'donut_chart') and has_series:
+            warning = "Pie/Donut chart ไม่รองรับ series column — พิจารณาใช้ bar_chart แทน"
+        elif viz in ('pie_chart', 'donut_chart') and n_categories > 10:
+            warning = f"Pie chart มีมากกว่า 10 ประเภท ({n_categories} ประเภท) อาจอ่านยาก"
+
+        # --- Sort hint ---
+        sort_by = 'category_asc' if has_time_cat else 'original'
+
+        # --- Merge into chart_config (extend, don't replace) ---
+        config["suggested_type"] = echarts_type
+        config["available_types"] = _suggest_available_types(n_categories, has_series, has_time_cat)
+        config["column_roles"] = roles
+        config["title"] = chart_title or ""
+        config["sort_by"] = sort_by
+        config["show_data_labels"] = len(data) <= 20 if data else False
+        if warning:
+            config["warning"] = warning
+
+        return parsed_result
+
+    except Exception as e:
+        logger.error(f"Error in enrich_chart_config: {e}")
+        return parsed_result

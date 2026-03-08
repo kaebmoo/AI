@@ -17,6 +17,9 @@ from app.schemas.chat import ChatRequest, ChatResponse, DataWarning, TrainingReq
 from app.services.ai_service import AIService
 from app.services.schema_service import SchemaService
 from app.services.query_engine import QueryEngine, QueryEngineResult, detect_context_from_question
+from app.services.intent_classifier import classify_intent
+from app.providers.chart_postprocessor import enrich_chart_config
+from app.models.chat_session import ChatSessionData
 from app.config import settings
 
 
@@ -244,6 +247,93 @@ def _format_response(
         "chart_config": chart_config_response,
         "display_hint": display_hint_response,
         "hierarchy_columns": hierarchy_columns_response,
+        "is_chart_only": False,
+    }
+
+
+def _save_session_data(db: Session, conversation_id: str, data: list, columns: list, chart_config: dict = None):
+    """Upsert last query data for chart-only re-render."""
+    existing = db.query(ChatSessionData).filter(
+        ChatSessionData.conversation_id == conversation_id
+    ).first()
+
+    cfg_json = json.dumps(chart_config, ensure_ascii=False, default=str) if chart_config else None
+    data_json = json.dumps(data, ensure_ascii=False, default=str)
+    cols_json = json.dumps(columns)
+
+    if existing:
+        existing.last_data = data_json
+        existing.last_columns = cols_json
+        existing.last_chart_config = cfg_json
+        existing.row_count = len(data)
+        existing.updated_at = datetime.utcnow()
+    else:
+        db.add(ChatSessionData(
+            conversation_id=conversation_id,
+            last_data=data_json,
+            last_columns=cols_json,
+            last_chart_config=cfg_json,
+            row_count=len(data),
+        ))
+    db.commit()
+
+
+def _get_session_data(db: Session, conversation_id: str) -> dict:
+    """Get last query data for chart-only re-render. Returns dict or None."""
+    row = db.query(ChatSessionData).filter(
+        ChatSessionData.conversation_id == conversation_id
+    ).first()
+    if not row:
+        return None
+    return {
+        "data": json.loads(row.last_data),
+        "columns": json.loads(row.last_columns),
+        "chart_config": json.loads(row.last_chart_config) if row.last_chart_config else None,
+    }
+
+
+def _handle_chart_only(db: Session, conversation_id: str, question: str, intent: dict) -> dict:
+    """Handle chart-only intent — return enriched chart config with existing session data."""
+    session = _get_session_data(db, conversation_id)
+
+    if not session or not session.get("data"):
+        return {
+            "id": None,
+            "conversation_id": conversation_id,
+            "question": question,
+            "answer": "ยังไม่มีข้อมูลจากการสนทนานี้ครับ กรุณาถามข้อมูลก่อน แล้วค่อยขอเปลี่ยนรูปแบบกราฟได้เลย",
+            "sql_query": None,
+            "data": None,
+            "execution_time_ms": 0.0,
+            "is_chart_only": True,
+        }
+
+    prev_config = session.get("chart_config") or {}
+    mock_result = {
+        "visualization": intent["requested_type"] or prev_config.get("visualization"),
+        "chart_config": {
+            "category_column": prev_config.get("category_column"),
+            "measure_column": prev_config.get("measure_column"),
+            "series_column": prev_config.get("series_column"),
+        }
+    }
+    enriched = enrich_chart_config(
+        parsed_result=mock_result,
+        data=session["data"],
+        chart_title=prev_config.get("title", ""),
+    )
+
+    return {
+        "id": None,
+        "conversation_id": conversation_id,
+        "question": question,
+        "answer": "",
+        "sql_query": None,
+        "data": session["data"],
+        "execution_time_ms": 0.0,
+        "visualization": enriched.get("visualization"),
+        "chart_config": enriched.get("chart_config"),
+        "is_chart_only": True,
     }
 
 
@@ -267,17 +357,22 @@ async def chat(
     # 1. Conversation ID
     conversation_id = request.conversation_id or str(uuid.uuid4())
 
-    # 2. Get history
+    # 2. Chart-only intent detection
+    intent = classify_intent(request.question)
+    if intent["is_chart_request"] and intent["confidence"] == "high":
+        return _handle_chart_only(db, conversation_id, request.question, intent)
+
+    # 3. Get history
     history, previous_chats = _get_conversation_history(db, conversation_id, current_user.id)
 
-    # 3. Resolve context (with history-aware logic)
+    # 4. Resolve context (with history-aware logic)
     db_path = settings.DATABASE_URL.replace("sqlite:///", "").replace("sqlite://", "")
     schema_service = SchemaService(db_path=db_path)
     context_name, history = _resolve_context_with_history(
         request.context, request.question, previous_chats, history, schema_service
     )
 
-    # 4. Execute query via QueryEngine
+    # 5. Execute query via QueryEngine
     mcp_client = deps.get_mcp_client(current_request)
     engine = QueryEngine(mcp_client=mcp_client, db_session=db)
     engine_result = await engine.query(
@@ -289,10 +384,20 @@ async def chat(
         max_retries=request.max_retries,
     )
 
-    # 5. Save history
+    # 6. Save session data for chart-only re-render (non-fatal)
+    result = engine_result.query_result
+    if result.data and not result.error:
+        try:
+            columns = list(result.data[0].keys()) if result.data else []
+            existing_cfg = result.explanation.get("chart_config") if isinstance(result.explanation, dict) else {}
+            _save_session_data(db, conversation_id, result.data, columns, existing_cfg)
+        except Exception as e:
+            logger.warning(f"Failed to save session data (non-fatal): {e}")
+
+    # 7. Save history
     chat_entry = _save_history(db, current_user.id, conversation_id, engine_result)
 
-    # 6. Format response
+    # 8. Format response
     return _format_response(chat_entry, conversation_id, engine_result)
 
 
@@ -312,6 +417,10 @@ async def chat_stream(
     Events: status, data_ready, answer, done, error
     """
     conversation_id = request.conversation_id or str(uuid.uuid4())
+
+    # Chart-only intent detection (same as /chat endpoint)
+    intent = classify_intent(request.question)
+
     history, previous_chats = _get_conversation_history(db, conversation_id, current_user.id)
 
     db_path = settings.DATABASE_URL.replace("sqlite:///", "").replace("sqlite://", "")
@@ -341,6 +450,13 @@ async def chat_stream(
     async def generate_events():
         """SSE event generator."""
         try:
+            # Chart-only: skip QueryEngine, return session data directly
+            if intent["is_chart_request"] and intent["confidence"] == "high":
+                chart_response = _handle_chart_only(db, conversation_id, request.question, intent)
+                yield _sse_format("answer", chart_response)
+                yield _sse_format("done", {"id": None, "conversation_id": conversation_id})
+                return
+
             # Send initial event
             yield _sse_format("status", {"status": "started", "message": "Processing query..."})
 
@@ -382,6 +498,15 @@ async def chat_stream(
 
             # Save history
             chat_entry = _save_history(db, current_user.id, conversation_id, engine_result)
+
+            # Save session data for chart-only re-render (non-fatal)
+            if result.data and not result.error:
+                try:
+                    columns = list(result.data[0].keys()) if result.data else []
+                    existing_cfg = result.explanation.get("chart_config") if isinstance(result.explanation, dict) else {}
+                    _save_session_data(db, conversation_id, result.data, columns, existing_cfg)
+                except Exception as e:
+                    logger.warning(f"Failed to save session data (non-fatal): {e}")
 
             # Send full response
             response_data = _format_response(chat_entry, conversation_id, engine_result)

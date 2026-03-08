@@ -15,6 +15,7 @@ from app.providers.chart_postprocessor import (
     enforce_time_series_rule,
     enforce_dimension_family_rule,
     build_explain_prompt,
+    enrich_chart_config,
 )
 from app.config import settings
 
@@ -150,6 +151,12 @@ class ClaudeProvider(AIProvider):
         parsed_result = parse_explanation_response(content)
         parsed_result = enforce_time_series_rule(parsed_result, time_columns=time_columns)
         parsed_result = enforce_dimension_family_rule(parsed_result, dimension_families)
+        parsed_result = enrich_chart_config(
+            parsed_result=parsed_result,
+            data=data,
+            schema_metadata=schema_metadata,
+            chart_title=parsed_result.get("chart_title", ""),
+        )
         return parsed_result
 
     @ai_retry

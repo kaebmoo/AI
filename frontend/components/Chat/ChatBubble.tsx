@@ -14,11 +14,8 @@ export interface DataWarning {
     severity: 'info' | 'warning' | 'important';
 }
 
-export interface ChartConfig {
-    category_column?: string;
-    measure_column?: string;
-    series_column?: string;
-}
+export type { ChartConfig } from '../../types/chart';
+import type { ChartConfig } from '../../types/chart';
 
 export interface Message {
     id: string | number;

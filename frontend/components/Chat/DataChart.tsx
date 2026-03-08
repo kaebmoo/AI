@@ -1,15 +1,13 @@
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { View, Text, Dimensions, ScrollView, Modal, TouchableOpacity, Pressable } from 'react-native';
 import { BarChart, LineChart, PieChart } from 'react-native-gifted-charts';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Ionicons } from '@expo/vector-icons';
-
-interface ChartConfig {
-    category_column?: string;
-    measure_column?: string;
-    series_column?: string;
-}
+import type { ChartConfig } from '../../types/chart';
+import { resolveChartType } from '../../types/chart';
+import { EChartsWrapper, isEChartsAvailable } from '../Chart/EChartsWrapper';
+import { buildEChartsOption } from '../../utils/chartDataTransform';
 
 interface DataChartProps {
     data: Record<string, any>[];
@@ -80,48 +78,37 @@ const formatNumberWithUnit = (
     // If unit is pre-determined by column name (value already converted)
     if (detectedUnit === 'billion') {
         return {
-            text: value.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+            text: value.toLocaleString('th-TH', { maximumFractionDigits: 2 }),
             unit: 'พันล้านบาท'
         };
     }
 
     if (detectedUnit === 'million') {
         return {
-            text: value.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+            text: value.toLocaleString('th-TH', { maximumFractionDigits: 2 }),
             unit: 'ล้านบาท'
         };
     }
 
     if (detectedUnit === 'thousand') {
         return {
-            text: value.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+            text: value.toLocaleString('th-TH', { maximumFractionDigits: 2 }),
             unit: 'พันบาท'
         };
     }
 
     // Auto-detect based on max value in dataset (for raw baht values)
-    if (maxValue >= 1_000_000_000) {
-        // พันล้านบาท (Billions)
+    const absMax = Math.abs(maxValue);
+    if (absMax >= 1_000_000) {
+        // As requested, anything >= 1M is represented in millions
         return {
-            text: (value / 1_000_000_000).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
-            unit: 'พันล้านบาท'
-        };
-    } else if (maxValue >= 1_000_000) {
-        // ล้านบาท (Millions)
-        return {
-            text: (value / 1_000_000).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+            text: (value / 1_000_000).toLocaleString('th-TH', { maximumFractionDigits: 2 }),
             unit: 'ล้านบาท'
-        };
-    } else if (maxValue >= 1_000) {
-        // พันบาท (Thousands)
-        return {
-            text: (value / 1_000).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
-            unit: 'พันบาท'
         };
     } else {
         // บาท (Baht)
         return {
-            text: value.toLocaleString('th-TH', { minimumFractionDigits: 0, maximumFractionDigits: 0 }),
+            text: value.toLocaleString('th-TH', { maximumFractionDigits: 2 }),
             unit: 'บาท'
         };
     }
@@ -665,16 +652,8 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
     // 2. Color Utilities
     // ============================================================
 
-    const SERIES_COLORS = [
-        '#3B82F6', // Blue
-        '#10B981', // Green
-        '#F59E0B', // Amber
-        '#EF4444', // Red
-        '#8B5CF6', // Purple
-        '#EC4899', // Pink
-        '#06B6D4', // Cyan
-        '#F97316', // Orange
-    ];
+    // Imported from constants/chartColors.ts — kept as local ref for gifted-charts path
+    const SERIES_COLORS = require('../../constants/chartColors').SERIES_COLORS as string[];
 
     const stringToColor = (str: string, index?: number) => {
         if (typeof index === 'number' && index < SERIES_COLORS.length) {
@@ -690,10 +669,10 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
 
     const formatYLabel = (val: string) => {
         const num = safelyParseNumber(val);
-        if (num >= 1_000_000_000) return (num / 1_000_000_000).toFixed(1) + 'B';
-        if (num >= 1_000_000) return (num / 1_000_000).toFixed(1) + 'M';
-        if (num >= 1_000) return (num / 1_000).toFixed(1) + 'K';
-        return num.toFixed(0);
+        const abs = Math.abs(num);
+        if (abs >= 1_000_000) return (num / 1_000_000).toLocaleString('th-TH', { maximumFractionDigits: 2 }) + ' ลบ.';
+        if (abs >= 1_000) return (num / 1_000).toLocaleString('th-TH', { maximumFractionDigits: 2 }) + 'k';
+        return num.toLocaleString('th-TH', { maximumFractionDigits: 2 });
     };
 
     const truncateLabel = (label: string, maxLen: number = 12) => {
@@ -1347,6 +1326,220 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
             </View>
         );
     };
+
+    // ============================================================
+    // ECharts Rendering Path
+    // ============================================================
+
+    /** Thai labels for chart type toolbar */
+    const CHART_LABELS: Record<string, string> = {
+        vertical_bar: 'แท่ง',
+        horizontal_bar: 'แท่งแนวนอน',
+        bar_chart: 'แท่ง',
+        line: 'เส้น',
+        line_chart: 'เส้น',
+        multi_line: 'หลายเส้น',
+        pie_chart: 'วงกลม',
+        donut_chart: 'โดนัท',
+        grouped_bar: 'แท่งกลุ่ม',
+        stacked_bar: 'แท่งสะสม',
+        stacked_bar_100: '100% สะสม',
+        area: 'พื้นที่',
+        stacked_area: 'พื้นที่สะสม',
+        waterfall: 'น้ำตก',
+        scatter: 'กระจาย',
+        mixed_bar_line: 'ผสม',
+        treemap: 'แผนผัง',
+    };
+
+    // Active chart type state (for toolbar switching)
+    const resolvedType = resolveChartType(visualization, chartConfig);
+    const [activeType, setActiveType] = useState<string | null>(resolvedType);
+
+    // Sync activeType when props change
+    useEffect(() => {
+        const newType = resolveChartType(visualization, chartConfig);
+        if (newType) setActiveType(newType);
+    }, [visualization, chartConfig?.suggested_type]);
+
+    const availableTypes = chartConfig?.available_types ?? [];
+    const showToolbar = availableTypes.length > 1;
+
+    // Build ECharts option with active type override
+    const echartsOption = useMemo(() => {
+        if (!isEChartsAvailable() || !activeType) return null;
+        const overrideConfig = { ...chartConfig, suggested_type: activeType };
+        return buildEChartsOption(data, visualization, overrideConfig);
+    }, [data, visualization, chartConfig, activeType]);
+
+    // Fullscreen version — strip title from chart (header shows it instead)
+    const echartsOptionFullscreen = useMemo(() => {
+        if (!echartsOption) return null;
+        const opt = { ...(echartsOption as any) };
+        delete opt.title;
+        // Give more space at top since no title
+        if (opt.grid) opt.grid = { ...opt.grid, top: '8%' };
+        return opt;
+    }, [echartsOption]);
+
+    // Toolbar renderer — shared between normal and fullscreen views (ECharts path)
+    const renderEChartsToolbar = (containerStyle?: any) => (
+        showToolbar ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={containerStyle}>
+                <View style={{ flexDirection: 'row', gap: 6, paddingHorizontal: 2 }}>
+                    {availableTypes.map((type) => {
+                        const isActive = type === activeType;
+                        return (
+                            <TouchableOpacity
+                                key={type}
+                                onPress={() => setActiveType(type)}
+                                style={{
+                                    paddingHorizontal: 12,
+                                    paddingVertical: 6,
+                                    borderRadius: 16,
+                                    backgroundColor: isActive ? '#3B82F6' : (isDark ? '#374151' : '#F3F4F6'),
+                                    borderWidth: isActive ? 0 : 1,
+                                    borderColor: isDark ? '#4B5563' : '#E5E7EB',
+                                }}
+                            >
+                                <Text style={{
+                                    fontSize: 12,
+                                    fontWeight: isActive ? '600' : '400',
+                                    color: isActive ? '#FFFFFF' : (isDark ? '#D1D5DB' : '#4B5563'),
+                                }}>
+                                    {CHART_LABELS[type] || type}
+                                </Text>
+                            </TouchableOpacity>
+                        );
+                    })}
+                </View>
+            </ScrollView>
+        ) : null
+    );
+
+    // If ECharts is available and we have a valid chart type, use ECharts
+    if (isEChartsAvailable() && echartsOption) {
+        return (
+            <View className="my-4 p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm"
+                style={{ width: '100%' }}>
+
+                {/* Header: Title + Expand Button */}
+                <View style={{
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    marginBottom: 8,
+                }}>
+                    <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200"
+                        style={{ flex: 1, flexShrink: 1 }} numberOfLines={2}>
+                        {chartConfig?.title || ''}
+                    </Text>
+                    <TouchableOpacity
+                        onPress={() => setIsFullScreen(true)}
+                        style={{
+                            padding: 6,
+                            borderRadius: 6,
+                            backgroundColor: isDark ? '#374151' : '#F3F4F6',
+                            flexShrink: 0,
+                            marginLeft: 8,
+                        }}
+                        activeOpacity={0.7}
+                    >
+                        <Ionicons name="expand-outline" size={18} color={isDark ? '#D1D5DB' : '#6B7280'} />
+                    </TouchableOpacity>
+                </View>
+
+                {/* Chart Type Toolbar */}
+                {renderEChartsToolbar({ marginBottom: 8 })}
+
+                {/* ECharts Render */}
+                <EChartsWrapper
+                    option={echartsOption}
+                    height={400}
+                    width={Math.min(screenWidth - 48, 800)}
+                />
+
+                {/* Warning */}
+                {chartConfig?.warning && (
+                    <Text className="text-xs text-amber-600 dark:text-amber-400 text-center mt-2">
+                        {chartConfig.warning}
+                    </Text>
+                )}
+
+                {/* Full Screen Modal */}
+                <Modal
+                    visible={isFullScreen}
+                    animationType="slide"
+                    transparent={false}
+                    onRequestClose={() => setIsFullScreen(false)}
+                >
+                    <View style={{ flex: 1, backgroundColor: isDark ? '#111827' : '#FFFFFF', paddingTop: 48 }}>
+                        {/* Modal Header — compact */}
+                        <View style={{
+                            flexDirection: 'row',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            paddingHorizontal: 16,
+                            paddingBottom: 8,
+                            borderBottomWidth: 1,
+                            borderBottomColor: isDark ? '#374151' : '#E5E7EB',
+                        }}>
+                            <Text style={{
+                                flex: 1,
+                                fontSize: 15,
+                                fontWeight: '600',
+                                color: isDark ? '#F3F4F6' : '#1F2937',
+                            }} numberOfLines={2}>
+                                {chartConfig?.title || ''}
+                            </Text>
+                            <TouchableOpacity
+                                onPress={() => setIsFullScreen(false)}
+                                style={{
+                                    padding: 6,
+                                    borderRadius: 6,
+                                    backgroundColor: isDark ? '#374151' : '#F3F4F6',
+                                    marginLeft: 8,
+                                }}
+                            >
+                                <Ionicons name="close" size={20} color={isDark ? '#E5E7EB' : '#374151'} />
+                            </TouchableOpacity>
+                        </View>
+
+                        {/* Toolbar in Modal — compact */}
+                        <View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4 }}>
+                            {renderEChartsToolbar()}
+                        </View>
+
+                        {/* Full Screen ECharts — use option WITHOUT title */}
+                        <View style={{ flex: 1, paddingHorizontal: 8, paddingTop: 4 }}>
+                            <EChartsWrapper
+                                option={echartsOptionFullscreen || echartsOption}
+                                height={screenWidth > 768 ? 580 : 460}
+                                width={screenWidth - 16}
+                            />
+                        </View>
+
+                        {/* Warning in fullscreen */}
+                        {chartConfig?.warning && (
+                            <Text style={{
+                                fontSize: 11,
+                                color: '#D97706',
+                                textAlign: 'center',
+                                paddingBottom: 12,
+                                paddingHorizontal: 16,
+                            }}>
+                                {chartConfig.warning}
+                            </Text>
+                        )}
+                    </View>
+                </Modal>
+            </View>
+        );
+    }
+
+    // ============================================================
+    // Gifted Charts Fallback (original code below)
+    // ============================================================
 
     return (
         <View className="my-4 p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm"

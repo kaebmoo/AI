@@ -81,8 +81,29 @@ export default function ChatScreen() {
           onAnswer: (response) => {
             setConversationId(response.conversation_id);
 
+            // Chart-only: update existing message's chart, don't add a new bubble
+            if (response.is_chart_only) {
+              setMessages((prev) => {
+                const updated = [...prev];
+                // Find the last message that has data (the one to re-render)
+                for (let i = updated.length - 1; i >= 0; i--) {
+                  if (updated[i].data && updated[i].data!.length > 0) {
+                    updated[i] = {
+                      ...updated[i],
+                      data: response.data ?? updated[i].data,
+                      visualization: response.visualization,
+                      chartConfig: response.chart_config,
+                    };
+                    break;
+                  }
+                }
+                return updated;
+              });
+              return;
+            }
+
             const aiMessage: Message = {
-              id: response.id,
+              id: response.id ?? Date.now(),
               chatId: response.id,
               role: 'assistant',
               content: response.answer,

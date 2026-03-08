@@ -19,6 +19,7 @@ from app.providers.chart_postprocessor import (
     enforce_dimension_family_rule,
     build_explain_prompt,
     auto_detect_chart_config,
+    enrich_chart_config,
 )
 from app.config import settings
 
@@ -108,6 +109,14 @@ class MatchaProvider(AIProvider):
         if "chart_config" not in parsed_result and data and len(data) > 0:
             logger.info("Matcha: No chart_config found, attempting auto-detection")
             parsed_result = auto_detect_chart_config(data, parsed_result, schema_metadata=schema_metadata)
+
+        # Enrich chart config (runs on both AI-generated and auto-detected configs)
+        parsed_result = enrich_chart_config(
+            parsed_result=parsed_result,
+            data=data,
+            schema_metadata=schema_metadata,
+            chart_title=parsed_result.get("chart_title", ""),
+        )
 
         return parsed_result
 

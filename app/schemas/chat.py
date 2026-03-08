@@ -55,23 +55,35 @@ class Confidence(BaseModel):
 
 
 class ChartConfig(BaseModel):
-    """AI-recommended chart configuration"""
+    """AI-recommended chart configuration (extended)"""
+    # Original fields
     category_column: Optional[str] = Field(default=None, description="Column for X-axis labels")
     measure_column: Optional[str] = Field(default=None, description="Column for Y-axis values")
     series_column: Optional[str] = Field(default=None, description="Column for grouping/series (for grouped charts)")
+    # Extended fields (populated by enrich_chart_config)
+    suggested_type: Optional[str] = Field(default=None, description="ECharts-ready chart type")
+    available_types: Optional[List[str]] = Field(default=None, description="Chart types this data supports")
+    column_roles: Optional[List[Dict[str, Any]]] = Field(default=None, description="Column role metadata")
+    title: Optional[str] = Field(default=None, description="Chart title in Thai")
+    sort_by: Optional[str] = Field(default=None, description="Sort hint: value_desc, value_asc, category_asc, original")
+    show_data_labels: Optional[bool] = Field(default=None, description="Whether to show data labels on chart")
+    warning: Optional[str] = Field(default=None, description="Chart compatibility warning")
 
 
 class ChatResponse(BaseModel):
-    id: int
+    id: Optional[int] = None
     conversation_id: Optional[str] = None
     question: str
     answer: str
-    sql_query: Optional[str]
+    sql_query: Optional[str] = None
     data: Optional[List[Dict[str, Any]]] = None
-    execution_time_ms: float
+    execution_time_ms: float = 0.0
     retry_count: int = Field(default=0, description="Number of retries performed")
     retry_history: Optional[List[RetryAttempt]] = Field(default=None, description="Retry attempt details")
     warnings: Optional[List[DataWarning]] = Field(default=None, description="Data interpretation warnings")
     confidence: Optional[Confidence] = Field(default=None, description="Confidence score for this response")
     visualization: Optional[str] = Field(default=None, description="Recommended visualization type: bar_chart, line_chart, etc.")
     chart_config: Optional[ChartConfig] = Field(default=None, description="AI-recommended chart column configuration")
+    display_hint: Optional[str] = Field(default=None, description="Table display hint: flat, hierarchical, crosstab")
+    hierarchy_columns: Optional[List[str]] = Field(default=None, description="Ordered column names for hierarchical display")
+    is_chart_only: bool = Field(default=False, description="True when no SQL was re-executed (chart switch only)")
