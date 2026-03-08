@@ -10,6 +10,7 @@
 ```
 app/providers/
 ├── base.py                # AIProvider ABC — interface ที่ต้อง implement
+│                          #   get_model() อยู่ที่นี่ (DB-first, fallback self.model)
 ├── registry.py            # Auto-discover ไฟล์ provider ทั้งหมด
 ├── retry_config.py        # @ai_retry decorator
 ├── chart_postprocessor.py # Shared explain/chart logic
@@ -36,7 +37,9 @@ class AIProvider(ABC):
     name: str = ""                    # ต้องตั้งค่า — ใช้เป็น provider ID
 
     def is_configured(self) -> bool:  # เช็คว่ามี credentials ครบไหม
-    def get_model(self, tier) -> str: # return model name ตาม tier
+
+    # get_model(tier) อยู่ใน base class แล้ว — ไม่ต้อง override
+    # Logic: DB lookup → ถ้าไม่มี → return self.model (ใช้ model เดียวทุก tier)
 
     # === 3 Abstract Methods ===
     async def generate_sql(self, question, system_prompt, tools, history) -> dict
@@ -61,7 +64,7 @@ from typing import Dict, List, Optional, Any, Union
 
 import httpx
 
-from app.providers.base import AIProvider, lookup_model_by_tier
+from app.providers.base import AIProvider
 from app.providers.retry_config import ai_retry
 from app.providers.chart_postprocessor import (
     parse_explanation_response,
@@ -87,15 +90,9 @@ class DeepSeekProvider(AIProvider):
     def is_configured(self) -> bool:
         return bool(self.api_key and self.api_url)
 
-    def get_model(self, tier: str = "default") -> str:
-        # ลอง DB ก่อน (admin อาจตั้ง model ผ่าน ai_models table)
-        db_model = lookup_model_by_tier("deepseek", tier)
-        if db_model:
-            return db_model
-        # Fallback
-        if tier == "cheap":
-            return "deepseek-chat"
-        return self.model
+    # get_model() — ไม่ต้อง override!
+    # base class จัดการให้: DB lookup → fallback self.model
+    # Admin ตั้ง cheap model ผ่าน Web Admin UI (/models) ได้เลย
 
     # =====================================================
     # Method 1: generate_sql — สร้าง SQL จากคำถาม + tools
@@ -264,11 +261,67 @@ class MyProvider(AIProvider):
 
 ---
 
-### ขั้นตอนที่ 2: เพิ่มข้อมูลใน Database
+### ขั้นตอนที่ 2: ลงทะเบียน Provider + Models ใน Database
 
-เพิ่ม row ใน 2 tables: `ai_providers` และ `ai_models`
+มี 2 วิธี: ผ่าน **Web Admin UI** (แนะนำ) หรือ **SQL ตรง**
 
-#### 2a. INSERT ai_providers
+#### วิธี A: ผ่าน Web Admin UI (แนะนำ)
+
+> เปิด Admin Panel ที่ `http://localhost:5173`
+
+**2a. เพิ่ม Provider** — ยังไม่มี UI สร้าง provider ใหม่ ต้องใช้ SQL (ครั้งเดียว):
+
+```sql
+INSERT INTO ai_providers (id, name, description, api_key_env_var, api_url_env_var, default_api_url, is_active)
+VALUES (
+    'deepseek',                          -- id: ต้องตรงกับ class.name
+    'DeepSeek',                          -- name: แสดงใน UI
+    'DeepSeek AI API',                   -- description
+    'DEEPSEEK_API_KEY',                  -- api_key_env_var
+    'DEEPSEEK_API_URL',                  -- api_url_env_var (NULL ถ้าไม่ต้องการ)
+    'https://api.deepseek.com/v1/chat/completions',
+    1                                    -- is_active
+);
+```
+
+**2b. เพิ่ม Models** — ไปที่หน้า `/models`:
+
+1. กดเลือก tab **DeepSeek** (จะปรากฏหลัง restart server)
+2. กดปุ่ม **+ Add Model** แล้วกรอก:
+
+| Field | Model ตัวหลัก | Model ตัว Cheap |
+|-------|---------------|-----------------|
+| Model ID | `deepseek-chat` | `deepseek-chat` (หรือ model เบากว่า) |
+| Display Name | `DeepSeek Chat` | `DeepSeek Chat (Lite)` |
+| **Tier** | **default** | **cheap** |
+| Is Default | ✅ | ❌ |
+| Priority | 100 | 50 |
+
+> **Tier คืออะไร?**
+> - `default` = model หลัก ใช้สำหรับงานยาก (สร้าง SQL)
+> - `cheap` = model เบา ใช้สำหรับงานง่าย (วิเคราะห์คำถาม + สรุปผลลัพธ์)
+> - ถ้า provider มี model เดียว → ตั้งเป็น `default` ตัวเดียว → ระบบใช้ model เดียวกันทุก stage
+> - ถ้ามีหลาย model → ตั้ง model เก่งเป็น `default`, model เบาเป็น `cheap` → ประหยัดต้นทุน
+
+**2c. เปิดใช้งาน Provider** — ไปที่หน้า `/settings`:
+
+1. ในส่วน **AI Providers** จะเห็น toggle ของ DeepSeek
+2. เปิด toggle **Enable**
+3. เลือก **Default Model** = `deepseek-chat`
+4. กด **Save**
+
+**2d. ตั้งเป็น Default Provider (ถ้าต้องการ):**
+
+1. ในหน้า `/settings` ส่วน **Default Provider**
+2. เลือก **DeepSeek** จาก dropdown
+3. กด **Save**
+
+#### วิธี B: ผ่าน SQL (สำหรับ Developer / Migration Script)
+
+<details>
+<summary>คลิกเพื่อดู SQL</summary>
+
+**2a. INSERT ai_providers**
 
 ```sql
 INSERT INTO ai_providers (id, name, description, api_key_env_var, api_url_env_var, default_api_url, is_active, config_schema)
@@ -276,41 +329,40 @@ VALUES (
     'deepseek',                          -- id: ต้องตรงกับ class.name
     'DeepSeek',                          -- name: แสดงใน UI
     'DeepSeek AI API',                   -- description
-    'DEEPSEEK_API_KEY',                  -- api_key_env_var: ชื่อ env var สำหรับ API key
-    'DEEPSEEK_API_URL',                  -- api_url_env_var: ชื่อ env var สำหรับ API URL (NULL ถ้าไม่ต้องการ)
-    'https://api.deepseek.com/v1/chat/completions',  -- default_api_url
+    'DEEPSEEK_API_KEY',                  -- api_key_env_var
+    'DEEPSEEK_API_URL',                  -- api_url_env_var (NULL ถ้าไม่ต้องการ)
+    'https://api.deepseek.com/v1/chat/completions',
     1,                                   -- is_active
-    NULL                                 -- config_schema: JSON สำหรับ extra config (ถ้ามี)
+    NULL                                 -- config_schema
 );
 ```
 
 **`config_schema` (optional):** ถ้า provider มี config พิเศษ ให้ใส่เป็น JSON:
 
 ```sql
--- ตัวอย่าง: provider ที่มี options เพิ่มเติม
 UPDATE ai_providers SET config_schema = '{
     "temperature": {"type": "number", "default": 0.1, "label": "Temperature"},
     "max_tokens": {"type": "integer", "default": 4096, "label": "Max Tokens"}
 }' WHERE id = 'deepseek';
 ```
 
-#### 2b. INSERT ai_models
+**2b. INSERT ai_models**
 
 ```sql
--- Default model
-INSERT INTO ai_models (id, provider_id, model_id, name, tier, is_default, is_active, priority)
-VALUES ('deepseek-chat', 'deepseek', 'deepseek-chat', 'DeepSeek Chat', 'default', 1, 1, 100);
+-- Default model (งานยาก — สร้าง SQL)
+INSERT INTO ai_models (provider_id, model_id, display_name, tier, is_default, is_active, priority)
+VALUES ('deepseek', 'deepseek-chat', 'DeepSeek Chat', 'default', 1, 1, 100);
 
--- Cheap model (สำหรับ tasks ที่ไม่ต้องการ quality สูง)
-INSERT INTO ai_models (id, provider_id, model_id, name, tier, is_default, is_active, priority)
-VALUES ('deepseek-chat-cheap', 'deepseek', 'deepseek-chat', 'DeepSeek Chat (Cheap)', 'cheap', 0, 1, 50);
+-- Cheap model (งานง่าย — วิเคราะห์คำถาม + สรุปผลลัพธ์)
+INSERT INTO ai_models (provider_id, model_id, display_name, tier, is_default, is_active, priority)
+VALUES ('deepseek', 'deepseek-chat', 'DeepSeek Chat (Lite)', 'cheap', 0, 1, 50);
 
 -- Reasoning model (optional)
-INSERT INTO ai_models (id, provider_id, model_id, name, tier, is_default, is_active, priority)
-VALUES ('deepseek-reasoner', 'deepseek', 'deepseek-reasoner', 'DeepSeek Reasoner', 'default', 0, 1, 90);
+INSERT INTO ai_models (provider_id, model_id, display_name, tier, is_default, is_active, priority)
+VALUES ('deepseek', 'deepseek-reasoner', 'DeepSeek Reasoner', 'default', 0, 1, 90);
 ```
 
-#### 2c. Enable ใน admin_config
+**2c. Enable ใน admin_config**
 
 ```sql
 INSERT INTO admin_config (config_key, config_value, config_type, category)
@@ -319,6 +371,8 @@ VALUES ('deepseek_enabled', 'true', 'ai_provider', 'ai');
 INSERT INTO admin_config (config_key, config_value, config_type, category)
 VALUES ('deepseek_model', 'deepseek-chat', 'model', 'ai');
 ```
+
+</details>
 
 ---
 
@@ -333,7 +387,7 @@ DEEPSEEK_API_URL=https://api.deepseek.com/v1/chat/completions
 
 ---
 
-## เสร็จ! ไม่ต้องแก้ไฟล์อื่น
+## เสร็จ! Restart Server แล้วทดสอบ
 
 ระบบจะ auto-discover provider ใหม่เมื่อ restart server:
 
@@ -341,6 +395,46 @@ DEEPSEEK_API_URL=https://api.deepseek.com/v1/chat/completions
 2. `_build_provider_kwargs("deepseek", ai_config)` — อ่าน `api_key_env_var` จาก DB → resolve จาก `.env`
 3. `registry.create_provider("deepseek", **kwargs)` — introspect `__init__` → สร้าง instance
 4. `provider.is_configured()` → เช็คว่ามี api_key + api_url → พร้อมใช้
+
+**ทดสอบผ่าน Web Admin:**
+
+1. เปิด `/models` → ดูว่า tab DeepSeek มี models ครบ
+2. เปิด `/settings` → ดูว่า DeepSeek ถูก enable + เลือกเป็น default ได้
+3. เปิดหน้า Chat → ถามคำถาม → ตรวจว่าใช้ DeepSeek
+
+---
+
+## Model Tier — ระบบเลือก Model อัตโนมัติ
+
+ระบบแบ่งงานเป็น 2 ระดับ แล้วเลือก model ตาม tier:
+
+```
+┌─────────────────────────────────────────────────────┐
+│                   User Query                        │
+│                      │                              │
+│     ┌────────────────┼────────────────┐             │
+│     ▼                ▼                ▼             │
+│  Intent          SQL Gen         Explanation        │
+│  (งานง่าย)        (งานยาก)        (งานง่าย)          │
+│  cheap model     default model   cheap model        │
+│                                                     │
+│  ตัวอย่าง:                                           │
+│  Matcha:  gpt-4.1-mini   gpt-4.1      gpt-4.1-mini │
+│  Claude:  haiku-3.5      sonnet-4.5   haiku-3.5    │
+│  Gemini:  flash-exp      flash-3      flash-exp    │
+└─────────────────────────────────────────────────────┘
+```
+
+**กฎการเลือก:**
+- ระบบดู `ai_models` table → หา row ที่ `tier = 'cheap'` ของ provider นั้น
+- ถ้ามี → ใช้ cheap model สำหรับ intent + explanation
+- **ถ้าไม่มี → ใช้ model เดียวกันทุก stage** (ไม่ข้าม provider)
+- ถ้า cheap model fail → retry ด้วย default model อัตโนมัติ
+
+**ตั้งค่าผ่าน Web Admin (`/models`):**
+1. เลือก tab ของ provider ที่ต้องการ
+2. กด Edit ที่ model → เปลี่ยน Tier เป็น `cheap` หรือ `default`
+3. กด OK → ค่าจะ apply ทันที (ไม่ต้อง restart server)
 
 ---
 
@@ -370,26 +464,45 @@ Tier 3: Hardcoded defaults
 
 ## Checklist
 
-| # | รายการ | ตรวจสอบ |
-|---|--------|---------|
-| 1 | สร้างไฟล์ `app/providers/{name}_provider.py` | |
-| 2 | Class inherit จาก `AIProvider` | |
-| 3 | ตั้ง `name = "xxx"` ตรงกับ DB id | |
-| 4 | Implement `__init__` รับ `api_key`, `model` (+ `api_url` ถ้าจำเป็น) | |
-| 5 | Implement `is_configured()` | |
-| 6 | Implement `generate_sql()` — return `{"response": ..., "tokens_used": N}` | |
-| 7 | Implement `explain_result()` — ใช้ `build_explain_prompt()` + `parse_explanation_response()` | |
-| 8 | Implement `generate_content()` — return string | |
-| 9 | INSERT `ai_providers` row พร้อม `api_key_env_var` | |
-| 10 | INSERT `ai_models` row(s) พร้อม tier | |
-| 11 | INSERT `admin_config` rows (`{name}_enabled`, `{name}_model`) | |
-| 12 | เพิ่ม API key ใน `.env` | |
-| 13 | Restart server → ตรวจ log "Discovered provider: xxx" | |
-| 14 | ทดสอบ query ผ่าน UI | |
+| # | รายการ | วิธี | ตรวจสอบ |
+|---|--------|------|---------|
+| 1 | สร้างไฟล์ `app/providers/{name}_provider.py` | Code | |
+| 2 | Class inherit จาก `AIProvider` | Code | |
+| 3 | ตั้ง `name = "xxx"` ตรงกับ DB id | Code | |
+| 4 | Implement `__init__` รับ `api_key`, `model` (+ `api_url` ถ้าจำเป็น) | Code | |
+| 5 | Implement `is_configured()` | Code | |
+| 6 | Implement `generate_sql()` — return `{"response": ..., "tokens_used": N}` | Code | |
+| 7 | Implement `explain_result()` — ใช้ `build_explain_prompt()` + `parse_explanation_response()` | Code | |
+| 8 | Implement `generate_content()` — return string | Code | |
+| 9 | INSERT `ai_providers` row พร้อม `api_key_env_var` | SQL | |
+| 10 | เพิ่ม API key ใน `.env` | `.env` | |
+| 11 | Restart server → ตรวจ log "Discovered provider: xxx" | Terminal | |
+| 12 | เพิ่ม Models + ตั้ง Tier ผ่าน `/models` | Web Admin | |
+| 13 | Enable provider + ตั้ง default model ผ่าน `/settings` | Web Admin | |
+| 14 | ทดสอบ query ผ่าน Chat UI | Web Admin | |
+
+---
+
+## Web Admin UI — หน้าที่เกี่ยวข้อง
+
+| หน้า | URL | ใช้ทำอะไร |
+|------|-----|-----------|
+| **Models** | `/models` | เพิ่ม/แก้ไข models, **ตั้ง Tier** (default/cheap) |
+| **Settings** | `/settings` | Enable/disable providers, เลือก default provider + model |
+| **Query Logs** | `/query-logs` | ตรวจดู queries ที่ใช้ provider ใหม่ |
+| **Feedback** | `/feedback` | ดู feedback จาก users ต่อ provider ใหม่ |
 
 ---
 
 ## FAQ
+
+### Q: ต้อง override `get_model()` ไหม?
+
+**ไม่ต้อง** — base class (`AIProvider`) จัดการให้แล้ว:
+1. หา model จาก DB (`ai_models` table ตาม provider + tier)
+2. ถ้าไม่มี → return `self.model` (model เดียวทุก stage)
+
+Admin ตั้ง cheap model ผ่านหน้า `/models` → เปลี่ยน Tier ของ model เป็น `cheap`
 
 ### Q: ต้องเพิ่ม env var ใน `config.py` (Pydantic Settings) ไหม?
 
@@ -492,6 +605,14 @@ pip install deepseek-sdk  # (ถ้ามี official SDK)
 | Gemini | `api_key, model` | `google-genai` SDK | `gemini_provider.py` |
 | Matcha | `api_key, api_url, model` | `httpx` (OpenAI-compat) | `matcha_provider.py` |
 
+**ตัวอย่าง Tier ที่ตั้งไว้ในระบบ:**
+
+| Provider | Default Model (งานยาก) | Cheap Model (งานง่าย) |
+|----------|----------------------|---------------------|
+| Matcha | gpt-4.1 | gpt-4.1-mini |
+| Claude | claude-sonnet-4.5 | claude-haiku-3.5 |
+| Gemini | gemini-3-flash | gemini-2.0-flash-exp |
+
 ---
 
 ## Flow Diagram
@@ -534,5 +655,11 @@ pip install deepseek-sdk  # (ถ้ามี official SDK)
                          │
               provider.is_configured() ✓
                          │
-              provider.generate_sql(...)
+              ┌──────────┴──────────┐
+              │                     │
+         get_model("default")  get_model("cheap")
+         → DB: "deepseek-chat" → DB: "deepseek-lite"
+              │                     │
+         SQL Generation        Intent + Explain
+         (งานยาก)                (งานง่าย)
 ```
