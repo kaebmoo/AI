@@ -94,6 +94,9 @@ class Settings(BaseSettings):
     # Value Lookup (keyword index search)
     VALUE_LOOKUP_ENABLED: bool = False
 
+    # Tier Classification (route queries to cheap/mid model based on complexity)
+    TIER_CLASSIFICATION_ENABLED: bool = False
+
     # Conversation History
     MAX_HISTORY_MESSAGES: int = 10  # Max conversation turns to keep as context
     DEDUP_TTL_SECONDS: float = 5.0  # Ignore duplicate questions within N seconds

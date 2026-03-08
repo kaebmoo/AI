@@ -19,6 +19,7 @@ Usage:
     ai_service = create_claude_service(api_key="...", mcp_client=global_mcp_client)
 """
 
+import asyncio
 import json
 import re
 import logging
@@ -403,6 +404,7 @@ class AIService:
         context_name: str = "revenue",
         two_pass_enabled: bool = False,
         value_lookup_enabled: bool = False,
+        cheap_model: Optional[str] = None,
         **kwargs
     ) -> QueryResult:
         """
@@ -476,32 +478,44 @@ class AIService:
                 logger.info(f"Hybrid Mode: Using native conversation history ({len(history)} messages)")
 
             if attempt == 0:
-                # Get RAG Context
-                rag_context = ""
-                try:
-                    t0 = time.perf_counter()
-                    rag_context = self._get_vanna_context_string(question)
-                    t_rag = time.perf_counter() - t0
-                    if rag_context:
-                        logger.info(f"Hybrid Mode: Injected RAG Context ({len(rag_context)} chars) took {t_rag:.4f}s")
-                except Exception as e:
-                    logger.warning(f"Failed to get RAG context: {e}")
+                # Run RAG Context + Value Lookup in parallel (both are sync → use to_thread)
 
-                # Value Lookup — always-on (searches actual DB values for keywords in question)
+                async def _rag_task():
+                    try:
+                        t0 = time.perf_counter()
+                        ctx = await asyncio.to_thread(self._get_vanna_context_string, question)
+                        t_rag = time.perf_counter() - t0
+                        if ctx:
+                            logger.info(f"Hybrid Mode: Injected RAG Context ({len(ctx)} chars) took {t_rag:.4f}s")
+                        return ctx
+                    except Exception as e:
+                        logger.warning(f"Failed to get RAG context: {e}")
+                        return ""
+
+                async def _value_lookup_task():
+                    try:
+                        matches = await asyncio.to_thread(
+                            self._lookup_values_from_question, question, context_name, context_table
+                        )
+                        return matches
+                    except Exception as e:
+                        logger.warning(f"Value Lookup failed: {e}")
+                        return []
+
+                rag_context, value_matches = await asyncio.gather(_rag_task(), _value_lookup_task())
+                rag_context = rag_context or ""
+
+                # Format value lookup results
                 value_lookup_text = ""
                 detected_level = None
-                try:
-                    value_matches = self._lookup_values_from_question(question, context_name, context_table)
-                    if value_matches:
-                        hierarchy = get_column_hierarchies().get(context_name)
-                        detected_level = self._detect_hierarchy_level(question, context_name)
-                        if hierarchy and detected_level:
-                            logger.info(f"Hierarchy: level {detected_level['level']} ({detected_level['label_en']})")
-                        value_lookup_text = self._format_value_matches(
-                            value_matches, hierarchy=hierarchy, detected_level=detected_level
-                        )
-                except Exception as e:
-                    logger.warning(f"Value Lookup failed: {e}")
+                if value_matches:
+                    hierarchy = get_column_hierarchies().get(context_name)
+                    detected_level = self._detect_hierarchy_level(question, context_name)
+                    if hierarchy and detected_level:
+                        logger.info(f"Hierarchy: level {detected_level['level']} ({detected_level['label_en']})")
+                    value_lookup_text = self._format_value_matches(
+                        value_matches, hierarchy=hierarchy, detected_level=detected_level
+                    )
 
                 # Two-Pass Mode
                 if two_pass_enabled:
@@ -516,7 +530,8 @@ class AIService:
                         context_table=context_table,
                         context_thai=context_thai,
                         history_context="",
-                        rag_context=rag_context
+                        rag_context=rag_context,
+                        cheap_model=cheap_model
                     )
 
                     if intent_json:
@@ -749,7 +764,29 @@ Error: {last_error.get('error', '')}
                         # instead of just first 30 rows (which may be biased by ORDER BY)
                         explain_data = self._prepare_data_for_explanation(data)
                         simple_system_prompt = "You are a data visualization assistant. Analyze the data and provide a Thai explanation and chart recommendation."
-                        explanation = await self.provider.explain_result(enriched_question, sql_query, explain_data, simple_system_prompt, dimension_families=dim_families, hierarchy_info=_hierarchy_info, schema_metadata=_schema_metadata)
+
+                        # Use cheap model for explanation (lightweight summarization task)
+                        original_model = None
+                        if cheap_model and cheap_model != self.provider.model:
+                            original_model = self.provider.model
+                            self.provider.model = cheap_model
+                            logger.info(f"Hybrid Mode: Explanation using cheap model '{cheap_model}' (default: '{original_model}')")
+
+                        try:
+                            explanation = await self.provider.explain_result(enriched_question, sql_query, explain_data, simple_system_prompt, dimension_families=dim_families, hierarchy_info=_hierarchy_info, schema_metadata=_schema_metadata)
+                        except Exception as cheap_err:
+                            # Cheap model failed — retry with the original (default) model
+                            if original_model:
+                                logger.warning(f"Cheap model '{cheap_model}' failed for explanation: {cheap_err}. Retrying with default model '{original_model}'...")
+                                self.provider.model = original_model
+                                original_model = None  # Already restored — prevent double-restore in finally
+                                explanation = await self.provider.explain_result(enriched_question, sql_query, explain_data, simple_system_prompt, dimension_families=dim_families, hierarchy_info=_hierarchy_info, schema_metadata=_schema_metadata)
+                            else:
+                                raise  # No fallback model available — propagate to outer except
+                        finally:
+                            if original_model:
+                                self.provider.model = original_model
+
                         t_explain = time.perf_counter() - t0
                         logger.info(f"Hybrid Mode: Explanation Generation took {t_explain:.4f}s")
                     except Exception as explain_error:
@@ -965,55 +1002,88 @@ Error: {last_error.get('error', '')}
     # Smart Value Lookup
     # ============================================================
 
-    def _extract_keywords_from_question(self, question: str) -> List[str]:
-        """Extract searchable keywords from raw question text (no AI needed)."""
-        strip_prefixes = [
-            "ค่าใช้จ่าย", "รายได้", "บริการ", "ค่า", "ยอด",
-            "ขอดู", "ขอ", "แสดง", "หา", "ดู", "สรุป",
-        ]
-        stop_words = {
-            "รายได้", "ค่าใช้จ่าย", "บริการ",
-            "เท่าไหร่", "เท่าไร", "อะไร", "อยากรู้",
-            "ทั้งหมด", "รวม", "แยก", "ตาม", "ราย", "เดือน", "ปี", "ไตรมาส",
-            "รายเดือน", "รายไตรมาส", "รายปี",
-            "เปรียบเทียบ", "เทียบ", "กับ", "และ", "ของ", "ที่", "ใน", "จาก",
-            "มี", "ให้", "ดู", "หา", "แสดง", "สรุป", "วิเคราะห์",
-            "the", "of", "and", "for", "by", "in", "to", "a", "is",
-            "total", "sum", "count", "group", "show", "revenue", "expense",
-        }
+    # Thai stop words and question words that should not be searched in DB
+    _THAI_STOP_WORDS = {
+        "รายได้", "ค่าใช้จ่าย", "บริการ",
+        "เท่าไหร่", "เท่าไร", "อะไร", "อยากรู้", "ไหน", "ยังไง", "เมื่อไร",
+        "ทั้งหมด", "รวม", "แยก", "ตาม", "ราย", "เดือน", "ปี", "ไตรมาส",
+        "รายเดือน", "รายไตรมาส", "รายปี",
+        "เปรียบเทียบ", "เทียบ", "กับ", "และ", "ของ", "ที่", "ใน", "จาก",
+        "มี", "ให้", "ดู", "หา", "แสดง", "สรุป", "วิเคราะห์",
+        "มากสุด", "น้อยสุด", "สูงสุด", "ต่ำสุด", "มาก", "น้อย", "สุด",
+        "อันดับ", "อันดับแรก", "แรก", "หลัง", "ล่าสุด",
+        "หน่วยงาน", "ส่วนงาน",  # generic org terms — actual names are in dictionary
+        "the", "of", "and", "for", "by", "in", "to", "a", "is",
+        "total", "sum", "count", "group", "show", "revenue", "expense",
+    }
+
+    def _extract_keywords_from_question(self, question: str, context_name: str = None) -> List[str]:
+        """
+        Extract searchable keywords using dictionary-based longest-match.
+
+        Strategy:
+        1. Dictionary scan: find known terms (from keyword_value_index + master_hierarchy_values)
+           using longest-match-first against the raw question text
+        2. Regex fallback: split remaining text by whitespace for English/numeric tokens
+        3. Filter: skip numbers, stop words, and overly long unmatched phrases
+        """
+        import time
+        t0 = time.perf_counter()
 
         keywords = []
+        question_lower = question.lower().strip()
 
+        # --- Phase 1: Dictionary-based extraction (handles Thai without word segmentation) ---
+        try:
+            from app.services.schema_service import SchemaService
+            from app.config import settings as app_settings
+            db_path = app_settings.DATABASE_URL.replace("sqlite:///", "").replace("sqlite://", "")
+            schema_svc = SchemaService(db_path=db_path)
+            known_terms = schema_svc.get_known_terms(context_name)
+
+            # Scan question for longest matches
+            remaining = question_lower
+            for term in known_terms:
+                term_lower = term.lower()
+                if len(term_lower) < 2:
+                    continue
+                if term_lower in remaining and term_lower not in self._THAI_STOP_WORDS:
+                    keywords.append(term)
+                    # Remove matched term to avoid re-matching substrings
+                    remaining = remaining.replace(term_lower, " ", 1)
+
+        except Exception as e:
+            logger.warning(f"Dictionary-based extraction failed: {e}")
+
+        # --- Phase 2: Regex fallback for remaining English/numeric tokens ---
         parts = re.split(r'[\s,;:?!()（）\[\]]+', question.strip())
         for part in parts:
             part = part.strip().strip('"\'')
-            if len(part) < 2 or part.lower() in stop_words:
+            if len(part) < 2:
                 continue
+            # Skip pure numbers
+            if re.match(r'^\d+$', part):
+                continue
+            if part.lower() in self._THAI_STOP_WORDS:
+                continue
+            # Skip long Thai phrases that didn't match dictionary (likely noise)
+            if len(part) > 20 and not any(c.isascii() and c.isalpha() for c in part):
+                continue
+            # Only add English tokens or short Thai tokens not already found
+            if any(c.isascii() and c.isalpha() for c in part):
+                keywords.append(part)
 
-            candidates = [part]
-            current = part
-            for _ in range(3):
-                stripped = False
-                for prefix in strip_prefixes:
-                    if current.startswith(prefix) and len(current) > len(prefix) + 1:
-                        current = current[len(prefix):]
-                        if current not in stop_words and len(current) >= 2:
-                            candidates.append(current)
-                        stripped = True
-                        break
-                if not stripped:
-                    break
-
-            for c in candidates:
-                if c not in stop_words and len(c) >= 2:
-                    keywords.append(c)
-
+        # Deduplicate preserving order
         seen = set()
         unique = []
         for kw in keywords:
             if kw.lower() not in seen:
                 seen.add(kw.lower())
                 unique.append(kw)
+
+        t_extract = time.perf_counter() - t0
+        logger.info(f"Keyword extraction: {len(unique)} keywords in {t_extract:.3f}s — {[k[:30] for k in unique[:10]]}")
+
         return unique
 
     def _lookup_values_from_question(self, question: str, context_name: str, table_name: str) -> List[Dict]:
@@ -1025,7 +1095,7 @@ Error: {last_error.get('error', '')}
         t0 = time.perf_counter()
         results = []
 
-        keywords = self._extract_keywords_from_question(question)
+        keywords = self._extract_keywords_from_question(question, context_name)
         if not keywords:
             return results
 
@@ -1255,7 +1325,8 @@ Error: {last_error.get('error', '')}
         context_table: str,
         context_thai: str,
         history_context: str,
-        rag_context: str
+        rag_context: str,
+        cheap_model: Optional[str] = None
     ) -> Optional[Dict]:
         """Pass 1: Extract structured intent from user question."""
         intent_prompt = f"""คำถาม: {question}
@@ -1295,7 +1366,29 @@ Error: {last_error.get('error', '')}
         try:
             import time
             t0 = time.perf_counter()
-            response_text = await self.provider.generate_content(intent_prompt, system_prompt)
+
+            # Use cheap model for intent extraction (lightweight JSON task)
+            original_model = None
+            if cheap_model and cheap_model != self.provider.model:
+                original_model = self.provider.model
+                self.provider.model = cheap_model
+                logger.info(f"Two-Pass: Intent using cheap model '{cheap_model}' (default: '{original_model}')")
+
+            try:
+                response_text = await self.provider.generate_content(intent_prompt, system_prompt)
+            except Exception as cheap_err:
+                # Cheap model failed — retry with default model
+                if original_model:
+                    logger.warning(f"Cheap model '{cheap_model}' failed for intent: {cheap_err}. Retrying with default model '{original_model}'...")
+                    self.provider.model = original_model
+                    original_model = None  # Already restored
+                    response_text = await self.provider.generate_content(intent_prompt, system_prompt)
+                else:
+                    raise
+            finally:
+                if original_model:
+                    self.provider.model = original_model
+
             t_intent = time.perf_counter() - t0
 
             intent_json = self._parse_intent_json(response_text)

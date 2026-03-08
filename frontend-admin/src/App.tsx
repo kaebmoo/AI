@@ -16,6 +16,10 @@ import Providers from './pages/Providers'
 import Models from './pages/Models'
 import Settings from './pages/Settings'
 import HierarchyManager from './pages/HierarchyManager'
+import Feedback from './pages/Feedback'
+import QueryLogs from './pages/QueryLogs'
+import DataWarnings from './pages/DataWarnings'
+import QueryPatterns from './pages/QueryPatterns'
 
 // Simple Auth Guard
 const ProtectedRoute = () => {
@@ -48,6 +52,10 @@ function App() {
             <Route path="/hierarchy" element={<HierarchyManager />} />
             <Route path="/providers" element={<Providers />} />
             <Route path="/models" element={<Models />} />
+            <Route path="/feedback" element={<Feedback />} />
+            <Route path="/query-logs" element={<QueryLogs />} />
+            <Route path="/data-warnings" element={<DataWarnings />} />
+            <Route path="/query-patterns" element={<QueryPatterns />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
           </Route>

@@ -1498,7 +1498,8 @@ def create_model(
         context_window=data.get("context_window"),
         supports_vision=data.get("supports_vision", False),
         description=data.get("description"),
-        priority=data.get("priority", 0)
+        priority=data.get("priority", 0),
+        tier=data.get("tier", "default")
     )
 
     if not success:
@@ -1528,7 +1529,8 @@ def update_model(
         context_window=data.get("context_window"),
         supports_vision=data.get("supports_vision"),
         description=data.get("description"),
-        priority=data.get("priority")
+        priority=data.get("priority"),
+        tier=data.get("tier")
     )
 
     if not success:
@@ -2029,3 +2031,74 @@ def delete_query_pattern(
 
     clear_patterns_cache()
     return None
+
+
+# ============================================================
+# Query Logs Endpoint
+# ============================================================
+
+@router.get("/query-logs")
+def get_query_logs(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    context: Optional[str] = None,
+    user_id: Optional[int] = None,
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db),
+):
+    """Get paginated query logs from chat_history. Admin only."""
+    from app.models.chat import ChatHistory
+    from app.models.user import User as UserModel
+
+    query = db.query(ChatHistory).order_by(ChatHistory.created_at.desc())
+
+    if date_from:
+        try:
+            dt = datetime.fromisoformat(date_from)
+            query = query.filter(ChatHistory.created_at >= dt)
+        except ValueError:
+            pass
+
+    if date_to:
+        try:
+            dt = datetime.fromisoformat(date_to)
+            query = query.filter(ChatHistory.created_at <= dt)
+        except ValueError:
+            pass
+
+    if context:
+        query = query.filter(ChatHistory.context_name == context)
+
+    if user_id:
+        query = query.filter(ChatHistory.user_id == user_id)
+
+    total = query.count()
+    rows = query.offset(skip).limit(limit).all()
+
+    # Map user IDs to emails
+    user_ids = list(set(r.user_id for r in rows if r.user_id))
+    user_map = {}
+    if user_ids:
+        users = db.query(UserModel).filter(UserModel.id.in_(user_ids)).all()
+        user_map = {u.id: u.email for u in users}
+
+    items = []
+    for r in rows:
+        items.append({
+            "id": r.id,
+            "user_id": r.user_id,
+            "user_email": user_map.get(r.user_id, "unknown"),
+            "question": r.question,
+            "generated_sql": r.generated_sql,
+            "sql_result_summary": (r.sql_result_summary or "")[:500],
+            "ai_response": (r.ai_response or "")[:300],
+            "tokens_used": r.tokens_used,
+            "execution_time_ms": r.execution_time_ms,
+            "context_name": r.context_name,
+            "feedback_rating": r.feedback_rating,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        })
+
+    return {"total": total, "items": items}

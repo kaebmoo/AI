@@ -12,6 +12,7 @@ export default function ChatScreen() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [statusText, setStatusText] = useState<string>('');
   const [provider, setProvider] = useState(''); // Let ModelSelector auto-select default from API
   const [context, setContext] = useState<DataContext>('auto'); // Default: auto-detect
   const [conversationId, setConversationId] = useState<string | undefined>(undefined);
@@ -29,6 +30,15 @@ export default function ChatScreen() {
     ])
   }, []);
 
+  const STATUS_LABELS: Record<string, string> = {
+    started: 'กำลังเริ่มต้น...',
+    analyzing: 'กำลังวิเคราะห์คำถาม...',
+    generating: 'กำลังสร้าง SQL...',
+    validating: 'กำลังตรวจสอบ SQL...',
+    executing: 'กำลังดึงข้อมูล...',
+    explaining: 'กำลังสรุปผล...',
+  };
+
   const handleSend = async () => {
     if (!input.trim()) return;
 
@@ -38,42 +48,81 @@ export default function ChatScreen() {
       content: input.trim(),
     };
 
+    const streamingId = `streaming-${Date.now()}`;
     setMessages((prev) => [...prev, userMessage]);
     setInput('');
     setLoading(true);
+    setStatusText('กำลังเริ่มต้น...');
 
     try {
-      const response = await chatService.sendMessage({
-        question: userMessage.content,
-        conversation_id: conversationId,
-        provider: provider,
-        context: context === 'auto' ? undefined : context  // undefined = auto-detect on backend
-      });
+      await chatService.streamMessage(
+        {
+          question: userMessage.content,
+          conversation_id: conversationId,
+          provider: provider,
+          context: context === 'auto' ? undefined : context,
+        },
+        {
+          onStatus: (status, message) => {
+            setStatusText(STATUS_LABELS[status] || message);
+          },
+          onDataReady: (data, sqlQuery) => {
+            // Show data immediately while explanation is being generated
+            setStatusText('กำลังสรุปผล...');
+            const previewMessage: Message = {
+              id: streamingId,
+              role: 'assistant',
+              content: '⏳ กำลังสรุปผลลัพธ์...',
+              sql: sqlQuery,
+              data: data,
+            };
+            setMessages((prev) => [...prev, previewMessage]);
+          },
+          onAnswer: (response) => {
+            setConversationId(response.conversation_id);
 
-      setConversationId(response.conversation_id);
+            const aiMessage: Message = {
+              id: response.id,
+              chatId: response.id,
+              role: 'assistant',
+              content: response.answer,
+              sql: response.sql_query,
+              question: response.question,
+              executionTime: response.execution_time_ms,
+              warnings: response.warnings,
+              data: response.data,
+              confidence: response.confidence as any,
+              visualization: response.visualization,
+              chartConfig: response.chart_config,
+              displayHint: response.display_hint,
+              hierarchyColumns: response.hierarchy_columns,
+            };
 
-      const aiMessage: Message = {
-        id: response.id,
-        role: 'assistant',
-        content: response.answer,
-        sql: response.sql_query,
-        question: response.question, // Pass original question for training context
-        executionTime: response.execution_time_ms,
-        warnings: response.warnings,
-        data: response.data,
-        confidence: response.confidence as any,           // Confidence score from validation MCP
-        visualization: response.visualization,     // AI recommended visualization type
-        chartConfig: response.chart_config,        // AI recommended chart columns
-        displayHint: response.display_hint,        // AI recommended table display mode
-        hierarchyColumns: response.hierarchy_columns, // Ordered parent→child columns
-      };
-
-      setMessages((prev) => [...prev, aiMessage]);
+            // Replace preview message or append
+            setMessages((prev) => {
+              const idx = prev.findIndex((m) => m.id === streamingId);
+              if (idx >= 0) {
+                const updated = [...prev];
+                updated[idx] = aiMessage;
+                return updated;
+              }
+              return [...prev, aiMessage];
+            });
+          },
+          onDone: (_id, _convId) => {
+            setStatusText('');
+          },
+          onError: (error) => {
+            Alert.alert('Error', error);
+          },
+        }
+      );
     } catch (error: any) {
       const msg = error.response?.data?.detail || 'Failed to get response';
       Alert.alert('Error', msg);
     } finally {
       setLoading(false);
+      setStatusText('');
     }
   };
 
@@ -147,6 +196,18 @@ export default function ChatScreen() {
               หมายเหตุ: ข้อมูล &quot;รายได้อื่น&quot; เป็นรายได้ที่ยังไม่สุทธิ
             </Text>
           </View>
+
+          {/* Status Text */}
+          {loading && statusText ? (
+            <View className="px-4 py-2 bg-blue-50 dark:bg-blue-900/20 border-t border-blue-100 dark:border-blue-800">
+              <View className="flex-row items-center gap-2">
+                <ActivityIndicator size="small" color="#3B82F6" />
+                <Text className="text-xs text-blue-600 dark:text-blue-300 font-medium">
+                  {statusText}
+                </Text>
+              </View>
+            </View>
+          ) : null}
 
           {/* Input Area */}
           <View className="p-4 bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-800">

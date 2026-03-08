@@ -114,8 +114,23 @@ class AIProvider(ABC):
         return True
 
     def get_model(self, tier: str = "default") -> str:
-        """Return model name for given tier. Override in subclass for cost control."""
-        return ""
+        """Return model name for given tier.
+
+        Lookup order:
+        1. DB (ai_models table with matching provider + tier) — admin-configurable
+        2. Fallback to self.model (current default model for this provider)
+
+        This ensures cheap model always stays within the same provider family.
+        If admin hasn't configured a cheap model in DB, the default model is used
+        for all tiers — no cross-provider model fallback.
+        """
+        # provider_name comes from each subclass (e.g. "matcha", "claude", "gemini")
+        provider_name = getattr(self, '_provider_name', self.__class__.__name__.lower().replace('provider', ''))
+        db_model = lookup_model_by_tier(provider_name, tier)
+        if db_model:
+            return db_model
+        # No tier-specific model in DB → use the default model
+        return self.model
 
     @abstractmethod
     async def generate_sql(

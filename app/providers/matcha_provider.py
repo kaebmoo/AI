@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Any, Union
 
 import httpx
 
-from app.providers.base import AIProvider, lookup_model_by_tier
+from app.providers.base import AIProvider
 from app.providers.retry_config import ai_retry
 from app.providers.chart_postprocessor import (
     parse_explanation_response,
@@ -37,15 +37,6 @@ class MatchaProvider(AIProvider):
 
     def is_configured(self) -> bool:
         return bool(self.api_key and self.api_url)
-
-    def get_model(self, tier: str = "default") -> str:
-        db_model = lookup_model_by_tier("matcha", tier)
-        if db_model:
-            return db_model
-        # Hardcoded fallback
-        if tier == "cheap":
-            return "gpt-4o-mini"
-        return self.model
 
     @ai_retry
     async def generate_sql(self, question: Optional[str], system_prompt: str, tools: List[Dict], history: List[Dict] = []) -> Dict[str, Any]:

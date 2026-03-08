@@ -16,7 +16,7 @@ import uuid
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Callable
 
 from sqlalchemy.orm import Session
 
@@ -76,8 +76,8 @@ def detect_context_from_question(question: str, schema_service: SchemaService = 
 # In-memory query result cache (TTL-based)
 # ---------------------------------------------------------------------------
 _query_cache: Dict[str, Dict[str, Any]] = {}
-_QUERY_CACHE_TTL = 300  # 5 minutes
-_QUERY_CACHE_MAX = 200  # max entries before eviction
+_QUERY_CACHE_TTL = 1800  # 30 minutes
+_QUERY_CACHE_MAX = 500  # max entries before eviction
 
 
 def _cache_key(question: str, provider: str, context: str) -> str:
@@ -266,6 +266,7 @@ class QueryEngine:
         max_retries: int = 3,
         conversation_id: str = None,
         provider_kwargs: Dict = None,
+        on_status: Callable = None,
     ) -> QueryEngineResult:
         """
         Main entry point.
@@ -341,6 +342,13 @@ class QueryEngine:
                 logger.info(f"Tier classification: '{tier}' → switching model from '{provider_instance.model}' to '{tier_model}'")
                 provider_instance.model = tier_model
 
+        # Resolve cheap model for lightweight stages (intent extraction, explanation)
+        cheap_model = provider_instance.get_model("cheap")
+        if cheap_model and cheap_model != provider_instance.model:
+            logger.info(f"Per-stage model: cheap='{cheap_model}', default='{provider_instance.model}'")
+        else:
+            cheap_model = None  # same as default — no swap needed
+
         ai_service = AIService(provider=provider_instance, mcp_client=self.mcp_client)
 
         # 2. Detect context
@@ -363,13 +371,14 @@ class QueryEngine:
                 system_prompt=system_prompt,
                 max_retries=max_retries,
                 history=history,
-                on_status=lambda status: logger.info(
+                on_status=on_status or (lambda status: logger.info(
                     f"QueryEngine status: attempt={status.attempt}/{status.max_attempts}, "
                     f"status={status.status}, message={status.message}"
-                ),
+                )),
                 context_name=context_name,
                 two_pass_enabled=feature_flags.get("two_pass_enabled", False),
                 value_lookup_enabled=feature_flags.get("value_lookup_enabled", False),
+                cheap_model=cheap_model,
             )
         else:
             result = await ai_service.query_with_retry(

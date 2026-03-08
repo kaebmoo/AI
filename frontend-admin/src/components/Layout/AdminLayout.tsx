@@ -17,7 +17,11 @@ import {
     CloudOutlined,
     ThunderboltOutlined,
     ApartmentOutlined,
-    SwapOutlined
+    SwapOutlined,
+    MessageOutlined,
+    FileSearchOutlined,
+    WarningOutlined,
+    ForkOutlined
 } from '@ant-design/icons';
 import { Layout, Menu, Button, theme, Dropdown, Avatar, Space } from 'antd';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
@@ -127,6 +131,32 @@ const AppLayout: React.FC = () => {
                     key: '/models',
                     icon: <ThunderboltOutlined />,
                     label: 'AI Models',
+                },
+            ]
+        },
+        {
+            type: 'group',
+            label: 'Monitoring',
+            children: [
+                {
+                    key: '/feedback',
+                    icon: <MessageOutlined />,
+                    label: 'Feedback',
+                },
+                {
+                    key: '/query-logs',
+                    icon: <FileSearchOutlined />,
+                    label: 'Query Logs',
+                },
+                {
+                    key: '/data-warnings',
+                    icon: <WarningOutlined />,
+                    label: 'Data Warnings',
+                },
+                {
+                    key: '/query-patterns',
+                    icon: <ForkOutlined />,
+                    label: 'Query Patterns',
                 },
             ]
         },

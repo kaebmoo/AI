@@ -107,7 +107,8 @@ const Models: React.FC = () => {
             is_active: true,
             is_default: false,
             supports_vision: false,
-            priority: 50
+            priority: 50,
+            tier: 'default'
         });
         setIsModalVisible(true);
     };
@@ -203,6 +204,22 @@ const Models: React.FC = () => {
             key: 'priority',
             width: 80,
             sorter: (a, b) => a.priority - b.priority
+        },
+        {
+            title: 'Tier',
+            dataIndex: 'tier',
+            key: 'tier',
+            width: 100,
+            render: (tier: string) => {
+                const colors: Record<string, string> = { cheap: 'green', default: 'blue', mid: 'orange' };
+                return <Tag color={colors[tier] || 'default'}>{tier || 'default'}</Tag>;
+            },
+            filters: [
+                { text: 'Cheap', value: 'cheap' },
+                { text: 'Default', value: 'default' },
+                { text: 'Mid', value: 'mid' },
+            ],
+            onFilter: (value, record) => (record as any).tier === value,
         },
         {
             title: 'Description',
@@ -352,6 +369,18 @@ const Models: React.FC = () => {
                         tooltip="Display order (higher priority appears first)"
                     >
                         <Input type="number" placeholder="e.g., 50" />
+                    </Form.Item>
+
+                    <Form.Item
+                        label="Tier"
+                        name="tier"
+                        tooltip="Model tier for cost control. 'cheap' = lightweight tasks (intent/explain), 'default' = standard, 'mid' = balanced"
+                    >
+                        <Select>
+                            <Select.Option value="cheap">Cheap (fast, lower cost)</Select.Option>
+                            <Select.Option value="default">Default (standard)</Select.Option>
+                            <Select.Option value="mid">Mid (balanced)</Select.Option>
+                        </Select>
                     </Form.Item>
 
                     <Form.Item

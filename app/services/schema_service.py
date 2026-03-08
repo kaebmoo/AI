@@ -1642,6 +1642,73 @@ DATE column is Unix Timestamp (ms). Use YEAR/MONTH columns instead."""
 
         return results
 
+    # ---------------------------------------------------------------
+    # Known Terms Dictionary (for Thai keyword extraction)
+    # ---------------------------------------------------------------
+    _known_terms_cache: dict = {}
+    _known_terms_ts: float = 0
+
+    def get_known_terms(self, context_name: str = None) -> List[str]:
+        """
+        Get all known terms from keyword_value_index + master_hierarchy_values.
+        Returns terms sorted by length DESC (for longest-match-first scanning).
+        Cached for 1 hour per context.
+        """
+        import time
+        cache_key = context_name or "__all__"
+        now = time.time()
+
+        if cache_key in self._known_terms_cache:
+            cached = self._known_terms_cache[cache_key]
+            if now - cached["ts"] < 3600:
+                return cached["terms"]
+
+        terms_set: set = set()
+        try:
+            with self.engine.connect() as conn:
+                # Source 1: keyword_value_index
+                ctx_filter = "AND context_name = :ctx" if context_name else ""
+                params = {"ctx": context_name} if context_name else {}
+                rows = conn.execute(text(f"""
+                    SELECT DISTINCT keyword FROM keyword_value_index
+                    WHERE 1=1 {ctx_filter}
+                """), params).fetchall()
+                for row in rows:
+                    val = (row[0] or "").strip()
+                    if len(val) >= 2:
+                        terms_set.add(val)
+
+                # Source 2: master_hierarchy_values (aliases + display values)
+                ctx_filter2 = "AND context_name = :ctx" if context_name else ""
+                rows2 = conn.execute(text(f"""
+                    SELECT DISTINCT display_value FROM master_hierarchy_values
+                    WHERE is_active = 1 {ctx_filter2}
+                """), params).fetchall()
+                for row in rows2:
+                    val = (row[0] or "").strip()
+                    if len(val) >= 2:
+                        terms_set.add(val)
+
+                # Source 3: aliases from master_hierarchy_values
+                rows3 = conn.execute(text(f"""
+                    SELECT DISTINCT aliases FROM master_hierarchy_values
+                    WHERE aliases IS NOT NULL AND aliases != '' AND is_active = 1 {ctx_filter2}
+                """), params).fetchall()
+                for row in rows3:
+                    for alias in (row[0] or "").split(","):
+                        alias = alias.strip()
+                        if len(alias) >= 2:
+                            terms_set.add(alias)
+
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"get_known_terms failed: {e}")
+
+        # Sort by length DESC for longest-match-first
+        sorted_terms = sorted(terms_set, key=len, reverse=True)
+        self._known_terms_cache[cache_key] = {"terms": sorted_terms, "ts": now}
+        return sorted_terms
+
 
 # Factory Functions
 # =========================================================

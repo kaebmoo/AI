@@ -13,6 +13,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 from app.config import settings
 import logging
+from app.providers.base import clear_model_tier_cache
 
 logger = logging.getLogger(__name__)
 
@@ -449,6 +450,10 @@ class AdminConfigService:
                 "value_lookup_enabled",
                 "true" if settings.VALUE_LOOKUP_ENABLED else "false"
             ) == "true",
+            "tier_classification_enabled": self.get_config(
+                "tier_classification_enabled",
+                "true" if settings.TIER_CLASSIFICATION_ENABLED else "false"
+            ) == "true",
         }
 
     def toggle_feature(self, feature_name: str, enabled: bool, updated_by: Optional[str] = None) -> bool:
@@ -784,7 +789,8 @@ class AdminConfigService:
                         m.supports_vision,
                         m.cost_per_1m_tokens,
                         m.description,
-                        m.priority
+                        m.priority,
+                        m.tier
                     FROM ai_models m
                     WHERE m.provider_id = :provider
                     {where_clause}
@@ -804,7 +810,8 @@ class AdminConfigService:
                 "supports_vision": bool(row[7]),
                 "cost_per_1m_tokens": row[8],
                 "description": row[9],
-                "priority": row[10]
+                "priority": row[10],
+                "tier": row[11] or "default"
             } for row in results]
 
         except Exception as e:
@@ -820,7 +827,8 @@ class AdminConfigService:
         context_window: Optional[int] = None,
         supports_vision: bool = False,
         description: Optional[str] = None,
-        priority: int = 0
+        priority: int = 0,
+        tier: Optional[str] = None
     ) -> bool:
         """Create a new AI model."""
         try:
@@ -835,10 +843,10 @@ class AdminConfigService:
                 text("""
                     INSERT INTO ai_models (
                         provider_id, model_id, display_name, is_active, is_default,
-                        context_window, supports_vision, description, priority
+                        context_window, supports_vision, description, priority, tier
                     ) VALUES (
                         :provider, :model_id, :display_name, 1, :is_default,
-                        :context_window, :supports_vision, :description, :priority
+                        :context_window, :supports_vision, :description, :priority, :tier
                     )
                 """),
                 {
@@ -849,10 +857,12 @@ class AdminConfigService:
                     "context_window": context_window,
                     "supports_vision": 1 if supports_vision else 0,
                     "description": description,
-                    "priority": priority
+                    "priority": priority,
+                    "tier": tier or "default"
                 }
             )
             self.db.commit()
+            clear_model_tier_cache()
             return True
 
         except Exception as e:
@@ -869,7 +879,8 @@ class AdminConfigService:
         context_window: Optional[int] = None,
         supports_vision: Optional[bool] = None,
         description: Optional[str] = None,
-        priority: Optional[int] = None
+        priority: Optional[int] = None,
+        tier: Optional[str] = None
     ) -> bool:
         """Update an existing AI model."""
         try:
@@ -922,10 +933,15 @@ class AdminConfigService:
                 updates.append("priority = :priority")
                 params["priority"] = priority
 
+            if tier is not None:
+                updates.append("tier = :tier")
+                params["tier"] = tier
+
             if updates:
                 sql = f"UPDATE ai_models SET {', '.join(updates)} WHERE id = :id"
                 self.db.execute(text(sql), params)
                 self.db.commit()
+                clear_model_tier_cache()
 
             return True
 
@@ -942,6 +958,7 @@ class AdminConfigService:
                 {"id": model_pk_id}
             )
             self.db.commit()
+            clear_model_tier_cache()
             return True
 
         except Exception as e:

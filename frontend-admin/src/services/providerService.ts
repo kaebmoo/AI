@@ -36,6 +36,7 @@ export interface AIModel {
     cost_per_1m_tokens?: number;
     description?: string;
     priority: number;
+    tier?: string;
     created_at?: string;
     updated_at?: string;
 }

@@ -6,6 +6,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { DataChart } from './DataChart';
 import { DataTable } from './DataTable';
 import { ConfidenceBadge, ConfidenceData } from './ConfidenceBadge';
+import { chatService, FeedbackRating, FeedbackCategory } from '@/services/chat';
 
 export interface DataWarning {
     code: string;
@@ -21,6 +22,7 @@ export interface ChartConfig {
 
 export interface Message {
     id: string | number;
+    chatId?: number;               // Backend chat_history.id (for feedback)
     role: 'user' | 'assistant';
     content: string;
     sql?: string;
@@ -33,6 +35,7 @@ export interface Message {
     displayHint?: 'hierarchical' | 'crosstab' | 'flat'; // AI recommended table display mode
     hierarchyColumns?: string[];   // Ordered column names for hierarchical display (parent→child)
     question?: string;             // Original question (needed for training)
+    feedbackRating?: FeedbackRating; // User's feedback (persisted)
 }
 
 interface ChatBubbleProps {
@@ -60,6 +63,32 @@ export const ChatBubble = ({ message, onTrain }: ChatBubbleProps) => {
     };
 
     const [showAllData, setShowAllData] = useState(false);
+    const [feedbackState, setFeedbackState] = useState<FeedbackRating | null>(message.feedbackRating || null);
+    const [showCategoryPicker, setShowCategoryPicker] = useState(false);
+    const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+
+    const FEEDBACK_CATEGORIES: { value: FeedbackCategory; label: string }[] = [
+        { value: 'wrong_data', label: 'ข้อมูลไม่ถูกต้อง' },
+        { value: 'incomplete', label: 'ข้อมูลไม่ครบถ้วน' },
+        { value: 'sql_error', label: 'SQL ผิดพลาด' },
+        { value: 'hard_to_understand', label: 'เข้าใจยาก' },
+        { value: 'slow', label: 'ช้าเกินไป' },
+        { value: 'other', label: 'อื่นๆ' },
+    ];
+
+    const handleFeedback = async (rating: FeedbackRating, category?: FeedbackCategory) => {
+        if (!message.chatId || feedbackSubmitting) return;
+        setFeedbackSubmitting(true);
+        try {
+            await chatService.submitFeedback(message.chatId, { rating, category });
+            setFeedbackState(rating);
+            setShowCategoryPicker(false);
+        } catch (e) {
+            console.warn('Feedback submission failed:', e);
+        } finally {
+            setFeedbackSubmitting(false);
+        }
+    };
 
     const dataToShow = message.data
         ? (showAllData ? message.data : message.data.slice(0, INITIAL_ROWS))
@@ -309,7 +338,53 @@ export const ChatBubble = ({ message, onTrain }: ChatBubbleProps) => {
                     <ConfidenceBadge confidence={message.confidence} />
                 )}
 
-                {/* Technical Details Accordion */}
+                {/* Feedback Buttons */}
+                {!isUser && message.chatId && (
+                    <View className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
+                        {feedbackState ? (
+                            <View className="flex-row items-center">
+                                <Text className="text-xs text-gray-400 dark:text-gray-500">
+                                    {feedbackState === 'thumbs_up' ? '👍 ขอบคุณสำหรับ feedback' : '👎 ขอบคุณ เราจะปรับปรุงต่อไป'}
+                                </Text>
+                            </View>
+                        ) : (
+                            <View>
+                                <View className="flex-row items-center gap-2">
+                                    <Text className="text-xs text-gray-400 dark:text-gray-500 mr-1">คำตอบนี้เป็นอย่างไร?</Text>
+                                    <TouchableOpacity
+                                        onPress={() => handleFeedback('thumbs_up', 'perfect')}
+                                        disabled={feedbackSubmitting}
+                                        className="px-3 py-1.5 rounded-full bg-gray-50 dark:bg-gray-700 active:bg-green-50 dark:active:bg-green-900/20"
+                                    >
+                                        <Text className="text-sm">👍</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        onPress={() => setShowCategoryPicker(true)}
+                                        disabled={feedbackSubmitting}
+                                        className="px-3 py-1.5 rounded-full bg-gray-50 dark:bg-gray-700 active:bg-red-50 dark:active:bg-red-900/20"
+                                    >
+                                        <Text className="text-sm">👎</Text>
+                                    </TouchableOpacity>
+                                </View>
+                                {showCategoryPicker && (
+                                    <View className="mt-2 flex-row flex-wrap gap-1.5">
+                                        {FEEDBACK_CATEGORIES.map((cat) => (
+                                            <TouchableOpacity
+                                                key={cat.value}
+                                                onPress={() => handleFeedback('thumbs_down', cat.value)}
+                                                disabled={feedbackSubmitting}
+                                                className="px-2.5 py-1 rounded-full bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 active:bg-red-100"
+                                            >
+                                                <Text className="text-xs text-red-700 dark:text-red-300">{cat.label}</Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </View>
+                                )}
+                            </View>
+                        )}
+                    </View>
+                )}
+
                 {/* Technical Details Accordion */}
                 {message.sql && (
                     <View className="mt-2">

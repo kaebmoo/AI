@@ -9,7 +9,7 @@ import asyncio
 import logging
 from typing import Dict, List, Optional, Any, Union
 
-from app.providers.base import AIProvider, lookup_model_by_tier
+from app.providers.base import AIProvider
 from app.providers.retry_config import ai_retry
 from app.providers.chart_postprocessor import (
     parse_explanation_response,
@@ -33,15 +33,6 @@ class GeminiProvider(AIProvider):
 
     def is_configured(self) -> bool:
         return bool(self.api_key)
-
-    def get_model(self, tier: str = "default") -> str:
-        db_model = lookup_model_by_tier("gemini", tier)
-        if db_model:
-            return db_model
-        # Hardcoded fallback
-        if tier == "cheap":
-            return "gemini-2.0-flash-exp"
-        return self.model
 
     @property
     def client(self):

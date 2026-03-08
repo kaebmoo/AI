@@ -1,7 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any
+import asyncio
 import uuid
+import json
 import logging
 from datetime import datetime
 
@@ -291,6 +294,120 @@ async def chat(
 
     # 6. Format response
     return _format_response(chat_entry, conversation_id, engine_result)
+
+
+# =============================================================================
+# SSE Streaming Endpoint
+# =============================================================================
+
+@router.post("/stream")
+async def chat_stream(
+    request: ChatRequest,
+    current_request: Request,
+    current_user: User = Depends(deps.get_current_user),
+    db: Session = Depends(deps.get_db),
+):
+    """
+    Stream chat responses via Server-Sent Events (SSE).
+    Events: status, data_ready, answer, done, error
+    """
+    conversation_id = request.conversation_id or str(uuid.uuid4())
+    history, previous_chats = _get_conversation_history(db, conversation_id, current_user.id)
+
+    db_path = settings.DATABASE_URL.replace("sqlite:///", "").replace("sqlite://", "")
+    schema_service = SchemaService(db_path=db_path)
+    context_name, history = _resolve_context_with_history(
+        request.context, request.question, previous_chats, history, schema_service
+    )
+
+    # Queue for pushing SSE events from on_status callback
+    event_queue: asyncio.Queue = asyncio.Queue()
+
+    def on_status(status):
+        """Push status updates to SSE queue."""
+        try:
+            event_queue.put_nowait({
+                "event": "status",
+                "data": {
+                    "status": status.status,
+                    "message": status.message,
+                    "attempt": status.attempt,
+                    "max_attempts": status.max_attempts,
+                }
+            })
+        except Exception:
+            pass
+
+    async def generate_events():
+        """SSE event generator."""
+        try:
+            # Send initial event
+            yield _sse_format("status", {"status": "started", "message": "Processing query..."})
+
+            # Run query in background task
+            mcp_client = deps.get_mcp_client(current_request)
+            engine = QueryEngine(mcp_client=mcp_client, db_session=db)
+
+            # Start query as a task
+            query_task = asyncio.create_task(engine.query(
+                question=request.question,
+                provider=request.provider,
+                context=context_name,
+                mode=request.mode or "hybrid",
+                history=history,
+                max_retries=request.max_retries,
+                on_status=on_status,
+            ))
+
+            # Stream status events while query runs
+            while not query_task.done():
+                try:
+                    event = await asyncio.wait_for(event_queue.get(), timeout=0.5)
+                    yield _sse_format(event["event"], event["data"])
+                except asyncio.TimeoutError:
+                    # Send keepalive comment
+                    yield ": keepalive\n\n"
+
+            # Get result
+            engine_result = query_task.result()
+
+            # Send data event (if SQL executed successfully with data)
+            result = engine_result.query_result
+            if result.data and not result.error:
+                yield _sse_format("data_ready", {
+                    "sql_query": result.sql_query,
+                    "data": result.data,
+                    "row_count": len(result.data),
+                })
+
+            # Save history
+            chat_entry = _save_history(db, current_user.id, conversation_id, engine_result)
+
+            # Send full response
+            response_data = _format_response(chat_entry, conversation_id, engine_result)
+            yield _sse_format("answer", response_data)
+
+            # Done
+            yield _sse_format("done", {"id": chat_entry.id, "conversation_id": conversation_id})
+
+        except Exception as e:
+            logger.error(f"SSE stream error: {e}")
+            yield _sse_format("error", {"message": str(e)})
+
+    return StreamingResponse(
+        generate_events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )
+
+
+def _sse_format(event: str, data: dict) -> str:
+    """Format data as SSE event string."""
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
 
 
 # =============================================================================
