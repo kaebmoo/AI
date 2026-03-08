@@ -587,24 +587,124 @@ class SchemaService:
             except Exception:
                 return []
     
-    def get_business_rules(self, table_name: str) -> List[Dict]:
-        """Get business rules from schema_business_rules table"""
+    def get_business_rules(self, table_name: str, inject_mode: str = None) -> List[Dict]:
+        """Get business rules from schema_business_rules table
+
+        Args:
+            table_name: View/table name to filter rules for
+            inject_mode: Optional filter - 'schema_context' or 'instruction'
+        """
         with self.engine.connect() as conn:
             try:
-                result = conn.execute(text("""
+                query = """
                     SELECT * FROM schema_business_rules
                     WHERE is_active = 1
                     AND (table_name = :table_name OR table_name = 'ALL' OR table_name IS NULL)
+                """
+                params = {"table_name": table_name}
+
+                if inject_mode:
+                    query += " AND (inject_mode = :inject_mode OR inject_mode IS NULL)"
+                    params["inject_mode"] = inject_mode
+
+                query += """
                     ORDER BY
                         CASE severity
                             WHEN 'error' THEN 1
                             WHEN 'warning' THEN 2
                             ELSE 3
-                        END
-                """), {"table_name": table_name})
+                        END,
+                        rule_code
+                """
+
+                result = conn.execute(text(query), params)
                 return [dict(row) for row in result.mappings().fetchall()]
             except Exception:
                 return []
+
+    def build_hierarchy_rule_text(self, context_name: str) -> str:
+        """Build hierarchy rule text dynamically from master_hierarchy table.
+
+        Returns a prompt section like:
+        STEP 1.5: HIERARCHY RULE (ห้าม OR ข้ามระดับ)
+        - ข้อมูลมีลำดับชั้น: กลุ่มธุรกิจ > กลุ่มบริการ > บริการ/ผลิตภัณฑ์
+        ...
+        """
+        try:
+            with self.engine.connect() as conn:
+                result = conn.execute(text("""
+                    SELECT level_label_th, level_columns
+                    FROM master_hierarchy
+                    WHERE context_name = :ctx AND is_active = 1
+                    ORDER BY level
+                """), {"ctx": context_name})
+                rows = result.fetchall()
+
+            if not rows:
+                return ""
+
+            hierarchy_chain = " > ".join(r[0] for r in rows)
+            # Get first column from each level for the example
+            import json as _json
+            example_cols = []
+            for r in rows:
+                try:
+                    cols = _json.loads(r[1])
+                    if cols:
+                        example_cols.append(cols[0].lower())
+                except (ValueError, IndexError):
+                    pass
+
+            text_parts = [
+                "STEP 1.5: HIERARCHY RULE (ห้าม OR ข้ามระดับ)",
+                f"- ข้อมูลมีลำดับชั้น: {hierarchy_chain}",
+                "- ถ้า Actual Values มีข้อมูลจากหลาย level → ใช้เฉพาะ level ที่ user ถามถึง",
+            ]
+
+            if len(example_cols) >= 2:
+                col_a, col_b = example_cols[0], example_cols[1]
+                text_parts.append(
+                    f"- ห้าม: WHERE {col_a} LIKE '%x%' OR {col_b} LIKE '%x%' (OR ข้ามระดับ)"
+                )
+
+            text_parts.append("- การ OR ข้ามระดับทำให้ตัวเลขผิดเพี้ยนอย่างมาก (สูงเกินจริงหลายสิบเท่า)")
+            return "\n".join(text_parts)
+
+        except Exception as e:
+            logger.error(f"build_hierarchy_rule_text error: {e}")
+            # Fallback to generic rule
+            return """STEP 1.5: HIERARCHY RULE (ห้าม OR ข้ามระดับ)
+- ถ้า Actual Values มีข้อมูลจากหลาย level → ใช้เฉพาะ level ที่ user ถามถึง
+- ห้าม OR ข้ามระดับ — ทำให้ตัวเลขผิดเพี้ยนอย่างมาก"""
+
+    def build_instruction_rules_text(self, main_view: str) -> str:
+        """Build instruction section rules from DB (context_retention, unit_conversion, etc.)"""
+        rules = self.get_business_rules(main_view, inject_mode='instruction')
+        if not rules:
+            return ""
+
+        sections = {}
+        for rule in rules:
+            category = rule.get('rule_category', 'other')
+            if category not in sections:
+                sections[category] = []
+            sections[category].append(rule['rule_description'])
+
+        text = ""
+        # Context retention rules get a header
+        if 'context_retention' in sections:
+            text += "\n## กฎการรักษาบริบท (Context Retention Rules)\n"
+            text += "**หลักการสำคัญ:** แยกระหว่าง REPLACE vs MERGE\n\n"
+            for desc in sections['context_retention']:
+                text += f"{desc}\n\n"
+            del sections['context_retention']
+
+        # Other sections
+        for category, descs in sections.items():
+            for desc in descs:
+                text += f"\n{desc}\n"
+
+        return text
 
     def get_dimension_families(self, table_name: str) -> Dict[str, List[str]]:
         """Get dimension families — groups of related columns that must stay on the same axis.
@@ -871,9 +971,9 @@ class SchemaService:
         return text
     
     def build_business_rules_text(self, table_name: str) -> str:
-        """Build business rules text for AI prompt"""
-        
-        rules = self.get_business_rules(table_name)
+        """Build business rules text for AI prompt (schema_context rules only)"""
+
+        rules = self.get_business_rules(table_name, inject_mode='schema_context')
         
         if not rules:
             return self._get_default_business_rules()
@@ -1183,33 +1283,18 @@ DATE เก็บเป็น Unix Timestamp (milliseconds) ต้องแป�
        - NO `DATE_FORMAT` -> Use `strftime`"""
 
     def _build_thai_prompt(self, ai_provider: str, main_view: str, context_name: str, context_info: Dict = {}) -> str:
-        """Build Thai language system prompt"""
+        """Build Thai language system prompt — DB-driven sections"""
 
         syntax_rules = self._get_syntax_rules("thai")
 
-        # Context specific instructions
-        context_instructions = ""
-        if context_name == "revenue":
-             context_instructions = context_info.get('instruction_th') or ""
-             if not context_instructions:
-                context_instructions = """
-    - **คำเตือน (Revenue Context):**
-      - อย่ารวม 'รายได้อื่น' (Other Revenue) ในการคำนวณรายได้ทั้งหมด ยกเว้น user สั่ง
-      - หน่วยรายได้เป็น **บาท**
-             """
-        elif context_name == "expense":
-             context_instructions = context_info.get('instruction_th') or ""
-             if not context_instructions:
-                 context_instructions = """
-    - **คำเตือน (Expense Context):**
-      - ค่าใช้จ่ายแยกตามหมวดบัญชี (Account Group)
-      - `gl_code` คือรหัสบัญชี, `account_name` คือชื่อบัญชี
-      - **Visualization Rule:** ห้ามใช้ `gl_code` เป็น Label หรือ Legend ในกราฟเด็ดขาด ให้ใช้ `account_name` เสมอ (ยกเว้น User สั่งเจาะจงรหัส)
-      - `amount` คือยอดค่าใช้จ่าย (เป็นตัวเลขติดลบ หรือบวกแล้วแต่การบันทึก ให้ระวังเรื่อง SUM)
-      - ปกติถ้าเป็น Expense table ค่าอาจจะเป็น + หรือ - ให้เช็ค Data range ใน Schema
-             """
-        else:
-             context_instructions = context_info.get('instruction_th') or ""
+        # Context specific instructions — DB-driven from schema_contexts.instruction_th
+        context_instructions = context_info.get('instruction_th') or ""
+
+        # Hierarchy rule — generated from master_hierarchy
+        hierarchy_rule = self.build_hierarchy_rule_text(context_name)
+
+        # Instruction rules from DB (context_retention, unit_conversion, response_format)
+        instruction_rules = self.build_instruction_rules_text(main_view)
 
         return f"""<system>
 คุณเป็น AI Assistant สำหรับวิเคราะห์ข้อมูลของ NT (National Telecom)
@@ -1222,11 +1307,7 @@ STEP 1: CHECK FOR ACTUAL VALUES FIRST
 - ถ้ามี "Actual Values Found" section ใน user message → ใช้ค่าจากนั้น (มาจาก DB จริง)
 - ใช้ LIKE '%keyword%' สำหรับ text columns เสมอ
 
-STEP 1.5: HIERARCHY RULE (ห้าม OR ข้ามระดับ)
-- ข้อมูลมีลำดับชั้น: กลุ่มธุรกิจ > กลุ่มบริการ > บริการ/ผลิตภัณฑ์
-- ถ้า Actual Values มีข้อมูลจากหลาย level → ใช้เฉพาะ level ที่ user ถามถึง
-- ห้าม: WHERE service_group LIKE '%x%' OR product_name LIKE '%x%' (OR ข้ามระดับ)
-- การ OR ข้ามระดับทำให้ตัวเลขผิดเพี้ยนอย่างมาก (สูงเกินจริงหลายสิบเท่า)
+{hierarchy_rule}
 
 STEP 2: CHECK SEMANTIC MAPPINGS
 - ถ้าไม่มี Actual Values → ตรวจ <semantic_mappings> section
@@ -1262,77 +1343,18 @@ STEP 3: FALLBACK
    - ต้องส่งค่าดิบ (Raw Number) เช่น `1234567.89` เท่านั้น
    - (Frontend จะจัดการใส่ลูกน้ำเอง)
 
-## กฎการรักษาบริบท (Context Retention Rules)
-**หลักการสำคัญ:** แยกระหว่าง REPLACE vs MERGE
-
-1. **REPLACE** - เมื่อ User ระบุค่าใหม่สำหรับ **Column เดียวกัน**:
-   - เดิม: `SERVICE_GROUP LIKE '%IDD%'`
-   - User: "ขอรายได้อสังหาริมทรัพย์"
-   - **ต้องทำ:** `WHERE SERVICE_GROUP LIKE '%อสังหาริมทรัพย์%'` (REPLACE!)
-   - **ห้ามทำ:** `WHERE SERVICE_GROUP LIKE '%IDD%' AND SERVICE_GROUP LIKE '%อสังหาริมทรัพย์%'`
-
-2. **MERGE** - เมื่อ User เพิ่มเงื่อนไขสำหรับ **Column ใหม่**:
-   - เดิม: `account_name LIKE '%ค่าซอฟต์แวร์%'`
-   - User: "ขอเฉพาะฝ่าย Cloud"
-   - **ต้องทำ:** `WHERE account_name LIKE '%ค่าซอฟต์แวร์%' AND department LIKE '%Cloud%'`
-
-3. **RESET** - เมื่อ User ใช้คำว่า "ทั้งหมด", "ภาพรวม", "รวม" หรือถามหัวข้อใหญ่ใหม่:
-   - User: "ขอรายได้กลุ่มธุรกิจทั้งหมด"
-   - **ต้องทำ:** ลบ filter เดิมทั้งหมด
-
-**สรุปง่ายๆ:**
-- Column เดิม + ค่าใหม่ → **REPLACE** filter นั้น
-- Column ใหม่ → **MERGE** (AND) เข้าไป
-- คำว่า "ทั้งหมด/ภาพรวม" → **RESET** ทั้งหมด
-
+{instruction_rules}
 
 {context_instructions}
 
-{syntax_rules}
-
-## การแปลงหน่วย (Unit Conversion)
-**เมื่อ User ระบุหน่วยเงินตรา ให้แปลงและตั้งชื่อ column ให้ชัดเจน:**
-
-1. **ล้านบาท / Million Baht**:
-   ```sql
-   -- ✅ CORRECT
-   SUM(amount) / 1000000.0 AS revenue_million_baht
-   SUM(expense) / 1000000.0 AS expense_ล้านบาท
-
-   -- ❌ WRONG - ชื่อไม่ชัด
-   SUM(amount) / 1000000.0 AS revenue
-   SUM(amount) / 1000000.0 AS total
-   ```
-
-2. **พันล้านบาท / Billion Baht**:
-   ```sql
-   SUM(amount) / 1000000000.0 AS revenue_billion_baht
-   SUM(amount) / 1000000000.0 AS revenue_พันล้าน
-   ```
-
-3. **พันบาท / Thousand Baht**:
-   ```sql
-   SUM(amount) / 1000.0 AS revenue_thousand_baht
-   SUM(amount) / 1000.0 AS revenue_พันบาท
-   ```
-
-**กฎสำคัญ:**
-- ถ้า User ไม่ระบุหน่วย → ใช้บาท (ไม่ต้องหาร)
-- ถ้า User บอก "ล้านบาท" → **ต้องหาร 1000000** และตั้งชื่อ `*_million_baht` หรือ `*_ล้านบาท`
-- Column name ต้องมี suffix บอกหน่วย: `_million_baht`, `_ล้านบาท`, `_billion_baht`, `_thousand_baht`
-
-## รูปแบบการตอบ
-1. แสดง SQL query (ต้อง return ค่าตัวเลขดิบ ห้าม format ใส่ลูกน้ำ)
-2. อธิบายผลลัพธ์เป็นภาษาไทย
-3. ในส่วน**คำอธิบาย** (Text) ให้ Format ตัวเลขให้อ่านง่าย (เช่น 1,234,567.89)"""
+{syntax_rules}"""
     
     def _build_english_prompt(self, ai_provider: str, main_view: str, context_name: str, context_info: Dict = {}) -> str:
         """Build English language system prompt"""
         
         syntax_rules = self._get_syntax_rules("english")
         
-        # Get context info again to fetch instruction_en
-        context_info = self.get_context_info(context_name) or {}
+        # Context specific instructions — DB-driven from schema_contexts.instruction_en
         context_instructions = context_info.get('instruction_en') or ""
         
         return f"""You are an AI Assistant for analyzing NT data.

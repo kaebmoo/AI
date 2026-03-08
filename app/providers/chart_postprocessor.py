@@ -58,7 +58,7 @@ def parse_explanation_response(text: str) -> Dict:
     return parsed_result
 
 
-def enforce_time_series_rule(parsed_result: Dict) -> Dict:
+def enforce_time_series_rule(parsed_result: Dict, time_columns: Optional[List[str]] = None) -> Dict:
     """
     Post-process chart config to ensure Time columns are on X-axis (category),
     not on legend (series). Swaps if necessary.
@@ -66,6 +66,11 @@ def enforce_time_series_rule(parsed_result: Dict) -> Dict:
     Time-Series Rule:
     - If series_column is a time column BUT category_column is NOT → SWAP them
     - If swap happens on grouped_bar → force stacked_bar
+
+    Args:
+        parsed_result: Parsed AI response dict
+        time_columns: Optional list of known time columns from schema_metadata.
+                      If provided, uses exact match instead of keyword heuristic.
     """
     try:
         # Ensure we have a dict
@@ -79,8 +84,14 @@ def enforce_time_series_rule(parsed_result: Dict) -> Dict:
         cat = str(config.get("category_column", "")).lower()
         series = str(config.get("series_column", "")).lower()
 
-        is_series_time = any(t in series for t in TIME_KEYS)
-        is_cat_time = any(t in cat for t in TIME_KEYS)
+        # Use schema_metadata time_columns if available, else fallback to keyword heuristic
+        if time_columns:
+            time_cols_lower = [c.lower() for c in time_columns]
+            is_series_time = series in time_cols_lower
+            is_cat_time = cat in time_cols_lower
+        else:
+            is_series_time = any(t in series for t in TIME_KEYS)
+            is_cat_time = any(t in cat for t in TIME_KEYS)
 
         logger.debug(f"Chart Config: Cat='{cat}', Series='{series}', IsSeriesTime={is_series_time}, IsCatTime={is_cat_time}")
 
@@ -181,17 +192,121 @@ def build_dimension_family_prompt(families: Dict[str, List[str]]) -> str:
     return "\n".join(lines)
 
 
-def auto_detect_chart_config(data: List[Dict], parsed_result: Dict = None) -> Dict:
+def build_explain_prompt(
+    question: str,
+    sql: str,
+    data: List[Dict],
+    dimension_families: Optional[Dict[str, List[str]]] = None,
+    hierarchy_info: Optional[List[Dict]] = None,
+    schema_metadata: Optional[List[Dict]] = None,
+) -> str:
+    """
+    Build the explain_result prompt dynamically — shared across all providers.
+
+    Args:
+        question: User's original question
+        sql: Generated SQL query
+        data: Query result data rows
+        dimension_families: Column family groups (for family rule prompt)
+        hierarchy_info: Hierarchy levels from master_hierarchy [{level_label_th, level_columns}]
+        schema_metadata: Column metadata [{column_name, is_summable, dimension_group, ...}]
+    """
+    data_preview = json.dumps(data, ensure_ascii=False, default=str)
+    family_prompt = build_dimension_family_prompt(dimension_families) if dimension_families else ""
+
+    # Build column hints from schema_metadata
+    column_hints = ""
+    if schema_metadata:
+        measure_cols = [m['column_name'] for m in schema_metadata if m.get('is_summable')]
+        time_cols = [m['column_name'] for m in schema_metadata
+                     if m.get('dimension_group') == 'time_period']
+        groupable_cols = [m['column_name'] for m in schema_metadata
+                          if m.get('is_groupable') and m.get('dimension_group') != 'time_period'
+                          and not m.get('is_summable')]
+
+        if measure_cols or time_cols or groupable_cols:
+            column_hints = "\n\nCOLUMN HINTS (from schema metadata):"
+            if measure_cols:
+                column_hints += f"\n  Measure columns (summable): {', '.join(measure_cols)}"
+            if time_cols:
+                column_hints += f"\n  Time columns: {', '.join(time_cols)}"
+            if groupable_cols:
+                column_hints += f"\n  Groupable dimensions: {', '.join(groupable_cols[:10])}"
+                if len(groupable_cols) > 10:
+                    column_hints += f" (and {len(groupable_cols) - 10} more)"
+
+    # Build hierarchy examples from master_hierarchy
+    hierarchy_example = ""
+    if hierarchy_info and len(hierarchy_info) >= 2:
+        hierarchy_chain = " > ".join(h.get('level_label_th', '') for h in hierarchy_info)
+        # Get column names for example
+        example_cols = []
+        for h in hierarchy_info:
+            try:
+                cols = json.loads(h.get('level_columns', '[]'))
+                if cols:
+                    example_cols.append(cols[0])
+            except (ValueError, IndexError):
+                pass
+        hierarchy_example = f"""
+Example for hierarchical data (hierarchy: {hierarchy_chain}):
+{{{{
+  "display_hint": "hierarchical",
+  "hierarchy_columns": {json.dumps(example_cols, ensure_ascii=False)}
+}}}}"""
+
+    return f"""Question: {question}
+SQL: {sql}
+Results ({len(data)} rows):
+{data_preview}
+{column_hints}
+{family_prompt}
+
+Explain in Thai.
+Ensure the "explanation" value is formatted as **beautiful Markdown**:
+- Use `###` for main summaries and `####` for subsections.
+- Use **bold text** (`**value**`) to highlight key metrics and numbers.
+- Use bullet points (`-`) when listing multiple items (e.g., breakdown by group).
+- Use blockquotes (`>`) to emphasize key insights or the most important finding.
+- Keep the language natural and strictly in **Thai**.
+
+CRITICAL: You must analyze the data and recommend the best visualization type.
+Return the result as a JSON object with these keys:
+1. "explanation": The beautifully formatted Thai markdown explanation.
+2. "visualization": One of ['bar_chart', 'horizontal_bar', 'line_chart', 'pie_chart', 'donut_chart', 'table', 'single_value', 'grouped_bar', 'stacked_bar']
+3. "chart_config": Object with column mappings for the chart:
+   - "category_column": The column name for X-axis labels (the PRIMARY grouping)
+   - "measure_column": The column name for Y-axis values (e.g., total, sum, amount)
+   - "series_column": (optional) The column for SECONDARY grouping/comparison
+4. "display_hint": How to display the TABLE (separate from chart). Choose ONE:
+   - 'hierarchical': ONLY when columns are STRICT parent-child. Each child belongs to EXACTLY ONE parent.
+     DO NOT use hierarchical when columns are INDEPENDENT dimensions (cross-dimensions).
+   - 'crosstab': When comparing values across a time dimension (month, quarter, year) OR across any two independent dimensions.
+     USE THIS when data has: category × time × measure.
+   - 'flat': For single-dimension data, already aggregated, or when unsure.
+5. "hierarchy_columns": (REQUIRED if display_hint='hierarchical') Array of actual column names ordered HIGHEST (parent) to LOWEST (child).
+
+IMPORTANT for time-based comparisons:
+- **CRITICAL**: If a Time column exists (Month, Year, Date), YOU MUST USE IT AS 'category_column' (X-axis).
+- **Comparison**: Use the other dimension (Department, Account, Section) as 'series_column' (Legend).
+     - **Legend Rule**: Prefer DESCRIPTIVE columns (e.g., 'department_name', 'account_name') over ID/Code columns for better readability.
+     - If < 5 series: Suggest 'grouped_bar' or 'line_chart'
+     - If > 5 series: Suggest 'stacked_bar' (to avoid clutter)
+- **Exception**: Only use Time as Series if explicitly asked to "Compare Years" (Year-over-Year).
+{hierarchy_example}
+"""
+
+
+def auto_detect_chart_config(data: List[Dict], parsed_result: Dict = None,
+                             schema_metadata: Optional[List[Dict]] = None) -> Dict:
     """
     Fallback: infer chart config from data shape when AI doesn't provide one.
-    Used primarily by Matcha provider.
 
     Args:
         data: Query result data rows
         parsed_result: Existing parsed result to augment (or None for new dict)
-
-    Returns:
-        Dict with visualization and chart_config added
+        schema_metadata: Optional list of column metadata dicts with is_summable,
+                         dimension_group, etc. from schema_metadata table.
     """
     if parsed_result is None:
         parsed_result = {}
@@ -201,16 +316,31 @@ def auto_detect_chart_config(data: List[Dict], parsed_result: Dict = None) -> Di
 
     keys = list(data[0].keys())
 
-    # Patterns for identifying column types
-    measure_patterns = [
+    # Build metadata-driven lookups if available
+    meta_measure_cols = set()
+    meta_time_cols = set()
+    meta_dimension_cols = set()
+    if schema_metadata:
+        for m in schema_metadata:
+            col = m.get('column_name', '')
+            if m.get('is_summable'):
+                meta_measure_cols.add(col.lower())
+            dg = m.get('dimension_group', '')
+            if dg == 'time_period':
+                meta_time_cols.add(col.lower())
+            if m.get('is_groupable'):
+                meta_dimension_cols.add(col.lower())
+
+    # Fallback patterns (used when schema_metadata not available)
+    _measure_patterns = [
         'revenue', 'value', 'amount', 'total', 'sum', 'count', 'baht',
         'รายได้', 'จำนวน', 'ยอด',
     ]
-    dimension_patterns = [
+    _dimension_patterns = [
         'year', 'month', 'date', 'day', 'week', 'quarter',
         'ปี', 'เดือน', 'วันที่', 'id',
     ]
-    time_patterns = ['month', 'year', 'date', 'เดือน', 'ปี', 'วันที่']
+    _time_patterns = ['month', 'year', 'date', 'เดือน', 'ปี', 'วันที่']
 
     # Find measure column
     measure_col = None
@@ -225,16 +355,24 @@ def auto_detect_chart_config(data: List[Dict], parsed_result: Dict = None) -> Di
         if is_numeric:
             numeric_cols.append(key)
 
+    # Priority 0 (metadata): Column marked is_summable
+    if meta_measure_cols:
+        for col in numeric_cols:
+            if col.lower() in meta_measure_cols:
+                measure_col = col
+                break
+
     # Priority 1: Column with measure-like name
-    for col in numeric_cols:
-        if any(p in col.lower() for p in measure_patterns):
-            measure_col = col
-            break
+    if not measure_col:
+        for col in numeric_cols:
+            if any(p in col.lower() for p in _measure_patterns):
+                measure_col = col
+                break
 
     # Priority 2: Numeric column that's NOT a dimension
     if not measure_col:
         for col in reversed(numeric_cols):
-            if not any(p in col.lower() for p in dimension_patterns):
+            if not any(p in col.lower() for p in _dimension_patterns):
                 measure_col = col
                 break
 
@@ -247,14 +385,24 @@ def auto_detect_chart_config(data: List[Dict], parsed_result: Dict = None) -> Di
     series_col = None
     potential_cats = [k for k in keys if k != measure_col]
 
-    has_month = any('month' in k.lower() for k in potential_cats)
-    has_year = any('year' in k.lower() for k in potential_cats)
+    # Use metadata time columns if available
+    if meta_time_cols:
+        time_cats = [k for k in potential_cats if k.lower() in meta_time_cols]
+        # Prefer month over year
+        month_cols = [k for k in time_cats if 'month' in k.lower()]
+        if month_cols:
+            category_col = month_cols[0]
+        elif time_cats:
+            category_col = time_cats[0]
+    else:
+        has_month = any('month' in k.lower() for k in potential_cats)
+        has_year = any('year' in k.lower() for k in potential_cats)
+        if has_month:
+            category_col = next((k for k in potential_cats if 'month' in k.lower()), potential_cats[0] if potential_cats else None)
+        elif has_year:
+            category_col = next((k for k in potential_cats if 'year' in k.lower()), potential_cats[0] if potential_cats else None)
 
-    if has_month:
-        category_col = next((k for k in potential_cats if 'month' in k.lower()), potential_cats[0] if potential_cats else None)
-    elif has_year:
-        category_col = next((k for k in potential_cats if 'year' in k.lower()), potential_cats[0] if potential_cats else None)
-    elif potential_cats:
+    if not category_col and potential_cats:
         category_col = potential_cats[0]
 
     # Infer Series Column
@@ -275,9 +423,12 @@ def auto_detect_chart_config(data: List[Dict], parsed_result: Dict = None) -> Di
             series_col = non_year_cols[0] if non_year_cols else (remaining_cols[0] if remaining_cols else None)
 
     # Determine visualization type
-    is_time_category = category_col and any(
-        pattern in category_col.lower() for pattern in time_patterns
-    )
+    if meta_time_cols:
+        is_time_category = category_col and category_col.lower() in meta_time_cols
+    else:
+        is_time_category = category_col and any(
+            pattern in category_col.lower() for pattern in _time_patterns
+        )
 
     viz_type = "bar_chart"
     if series_col and is_time_category:

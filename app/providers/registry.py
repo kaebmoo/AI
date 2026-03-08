@@ -12,7 +12,6 @@ import logging
 from typing import Dict, Optional, List
 
 from app.providers.base import AIProvider
-from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +62,8 @@ class ProviderRegistry:
     def create_provider(self, name: str, **kwargs) -> Optional[AIProvider]:
         """
         Create a provider instance with the given configuration.
-        Returns None if provider not found.
+        Uses __init__ introspection to pass only valid kwargs.
+        Returns None if provider not found or creation fails.
         """
         cls = self.providers.get(name)
         if not cls:
@@ -71,29 +71,10 @@ class ProviderRegistry:
             return None
 
         try:
-            if name == "claude":
-                return cls(
-                    api_key=kwargs.get("api_key", settings.ANTHROPIC_API_KEY or ""),
-                    model=kwargs.get("model", settings.CLAUDE_MODEL),
-                    extended_thinking=kwargs.get("extended_thinking", False),
-                    thinking_budget_tokens=kwargs.get("thinking_budget_tokens", 8000),
-                )
-            elif name == "gemini":
-                return cls(
-                    api_key=kwargs.get("api_key", settings.GOOGLE_AI_API_KEY or ""),
-                    model=kwargs.get("model", settings.GEMINI_MODEL),
-                )
-            elif name == "matcha":
-                return cls(
-                    api_key=kwargs.get("api_key", settings.MATCHA_AI_API_KEY or ""),
-                    api_url=kwargs.get("api_url", settings.MATCHA_API_URL or ""),
-                    model=kwargs.get("model", settings.MATCHA_MODEL),
-                )
-            else:
-                # Generic: try to create with whatever kwargs match __init__
-                sig = inspect.signature(cls.__init__)
-                valid_kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
-                return cls(**valid_kwargs)
+            # Generic: introspect __init__ and pass only matching kwargs
+            sig = inspect.signature(cls.__init__)
+            valid_kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
+            return cls(**valid_kwargs)
         except Exception as e:
             logger.error(f"Failed to create provider '{name}': {e}")
             return None

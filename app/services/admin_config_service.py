@@ -7,6 +7,7 @@ Service for managing runtime configuration with fallback mechanism:
 3. Hardcoded defaults - Safety net
 """
 
+import os
 from typing import Optional, Dict, List, Any
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -165,82 +166,100 @@ class AdminConfigService:
     def get_ai_config(self) -> Dict[str, Any]:
         """
         Get complete AI configuration with fallbacks.
+        Dynamically queries ai_providers table for provider list.
+        Falls back to hardcoded 3-provider config if DB table unavailable.
 
         Returns:
             Dict with provider, models, and enabled status
         """
-        return {
-            # Default provider (with fallback)
+        config: Dict[str, Any] = {
             "default_provider": self.get_config("default_ai_provider", "matcha"),
-
-            # Provider enabled status
-            "claude_enabled": self.get_config("claude_enabled", "true") == "true",
-            "gemini_enabled": self.get_config("gemini_enabled", "true") == "true",
-            "matcha_enabled": self.get_config("matcha_enabled", "true") == "true",
-
-            # Model names
-            "claude_model": self.get_config("claude_model", settings.CLAUDE_MODEL),
-            "gemini_model": self.get_config("gemini_model", settings.GEMINI_MODEL),
-            "matcha_model": self.get_config("matcha_model", settings.MATCHA_MODEL),
-
-            # API URLs (for display, not secrets)
-            "matcha_api_url": self.get_config("matcha_api_url", settings.MATCHA_API_URL or ""),
-
-            # Claude Extended Thinking
-            "claude_extended_thinking": self.get_config(
-                "claude_extended_thinking",
-                "true" if settings.CLAUDE_EXTENDED_THINKING else "false"
-            ) == "true",
-            "claude_thinking_budget_tokens": int(self.get_config(
-                "claude_thinking_budget_tokens",
-                str(settings.CLAUDE_THINKING_BUDGET_TOKENS)
-            )),
         }
+
+        # Dynamic: query all active providers from DB
+        try:
+            providers = self.db.execute(text(
+                "SELECT id FROM ai_providers WHERE is_active = 1 ORDER BY priority DESC"
+            )).fetchall()
+            if providers:
+                for row in providers:
+                    pid = row[0]
+                    config[f"{pid}_enabled"] = self.get_config(f"{pid}_enabled", "true") == "true"
+                    # Get default model for this provider
+                    model_row = self.db.execute(text(
+                        "SELECT model_id FROM ai_models "
+                        "WHERE provider_id = :pid AND is_default = 1 AND is_active = 1"
+                    ), {"pid": pid}).fetchone()
+                    default_model = model_row[0] if model_row else ""
+                    config[f"{pid}_model"] = self.get_config(f"{pid}_model", default_model)
+            else:
+                raise ValueError("No providers in DB")
+        except Exception:
+            # Fallback: hardcoded 3-provider config (DB table missing or empty)
+            config.update({
+                "claude_enabled": self.get_config("claude_enabled", "true") == "true",
+                "gemini_enabled": self.get_config("gemini_enabled", "true") == "true",
+                "matcha_enabled": self.get_config("matcha_enabled", "true") == "true",
+                "claude_model": self.get_config("claude_model", settings.CLAUDE_MODEL),
+                "gemini_model": self.get_config("gemini_model", settings.GEMINI_MODEL),
+                "matcha_model": self.get_config("matcha_model", settings.MATCHA_MODEL),
+            })
+
+        # Provider-specific extras from admin_config
+        config["matcha_api_url"] = self.get_config("matcha_api_url", settings.MATCHA_API_URL or "")
+        config["claude_extended_thinking"] = self.get_config(
+            "claude_extended_thinking",
+            "true" if settings.CLAUDE_EXTENDED_THINKING else "false"
+        ) == "true"
+        config["claude_thinking_budget_tokens"] = int(self.get_config(
+            "claude_thinking_budget_tokens",
+            str(settings.CLAUDE_THINKING_BUDGET_TOKENS)
+        ))
+
+        return config
 
     def update_ai_config(
         self,
-        default_provider: Optional[str] = None,
-        claude_enabled: Optional[bool] = None,
-        gemini_enabled: Optional[bool] = None,
-        matcha_enabled: Optional[bool] = None,
-        claude_model: Optional[str] = None,
-        gemini_model: Optional[str] = None,
-        matcha_model: Optional[str] = None,
-        matcha_api_url: Optional[str] = None,
-        claude_extended_thinking: Optional[bool] = None,
-        claude_thinking_budget_tokens: Optional[int] = None,
+        updates: Dict[str, Any],
         updated_by: Optional[str] = None
     ) -> bool:
         """
-        Update AI configuration.
+        Update AI configuration from a generic dict.
+        Supports any provider — keys follow pattern: {provider}_{setting}
+        or special keys like "default_provider".
+
+        Key mapping:
+            "default_provider" → stored as "default_ai_provider"
+            "{provider}_enabled" (bool) → stored as "true"/"false"
+            "{provider}_model" (str) → stored as-is
+            any other key → stored as-is
 
         Args:
-            default_provider: Default provider to use
-            *_enabled: Enable/disable providers
-            *_model: Model names for each provider
-            matcha_api_url: Matcha gateway URL
+            updates: Dict of config updates (keys as received from API)
             updated_by: User who made changes
 
         Returns:
             True if all updates successful
         """
-        updates = {
-            "default_ai_provider": default_provider,
-            "claude_enabled": "true" if claude_enabled else "false" if claude_enabled is False else None,
-            "gemini_enabled": "true" if gemini_enabled else "false" if gemini_enabled is False else None,
-            "matcha_enabled": "true" if matcha_enabled else "false" if matcha_enabled is False else None,
-            "claude_model": claude_model,
-            "gemini_model": gemini_model,
-            "matcha_model": matcha_model,
-            "matcha_api_url": matcha_api_url,
-            "claude_extended_thinking": "true" if claude_extended_thinking else "false" if claude_extended_thinking is False else None,
-            "claude_thinking_budget_tokens": str(claude_thinking_budget_tokens) if claude_thinking_budget_tokens is not None else None,
-        }
+        # Normalize keys and convert values to strings
+        normalized: Dict[str, Optional[str]] = {}
+        for key, value in updates.items():
+            if value is None:
+                continue
+            # Special mapping
+            if key == "default_provider":
+                normalized["default_ai_provider"] = str(value)
+            elif isinstance(value, bool):
+                normalized[key] = "true" if value else "false"
+            elif isinstance(value, (int, float)):
+                normalized[key] = str(value)
+            else:
+                normalized[key] = str(value)
 
         success = True
-        for key, value in updates.items():
+        for key, value in normalized.items():
             if value is not None:
-                # Determine type
+                # Determine type for categorization
                 if "enabled" in key or "default" in key:
                     config_type = "ai_provider"
                 elif "model" in key:
@@ -248,7 +267,7 @@ class AdminConfigService:
                 else:
                     config_type = "api_key"
 
-                if not self.set_config(key, str(value), config_type, "ai", updated_by):
+                if not self.set_config(key, value, config_type, "ai", updated_by):
                     success = False
 
         return success
@@ -497,6 +516,7 @@ class AdminConfigService:
     def validate_provider(self, provider: str) -> bool:
         """
         Check if provider is valid and enabled.
+        Queries ai_providers table first, falls back to admin_config.
 
         Args:
             provider: Provider name
@@ -504,16 +524,29 @@ class AdminConfigService:
         Returns:
             True if valid and enabled
         """
-        if provider not in ["claude", "gemini", "matcha"]:
+        # Tier 1: Check DB
+        try:
+            row = self.db.execute(text(
+                "SELECT 1 FROM ai_providers WHERE id = :id AND is_active = 1"
+            ), {"id": provider}).fetchone()
+            if row:
+                enabled = self.get_config(f"{provider}_enabled", "true")
+                return enabled == "true"
+            # Provider exists in DB but inactive
             return False
+        except Exception:
+            pass
 
+        # Tier 2: Fallback — check admin_config (for cases where DB table doesn't exist)
         enabled = self.get_config(f"{provider}_enabled", "false")
         return enabled == "true"
 
     def get_provider_api_key(self, provider: str) -> Optional[str]:
         """
-        Get API key for provider.
-        Tries database first, then falls back to settings.
+        Get API key for provider with 3-tier resolution:
+        1. DB (ai_providers.api_key_env_var → os.environ)
+        2. admin_config table
+        3. .env via settings object
 
         Args:
             provider: Provider name
@@ -521,7 +554,24 @@ class AdminConfigService:
         Returns:
             API key or None
         """
-        # Map provider to key names
+        # Tier 1: Try ai_providers table for env var name
+        try:
+            row = self.db.execute(text(
+                "SELECT api_key_env_var FROM ai_providers WHERE id = :id"
+            ), {"id": provider}).fetchone()
+            if row and row[0]:
+                env_var = row[0]  # e.g. "ANTHROPIC_API_KEY"
+                # Try admin_config first (admin may have stored key in DB)
+                api_key = self.get_config(env_var.lower(), use_cache=False)
+                if not api_key:
+                    api_key = os.environ.get(env_var, "")
+                if not api_key:
+                    api_key = getattr(settings, env_var, "")
+                return api_key or None
+        except Exception:
+            pass
+
+        # Tier 2-3: Hardcoded key_map fallback for built-in providers
         key_map = {
             "claude": ("anthropic_api_key", settings.ANTHROPIC_API_KEY),
             "gemini": ("google_ai_api_key", settings.GOOGLE_AI_API_KEY),
@@ -532,11 +582,7 @@ class AdminConfigService:
             return None
 
         db_key, env_fallback = key_map[provider]
-
-        # Try database first
-        api_key = self.get_config(db_key, use_cache=False)  # Don't cache sensitive data
-
-        # Fallback to environment
+        api_key = self.get_config(db_key, use_cache=False)
         if not api_key:
             api_key = env_fallback
 

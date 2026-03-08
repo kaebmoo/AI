@@ -191,3 +191,61 @@ class SchemaBusinessRule(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
+
+
+class DataWarningModel(Base):
+    """
+    Data warning definitions for data quality alerts.
+    Replaces hardcoded DATA_WARNINGS list in warning_detector.py.
+    """
+    __tablename__ = "data_warnings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(50), nullable=False, unique=True)
+    keywords = Column(Text, nullable=False)             # JSON array
+    exclude_keywords = Column(Text, nullable=True)       # JSON array
+    columns_to_check = Column(Text, nullable=False)      # JSON array
+    message = Column(Text, nullable=False)
+    severity = Column(String(20), default='warning')
+    context_name = Column(String(100), nullable=True)    # NULL = all contexts
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index('ix_data_warnings_active', 'is_active'),
+    )
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "code": self.code,
+            "keywords": self.keywords,
+            "exclude_keywords": self.exclude_keywords,
+            "columns_to_check": self.columns_to_check,
+            "message": self.message,
+            "severity": self.severity,
+            "context_name": self.context_name,
+            "is_active": self.is_active,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class QueryComplexityPattern(Base):
+    """
+    Query complexity patterns for tier-based cost control.
+    Replaces hardcoded COMPLEX_PATTERNS/SIMPLE_PATTERNS in query_classifier.py.
+    """
+    __tablename__ = "query_complexity_patterns"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tier = Column(String(20), nullable=False)      # 'simple' or 'complex'
+    pattern = Column(Text, nullable=False)
+    description = Column(Text, nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint('tier', 'pattern', name='uq_tier_pattern'),
+    )

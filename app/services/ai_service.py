@@ -183,8 +183,8 @@ class AIService:
         else:
             raise ValueError(f"Unknown provider: {provider_name}")
 
-    async def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str, dimension_families: Optional[Dict[str, List[str]]] = None) -> str:
-        return await self.provider.explain_result(question, sql, data, system_prompt, dimension_families=dimension_families)
+    async def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str, dimension_families: Optional[Dict[str, List[str]]] = None, hierarchy_info: Optional[list] = None, schema_metadata: Optional[list] = None) -> str:
+        return await self.provider.explain_result(question, sql, data, system_prompt, dimension_families=dimension_families, hierarchy_info=hierarchy_info, schema_metadata=schema_metadata)
 
     async def query_with_retry(
         self,
@@ -594,8 +594,8 @@ Error: {last_error.get('error', '')}
 
                 try:
                     t0 = time.perf_counter()
-                    # Pass native multi-turn history on first attempt only
-                    native_history = history if (attempt == 0 and history) else None
+                    # Pass native history — limit to last 6 messages (3 turns) to control tokens
+                    native_history = history[-6:] if (attempt == 0 and history) else None
                     response_text = await self.provider.generate_content(user_prompt, system_prompt, history=native_history)
                     t_gen = time.perf_counter() - t0
                     logger.info(f"Hybrid Mode: SQL Generation took {t_gen:.4f}s")
@@ -618,17 +618,22 @@ Error: {last_error.get('error', '')}
 
                 logger.info(f"Extracted SQL: {sql_query[:100]}...")
 
-                # Phase 4: Log unmatched LIKE keywords for admin review
+                # Phase 4: Log unmatched LIKE keywords (fire-and-forget, non-blocking)
                 try:
+                    import threading
                     like_patterns = re.findall(r"LIKE\s+'%(.+?)%'", sql_query, re.IGNORECASE)
                     if like_patterns:
-                        from app.services.hierarchy_service import hierarchy_service
-                        for pattern in like_patterns:
-                            existing = hierarchy_service.search_aliases(context_name, pattern, limit=1)
-                            if not existing:
-                                hierarchy_service.log_unmatched_keyword(pattern, context_name, question)
+                        def _log_unmatched():
+                            try:
+                                from app.services.hierarchy_service import hierarchy_service
+                                for p in like_patterns:
+                                    if not hierarchy_service.search_aliases(context_name, p, limit=1):
+                                        hierarchy_service.log_unmatched_keyword(p, context_name, question)
+                            except Exception:
+                                pass
+                        threading.Thread(target=_log_unmatched, daemon=True).start()
                 except Exception:
-                    pass  # non-critical
+                    pass
 
                 # Step 3: Validate SQL using MCP
                 if on_status:
@@ -708,23 +713,43 @@ Error: {last_error.get('error', '')}
                 except Exception as df_err:
                     logger.warning(f"Could not load dimension families: {df_err}")
 
+                # Load schema metadata + hierarchy info for dynamic explain prompt
+                _schema_metadata = None
+                _hierarchy_info = None
+                try:
+                    _schema_metadata = temp_schema.get_schema_metadata(context_table)
+                except Exception:
+                    pass
+                try:
+                    from sqlalchemy import text as sa_text
+                    with temp_schema.engine.connect() as _conn:
+                        _rows = _conn.execute(sa_text(
+                            "SELECT level_label_th, level_columns FROM master_hierarchy "
+                            "WHERE context_name = :ctx AND is_active = 1 ORDER BY level"
+                        ), {"ctx": context_name}).fetchall()
+                        if _rows:
+                            _hierarchy_info = [{"level_label_th": r[0], "level_columns": r[1]} for r in _rows]
+                except Exception:
+                    pass
+
                 # Enhance explanation
                 # Build enriched question with conversation context for better explanation
                 enriched_question = question
                 if history:
-                    # Include last user question for context in follow-up queries
-                    prev_questions = [m["content"] for m in history if m.get("role") == "user"]
+                    prev_questions = [m["content"] for m in history[-4:] if m.get("role") == "user"]
                     if prev_questions:
-                        last_q = prev_questions[-1][:200]
-                        enriched_question = f"(บริบทก่อนหน้า: {last_q})\nคำถามปัจจุบัน: {question}"
+                        enriched_question = f"(บริบท: {prev_questions[-1][:100]})\n{question}"
 
                 if not data:
                     explanation = f"ไม่พบข้อมูลที่ตรงกับเงื่อนไข\n\nSQL ที่ใช้:\n```sql\n{sql_query}\n```\n\nอาจเป็นเพราะ:\n- ไม่มีข้อมูลที่ตรงกับคำค้นหา\n- ชื่อคอลัมน์หรือค่าที่ใช้ค้นหาอาจไม่ถูกต้อง"
                 elif len(data) > 0:
                     try:
                         t0 = time.perf_counter()
+                        # Prepare data for explanation: send summary + representative sample
+                        # instead of just first 30 rows (which may be biased by ORDER BY)
+                        explain_data = self._prepare_data_for_explanation(data)
                         simple_system_prompt = "You are a data visualization assistant. Analyze the data and provide a Thai explanation and chart recommendation."
-                        explanation = await self.provider.explain_result(enriched_question, sql_query, data, simple_system_prompt, dimension_families=dim_families)
+                        explanation = await self.provider.explain_result(enriched_question, sql_query, explain_data, simple_system_prompt, dimension_families=dim_families, hierarchy_info=_hierarchy_info, schema_metadata=_schema_metadata)
                         t_explain = time.perf_counter() - t0
                         logger.info(f"Hybrid Mode: Explanation Generation took {t_explain:.4f}s")
                     except Exception as explain_error:
@@ -792,6 +817,85 @@ Error: {last_error.get('error', '')}
             retry_count=max_retries + 1,
             retry_history=retry_history
         )
+
+    @staticmethod
+    def _prepare_data_for_explanation(data: List[Dict]) -> List[Dict]:
+        """
+        Prepare data for explain_result — balance accuracy vs speed.
+
+        NOTE: Frontend table gets FULL data separately. This is ONLY for AI explanation.
+
+        ≤ 200 rows:  send all (fast enough, ~7s explain)
+        > 200 rows:  aggregate by text columns → reduce to ≤ 200 rows
+                     all groups preserved, just detail rows merged
+
+        Previously data[:30] was biased by ORDER BY. Now we aggregate smartly.
+        """
+        if not data:
+            return data
+
+        if len(data) <= 200:
+            return data
+
+        # Aggregate: GROUP BY text columns, SUM numeric columns
+        from collections import defaultdict
+
+        sample = data[0]
+        text_cols = [k for k, v in sample.items() if isinstance(v, str)]
+        num_cols = [k for k, v in sample.items() if isinstance(v, (int, float))]
+
+        if not text_cols or not num_cols:
+            return data[:200]
+
+        # Strategy: progressively drop the LEAST important dimension
+        # Drop the column with MOST distinct values that contributes LEAST to grouping
+        # i.e. the "detail" dimension — keeps the primary grouping intact
+        # Example: dept(20) × quarter(4) × BG(8) = 640 → drop BG(8) → 80 rows
+        cols_by_cardinality = sorted(
+            text_cols,
+            key=lambda c: len(set(row.get(c, '') for row in data)),
+        )
+        # Drop from the MIDDLE: not the smallest (time) nor largest (primary), but the detail
+        # Reorder: put highest-cardinality-but-not-biggest last (protect primary grouping)
+        if len(cols_by_cardinality) >= 3:
+            # Keep first (smallest = time/quarter) and last (biggest = primary category)
+            # Drop middle ones first
+            protected = {cols_by_cardinality[0], cols_by_cardinality[-1]}
+            droppable = [c for c in cols_by_cardinality if c not in protected]
+            cols_by_cardinality = droppable + [cols_by_cardinality[0], cols_by_cardinality[-1]]
+        # For 2 columns: drop the one with fewer distinct values (likely time → keep primary)
+        # Already sorted ascending, so first = smallest
+
+        group_cols = list(text_cols)
+        for attempt in range(len(cols_by_cardinality)):
+            groups = defaultdict(lambda: {c: 0.0 for c in num_cols})
+            for row in data:
+                key = tuple(row.get(c, '') for c in group_cols)
+                for c in num_cols:
+                    groups[key][c] += (row.get(c, 0) or 0)
+
+            if len(groups) <= 200:
+                break
+
+            # Drop highest-cardinality column that's still in group_cols
+            for drop_col in cols_by_cardinality:
+                if drop_col in group_cols and len(group_cols) > 1:
+                    group_cols.remove(drop_col)
+                    break
+
+        agg_data = []
+        for key, sums in groups.items():
+            row = {c: k for c, k in zip(group_cols, key)}
+            row.update(sums)
+            agg_data.append(row)
+
+        agg_data.sort(key=lambda r: r.get(num_cols[0], 0), reverse=True)
+        result = agg_data[:200]
+
+        dropped = set(text_cols) - set(group_cols)
+        if dropped:
+            logger.info(f"explain data: {len(data)} → {len(result)} rows (dropped dimensions: {dropped})")
+        return result
 
     def _extract_sql(self, text: str) -> Optional[str]:
         """Extract SQL from AI response"""
@@ -936,14 +1040,14 @@ Error: {last_error.get('error', '')}
             except Exception:
                 has_hierarchy = False
 
-            for kw in keywords:
+            for kw in keywords[:5]:  # Cap at 5 keywords to limit DB queries
                 matches = schema_svc.search_keyword_index(kw, context_name=context_name, limit=5)
                 if matches:
                     results.extend(matches)
-                else:
-                    # Try hierarchy alias search first (more precise)
-                    if has_hierarchy:
-                        hier_matches = hierarchy_service.search_aliases(context_name, kw, limit=3)
+                elif has_hierarchy:
+                    # Try hierarchy alias search (more precise)
+                    hier_matches = hierarchy_service.search_aliases(context_name, kw, limit=3)
+                    if hier_matches:
                         for hm in hier_matches:
                             results.append({
                                 "keyword": kw,
@@ -951,10 +1055,13 @@ Error: {last_error.get('error', '')}
                                 "column_value": hm["value"],
                                 "source": "hierarchy_alias",
                             })
-                    # Fallback to direct DB search
-                    if not any(r.get("keyword") == kw for r in results):
+                    else:
+                        # Fallback to direct DB search
                         db_matches = schema_svc.search_db_for_keyword(kw, table_name=table_name, context_name=context_name, limit=5)
                         results.extend(db_matches)
+                else:
+                    db_matches = schema_svc.search_db_for_keyword(kw, table_name=table_name, context_name=context_name, limit=5)
+                    results.extend(db_matches)
 
             t_lookup = time.perf_counter() - t0
             if results:

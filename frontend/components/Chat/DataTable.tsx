@@ -212,8 +212,10 @@ export const DataTable = ({ data, displayHint, hierarchyColumns }: DataTableProp
     let periodLabels: string[] = [];
     let pivotedRows: any[] = [];
 
-    if (yearKey || periodKey) {
-        // Check for duplicate time entries
+    // === MASTER RULE: If AI explicitly says 'flat', skip ALL auto-detection ===
+    const skipAutoDetect = displayHint === 'flat';
+
+    if (!skipAutoDetect && (yearKey || periodKey)) {
         // Check for duplicate time entries
         const timeLabels = data.map(item => {
             if (periodKey && yearKey) {
@@ -233,7 +235,13 @@ export const DataTable = ({ data, displayHint, hierarchyColumns }: DataTableProp
         // OR simply if we have Time + Category (Force Crosstab for cleaner view)
         if (categoryKeys.length > 0 && (timeLabels.length > uniqueTimes.size || (periodKey && yearKey))) {
             isCrosstab = true;
-            rowKey = categoryKeys[0]; // Primary category (Province, Group)
+            // Pick category with highest cardinality as rowKey (not just first)
+            // e.g., product_name(25) > department(1) → use product_name as rows
+            rowKey = categoryKeys.reduce((best, k) => {
+                const bestCard = new Set(data.map(d => String(d[best] || ''))).size;
+                const kCard = new Set(data.map(d => String(d[k] || ''))).size;
+                return kCard > bestCard ? k : best;
+            }, categoryKeys[0]);
             colKey = quarterKey ? 'ไตรมาส' : monthKey ? 'เดือน' : yearKey ? 'ปี' : 'ช่วงเวลา';
 
             // --- Month Filling Logic ---
@@ -375,15 +383,23 @@ export const DataTable = ({ data, displayHint, hierarchyColumns }: DataTableProp
             });
 
             pivotedRows = Object.values(rowMap);
-            // Sort rows by name
-            pivotedRows.sort((a, b) => a._rowLabel.localeCompare(b._rowLabel));
+            // Sort rows by total value (descending)
+            pivotedRows.sort((a, b) => {
+                const totalA = periodLabels.reduce((s, p) => s + (a[p] || 0), 0);
+                const totalB = periodLabels.reduce((s, p) => s + (b[p] || 0), 0);
+                return totalB - totalA;
+            });
+
+            // Time-based crosstab: always keep as crosstab
+            // Users who ask "รายเดือน" or "รายไตรมาส" expect time as columns
+            // Empty cells simply mean "not in result set" — still useful info
         }
     }
 
     // === NEW: Category × Category Crosstab Detection ===
     // If no time-based crosstab, try to detect Category × Category pattern
     // SKIP if LLM explicitly requested hierarchical display
-    if (!isCrosstab && categoryKeys.length >= 2 && valueKey && displayHint !== 'hierarchical') {
+    if (!skipAutoDetect && !isCrosstab && categoryKeys.length >= 2 && valueKey && displayHint !== 'hierarchical') {
         // Analyze each category's cardinality
         const categoryStats = categoryKeys.map(k => ({
             key: k,
@@ -505,14 +521,26 @@ export const DataTable = ({ data, displayHint, hierarchyColumns }: DataTableProp
             });
             const isOneToNHierarchy = Object.values(rowToColMap).every(s => s.size === 1);
 
+            // Sparsity check: would the pivot create a mostly-empty matrix?
+            // If each row only has 1 value across columns → sparse → flat is better
+            const uniqueRowLabels = new Set(data.map(d =>
+                allRowKeys.map(k => String(d[k] || '')).join('-')
+            )).size;
+            const possibleCells = uniqueRowLabels * colCandidate.uniqueCount;
+            const fillRate = data.length / possibleCells;
+            const isSparse = fillRate < 0.4; // less than 40% cells filled
+
             // Use crosstab ONLY if:
             // (a) LLM explicitly requested crosstab, OR
-            // (b) Data is NOT a 1:N hierarchy (true matrix / time comparison)
+            // (b) Data is NOT a 1:N hierarchy AND NOT sparse
             const useCrosstab = (displayHint === 'crosstab') ||
-                (!isOneToNHierarchy && colCandidate.uniqueCount <= 20);
+                (!isOneToNHierarchy && !isSparse && colCandidate.uniqueCount <= 20);
 
             if (isOneToNHierarchy && displayHint !== 'crosstab') {
                 console.log(`[DataTable] Detected 1:N hierarchy (${primaryRowKey} → ${colCandidate.key}) → using hierarchical mode instead of crosstab`);
+            }
+            if (isSparse && displayHint !== 'crosstab') {
+                console.log(`[DataTable] Sparse pivot detected (fill rate ${(fillRate*100).toFixed(0)}%) → using flat table`);
             }
 
             if (useCrosstab) {
@@ -621,7 +649,7 @@ export const DataTable = ({ data, displayHint, hierarchyColumns }: DataTableProp
     const isCrosstabHint = displayHint === 'crosstab';
     const isFlatHint = displayHint === 'flat';
 
-    if (!isCrosstab && !isFlatHint && !isCrosstabHint) {
+    if (!skipAutoDetect && !isCrosstab && !isFlatHint && !isCrosstabHint) {
         hierarchyKeys = detectMultiLevelHierarchy();
         if (hierarchyKeys.length >= 2) {
             hierarchyValueKey = valueKey || keys.find(k => typeof data[0][k] === 'number' && !k.toLowerCase().includes('id')) || keys[keys.length - 1];
@@ -1052,14 +1080,24 @@ export const DataTable = ({ data, displayHint, hierarchyColumns }: DataTableProp
                 </View>
             </View>
 
-            <ScrollView horizontal showsHorizontalScrollIndicator={true} className="w-full">
-                {isCrosstab
-                    ? renderCrosstabTable()
-                    : isHierarchical
-                        ? renderHierarchicalTable()
-                        : parentKey
-                            ? renderGroupedTable()
-                            : renderFlatTable()}
+            <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={true}
+                className="w-full"
+            >
+                <ScrollView
+                    nestedScrollEnabled={true}
+                    showsVerticalScrollIndicator={true}
+                    style={{ maxHeight: 600 }}
+                >
+                    {isCrosstab
+                        ? renderCrosstabTable()
+                        : isHierarchical
+                            ? renderHierarchicalTable()
+                            : parentKey
+                                ? renderGroupedTable()
+                                : renderFlatTable()}
+                </ScrollView>
             </ScrollView>
         </View>
     );

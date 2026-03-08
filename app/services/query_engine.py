@@ -10,6 +10,7 @@ Usage:
 """
 
 import hashlib
+import os
 import time
 import uuid
 import logging
@@ -135,6 +136,99 @@ class QueryEngineResult:
     provider_used: str = ""
 
 
+# ---------------------------------------------------------------------------
+# Provider kwargs resolution: DB → .env → hardcoded fallback
+# ---------------------------------------------------------------------------
+# Hardcoded fallback for 3 built-in providers — new providers use ai_providers table
+_ENV_FALLBACK = {
+    "claude":  {"api_key_attr": "ANTHROPIC_API_KEY", "model_attr": "CLAUDE_MODEL"},
+    "gemini":  {"api_key_attr": "GOOGLE_AI_API_KEY", "model_attr": "GEMINI_MODEL"},
+    "matcha":  {"api_key_attr": "MATCHA_AI_API_KEY", "model_attr": "MATCHA_MODEL",
+                "api_url_attr": "MATCHA_API_URL"},
+}
+
+
+def _build_provider_kwargs(provider_name: str, ai_config: dict) -> dict:
+    """
+    Build provider kwargs with 3-tier resolution:
+    1. DB (ai_providers table) → resolve env var name → get actual value from os.environ
+    2. .env via settings object (for known providers)
+    3. Empty string (provider.is_configured() returns False → skip)
+    """
+    kwargs: Dict[str, Any] = {}
+    api_key_env_var = None
+    api_url_env_var = None
+    default_api_url = None
+
+    # === Tier 1: Try DB for env var names ===
+    try:
+        from app.db.session import SessionLocal
+        from sqlalchemy import text
+        db = SessionLocal()
+        try:
+            row = db.execute(text(
+                "SELECT api_key_env_var, api_url_env_var, default_api_url "
+                "FROM ai_providers WHERE id = :id AND is_active = 1"
+            ), {"id": provider_name}).fetchone()
+            if row:
+                api_key_env_var = row[0]
+                api_url_env_var = row[1]
+                default_api_url = row[2]
+        finally:
+            db.close()
+    except Exception as e:
+        logger.debug(f"DB lookup failed for provider '{provider_name}': {e}")
+
+    # === Resolve API Key ===
+    if api_key_env_var:
+        kwargs["api_key"] = (
+            os.environ.get(api_key_env_var, "")
+            or getattr(settings, api_key_env_var, "")
+        )
+    else:
+        fallback = _ENV_FALLBACK.get(provider_name, {})
+        attr = fallback.get("api_key_attr")
+        kwargs["api_key"] = getattr(settings, attr, "") if attr else ""
+
+    # === Resolve API URL (if provider needs it) ===
+    if api_url_env_var:
+        kwargs["api_url"] = (
+            ai_config.get(f"{provider_name}_api_url")
+            or os.environ.get(api_url_env_var, "")
+            or getattr(settings, api_url_env_var, "")
+            or default_api_url
+            or ""
+        )
+    else:
+        fallback = _ENV_FALLBACK.get(provider_name, {})
+        attr = fallback.get("api_url_attr")
+        if attr:
+            kwargs["api_url"] = (
+                ai_config.get(f"{provider_name}_api_url")
+                or getattr(settings, attr, "")
+            )
+
+    # === Resolve Model: admin_config → .env settings → "" ===
+    model_key = f"{provider_name}_model"
+    model = ai_config.get(model_key)
+    if not model:
+        fallback = _ENV_FALLBACK.get(provider_name, {})
+        attr = fallback.get("model_attr")
+        model = getattr(settings, attr, "") if attr else ""
+    kwargs["model"] = model or ""
+
+    # === Provider-specific extras from admin_config ===
+    # e.g. "claude_extended_thinking" → "extended_thinking"
+    skip_suffixes = {"enabled", "model", "api_url"}
+    for key, value in ai_config.items():
+        if key.startswith(f"{provider_name}_"):
+            param_name = key[len(provider_name) + 1:]
+            if param_name not in skip_suffixes:
+                kwargs[param_name] = value
+
+    return kwargs
+
+
 class QueryEngine:
     """
     Core orchestrator — can be called from Web, Telegram, or API.
@@ -223,19 +317,11 @@ class QueryEngine:
         # 1. Resolve provider
         selected_provider = provider or ai_config.get("default_provider", settings.AI_PROVIDER)
 
-        # Build provider kwargs from admin config + settings
-        if selected_provider == "claude":
-            provider_kwargs.setdefault("api_key", settings.ANTHROPIC_API_KEY)
-            provider_kwargs.setdefault("model", ai_config.get("claude_model", settings.CLAUDE_MODEL))
-            provider_kwargs.setdefault("extended_thinking", ai_config.get("claude_extended_thinking", False))
-            provider_kwargs.setdefault("thinking_budget_tokens", ai_config.get("claude_thinking_budget_tokens", 8000))
-        elif selected_provider == "gemini":
-            provider_kwargs.setdefault("api_key", settings.GOOGLE_AI_API_KEY)
-            provider_kwargs.setdefault("model", ai_config.get("gemini_model", settings.GEMINI_MODEL))
-        elif selected_provider == "matcha":
-            provider_kwargs.setdefault("api_key", settings.MATCHA_AI_API_KEY)
-            provider_kwargs.setdefault("api_url", ai_config.get("matcha_api_url") or settings.MATCHA_API_URL)
-            provider_kwargs.setdefault("model", ai_config.get("matcha_model", settings.MATCHA_MODEL))
+        # Build provider kwargs dynamically: DB → .env → hardcoded fallback
+        resolved_kwargs = _build_provider_kwargs(selected_provider, ai_config)
+        # Caller overrides take precedence
+        for k, v in resolved_kwargs.items():
+            provider_kwargs.setdefault(k, v)
 
         provider_instance = provider_registry.create_provider(selected_provider, **provider_kwargs)
         if not provider_instance or not provider_instance.is_configured():

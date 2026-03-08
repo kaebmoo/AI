@@ -1162,16 +1162,7 @@ def update_ai_config(
     config_service = AdminConfigService(db)
 
     success = config_service.update_ai_config(
-        default_provider=config_update.get("default_provider"),
-        claude_enabled=config_update.get("claude_enabled"),
-        gemini_enabled=config_update.get("gemini_enabled"),
-        matcha_enabled=config_update.get("matcha_enabled"),
-        claude_model=config_update.get("claude_model"),
-        gemini_model=config_update.get("gemini_model"),
-        matcha_model=config_update.get("matcha_model"),
-        matcha_api_url=config_update.get("matcha_api_url"),
-        claude_extended_thinking=config_update.get("claude_extended_thinking"),
-        claude_thinking_budget_tokens=config_update.get("claude_thinking_budget_tokens"),
+        updates=config_update,
         updated_by=current_user.email
     )
 
@@ -1819,3 +1810,222 @@ def resolve_unmatched_keyword(
     """Mark an unmatched keyword as resolved."""
     hierarchy_service.resolve_unmatched_keyword(keyword, context_name)
     return {"success": True}
+
+
+# ============================================================
+# Data Warnings Endpoints
+# ============================================================
+
+from app.models.schema_models import DataWarningModel
+from app.schemas.admin_schemas import (
+    DataWarningCreate, DataWarningUpdate, DataWarningResponse, DataWarningListResponse,
+)
+from app.services.warning_detector import clear_warnings_cache
+
+
+@router.get("/warnings", response_model=DataWarningListResponse)
+def list_data_warnings(
+    severity: Optional[str] = Query(None, description="Filter by severity"),
+    is_active: Optional[bool] = Query(None, description="Filter by active status"),
+    context_name: Optional[str] = Query(None, description="Filter by context"),
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db),
+):
+    """List all data warnings. Admin only."""
+    query = db.query(DataWarningModel)
+    if severity:
+        query = query.filter(DataWarningModel.severity == severity)
+    if is_active is not None:
+        query = query.filter(DataWarningModel.is_active == is_active)
+    if context_name:
+        query = query.filter(DataWarningModel.context_name == context_name)
+
+    warnings = query.order_by(DataWarningModel.code).all()
+    return DataWarningListResponse(
+        warnings=[DataWarningResponse.model_validate(w) for w in warnings],
+        total=len(warnings),
+    )
+
+
+@router.get("/warnings/{warning_id}", response_model=DataWarningResponse)
+def get_data_warning(
+    warning_id: int,
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db),
+):
+    """Get single data warning. Admin only."""
+    warning = db.query(DataWarningModel).filter(DataWarningModel.id == warning_id).first()
+    if not warning:
+        raise HTTPException(status_code=404, detail="Data warning not found")
+    return DataWarningResponse.model_validate(warning)
+
+
+@router.post("/warnings", response_model=DataWarningResponse, status_code=status.HTTP_201_CREATED)
+def create_data_warning(
+    data: DataWarningCreate,
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db),
+):
+    """Create new data warning. Admin only."""
+    existing = db.query(DataWarningModel).filter(DataWarningModel.code == data.code).first()
+    if existing:
+        raise HTTPException(status_code=400, detail=f"Warning code '{data.code}' already exists")
+
+    warning = DataWarningModel(**data.model_dump())
+    db.add(warning)
+    db.commit()
+    db.refresh(warning)
+
+    clear_warnings_cache()
+    return DataWarningResponse.model_validate(warning)
+
+
+@router.put("/warnings/{warning_id}", response_model=DataWarningResponse)
+def update_data_warning(
+    warning_id: int,
+    data: DataWarningUpdate,
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db),
+):
+    """Update data warning. Admin only."""
+    warning = db.query(DataWarningModel).filter(DataWarningModel.id == warning_id).first()
+    if not warning:
+        raise HTTPException(status_code=404, detail="Data warning not found")
+
+    update_data = data.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(warning, key, value)
+
+    warning.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(warning)
+
+    clear_warnings_cache()
+    return DataWarningResponse.model_validate(warning)
+
+
+@router.delete("/warnings/{warning_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_data_warning(
+    warning_id: int,
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db),
+):
+    """Delete data warning. Admin only."""
+    warning = db.query(DataWarningModel).filter(DataWarningModel.id == warning_id).first()
+    if not warning:
+        raise HTTPException(status_code=404, detail="Data warning not found")
+
+    db.delete(warning)
+    db.commit()
+
+    clear_warnings_cache()
+    return None
+
+
+# ============================================================
+# Query Complexity Pattern Endpoints
+# ============================================================
+
+from app.models.schema_models import QueryComplexityPattern
+from app.schemas.admin_schemas import (
+    QueryPatternCreate, QueryPatternUpdate, QueryPatternResponse, QueryPatternListResponse,
+)
+from app.services.query_classifier import clear_patterns_cache
+
+
+@router.get("/query-patterns", response_model=QueryPatternListResponse)
+def list_query_patterns(
+    tier: Optional[str] = Query(None, description="Filter by tier (simple/complex)"),
+    is_active: Optional[bool] = Query(None, description="Filter by active status"),
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db),
+):
+    """List all query complexity patterns. Admin only."""
+    query = db.query(QueryComplexityPattern)
+    if tier:
+        query = query.filter(QueryComplexityPattern.tier == tier)
+    if is_active is not None:
+        query = query.filter(QueryComplexityPattern.is_active == is_active)
+
+    patterns = query.order_by(QueryComplexityPattern.tier, QueryComplexityPattern.id).all()
+    return QueryPatternListResponse(
+        patterns=[QueryPatternResponse.model_validate(p) for p in patterns],
+        total=len(patterns),
+    )
+
+
+@router.get("/query-patterns/{pattern_id}", response_model=QueryPatternResponse)
+def get_query_pattern(
+    pattern_id: int,
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db),
+):
+    """Get single query pattern. Admin only."""
+    pattern = db.query(QueryComplexityPattern).filter(QueryComplexityPattern.id == pattern_id).first()
+    if not pattern:
+        raise HTTPException(status_code=404, detail="Query pattern not found")
+    return QueryPatternResponse.model_validate(pattern)
+
+
+@router.post("/query-patterns", response_model=QueryPatternResponse, status_code=status.HTTP_201_CREATED)
+def create_query_pattern(
+    data: QueryPatternCreate,
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db),
+):
+    """Create new query pattern. Admin only."""
+    existing = db.query(QueryComplexityPattern).filter(
+        QueryComplexityPattern.tier == data.tier,
+        QueryComplexityPattern.pattern == data.pattern,
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail=f"Pattern already exists for tier '{data.tier}'")
+
+    pattern = QueryComplexityPattern(**data.model_dump())
+    db.add(pattern)
+    db.commit()
+    db.refresh(pattern)
+
+    clear_patterns_cache()
+    return QueryPatternResponse.model_validate(pattern)
+
+
+@router.put("/query-patterns/{pattern_id}", response_model=QueryPatternResponse)
+def update_query_pattern(
+    pattern_id: int,
+    data: QueryPatternUpdate,
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db),
+):
+    """Update query pattern. Admin only."""
+    pattern = db.query(QueryComplexityPattern).filter(QueryComplexityPattern.id == pattern_id).first()
+    if not pattern:
+        raise HTTPException(status_code=404, detail="Query pattern not found")
+
+    update_data = data.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(pattern, key, value)
+
+    db.commit()
+    db.refresh(pattern)
+
+    clear_patterns_cache()
+    return QueryPatternResponse.model_validate(pattern)
+
+
+@router.delete("/query-patterns/{pattern_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_query_pattern(
+    pattern_id: int,
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db),
+):
+    """Delete query pattern. Admin only."""
+    pattern = db.query(QueryComplexityPattern).filter(QueryComplexityPattern.id == pattern_id).first()
+    if not pattern:
+        raise HTTPException(status_code=404, detail="Query pattern not found")
+
+    db.delete(pattern)
+    db.commit()
+
+    clear_patterns_cache()
+    return None

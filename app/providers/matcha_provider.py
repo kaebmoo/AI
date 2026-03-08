@@ -11,13 +11,13 @@ from typing import Dict, List, Optional, Any, Union
 
 import httpx
 
-from app.providers.base import AIProvider
+from app.providers.base import AIProvider, lookup_model_by_tier
 from app.providers.retry_config import ai_retry
 from app.providers.chart_postprocessor import (
     parse_explanation_response,
     enforce_time_series_rule,
     enforce_dimension_family_rule,
-    build_dimension_family_prompt,
+    build_explain_prompt,
     auto_detect_chart_config,
 )
 from app.config import settings
@@ -39,6 +39,10 @@ class MatchaProvider(AIProvider):
         return bool(self.api_key and self.api_url)
 
     def get_model(self, tier: str = "default") -> str:
+        db_model = lookup_model_by_tier("matcha", tier)
+        if db_model:
+            return db_model
+        # Hardcoded fallback
         if tier == "cheap":
             return "gpt-4o-mini"
         return self.model
@@ -91,67 +95,27 @@ class MatchaProvider(AIProvider):
             "tokens_used": result.get('usage', {}).get('total_tokens', 0)
         }
 
-    async def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str, dimension_families: Optional[Dict[str, List[str]]] = None) -> Dict[str, Any]:
+    async def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str, dimension_families: Optional[Dict[str, List[str]]] = None, hierarchy_info: Optional[list] = None, schema_metadata: Optional[list] = None) -> Dict[str, Any]:
         """Explain result using Matcha/OpenAI and return Config"""
-
-        data_preview = json.dumps(data[:5], ensure_ascii=False, default=str)
-        family_prompt = build_dimension_family_prompt(dimension_families) if dimension_families else ""
-
-        prompt = f"""
-Query: {question}
-SQL: {sql}
-
-Data Preview:
-{data_preview}
-{family_prompt}
-
-Based on the data, provide:
-1. A brief explanation of the trends/values (in Thai).
-   - IMPORTANT: Format the explanation as **beautiful Markdown**.
-   - Use `###` for headings, **bold text** for important metrics/numbers.
-   - Use bullet points (`-`) for multiple items.
-   - Use blockquotes (`>`) to emphasize key insights.
-2. The BEST chart type to visualize this (bar_chart, line_chart, pie_chart, grouped_bar, stacked_bar, table, single_value).
-3. The configuration:
-   - category_column: X-axis (Grouping). Rule: Use 'month' for trends, 'department'/'group' for comparison.
-   - measure_column: Y-axis (Value).
-   - series_column: Comparison/Legend (Optional). Rule: If comparing multiple groups over time, use this. Prefer NAME columns over CODE columns.
-4. display_hint: How to render the table. Choose ONE:
-   - 'hierarchical': Use when data has MULTIPLE categorical (non-time) columns where one is the parent of another.
-     Rule: If the columns represent a HIERARCHY (e.g., BUSINESS_GROUP > SERVICE_GROUP, or division > department > section),
-     always use 'hierarchical' — even if there are only 2 levels.
-     Do NOT use crosstab for parent-child hierarchy data without time dimension.
-   - 'crosstab': Use ONLY when comparing values ACROSS a time dimension (month, quarter, year) OR when
-     user explicitly asks to compare one category against another.
-   - 'flat': simple flat rows — single dimension or already one-level data.
-5. hierarchy_columns: (REQUIRED if display_hint='hierarchical') Actual column names ordered HIGHEST (parent) to LOWEST (child).
-   Example: BUSINESS_GROUP > SERVICE_GROUP → ["BUSINESS_GROUP", "SERVICE_GROUP"]
-
-IMPORTANT: Return VALID JSON only. Do not wrap in markdown unless necessary.
-Structure:
-{{
-  "explanation": "### สรุปข้อมูล\\n\\nรายได้รวม **...",
-  "visualization": "...",
-  "chart_config": {{
-      "category_column": "...",
-      "measure_column": "...",
-      "series_column": "..."
-  }},
-  "display_hint": "hierarchical",
-  "hierarchy_columns": ["...", "...", "..."]
-}}
-"""
+        prompt = build_explain_prompt(
+            question=question, sql=sql, data=data,
+            dimension_families=dimension_families,
+            hierarchy_info=hierarchy_info,
+            schema_metadata=schema_metadata,
+        )
         response_text = await self.generate_content(prompt, system_prompt)
 
         # Use shared post-processor
+        time_columns = [m['column_name'] for m in schema_metadata
+                        if m.get('dimension_group') == 'time_period'] if schema_metadata else None
         parsed_result = parse_explanation_response(response_text)
-        parsed_result = enforce_time_series_rule(parsed_result)
+        parsed_result = enforce_time_series_rule(parsed_result, time_columns=time_columns)
         parsed_result = enforce_dimension_family_rule(parsed_result, dimension_families)
 
         # Fallback: If no chart_config, try to infer from data
         if "chart_config" not in parsed_result and data and len(data) > 0:
             logger.info("Matcha: No chart_config found, attempting auto-detection")
-            parsed_result = auto_detect_chart_config(data, parsed_result)
+            parsed_result = auto_detect_chart_config(data, parsed_result, schema_metadata=schema_metadata)
 
         return parsed_result
 

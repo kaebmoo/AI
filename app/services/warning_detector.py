@@ -4,10 +4,12 @@ NT AI Assistant - Warning Detector
 Detect data warnings based on content and SQL patterns.
 
 Extracted from chat.py for reuse by QueryEngine and other callers.
+Warning definitions are loaded from `data_warnings` table with in-memory cache.
 """
 
 import re
 import json
+import time
 import logging
 from typing import List, Dict, Any, Optional
 
@@ -15,9 +17,8 @@ from app.schemas.chat import DataWarning
 
 logger = logging.getLogger(__name__)
 
-
-# Warning definitions — can be moved to database for admin management
-DATA_WARNINGS = [
+# Hardcoded fallback — used only when DB is unavailable
+_HARDCODED_WARNINGS = [
     {
         "code": "OTHER_REVENUE_NOT_NET",
         "keywords": ["รายได้อื่น"],
@@ -27,6 +28,68 @@ DATA_WARNINGS = [
         "severity": "warning"
     },
 ]
+
+# In-memory cache for warning definitions
+_warnings_cache: Optional[List[Dict]] = None
+_warnings_cache_ts: float = 0.0
+_WARNINGS_CACHE_TTL = 3600  # 1 hour
+
+
+def _load_warnings_from_db() -> Optional[List[Dict]]:
+    """Load active warning definitions from data_warnings table."""
+    try:
+        from app.db.session import SessionLocal
+        db = SessionLocal()
+        try:
+            from app.models.schema_models import DataWarningModel
+            rows = db.query(DataWarningModel).filter(
+                DataWarningModel.is_active == True
+            ).all()
+            warnings = []
+            for row in rows:
+                w = {
+                    "code": row.code,
+                    "keywords": json.loads(row.keywords) if isinstance(row.keywords, str) else row.keywords,
+                    "exclude_keywords": json.loads(row.exclude_keywords) if row.exclude_keywords and isinstance(row.exclude_keywords, str) else (row.exclude_keywords or []),
+                    "columns_to_check": json.loads(row.columns_to_check) if isinstance(row.columns_to_check, str) else row.columns_to_check,
+                    "message": row.message,
+                    "severity": row.severity or "warning",
+                    "context_name": row.context_name,
+                }
+                warnings.append(w)
+            return warnings
+        finally:
+            db.close()
+    except Exception as e:
+        logger.debug(f"Could not load warnings from DB: {e}")
+        return None
+
+
+def get_warning_definitions() -> List[Dict]:
+    """Get warning definitions with cache. Falls back to hardcoded if DB unavailable."""
+    global _warnings_cache, _warnings_cache_ts
+
+    now = time.time()
+    if _warnings_cache is not None and (now - _warnings_cache_ts) < _WARNINGS_CACHE_TTL:
+        return _warnings_cache
+
+    db_warnings = _load_warnings_from_db()
+    if db_warnings is not None:
+        _warnings_cache = db_warnings
+        _warnings_cache_ts = now
+        logger.debug(f"Loaded {len(db_warnings)} warning definitions from DB")
+        return db_warnings
+
+    # Fallback to hardcoded
+    logger.debug("Using hardcoded warning definitions (DB unavailable)")
+    return _HARDCODED_WARNINGS
+
+
+def clear_warnings_cache():
+    """Clear the warnings cache. Called by admin API after mutations."""
+    global _warnings_cache, _warnings_cache_ts
+    _warnings_cache = None
+    _warnings_cache_ts = 0.0
 
 
 class WarningDetector:
@@ -49,7 +112,7 @@ class WarningDetector:
 
         # 1. Standard data warnings (based on content)
         if data:
-            warnings.extend(self.detect_data_warnings(data, sql_query))
+            warnings.extend(self.detect_data_warnings(data, sql_query, context_name))
 
         # 2. Multiple sources warning (when LIKE matches multiple values)
         if sql_query and 'LIKE' in sql_query.upper() and self.mcp_client:
@@ -67,13 +130,21 @@ class WarningDetector:
     def detect_data_warnings(
         data: List[Dict[str, Any]],
         sql_query: str = None,
+        context_name: str = None,
     ) -> List[DataWarning]:
         """Detect warnings based on data content."""
         warnings = []
         if not data:
             return warnings
 
-        for warning_def in DATA_WARNINGS:
+        warning_defs = get_warning_definitions()
+
+        for warning_def in warning_defs:
+            # Filter by context if specified
+            wctx = warning_def.get("context_name")
+            if wctx and context_name and wctx != context_name:
+                continue
+
             warning_triggered = False
 
             for row in data:

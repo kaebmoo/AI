@@ -240,6 +240,94 @@ class DashboardStatsResponse(BaseModel):
 
 
 # ==========================
+# Data Warnings
+# ==========================
+
+class DataWarningBase(BaseModel):
+    """Base schema for data warning"""
+    code: str
+    keywords: str           # JSON array string
+    exclude_keywords: Optional[str] = None
+    columns_to_check: str   # JSON array string
+    message: str
+    severity: str = "warning"
+    context_name: Optional[str] = None
+    is_active: bool = True
+
+
+class DataWarningCreate(DataWarningBase):
+    """Schema for creating data warning"""
+    pass
+
+
+class DataWarningUpdate(BaseModel):
+    """Schema for updating data warning"""
+    keywords: Optional[str] = None
+    exclude_keywords: Optional[str] = None
+    columns_to_check: Optional[str] = None
+    message: Optional[str] = None
+    severity: Optional[str] = None
+    context_name: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class DataWarningResponse(DataWarningBase):
+    """Schema for data warning response"""
+    id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class DataWarningListResponse(BaseModel):
+    """Response for list of data warnings"""
+    warnings: List[DataWarningResponse]
+    total: int
+
+
+# ==========================
+# Query Complexity Patterns
+# ==========================
+
+class QueryPatternBase(BaseModel):
+    """Base schema for query complexity pattern"""
+    tier: str           # 'simple' or 'complex'
+    pattern: str
+    description: Optional[str] = None
+    is_active: bool = True
+
+
+class QueryPatternCreate(QueryPatternBase):
+    """Schema for creating query pattern"""
+    pass
+
+
+class QueryPatternUpdate(BaseModel):
+    """Schema for updating query pattern"""
+    tier: Optional[str] = None
+    pattern: Optional[str] = None
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class QueryPatternResponse(QueryPatternBase):
+    """Schema for query pattern response"""
+    id: int
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class QueryPatternListResponse(BaseModel):
+    """Response for list of query patterns"""
+    patterns: List[QueryPatternResponse]
+    total: int
+
+
+# ==========================
 # Schema Contexts
 # ==========================
 
