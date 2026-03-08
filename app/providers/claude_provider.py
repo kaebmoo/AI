@@ -88,7 +88,9 @@ class ClaudeProvider(AIProvider):
             max_tokens=2048,
             system=system_with_cache,
             tools=sanitized_tools,
-            messages=messages
+            messages=messages,
+            temperature=0,  # Deterministic SQL generation
+            top_p=0.05,     # Narrow probability space for consistency
         )
 
         # Log prompt caching metrics
@@ -127,7 +129,8 @@ class ClaudeProvider(AIProvider):
             model=self.model,
             max_tokens=2000,
             system=system_with_cache,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3  # Slightly varied but stable explanations
         )
 
         # Log prompt caching metrics
@@ -189,6 +192,7 @@ class ClaudeProvider(AIProvider):
             logger.info(f"ClaudeProvider: Extended Thinking enabled (budget={self.thinking_budget_tokens}, model={self.model})")
         else:
             kwargs["max_tokens"] = 4000
+            kwargs["temperature"] = 0.3  # Stable intent extraction
             if self.extended_thinking and not model_supports_thinking:
                 logger.warning(f"ClaudeProvider: Extended Thinking requested but model={self.model} does not support it, using standard mode")
 

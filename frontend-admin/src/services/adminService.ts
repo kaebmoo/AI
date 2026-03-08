@@ -113,5 +113,12 @@ export const adminService = {
             headers: getAuthHeader()
         });
         return response.data;
+    },
+
+    syncBrain: async () => {
+        const response = await axios.post(`${API_URL}/admin/sync-brain`, {}, {
+            headers: getAuthHeader()
+        });
+        return response.data;
     }
 };

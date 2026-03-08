@@ -1681,7 +1681,7 @@ DATE column is Unix Timestamp (ms). Use YEAR/MONTH columns instead."""
                 # Source 2: master_hierarchy_values (aliases + display values)
                 ctx_filter2 = "AND context_name = :ctx" if context_name else ""
                 rows2 = conn.execute(text(f"""
-                    SELECT DISTINCT display_value FROM master_hierarchy_values
+                    SELECT DISTINCT value FROM master_hierarchy_values
                     WHERE is_active = 1 {ctx_filter2}
                 """), params).fetchall()
                 for row in rows2:

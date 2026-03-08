@@ -70,7 +70,8 @@ class MatchaProvider(AIProvider):
             'model': self.model,
             'messages': messages,
             'tool_choice': 'auto',
-            'temperature': 0.1
+            'temperature': 0,   # Deterministic SQL generation
+            'top_p': 0.05,      # Narrow probability space for consistency
         }
 
         if openai_tools:
@@ -133,7 +134,7 @@ class MatchaProvider(AIProvider):
         payload = {
             'model': self.model,
             'messages': messages,
-            'temperature': 0.1
+            'temperature': 0.3  # Stable intent extraction / explanations
         }
 
         try:

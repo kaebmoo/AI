@@ -30,6 +30,7 @@ from app.schemas.admin_schemas import (
 )
 from app.services.schema_service import SchemaService
 from app.services.admin_config_service import AdminConfigService
+from app.services.query_engine import clear_query_cache
 from app.config import settings
 
 router = APIRouter()
@@ -106,6 +107,7 @@ def create_schema_column(
 
     # 🔥 Auto-refresh cache after creating column metadata
     schema_service.refresh_cache()
+    clear_query_cache()
 
     return SchemaMetadataResponse.model_validate(column)
 
@@ -136,6 +138,7 @@ def update_schema_column(
 
     # 🔥 Auto-refresh cache after updating column metadata
     schema_service.refresh_cache()
+    clear_query_cache()
 
     return SchemaMetadataResponse.model_validate(column)
 
@@ -160,6 +163,7 @@ def delete_schema_column(
 
     # 🔥 Auto-refresh cache after deleting column metadata
     schema_service.refresh_cache()
+    clear_query_cache()
 
     return None
 
@@ -245,6 +249,7 @@ def create_semantic_mapping(
 
     # 🔥 Auto-refresh cache after creating new mapping
     schema_service.refresh_cache()
+    clear_query_cache()
 
     return SemanticMappingResponse.model_validate(mapping)
 
@@ -287,6 +292,7 @@ def update_semantic_mapping(
 
     # 🔥 Auto-refresh cache after updating mapping
     schema_service.refresh_cache()
+    clear_query_cache()
 
     return SemanticMappingResponse.model_validate(mapping)
 
@@ -311,6 +317,7 @@ def delete_semantic_mapping(
 
     # 🔥 Auto-refresh cache after deleting mapping
     schema_service.refresh_cache()
+    clear_query_cache()
 
     return None
 
@@ -391,6 +398,7 @@ def create_business_rule(
 
     # 🔥 Auto-refresh cache after creating business rule
     schema_service.refresh_cache()
+    clear_query_cache()
 
     return BusinessRuleResponse.model_validate(rule)
 
@@ -421,6 +429,7 @@ def update_business_rule(
 
     # 🔥 Auto-refresh cache after updating business rule
     schema_service.refresh_cache()
+    clear_query_cache()
 
     return BusinessRuleResponse.model_validate(rule)
 
@@ -445,6 +454,7 @@ def delete_business_rule(
 
     # 🔥 Auto-refresh cache after deleting business rule
     schema_service.refresh_cache()
+    clear_query_cache()
 
     return None
 
@@ -471,6 +481,7 @@ def toggle_business_rule(
 
     # 🔥 Auto-refresh cache after toggling business rule
     schema_service.refresh_cache()
+    clear_query_cache()
 
     return BusinessRuleResponse.model_validate(rule)
 
@@ -572,6 +583,7 @@ def create_golden_example(
     if example.is_active:
         ai_service.train(question=example.question_pattern, sql_query=example.expected_sql)
         
+    clear_query_cache()
     return GoldenExampleResponse.model_validate(example)
 
 
@@ -606,6 +618,7 @@ def update_golden_example(
     if example.is_active:
          ai_service.train(question=example.question_pattern, sql_query=example.expected_sql)
          
+    clear_query_cache()
     return GoldenExampleResponse.model_validate(example)
 
 
@@ -627,6 +640,7 @@ def delete_golden_example(
 
     db.delete(example)
     db.commit()
+    clear_query_cache()
     return None
 
 
@@ -663,6 +677,7 @@ def create_context(
     """
     try:
         context = service.create_context(data.model_dump())
+        clear_query_cache()
         return SchemaContextResponse.model_validate(context)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -682,6 +697,7 @@ def update_context(
         context = service.update_context(context_id, data.model_dump(exclude_unset=True))
         if not context:
             raise HTTPException(status_code=404, detail="Context not found")
+        clear_query_cache()
         return SchemaContextResponse.model_validate(context)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -697,6 +713,7 @@ def delete_context(
     Admin only.
     """
     service.delete_context(context_id)
+    clear_query_cache()
     return None
 
 
@@ -731,6 +748,7 @@ def create_view(
             source_table=data.source_table,
             mapping=mapping_dicts
         )
+        clear_query_cache()
         return {"status": "success", "message": f"View {data.view_name} created with column mappings and metadata propagated"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1109,6 +1127,20 @@ def sync_brain_knowledge(
         return {"status": "success", "message": "Brain sync completed successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/clear-query-cache", response_model=dict)
+def clear_query_cache_endpoint(
+    current_user: User = Depends(deps.require_admin),
+):
+    """
+    Clear the in-memory query result cache.
+    Use after updating golden examples, business rules, or schema changes
+    to ensure fresh SQL generation on next query.
+    """
+    from app.services.query_engine import clear_query_cache
+    cleared = clear_query_cache()
+    return {"status": "success", "entries_cleared": cleared}
 
 
 # ============================================================
@@ -1611,7 +1643,9 @@ def create_hierarchy_level(
     current_user: User = Depends(deps.require_admin),
 ):
     """Create or update a hierarchy level."""
-    return hierarchy_service.upsert_level(context_name, body.level, body.model_dump())
+    result = hierarchy_service.upsert_level(context_name, body.level, body.model_dump())
+    clear_query_cache()
+    return result
 
 
 @router.put("/hierarchy/{context_name}/levels/{level}")
@@ -1623,7 +1657,9 @@ def update_hierarchy_level(
 ):
     """Update a hierarchy level."""
     data = {k: v for k, v in body.model_dump().items() if v is not None}
-    return hierarchy_service.upsert_level(context_name, level, data)
+    result = hierarchy_service.upsert_level(context_name, level, data)
+    clear_query_cache()
+    return result
 
 
 @router.delete("/hierarchy/{context_name}/levels/{level}", status_code=204)
@@ -1634,6 +1670,7 @@ def delete_hierarchy_level(
 ):
     """Soft-delete a hierarchy level."""
     hierarchy_service.delete_level(context_name, level)
+    clear_query_cache()
     return None
 
 
@@ -1660,7 +1697,9 @@ def create_hierarchy_value(
     current_user: User = Depends(deps.require_admin),
 ):
     """Create a hierarchy value (source='manual')."""
-    return hierarchy_service.create_value(context_name, body.model_dump())
+    result = hierarchy_service.create_value(context_name, body.model_dump())
+    clear_query_cache()
+    return result
 
 
 @router.put("/hierarchy/values/{value_id}")
@@ -1671,7 +1710,9 @@ def update_hierarchy_value(
 ):
     """Update a hierarchy value."""
     data = {k: v for k, v in body.model_dump().items() if v is not None}
-    return hierarchy_service.update_value(value_id, data)
+    result = hierarchy_service.update_value(value_id, data)
+    clear_query_cache()
+    return result
 
 
 @router.delete("/hierarchy/values/{value_id}", status_code=204)
@@ -1681,6 +1722,7 @@ def delete_hierarchy_value(
 ):
     """Soft-delete a hierarchy value."""
     hierarchy_service.delete_value(value_id)
+    clear_query_cache()
     return None
 
 
@@ -1692,7 +1734,9 @@ def extract_hierarchy(
     current_user: User = Depends(deps.require_admin),
 ):
     """Trigger auto-extract hierarchy from data."""
-    return hierarchy_service.auto_extract(context_name)
+    result = hierarchy_service.auto_extract(context_name)
+    clear_query_cache()
+    return result
 
 
 @router.post("/hierarchy/bootstrap")
@@ -1711,6 +1755,7 @@ def bootstrap_hierarchy(
     if "error" in result:
         raise HTTPException(400, result["error"])
     hierarchy_service._invalidate_cache()
+    clear_query_cache()
     return result
 
 
@@ -1779,6 +1824,7 @@ async def import_csv_hierarchy(
         })
         imported += 1
 
+    clear_query_cache()
     return {"success": True, "imported": imported, "filename": file.filename}
 
 
@@ -1811,6 +1857,7 @@ def resolve_unmatched_keyword(
 ):
     """Mark an unmatched keyword as resolved."""
     hierarchy_service.resolve_unmatched_keyword(keyword, context_name)
+    clear_query_cache()
     return {"success": True}
 
 

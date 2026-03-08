@@ -269,6 +269,7 @@ Ensure the "explanation" value is formatted as **beautiful Markdown**:
 - Use bullet points (`-`) when listing multiple items (e.g., breakdown by group).
 - Use blockquotes (`>`) to emphasize key insights or the most important finding.
 - Keep the language natural and strictly in **Thai**.
+- **DO NOT** mention or explain your choice of visualization (e.g. "We chose a Grouped Bar Chart because...") or table formats (like crosstab) in the `explanation`. The explanation must ONLY focus on answering the question and data insights.
 
 CRITICAL: You must analyze the data and recommend the best visualization type.
 Return the result as a JSON object with these keys:

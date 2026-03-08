@@ -80,9 +80,71 @@ _QUERY_CACHE_TTL = 1800  # 30 minutes
 _QUERY_CACHE_MAX = 500  # max entries before eviction
 
 
+# ---------------------------------------------------------------------------
+# Thai year normalization — expand 2-digit Thai year to 4-digit
+# ---------------------------------------------------------------------------
+# Pattern explanation:
+#   Group 1 — year keyword (longest-first to prevent partial match):
+#     ปีงบประมาณ | ปีงบ | ปี\s*พ\.?\s*ศ\.? | พ\.?\s*ศ\.? | ปี
+#   \s* — optional whitespace between keyword and number
+#   Group 2 — exactly 2 digits
+#   (?!\d) — NOT followed by another digit (prevents matching "ปี 2568")
+_THAI_YEAR_RE = re.compile(
+    r'(ปีงบประมาณ|ปีงบ|ปี\s*พ\.?\s*ศ\.?|พ\.?\s*ศ\.?|ปี)\s*(\d{2})(?!\d)'
+)
+
+# Valid 2-digit range: 40-99 → พ.ศ. 2540-2599 (ค.ศ. 1997-2056)
+_THAI_YEAR_MIN = 40
+_THAI_YEAR_MAX = 99
+
+
+def _replace_thai_year(match: re.Match) -> str:
+    """Replace 2-digit Thai year with 4-digit equivalent.
+
+    Example: "ปี 68" → "ปี 2568" (68 + 2500)
+    Only converts if the 2-digit number is in [40, 99].
+    Numbers outside this range are left untouched.
+    """
+    prefix = match.group(1)
+    year_2d = int(match.group(2))
+    if _THAI_YEAR_MIN <= year_2d <= _THAI_YEAR_MAX:
+        return prefix + ' ' + str(year_2d + 2500)
+    return match.group(0)  # Outside valid range — don't normalize
+
+
+def _normalize_question(q: str) -> str:
+    """Normalize question for cache key comparison.
+
+    Steps (order matters):
+    1. Strip + lowercase
+    2. Remove Thai particles & filler words
+    3. Expand 2-digit Thai year → 4-digit (e.g. "ปี 68" → "ปี 2568")
+    4. Collapse whitespace
+
+    This is used ONLY for cache key generation.
+    The original question is always sent to the LLM unchanged.
+    """
+    q = q.strip().lower()
+    # Step 2: Remove Thai particles & filler words that don't change meaning
+    particles = [
+        'ครับ', 'ค่ะ', 'คะ', 'นะ', 'จ้า', 'จ้ะ', 'จ๊ะ',
+        'หน่อย', 'ด้วย', 'ให้หน่อย', 'ได้ไหม', 'ได้มั้ย', 'ได้เปล่า',
+        'อยากรู้', 'อยากทราบ', 'อยากดู',
+        'ช่วย', 'ขอ', 'บอก', 'แสดง', 'ดู', 'หา',
+    ]
+    for p in particles:
+        q = q.replace(p, '')
+    # Step 3: Normalize 2-digit Thai year → 4-digit
+    q = _THAI_YEAR_RE.sub(_replace_thai_year, q)
+    # Step 4: Collapse whitespace
+    q = re.sub(r'\s+', ' ', q).strip()
+    return q
+
+
 def _cache_key(question: str, provider: str, context: str) -> str:
     """Create a deterministic cache key from question + provider + context."""
-    raw = f"{question.strip().lower()}|{provider}|{context}"
+    normalized = _normalize_question(question)
+    raw = f"{normalized}|{provider}|{context}"
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
@@ -104,6 +166,13 @@ def _cache_set(key: str, result: Any) -> None:
     _query_cache[key] = {"result": result, "ts": time.time()}
 
 
+def clear_query_cache() -> int:
+    """Clear all entries from query result cache. Returns number of entries cleared."""
+    count = len(_query_cache)
+    _query_cache.clear()
+    return count
+
+
 # ---------------------------------------------------------------------------
 # Request dedup — prevent identical questions within a short window
 # ---------------------------------------------------------------------------
@@ -114,7 +183,7 @@ def _dedup_check(user_question: str, provider: str) -> bool:
     """Return True if this is a duplicate request within DEDUP_TTL_SECONDS."""
     from app.config import settings as _settings
     ttl = getattr(_settings, "DEDUP_TTL_SECONDS", 5.0)
-    key = hashlib.md5(f"{user_question.strip().lower()}|{provider}".encode()).hexdigest()
+    key = hashlib.md5(f"{_normalize_question(user_question)}|{provider}".encode()).hexdigest()
     now = time.time()
     # Prune expired entries (lazy cleanup)
     expired = [k for k, ts in _dedup_store.items() if now - ts > ttl]

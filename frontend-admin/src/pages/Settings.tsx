@@ -16,7 +16,7 @@ import {
     Space,
     Tooltip
 } from 'antd';
-import { SaveOutlined, ReloadOutlined, ClearOutlined, InfoCircleOutlined, DatabaseOutlined } from '@ant-design/icons';
+import { SaveOutlined, ReloadOutlined, ClearOutlined, InfoCircleOutlined, DatabaseOutlined, SyncOutlined } from '@ant-design/icons';
 import { adminService } from '../services/adminService';
 import type { AIConfig, AIProvider, FeatureFlags } from '../services/adminService';
 
@@ -124,6 +124,7 @@ const Settings: React.FC = () => {
     };
 
     const [rebuildingIndex, setRebuildingIndex] = useState(false);
+    const [syncingBrain, setSyncingBrain] = useState(false);
 
     const handleRebuildKeywordIndex = async () => {
         try {
@@ -138,6 +139,22 @@ const Settings: React.FC = () => {
             message.error('Failed to rebuild keyword index');
         } finally {
             setRebuildingIndex(false);
+        }
+    };
+
+    const handleSyncBrain = async () => {
+        try {
+            setSyncingBrain(true);
+            setError(null);
+
+            await adminService.syncBrain();
+            message.success('Vanna Brain sync completed! Golden examples and business rules updated.');
+
+        } catch (err: any) {
+            setError(err.message || 'Failed to sync brain');
+            message.error('Failed to sync brain');
+        } finally {
+            setSyncingBrain(false);
         }
     };
 
@@ -519,6 +536,34 @@ const Settings: React.FC = () => {
                                         loading={rebuildingIndex}
                                     >
                                         Rebuild Index
+                                    </Button>
+                                </Col>
+                            </Row>
+                        </Card>
+                    </Col>
+                    <Col span={24}>
+                        <Card type="inner">
+                            <Row justify="space-between" align="middle">
+                                <Col>
+                                    <Space>
+                                        <Text strong>Sync Vanna Brain</Text>
+                                        <Tooltip title="Train Vanna Vector DB ใหม่จาก DDL, Business Rules, Golden Examples ล่าสุด — ช่วยให้ RAG context แม่นยำขึ้น กดหลังจากแก้ไข Golden Examples หรือ Business Rules">
+                                            <InfoCircleOutlined style={{ color: '#8c8c8c' }} />
+                                        </Tooltip>
+                                    </Space>
+                                    <br />
+                                    <Text type="secondary">
+                                        อัพเดท Vector DB (ChromaDB) จาก Golden Examples และ Business Rules ล่าสุด
+                                    </Text>
+                                </Col>
+                                <Col>
+                                    <Button
+                                        icon={<SyncOutlined />}
+                                        onClick={handleSyncBrain}
+                                        loading={syncingBrain}
+                                        type="primary"
+                                    >
+                                        Sync Brain
                                     </Button>
                                 </Col>
                             </Row>

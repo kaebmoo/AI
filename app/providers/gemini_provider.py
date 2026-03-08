@@ -136,7 +136,9 @@ class GeminiProvider(AIProvider):
             config_kwargs = {
                 "system_instruction": system_prompt,
                 "tools": gemini_tools,
-                "temperature": 0.0
+                "temperature": 0.0,
+                "top_p": 0.05,  # Narrow probability space for consistency
+                "top_k": 1,     # Select highest-probability token only
             }
 
             try:
@@ -174,7 +176,7 @@ class GeminiProvider(AIProvider):
             return self.client.models.generate_content(
                 model=self.model,
                 contents=prompt,
-                config={"system_instruction": system_prompt}
+                config={"system_instruction": system_prompt, "temperature": 0.3}
             )
 
         response = await self._run_async(call_api)
@@ -214,8 +216,9 @@ class GeminiProvider(AIProvider):
                 ))
 
                 config = types.GenerateContentConfig(
-                    system_instruction=system_prompt
-                ) if system_prompt else None
+                    system_instruction=system_prompt,
+                    temperature=0.3  # Stable intent extraction
+                ) if system_prompt else types.GenerateContentConfig(temperature=0.3)
 
                 result = self.client.models.generate_content(
                     model=self.model,
