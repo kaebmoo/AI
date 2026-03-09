@@ -269,12 +269,13 @@ Ensure the "explanation" value is formatted as **beautiful Markdown**:
 - Use bullet points (`-`) when listing multiple items (e.g., breakdown by group).
 - Use blockquotes (`>`) to emphasize key insights or the most important finding.
 - Keep the language natural and strictly in **Thai**.
+- **Number formatting**: Display numbers with comma separators (e.g., 233,764,256 บาท). Do NOT wrap positive numbers in parentheses — in accounting, parentheses mean negative values. For negative numbers, use a minus sign (e.g., -152,297 บาท).
 - **DO NOT** mention or explain your choice of visualization (e.g. "We chose a Grouped Bar Chart because...") or table formats (like crosstab) in the `explanation`. The explanation must ONLY focus on answering the question and data insights.
 
 CRITICAL: You must analyze the data and recommend the best visualization type.
 Return the result as a JSON object with these keys:
 1. "explanation": The beautifully formatted Thai markdown explanation.
-2. "visualization": One of ['bar_chart', 'horizontal_bar', 'line_chart', 'pie_chart', 'donut_chart', 'table', 'single_value', 'grouped_bar', 'stacked_bar', 'waterfall', 'mixed_bar_line']
+2. "visualization": One of ['bar_chart', 'horizontal_bar', 'line_chart', 'pie_chart', 'donut_chart', 'table', 'single_value', 'grouped_bar', 'stacked_bar', 'waterfall', 'mixed_bar_line', 'heatmap']
 2b. "chart_title": (optional) Short Thai title for the chart, e.g. "รายได้ตามกลุ่มธุรกิจ Q1/2567"
 3. "chart_config": Object with column mappings for the chart:
    - "category_column": The column name for X-axis labels (the PRIMARY grouping)
@@ -295,6 +296,16 @@ IMPORTANT for time-based comparisons:
      - If < 5 series: Suggest 'grouped_bar' or 'line_chart'
      - If > 5 series: Suggest 'stacked_bar' (to avoid clutter)
 - **Exception**: Only use Time as Series if explicitly asked to "Compare Years" (Year-over-Year).
+
+IMPORTANT for matrix/cross-dimension data:
+- When data has TWO categorical dimensions and ONE numeric measure forming a matrix
+  (e.g., owner × user, source × destination, sender × receiver, division × division),
+  use **'heatmap'** for visualization. Set:
+  - "category_column" = row dimension (e.g., owner_division)
+  - "series_column" = column dimension (e.g., user_division)
+  - "measure_column" = the numeric value
+- For the table: use display_hint='crosstab' to show the matrix as a cross-tabulation.
+- Do NOT use heatmap when one dimension is time-based — use line_chart or grouped_bar instead.
 {hierarchy_example}
 """
 
@@ -432,8 +443,29 @@ def auto_detect_chart_config(data: List[Dict], parsed_result: Dict = None,
             pattern in category_col.lower() for pattern in _time_patterns
         )
 
+    # Check for time on series side too
+    if meta_time_cols:
+        is_time_series = series_col and series_col.lower() in meta_time_cols
+    else:
+        is_time_series = series_col and any(
+            pattern in series_col.lower() for pattern in _time_patterns
+        )
+
+    # Matrix/heatmap detection: 2 non-time categorical dims + 1 measure, many-to-many
+    is_matrix = False
+    if (series_col and category_col and measure_col
+            and not is_time_category and not is_time_series):
+        unique_cat = len(set(str(row.get(category_col, '')) for row in data[:100]))
+        unique_ser = len(set(str(row.get(series_col, '')) for row in data[:100]))
+        if unique_cat >= 3 and unique_ser >= 3:
+            expected = unique_cat * unique_ser
+            if len(data) >= expected * 0.4:
+                is_matrix = True
+
     viz_type = "bar_chart"
-    if series_col and is_time_category:
+    if is_matrix:
+        viz_type = "heatmap"
+    elif series_col and is_time_category:
         viz_type = "line_chart"
     elif series_col:
         viz_type = "stacked_bar"
@@ -476,8 +508,11 @@ def _suggest_available_types(
     n_categories: int,
     has_series: bool,
     has_time_category: bool,
+    is_matrix: bool = False,
 ) -> list:
     """Rule-based available_types suggestion."""
+    if is_matrix:
+        return ['heatmap', 'grouped_bar', 'stacked_bar', 'table']
     if not has_series:
         if n_categories <= 8:
             return ['bar_chart', 'horizontal_bar', 'line_chart', 'pie_chart', 'donut_chart']
@@ -558,7 +593,8 @@ def enrich_chart_config(
 
         # --- Merge into chart_config (extend, don't replace) ---
         config["suggested_type"] = echarts_type
-        config["available_types"] = _suggest_available_types(n_categories, has_series, has_time_cat)
+        is_matrix = viz == 'heatmap'
+        config["available_types"] = _suggest_available_types(n_categories, has_series, has_time_cat, is_matrix=is_matrix)
         config["column_roles"] = roles
         config["title"] = chart_title or ""
         config["sort_by"] = sort_by

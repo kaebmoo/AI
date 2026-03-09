@@ -404,6 +404,7 @@ class AIService:
         context_name: str = "revenue",
         two_pass_enabled: bool = False,
         value_lookup_enabled: bool = False,
+        value_verification_enabled: bool = True,
         cheap_model: Optional[str] = None,
         **kwargs
     ) -> QueryResult:
@@ -674,6 +675,31 @@ Error: {last_error.get('error', '')}
                     logger.warning(f"SQL validation failed: {issues}")
                     retry_history.append({"sql": sql_query, "error": f"Validation failed: {issues}"})
                     continue
+
+                # Step 3.5: Value Verification — check WHERE values exist in DB
+                if value_verification_enabled and attempt == 0:
+                    try:
+                        from app.services.value_verifier import ValueVerifier
+                        verifier = ValueVerifier(self.mcp_client, context_table)
+                        verify_result = await verifier.verify(sql_query, question=question)
+
+                        if verify_result.needs_retry:
+                            logger.info(f"Value verification: {len(verify_result.corrections)} corrections found")
+                            for c in verify_result.corrections:
+                                logger.info(f"  {c.original_column}='{c.original_value}' → {c.correct_column}='{c.correct_value}'")
+
+                            # Log corrections for admin learning
+                            self._log_value_corrections(verify_result.corrections, question, context_name)
+
+                            # Inject hints into retry history so next attempt gets correction context
+                            retry_history.append({
+                                "sql": sql_query,
+                                "error": verify_result.hint_text,
+                            })
+                            continue  # → next attempt with correction hints
+                    except Exception as e:
+                        logger.warning(f"Value verification failed (non-blocking): {e}")
+                        # Fail-open: proceed with original SQL
 
                 # Step 4: Execute SQL using MCP
                 if on_status:
@@ -1085,6 +1111,39 @@ Error: {last_error.get('error', '')}
         logger.info(f"Keyword extraction: {len(unique)} keywords in {t_extract:.3f}s — {[k[:30] for k in unique[:10]]}")
 
         return unique
+
+    def _log_value_corrections(self, corrections, question: str, context_name: str):
+        """Log value corrections to DB for admin learning (non-blocking)."""
+        try:
+            from app.config import settings as app_settings
+            from sqlalchemy import create_engine, text
+            db_url = app_settings.DATABASE_URL
+            engine = create_engine(db_url)
+            with engine.connect() as conn:
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS query_correction_log (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        question TEXT,
+                        original_column TEXT,
+                        original_value TEXT,
+                        correct_column TEXT,
+                        correct_value TEXT,
+                        context_name TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """))
+                for c in corrections:
+                    conn.execute(text("""
+                        INSERT INTO query_correction_log
+                        (question, original_column, original_value, correct_column, correct_value, context_name)
+                        VALUES (:q, :oc, :ov, :cc, :cv, :ctx)
+                    """), {
+                        "q": question[:500], "oc": c.original_column, "ov": c.original_value,
+                        "cc": c.correct_column, "cv": c.correct_value, "ctx": context_name,
+                    })
+                conn.commit()
+        except Exception as e:
+            logger.debug(f"Failed to log value corrections: {e}")
 
     def _lookup_values_from_question(self, question: str, context_name: str, table_name: str) -> List[Dict]:
         """Look up actual database values for keywords extracted directly from question."""

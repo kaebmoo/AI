@@ -2,7 +2,7 @@
  * ECharts option builders — transforms backend data into ECharts option objects.
  */
 import { resolveChartType, type ChartConfig } from '../types/chart';
-import { NT_CHART_PALETTE, FINANCIAL_COLORS } from '../constants/chartColors';
+import { NT_CHART_PALETTE, FINANCIAL_COLORS, CHART_THEME, HEATMAP_COLORS } from '../constants/chartColors';
 import { safelyParseNumber, formatNumberWithUnit, truncateLabel } from './chartUtils';
 
 /** Thai tooltip number formatter */
@@ -60,6 +60,57 @@ function tooltipFormatter(params: any): string {
     return `<b>${header}</b><br/>` + lines.join('<br/>');
 }
 
+/** Apply dark/light mode text & line colors to any ECharts option */
+function applyThemeColors(option: any, isDark: boolean): any {
+    const t = isDark ? CHART_THEME.dark : CHART_THEME.light;
+
+    // Global default text color
+    option.textStyle = { ...(option.textStyle || {}), color: t.text };
+
+    // Background transparent — container handles bg color
+    option.backgroundColor = 'transparent';
+
+    // Title
+    if (option.title) {
+        option.title.textStyle = { ...(option.title.textStyle || {}), color: t.text };
+    }
+
+    // Axes (handles single axis or array of axes)
+    const patchAxis = (axis: any) => {
+        if (!axis) return;
+        const axes = Array.isArray(axis) ? axis : [axis];
+        for (const a of axes) {
+            a.axisLabel = { ...(a.axisLabel || {}), color: t.subText };
+            a.axisLine = {
+                ...(a.axisLine || {}),
+                lineStyle: { ...(a.axisLine?.lineStyle || {}), color: t.axisLine },
+            };
+            a.splitLine = {
+                ...(a.splitLine || {}),
+                lineStyle: { ...(a.splitLine?.lineStyle || {}), color: t.splitLine },
+            };
+        }
+    };
+    patchAxis(option.xAxis);
+    patchAxis(option.yAxis);
+
+    // Legend
+    if (option.legend) {
+        option.legend.textStyle = { ...(option.legend.textStyle || {}), color: t.subText };
+    }
+
+    // Series labels (data labels on bars/lines/pie)
+    if (option.series) {
+        for (const s of option.series) {
+            if (s.label?.show) {
+                s.label = { ...s.label, color: t.text };
+            }
+        }
+    }
+
+    return option;
+}
+
 /**
  * Main dispatcher — builds ECharts option from data + visualization + chartConfig.
  */
@@ -67,42 +118,69 @@ export function buildEChartsOption(
     data: Record<string, any>[],
     visualization?: string,
     chartConfig?: ChartConfig,
+    isDark: boolean = false,
 ): object | null {
     if (!data || data.length === 0) return null;
 
-    const chartType = resolveChartType(visualization, chartConfig);
-    if (!chartType) return null;
+    // Default to vertical_bar when no chart type resolved (prevents fallback to gifted-charts)
+    const chartType = resolveChartType(visualization, chartConfig) || 'vertical_bar';
 
-    const catCol = chartConfig?.category_column || Object.keys(data[0])[0];
-    const measureCol = chartConfig?.measure_column || findMeasureColumn(data[0], catCol);
-    const seriesCol = chartConfig?.series_column;
+    const dataKeys = Object.keys(data[0]);
+    // Validate chartConfig columns against actual data keys (handles aliased SQL columns)
+    const catCol = resolveColumn(chartConfig?.category_column, dataKeys) || dataKeys[0];
+    const measureCol = resolveColumn(chartConfig?.measure_column, dataKeys) || findMeasureColumn(data[0], catCol);
+    // Auto-detect series column when chart type is multi-series but series_column is missing/invalid
+    const seriesCol = resolveColumn(chartConfig?.series_column, dataKeys)
+        || (['grouped_bar', 'stacked_bar', 'stacked_bar_100', 'multi_line', 'stacked_area', 'heatmap'].includes(chartType)
+            ? autoDetectSeriesColumn(data, catCol, measureCol || '')
+            : undefined);
+
+
 
     if (!catCol || !measureCol) return null;
 
+    let result: object | null;
     switch (chartType) {
         case 'vertical_bar':
-            return buildVerticalBar(data, catCol, measureCol, chartConfig);
+            result = buildVerticalBar(data, catCol, measureCol, chartConfig);
+            break;
         case 'horizontal_bar':
-            return buildHorizontalBar(data, catCol, measureCol, chartConfig);
+            result = buildHorizontalBar(data, catCol, measureCol, chartConfig);
+            break;
         case 'line':
-            return buildLine(data, catCol, measureCol, chartConfig);
+            result = buildLine(data, catCol, measureCol, chartConfig);
+            break;
         case 'multi_line':
         case 'grouped_bar':
         case 'stacked_bar':
         case 'stacked_bar_100':
-            return buildMultiSeries(data, catCol, measureCol, seriesCol, chartType, chartConfig);
+            result = buildMultiSeries(data, catCol, measureCol, seriesCol, chartType, chartConfig);
+            break;
         case 'pie_chart':
-            return buildPie(data, catCol, measureCol, chartConfig, false);
+            result = buildPie(data, catCol, measureCol, chartConfig, false);
+            break;
         case 'donut_chart':
-            return buildPie(data, catCol, measureCol, chartConfig, true);
+            result = buildPie(data, catCol, measureCol, chartConfig, true);
+            break;
         case 'area':
         case 'stacked_area':
-            return buildArea(data, catCol, measureCol, seriesCol, chartType, chartConfig);
+            result = buildArea(data, catCol, measureCol, seriesCol, chartType, chartConfig);
+            break;
         case 'waterfall':
-            return buildWaterfall(data, catCol, measureCol, chartConfig);
+            result = buildWaterfall(data, catCol, measureCol, chartConfig);
+            break;
+        case 'heatmap':
+            result = buildHeatmap(data, catCol, measureCol, seriesCol, chartConfig);
+            break;
         default:
-            return buildVerticalBar(data, catCol, measureCol, chartConfig);
+            result = buildVerticalBar(data, catCol, measureCol, chartConfig);
     }
+
+    // Apply dark/light mode theme colors as final step
+    if (result) {
+        result = applyThemeColors(result, isDark);
+    }
+    return result;
 }
 
 /** Find the first numeric column that isn't the category */
@@ -114,6 +192,53 @@ function findMeasureColumn(row: Record<string, any>, catCol: string): string | u
     for (const [key, val] of Object.entries(row)) {
         if (key !== catCol && !isNaN(safelyParseNumber(val)) && val !== '' && val !== null) return key;
     }
+    return undefined;
+}
+
+/**
+ * Auto-detect a series column from data when chart type is multi-series
+ * but no series_column was provided.
+ * Heuristic: find a non-numeric column (other than catCol/measureCol)
+ * with few unique values (2-20) — likely a grouping dimension.
+ */
+function autoDetectSeriesColumn(
+    data: Record<string, any>[],
+    catCol: string,
+    measureCol: string,
+): string | undefined {
+    const keys = Object.keys(data[0] || {});
+    let bestCol: string | undefined;
+    let bestCount = Infinity;
+
+    for (const key of keys) {
+        if (key === catCol || key === measureCol) continue;
+
+        // Check if column is non-numeric (text-based series)
+        const firstVal = data[0][key];
+        if (typeof firstVal === 'number') continue;
+
+        const unique = new Set(data.map(d => String(d[key] ?? '')));
+        const count = unique.size;
+        // Good series column: 2-20 unique values, fewer is better
+        if (count >= 2 && count <= 20 && count < bestCount) {
+            bestCol = key;
+            bestCount = count;
+        }
+    }
+    return bestCol;
+}
+
+/**
+ * Validate that chartConfig column names exist in the actual data keys.
+ * If a column doesn't match, return undefined so auto-detection kicks in.
+ */
+function resolveColumn(
+    configCol: string | undefined,
+    dataKeys: string[],
+): string | undefined {
+    if (!configCol) return undefined;
+    if (dataKeys.includes(configCol)) return configCol;
+    // Column name from chartConfig doesn't match data — ignore it
     return undefined;
 }
 
@@ -411,5 +536,121 @@ function buildWaterfall(
                 label: config?.show_data_labels ? { show: true, position: 'bottom', fontSize: 10 } : undefined,
             },
         ],
+    };
+}
+
+function buildHeatmap(
+    data: Record<string, any>[],
+    catCol: string,
+    measureCol: string,
+    seriesCol: string | undefined,
+    config?: ChartConfig,
+): object {
+    // catCol = row dimension (Y-axis), seriesCol = column dimension (X-axis)
+    const colDim = seriesCol || catCol;
+    const rowDim = seriesCol ? catCol : (Object.keys(data[0] || {}).find(k => k !== catCol && k !== measureCol) || catCol);
+
+    // Unique labels for each axis
+    const xLabels = [...new Set(data.map(d => String(d[colDim] ?? '')))];
+    const yLabels = [...new Set(data.map(d => String(d[rowDim] ?? '')))];
+
+    // Build [xIndex, yIndex, value] tuples
+    const heatmapData: [number, number, number][] = [];
+    let minVal = Infinity;
+    let maxVal = -Infinity;
+
+    for (const row of data) {
+        const xVal = String(row[colDim] ?? '');
+        const yVal = String(row[rowDim] ?? '');
+        const val = safelyParseNumber(row[measureCol]);
+
+        const xi = xLabels.indexOf(xVal);
+        const yi = yLabels.indexOf(yVal);
+        if (xi >= 0 && yi >= 0) {
+            heatmapData.push([xi, yi, val]);
+            if (val < minVal) minVal = val;
+            if (val > maxVal) maxVal = val;
+        }
+    }
+
+    // Handle edge case
+    if (minVal === Infinity) { minVal = 0; maxVal = 1; }
+
+    return {
+        title: config?.title ? { text: config.title, left: 'center', textStyle: { fontSize: 14 } } : undefined,
+        tooltip: {
+            position: 'top',
+            confine: true,
+            formatter: (params: any) => {
+                const xi = params.value[0];
+                const yi = params.value[1];
+                const val = params.value[2];
+                const xName = xLabels[xi] || '';
+                const yName = yLabels[yi] || '';
+                const abs = Math.abs(val);
+                let text: string, unit: string;
+                if (abs >= 1_000_000_000) { text = fmtNum(val / 1_000_000_000); unit = 'พลบ.'; }
+                else if (abs >= 1_000_000) { text = fmtNum(val / 1_000_000); unit = 'ลบ.'; }
+                else if (abs >= 1_000) { text = fmtNum(val / 1_000, 0); unit = 'k'; }
+                else { text = fmtNum(val); unit = ''; }
+                return `${yName} → ${xName}<br/><b>${text} ${unit}</b>`;
+            },
+        },
+        grid: {
+            left: '25%',
+            right: '10%',
+            bottom: '20%',
+            top: config?.title ? '15%' : '10%',
+            containLabel: false,
+        },
+        xAxis: {
+            type: 'category',
+            data: xLabels.map(l => truncateLabel(l, 10)),
+            splitArea: { show: true },
+            axisLabel: { rotate: xLabels.length > 6 ? 45 : 0, fontSize: 10 },
+            position: 'bottom',
+        },
+        yAxis: {
+            type: 'category',
+            data: yLabels.map(l => truncateLabel(l, 15)),
+            splitArea: { show: true },
+            axisLabel: { fontSize: 10 },
+        },
+        visualMap: {
+            min: minVal,
+            max: maxVal,
+            calculable: true,
+            orient: 'horizontal',
+            left: 'center',
+            bottom: 0,
+            inRange: {
+                color: [HEATMAP_COLORS.min, HEATMAP_COLORS.mid, HEATMAP_COLORS.max],
+            },
+            textStyle: { fontSize: 10 },
+            formatter: (value: number) => {
+                const abs = Math.abs(value);
+                if (abs >= 1_000_000) return `${fmtNum(value / 1_000_000)} ลบ.`;
+                if (abs >= 1_000) return `${fmtNum(value / 1_000, 0)}k`;
+                return fmtNum(value, 0);
+            },
+        },
+        series: [{
+            type: 'heatmap',
+            data: heatmapData,
+            label: {
+                show: heatmapData.length <= 100,
+                fontSize: 9,
+                formatter: (params: any) => {
+                    const val = params.value[2];
+                    const abs = Math.abs(val);
+                    if (abs >= 1_000_000) return `${fmtNum(val / 1_000_000)}`;
+                    if (abs >= 1_000) return `${fmtNum(val / 1_000, 0)}k`;
+                    return fmtNum(val, 0);
+                },
+            },
+            emphasis: {
+                itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0, 0, 0, 0.5)' },
+            },
+        }],
     };
 }

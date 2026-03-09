@@ -28,6 +28,7 @@ VisualizationType = Literal[
     'waterfall',
     'mixed_bar_line',
     'scatter',
+    'heatmap',
 ]
 
 # Map backend visualization string → ECharts-ready type
@@ -46,6 +47,7 @@ VISUALIZATION_TO_ECHARTS: dict[str, Optional[str]] = {
     'waterfall':        'waterfall',
     'mixed_bar_line':   'mixed_bar_line',
     'scatter':          'scatter',
+    'heatmap':          'heatmap',
     # Non-chart types
     'table':            None,
     'single_value':     None,

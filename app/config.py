@@ -94,6 +94,9 @@ class Settings(BaseSettings):
     # Value Lookup (keyword index search)
     VALUE_LOOKUP_ENABLED: bool = False
 
+    # Value Verification (post-SQL verification of WHERE clause values against DB)
+    VALUE_VERIFICATION_ENABLED: bool = True
+
     # Tier Classification (route queries to cheap/mid model based on complexity)
     TIER_CLASSIFICATION_ENABLED: bool = False
 

@@ -1695,8 +1695,19 @@ DATE column is Unix Timestamp (ms). Use YEAR/MONTH columns instead."""
                     WHERE aliases IS NOT NULL AND aliases != '' AND is_active = 1 {ctx_filter2}
                 """), params).fetchall()
                 for row in rows3:
-                    for alias in (row[0] or "").split(","):
-                        alias = alias.strip()
+                    raw = (row[0] or "").strip()
+                    # aliases are stored as JSON arrays e.g. ["ปอธ.", "ธุรกิจลูกค้าฯ"]
+                    aliases_list = []
+                    if raw.startswith("["):
+                        try:
+                            import json as _json
+                            aliases_list = _json.loads(raw)
+                        except (ValueError, TypeError):
+                            aliases_list = raw.split(",")
+                    else:
+                        aliases_list = raw.split(",")
+                    for alias in aliases_list:
+                        alias = str(alias).strip()
                         if len(alias) >= 2:
                             terms_set.add(alias)
 

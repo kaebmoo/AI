@@ -31,14 +31,14 @@ export type BackendVisualizationType =
     | 'bar_chart' | 'horizontal_bar' | 'line_chart' | 'multi_line'
     | 'pie_chart' | 'donut_chart' | 'grouped_bar' | 'stacked_bar'
     | 'stacked_bar_100' | 'area' | 'stacked_area' | 'waterfall'
-    | 'mixed_bar_line' | 'scatter' | 'table' | 'single_value';
+    | 'mixed_bar_line' | 'scatter' | 'heatmap' | 'table' | 'single_value';
 
 /** ECharts-ready chart type strings */
 export type EChartsType =
     | 'vertical_bar' | 'horizontal_bar' | 'line' | 'multi_line'
     | 'pie_chart' | 'donut_chart' | 'grouped_bar' | 'stacked_bar'
     | 'stacked_bar_100' | 'area' | 'stacked_area' | 'waterfall'
-    | 'mixed_bar_line' | 'scatter';
+    | 'mixed_bar_line' | 'scatter' | 'heatmap';
 
 /** Maps backend visualization → ECharts-ready type */
 const VISUALIZATION_TO_ECHARTS: Record<string, string | null> = {
@@ -56,6 +56,7 @@ const VISUALIZATION_TO_ECHARTS: Record<string, string | null> = {
     waterfall: 'waterfall',
     mixed_bar_line: 'mixed_bar_line',
     scatter: 'scatter',
+    heatmap: 'heatmap',
     table: null,
     single_value: null,
 };

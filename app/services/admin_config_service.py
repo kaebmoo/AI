@@ -454,6 +454,10 @@ class AdminConfigService:
                 "tier_classification_enabled",
                 "true" if settings.TIER_CLASSIFICATION_ENABLED else "false"
             ) == "true",
+            "value_verification_enabled": self.get_config(
+                "value_verification_enabled",
+                "true" if settings.VALUE_VERIFICATION_ENABLED else "false"
+            ) == "true",
         }
 
     def toggle_feature(self, feature_name: str, enabled: bool, updated_by: Optional[str] = None) -> bool:

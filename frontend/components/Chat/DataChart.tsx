@@ -195,6 +195,37 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
     const [isFullScreen, setIsFullScreen] = useState(false);
 
     // ============================================================
+    // ECharts hooks — MUST be called before any early returns (React rules of hooks)
+    // These hooks are independent of `analysis` — they only use props.
+    // ============================================================
+    const resolvedType = resolveChartType(visualization, chartConfig);
+    const [activeType, setActiveType] = useState<string | null>(resolvedType);
+
+    useEffect(() => {
+        const newType = resolveChartType(visualization, chartConfig);
+        if (newType) setActiveType(newType);
+    }, [visualization, chartConfig?.suggested_type]);
+
+    const availableTypes = chartConfig?.available_types ?? [];
+    const showToolbar = availableTypes.length > 1;
+
+    const echartsOption = useMemo(() => {
+        if (!isEChartsAvailable()) return null;
+        const overrideConfig = activeType
+            ? { ...chartConfig, suggested_type: activeType }
+            : chartConfig;
+        return buildEChartsOption(data, visualization, overrideConfig, isDark);
+    }, [data, visualization, chartConfig, activeType, isDark]);
+
+    const echartsOptionFullscreen = useMemo(() => {
+        if (!echartsOption) return null;
+        const opt = { ...(echartsOption as any) };
+        delete opt.title;
+        if (opt.grid) opt.grid = { ...opt.grid, top: '8%' };
+        return opt;
+    }, [echartsOption]);
+
+    // ============================================================
     // 1. Analyze Data Structure (AI-first, fallback to pattern detection)
     // ============================================================
 
@@ -205,7 +236,6 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
         // Skip chart for non-chart visualizations
         // ============================================================
         if (visualization === 'table' || visualization === 'single_value') {
-            console.log('📊 DataChart: Skipping - visualization is', visualization);
             return null;
         }
 
@@ -222,7 +252,6 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
         });
 
         if (!hasNumericalData) {
-            console.log('📊 DataChart: Skipping - no numerical data found');
             return null;
         }
 
@@ -266,9 +295,7 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
 
                     // If Series is Time but Category is NOT Time -> SWAP them
                     if (isSeriesTime && !isCategoryTime) {
-                        console.warn(`⚠️ AI Config Issue Detected: Time column "${finalSeriesKey}" is in series_column instead of category_column. Auto-swapping...`);
                         [finalCategoryKey, finalSeriesKey] = [finalSeriesKey, finalCategoryKey];
-                        console.log(`✅ Swapped: category="${finalCategoryKey}", series="${finalSeriesKey}"`);
                     }
                 }
 
@@ -297,11 +324,8 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
                 const isNumericCategories = categories.length > 0 && categories.every(c => !isNaN(parseFloat(c)) && isFinite(parseFloat(c)));
 
                 if (isCategoryTimeColumn) {
-                    console.log('📊 DataChart: Applying Smart Month Sort', { finalCategoryKey, looksLikeMonths });
                     categories = smartMonthSort(categories);
                 } else if (isNumericCategories) {
-                    // Fallback: If categories are numbers (e.g., "1", "10", "2"), sort them numerically
-                    console.log('📊 DataChart: Applying Numeric Sort to Categories', { finalCategoryKey });
                     categories.sort((a, b) => parseFloat(a) - parseFloat(b));
                 }
 
@@ -344,8 +368,6 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
                 if ((visualization === 'grouped_bar' && finalSeriesKey) || (finalSeriesKey && seriesValues.length >= 2 && hasRepeatedCategories)) {
                     mode = 'grouped_bar';
                 } else if (visualization === 'grouped_bar' && !finalSeriesKey) {
-                    // Fallback: AI asked for grouped_bar but didn't provide series column -> use vertical_bar
-                    console.warn('⚠️ DataChart: grouped_bar requested but no series_column found. Falling back to vertical_bar.');
                     mode = 'vertical_bar';
                 } else if (visualization === 'stacked_bar') {
                     mode = 'stacked_bar';
@@ -622,31 +644,9 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
         };
     }, [data, visualization, chartConfig]);
 
-    // DEBUG: Log analysis result
-    console.log('📊 DataChart Debug:', {
-        visualization,
-        chartConfig,
-        analysis: analysis ? {
-            mode: analysis.mode,
-            categoryKey: analysis.categoryKey,
-            measureKey: analysis.measureKey,
-            categories: analysis.categories?.length,
-            seriesKey: analysis.seriesKey,
-            isLineChart: analysis.mode === 'line',
-            isGrouped: analysis.mode === 'grouped_bar'
-        } : null,
-        dataKeys: data?.[0] ? Object.keys(data[0]) : [],
-        dataLength: data?.length
-    });
-
     if (!analysis) {
-        console.warn('❌ DataChart: analysis is null, chart will not render');
         return null;
     }
-
-    console.log('✅ DataChart: Rendering chart with expand button. Chart type:',
-        analysis.mode === 'line' ? 'LINE' :
-            analysis.mode === 'grouped_bar' ? 'GROUPED BAR' : 'BAR');
 
     // ============================================================
     // 2. Color Utilities
@@ -813,10 +813,8 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
         const isNumericCategories = actualCategories.length > 0 && actualCategories.every(c => !isNaN(parseFloat(c)) && isFinite(parseFloat(c)));
 
         if (isCategoryTimeColumn && actualCategories.length > 0) {
-            console.log('📊 DataChart (Grouped): Applying Smart Month Sort', { categoryKey: analysis.categoryKey, looksLikeMonths });
             actualCategories = smartMonthSort(actualCategories);
         } else if (isNumericCategories && actualCategories.length > 0) {
-            console.log('📊 DataChart (Grouped): Applying Numeric Sort', { categoryKey: analysis.categoryKey });
             actualCategories.sort((a, b) => parseFloat(a) - parseFloat(b));
         }
 
@@ -1127,7 +1125,8 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
         );
     }, [data, analysis, isDark, chartWidth, isFullScreen]); // Added isFullScreen dependency
 
-    if (analysis.mode === 'grouped_bar' || analysis.mode === 'stacked_bar' || analysis.seriesKey === '__pivoted__') {
+    // Grouped/stacked bar: only fall back to gifted-charts if ECharts is NOT available
+    if ((analysis.mode === 'grouped_bar' || analysis.mode === 'stacked_bar' || analysis.seriesKey === '__pivoted__') && !(isEChartsAvailable() && echartsOption)) {
         return groupedChartData;
     }
 
@@ -1352,35 +1351,9 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
         treemap: 'แผนผัง',
     };
 
-    // Active chart type state (for toolbar switching)
-    const resolvedType = resolveChartType(visualization, chartConfig);
-    const [activeType, setActiveType] = useState<string | null>(resolvedType);
-
-    // Sync activeType when props change
-    useEffect(() => {
-        const newType = resolveChartType(visualization, chartConfig);
-        if (newType) setActiveType(newType);
-    }, [visualization, chartConfig?.suggested_type]);
-
-    const availableTypes = chartConfig?.available_types ?? [];
-    const showToolbar = availableTypes.length > 1;
-
-    // Build ECharts option with active type override
-    const echartsOption = useMemo(() => {
-        if (!isEChartsAvailable() || !activeType) return null;
-        const overrideConfig = { ...chartConfig, suggested_type: activeType };
-        return buildEChartsOption(data, visualization, overrideConfig);
-    }, [data, visualization, chartConfig, activeType]);
-
-    // Fullscreen version — strip title from chart (header shows it instead)
-    const echartsOptionFullscreen = useMemo(() => {
-        if (!echartsOption) return null;
-        const opt = { ...(echartsOption as any) };
-        delete opt.title;
-        // Give more space at top since no title
-        if (opt.grid) opt.grid = { ...opt.grid, top: '8%' };
-        return opt;
-    }, [echartsOption]);
+    // Note: hooks (useState, useEffect, useMemo) are now defined at the TOP
+    // of the component (line ~198) to comply with React's rules of hooks.
+    // They run before any early-return statements.
 
     // Toolbar renderer — shared between normal and fullscreen views (ECharts path)
     const renderEChartsToolbar = (containerStyle?: any) => (
@@ -1563,10 +1536,7 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
                     {isLineChart ? '📈 Trends' : isHorizontal ? '📊 Comparative Rank' : '📊 Comparison'} : {analysis.measureKey}
                 </Text>
                 <TouchableOpacity
-                    onPress={() => {
-                        console.log('🔍 Expand button clicked!');
-                        setIsFullScreen(true);
-                    }}
+                    onPress={() => setIsFullScreen(true)}
                     style={{
                         padding: 8,
                         borderRadius: 8,

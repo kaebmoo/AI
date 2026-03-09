@@ -447,6 +447,7 @@ class QueryEngine:
                 context_name=context_name,
                 two_pass_enabled=feature_flags.get("two_pass_enabled", False),
                 value_lookup_enabled=feature_flags.get("value_lookup_enabled", False),
+                value_verification_enabled=feature_flags.get("value_verification_enabled", True),
                 cheap_model=cheap_model,
             )
         else:
