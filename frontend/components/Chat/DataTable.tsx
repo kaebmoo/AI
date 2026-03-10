@@ -642,7 +642,8 @@ export const DataTable = ({ data, displayHint, hierarchyColumns }: DataTableProp
             const parentKey = candidate[candidate.length - 1];
             const childKey = cardinalityMap[i].key;
 
-            // Check: each unique childKey value → exactly 1 parentKey value
+            // Check: child values mostly map to 1 parent (allow some shared names)
+            // e.g., "ส่วนสนับสนุน" may exist in multiple departments — tree rendering handles this correctly.
             const childToParent: Record<string, Set<string>> = {};
             data.forEach(row => {
                 const child = String(row[childKey] || '');
@@ -651,8 +652,12 @@ export const DataTable = ({ data, displayHint, hierarchyColumns }: DataTableProp
                 childToParent[child].add(parent);
             });
 
-            const isStrictOneToMany = Object.values(childToParent).every(parents => parents.size === 1);
-            if (isStrictOneToMany) {
+            const totalChildren = Object.keys(childToParent).length;
+            const multiParentCount = Object.values(childToParent).filter(parents => parents.size > 1).length;
+            // Allow up to 30% of children to have shared names across parents
+            // True cross-dimensional data (product × region) typically has 80%+ overlap → won't pass
+            const isHierarchical = totalChildren > 0 && (multiParentCount / totalChildren) <= 0.3;
+            if (isHierarchical) {
                 candidate.push(childKey);
             }
         }
@@ -661,15 +666,17 @@ export const DataTable = ({ data, displayHint, hierarchyColumns }: DataTableProp
     };
 
     // Determine if we should use hierarchical mode
-    // Priority: 0. LLM hint='hierarchical' or 'flat' overrides, 1-5 existing rules
+    // Priority: crosstab hint wins, otherwise always try hierarchy auto-detection
+    // AI often defaults to 'flat' for multi-level data — the strict 1:N check in
+    // detectMultiLevelHierarchy() prevents false positives, so it's safe to always run.
     const isHierarchicalHint = displayHint === 'hierarchical';
     const isCrosstabHint = displayHint === 'crosstab';
     const isFlatHint = displayHint === 'flat';
 
-    if (!skipAutoDetect && !isCrosstab && !isFlatHint && !isCrosstabHint) {
+    if (!isCrosstab && !isCrosstabHint) {
         hierarchyKeys = detectMultiLevelHierarchy();
         if (hierarchyKeys.length >= 2) {
-            hierarchyValueKey = valueKey || keys.find(k => typeof data[0][k] === 'number' && !k.toLowerCase().includes('id')) || keys[keys.length - 1];
+            hierarchyValueKey = valueKey || keys.find(k => typeof data[0][k] === 'number' && !k.toLowerCase().includes('id') && !timeColumnSet.has(k)) || keys[keys.length - 1];
         }
     }
 
