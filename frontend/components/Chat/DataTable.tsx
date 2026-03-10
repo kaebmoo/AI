@@ -181,7 +181,7 @@ export const DataTable = ({ data, displayHint, hierarchyColumns }: DataTableProp
 
     // Strict exclusion of measure terms from dimensions
     // IMPORTANT: Use word-boundary for 'count' to avoid matching 'account'
-    const measurePatterns = ['total', 'revenue', 'amount', 'value', 'price', 'cost', 'profit', 'รายได้', 'ยอดรวม', 'จำนวน', 'expense', 'baht', 'บาท'];
+    const measurePatterns = ['total', 'revenue', 'amount', 'value', 'price', 'cost', 'profit', 'รายได้', 'ยอดรวม', 'จำนวน', 'expense', 'baht', 'บาท', 'ค่าใช้จ่าย', 'กำไร', 'ขาดทุน'];
     const wordBoundaryMeasures = ['count']; // These need word-boundary to avoid false positives
 
     const isMeasure = (k: string) => {
@@ -203,8 +203,9 @@ export const DataTable = ({ data, displayHint, hierarchyColumns }: DataTableProp
     const periodKey = monthKey || quarterKey; // Generic period key (month or quarter)
     const labelKey = periodKey || keys.find(k => !isMeasure(k) && ['date', 'label', 'name', 'time'].some(term => k.toLowerCase().includes(term)));
 
-    // Measure Key
-    const valueKey = keys.find(k => isMeasure(k)) || keys.find(k => typeof data[0][k] === 'number' && !k.toLowerCase().includes('id'));
+    // Measure Key — exclude already-identified time columns from fallback
+    const timeColumnSet = new Set([monthKey, quarterKey, yearKey].filter(Boolean));
+    const valueKey = keys.find(k => isMeasure(k)) || keys.find(k => typeof data[0][k] === 'number' && !k.toLowerCase().includes('id') && !timeColumnSet.has(k));
 
     const dimensionKeys = keys.filter(k => {
         const lowerK = k.toLowerCase();
