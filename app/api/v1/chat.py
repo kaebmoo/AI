@@ -13,6 +13,7 @@ from app.api import deps
 logger = logging.getLogger(__name__)
 from app.models.user import User
 from app.models.chat import ChatHistory
+from app.models.conversation import Conversation
 from app.schemas.chat import ChatRequest, ChatResponse, DataWarning, TrainingRequest
 from app.services.ai_service import AIService
 from app.services.schema_service import SchemaService
@@ -63,6 +64,66 @@ def refresh_metadata(
 # =============================================================================
 # Helpers
 # =============================================================================
+
+def _resolve_conversation(
+    db: Session,
+    conversation_id: str | None,
+    user_id: int,
+) -> str:
+    """
+    Resolve or create a Conversation record.
+    - If conversation_id is provided: verify ownership, return it.
+    - If not: create a new Conversation, return its id.
+    """
+    if conversation_id:
+        conv = db.query(Conversation).filter(
+            Conversation.id == conversation_id
+        ).first()
+        if conv:
+            if conv.user_id != user_id:
+                raise HTTPException(status_code=403, detail="Not authorized to access this conversation")
+            return conversation_id
+        # conversation_id given but not in DB (legacy or external)
+        # Create a new record with that id
+        conv = Conversation(id=conversation_id, user_id=user_id)
+        db.add(conv)
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+        return conversation_id
+
+    # No conversation_id → create new
+    conv = Conversation(user_id=user_id)
+    db.add(conv)
+    db.commit()
+    db.refresh(conv)
+    return conv.id
+
+
+def _update_conversation_meta(
+    db: Session,
+    conversation_id: str,
+    question: str,
+):
+    """Update conversation title (if first message) and metadata."""
+    conv = db.query(Conversation).filter(
+        Conversation.id == conversation_id
+    ).first()
+    if not conv:
+        return
+
+    # Auto-generate title from first question
+    if conv.title is None and question:
+        title = question[:60]
+        if len(question) > 60:
+            title += "..."
+        conv.title = title
+
+    conv.message_count = (conv.message_count or 0) + 1
+    conv.updated_at = datetime.utcnow()
+    db.commit()
+
 
 def _get_conversation_history(
     db: Session,
@@ -354,8 +415,8 @@ async def chat(
     2. Convert Question -> SQL & Explain (QueryEngine)
     3. Save History
     """
-    # 1. Conversation ID
-    conversation_id = request.conversation_id or str(uuid.uuid4())
+    # 1. Resolve or create Conversation
+    conversation_id = _resolve_conversation(db, request.conversation_id, current_user.id)
 
     # 2. Chart-only intent detection
     intent = classify_intent(request.question)
@@ -397,7 +458,10 @@ async def chat(
     # 7. Save history
     chat_entry = _save_history(db, current_user.id, conversation_id, engine_result)
 
-    # 8. Format response
+    # 8. Update conversation metadata (title, message_count, updated_at)
+    _update_conversation_meta(db, conversation_id, request.question)
+
+    # 9. Format response
     return _format_response(chat_entry, conversation_id, engine_result)
 
 
@@ -416,7 +480,7 @@ async def chat_stream(
     Stream chat responses via Server-Sent Events (SSE).
     Events: status, data_ready, answer, done, error
     """
-    conversation_id = request.conversation_id or str(uuid.uuid4())
+    conversation_id = _resolve_conversation(db, request.conversation_id, current_user.id)
 
     # Chart-only intent detection (same as /chat endpoint)
     intent = classify_intent(request.question)
@@ -498,6 +562,9 @@ async def chat_stream(
 
             # Save history
             chat_entry = _save_history(db, current_user.id, conversation_id, engine_result)
+
+            # Update conversation metadata (title, message_count, updated_at)
+            _update_conversation_meta(db, conversation_id, request.question)
 
             # Save session data for chart-only re-render (non-fatal)
             if result.data and not result.error:

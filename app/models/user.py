@@ -27,3 +27,4 @@ class User(Base):
     # Relationships
     sessions = relationship("UserSession", back_populates="user")
     chats = relationship("ChatHistory", back_populates="user")
+    conversations = relationship("Conversation", back_populates="user")

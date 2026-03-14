@@ -524,13 +524,24 @@ class AIService:
                     if on_status:
                         on_status(RetryStatus(attempt, max_retries, "analyzing", "Analyzing question (Pass 1)"))
 
+                    # Build history context for intent extraction
+                    # Include last 2 turns (4 messages) so AI understands follow-up questions
+                    _history_ctx = ""
+                    if history:
+                        recent = history[-4:]  # last 2 turns
+                        parts = []
+                        for msg in recent:
+                            role_label = "User" if msg.get("role") == "user" else "Assistant"
+                            parts.append(f"  {role_label}: {msg.get('content', '')[:200]}")
+                        _history_ctx = "\n\n**ประวัติสนทนาก่อนหน้า (ใช้เพื่อเข้าใจบริบท follow-up):**\n" + "\n".join(parts)
+
                     intent_json = await self._extract_intent(
                         question=question,
                         system_prompt=system_prompt,
                         context_name=context_name,
                         context_table=context_table,
                         context_thai=context_thai,
-                        history_context="",
+                        history_context=_history_ctx,
                         rag_context=rag_context,
                         cheap_model=cheap_model
                     )
@@ -546,6 +557,9 @@ class AIService:
                             hierarchy=get_column_hierarchies().get(context_name),
                             detected_level=detected_level
                         )
+                        if on_status:
+                            on_status(RetryStatus(attempt, max_retries, "generating", f"Generating SQL (Pass 2)"))
+
                     else:
                         logger.warning("Two-Pass Mode: Pass 1 failed. Falling back to one-pass CoT prompt.")
                         two_pass_enabled = False
@@ -773,13 +787,11 @@ Error: {last_error.get('error', '')}
                 except Exception:
                     pass
 
-                # Enhance explanation
-                # Build enriched question with conversation context for better explanation
+                # For explanation: use raw question + SQL as ground truth.
+                # Do NOT inject conversation history context here — it can mislead
+                # the AI into describing data that the SQL didn't actually query.
+                # (e.g., previous question about "น่าน" leaking into a national-level query)
                 enriched_question = question
-                if history:
-                    prev_questions = [m["content"] for m in history[-4:] if m.get("role") == "user"]
-                    if prev_questions:
-                        enriched_question = f"(บริบท: {prev_questions[-1][:100]})\n{question}"
 
                 if not data:
                     explanation = f"ไม่พบข้อมูลที่ตรงกับเงื่อนไข\n\nSQL ที่ใช้:\n```sql\n{sql_query}\n```\n\nอาจเป็นเพราะ:\n- ไม่มีข้อมูลที่ตรงกับคำค้นหา\n- ชื่อคอลัมน์หรือค่าที่ใช้ค้นหาอาจไม่ถูกต้อง"
@@ -900,47 +912,63 @@ Error: {last_error.get('error', '')}
         if len(data) <= 200:
             return data
 
-        # Aggregate: GROUP BY text columns, SUM numeric columns
+        # Aggregate: GROUP BY dimension columns, SUM measure columns
         from collections import defaultdict
 
         sample = data[0]
         text_cols = [k for k, v in sample.items() if isinstance(v, str)]
-        num_cols = [k for k, v in sample.items() if isinstance(v, (int, float))]
+        all_num_cols = [k for k, v in sample.items() if isinstance(v, (int, float))]
 
-        if not text_cols or not num_cols:
+        if not text_cols or not all_num_cols:
+            return data[:200]
+
+        # Separate dimension-like numeric columns from measure columns
+        # Dimensions have low cardinality (e.g., year=1 value, month=12 values)
+        # or names indicating time/dimension (ปี, เดือน, year, month, quarter)
+        _DIM_KEYWORDS = {'year', 'month', 'quarter', 'ปี', 'เดือน', 'ไตรมาส', 'q1', 'q2', 'q3', 'q4'}
+        num_dim_cols = []  # Numeric columns that are dimensions (group by, not sum)
+        measure_cols = []  # Numeric columns that are measures (sum)
+
+        for col in all_num_cols:
+            distinct_count = len(set(row.get(col, 0) for row in data))
+            col_lower = col.lower()
+            is_dim_keyword = any(kw in col_lower for kw in _DIM_KEYWORDS)
+            # Low cardinality (≤ 20 distinct values) or name matches dimension keywords
+            if is_dim_keyword or distinct_count <= min(20, len(data) * 0.1):
+                num_dim_cols.append(col)
+            else:
+                measure_cols.append(col)
+
+        if num_dim_cols:
+            logger.info(f"explain data: numeric dimensions (not summed): {num_dim_cols}, measures (summed): {measure_cols}")
+
+        # All dimension columns = text + numeric dimensions
+        all_dim_cols = text_cols + num_dim_cols
+        # If no measure columns left, treat all as dimensions and just truncate
+        if not measure_cols:
             return data[:200]
 
         # Strategy: progressively drop the LEAST important dimension
-        # Drop the column with MOST distinct values that contributes LEAST to grouping
-        # i.e. the "detail" dimension — keeps the primary grouping intact
-        # Example: dept(20) × quarter(4) × BG(8) = 640 → drop BG(8) → 80 rows
         cols_by_cardinality = sorted(
-            text_cols,
-            key=lambda c: len(set(row.get(c, '') for row in data)),
+            all_dim_cols,
+            key=lambda c: len(set(str(row.get(c, '')) for row in data)),
         )
-        # Drop from the MIDDLE: not the smallest (time) nor largest (primary), but the detail
-        # Reorder: put highest-cardinality-but-not-biggest last (protect primary grouping)
         if len(cols_by_cardinality) >= 3:
-            # Keep first (smallest = time/quarter) and last (biggest = primary category)
-            # Drop middle ones first
             protected = {cols_by_cardinality[0], cols_by_cardinality[-1]}
             droppable = [c for c in cols_by_cardinality if c not in protected]
             cols_by_cardinality = droppable + [cols_by_cardinality[0], cols_by_cardinality[-1]]
-        # For 2 columns: drop the one with fewer distinct values (likely time → keep primary)
-        # Already sorted ascending, so first = smallest
 
-        group_cols = list(text_cols)
+        group_cols = list(all_dim_cols)
         for attempt in range(len(cols_by_cardinality)):
-            groups = defaultdict(lambda: {c: 0.0 for c in num_cols})
+            groups = defaultdict(lambda: {c: 0.0 for c in measure_cols})
             for row in data:
-                key = tuple(row.get(c, '') for c in group_cols)
-                for c in num_cols:
+                key = tuple(str(row.get(c, '')) for c in group_cols)
+                for c in measure_cols:
                     groups[key][c] += (row.get(c, 0) or 0)
 
             if len(groups) <= 200:
                 break
 
-            # Drop highest-cardinality column that's still in group_cols
             for drop_col in cols_by_cardinality:
                 if drop_col in group_cols and len(group_cols) > 1:
                     group_cols.remove(drop_col)
@@ -948,14 +976,25 @@ Error: {last_error.get('error', '')}
 
         agg_data = []
         for key, sums in groups.items():
-            row = {c: k for c, k in zip(group_cols, key)}
+            row = {}
+            for c, k in zip(group_cols, key):
+                # Restore numeric dimensions to original type
+                if c in num_dim_cols:
+                    try:
+                        row[c] = int(float(k)) if '.' not in k else float(k)
+                    except (ValueError, TypeError):
+                        row[c] = k
+                else:
+                    row[c] = k
             row.update(sums)
             agg_data.append(row)
 
-        agg_data.sort(key=lambda r: r.get(num_cols[0], 0), reverse=True)
+        sort_col = measure_cols[0] if measure_cols else None
+        if sort_col:
+            agg_data.sort(key=lambda r: r.get(sort_col, 0), reverse=True)
         result = agg_data[:200]
 
-        dropped = set(text_cols) - set(group_cols)
+        dropped = set(all_dim_cols) - set(group_cols)
         if dropped:
             logger.info(f"explain data: {len(data)} → {len(result)} rows (dropped dimensions: {dropped})")
         return result
@@ -1419,6 +1458,7 @@ Error: {last_error.get('error', '')}
 1. ตรวจสอบ semantic mappings ใน system prompt ก่อน -- ถ้ามี keyword ที่ตรง ให้ใส่ใน matched_mappings พร้อม sql_condition ที่คัดลอกมาจาก mapping
 2. ถ้า User ระบุปี พ.ศ. ให้แปลงเป็น ค.ศ. (พ.ศ. - 543) ใส่ใน time_range.year
 3. ถ้าไม่แน่ใจค่า filter ให้ใช้ LIKE operator
+5. **Follow-up context**: ถ้ามีประวัติสนทนาก่อนหน้า ให้ใช้เป็นบริบท เช่น ถ้าถามก่อนหน้าเรื่อง "ค่าล่วงเวลา" แล้วถาม "ค่าเฉลี่ยเท่าไหร่" → ต้อง inherit filter "ค่าล่วงเวลา" จากคำถามก่อนหน้าด้วย
 4. ห้ามสร้าง SQL -- ระบุเฉพาะ intent เท่านั้น
 5. ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่น"""
 

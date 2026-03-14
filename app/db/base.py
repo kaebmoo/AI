@@ -7,5 +7,6 @@ from app.models.chat import ChatHistory
 from app.models.feedback_models import UserFeedback, GoldenExample
 from app.models.schema_models import SchemaMetadata, SchemaSemanticMapping, SchemaBusinessRule
 from app.models.chat_session import ChatSessionData
+from app.models.conversation import Conversation
 
 # Add any other models here

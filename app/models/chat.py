@@ -12,7 +12,7 @@ class ChatHistory(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     session_id = Column(Integer, ForeignKey("user_sessions.id"), nullable=True) # Optional link to session
-    conversation_id = Column(String, index=True, nullable=True) # For grouping chat turn
+    conversation_id = Column(String, ForeignKey("conversations.id"), index=True, nullable=True)  # FK to conversations
     question = Column(Text)
     generated_sql = Column(Text, nullable=True)
     sql_result_summary = Column(Text, nullable=True)
@@ -26,3 +26,4 @@ class ChatHistory(Base):
 
     # Relationships
     user = relationship("User", back_populates="chats")
+    conversation = relationship("Conversation", back_populates="messages")

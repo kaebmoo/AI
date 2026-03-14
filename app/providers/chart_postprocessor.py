@@ -263,6 +263,12 @@ Results ({len(data)} rows):
 {family_prompt}
 
 Explain in Thai.
+CRITICAL RULES:
+1. **SQL is the ground truth** — describe ONLY what the SQL actually queries. If the SQL has no WHERE filter for a province/department, do NOT mention any specific province/department. Look at the SQL's WHERE clause and GROUP BY to understand the scope.
+2. **Dimension columns** (Year/ปี, Month/เดือน, Quarter/ไตรมาส) — NEVER SUM or aggregate them. Report as-is (e.g., "เดือนมกราคม 2568" NOT "เดือนที่ 78").
+3. Only SUM/aggregate **MEASURE columns** (revenue, amount, cost, etc.).
+4. If data has multiple months, summarize each month individually or say "เดือน 1-12" — do NOT add month numbers together.
+
 Ensure the "explanation" value is formatted as **beautiful Markdown**:
 - Use `###` for main summaries and `####` for subsections.
 - Use **bold text** (`**value**`) to highlight key metrics and numbers.
