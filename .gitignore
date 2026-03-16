@@ -195,3 +195,4 @@ tests/data_export_1770174160824.csv
 # Claude Code worktrees and internal files
 .claude/
 ai_prompt_log.txt
+AUDIT.md
