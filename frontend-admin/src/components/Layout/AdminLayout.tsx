@@ -21,7 +21,8 @@ import {
     MessageOutlined,
     FileSearchOutlined,
     WarningOutlined,
-    ForkOutlined
+    ForkOutlined,
+    RocketOutlined
 } from '@ant-design/icons';
 import { Layout, Menu, Button, theme, Dropdown, Avatar, Space } from 'antd';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
@@ -74,6 +75,11 @@ const AppLayout: React.FC = () => {
                     key: '/contexts',
                     icon: <DatabaseOutlined />,
                     label: 'Data Contexts',
+                },
+                {
+                    key: '/context-onboarding',
+                    icon: <RocketOutlined />,
+                    label: 'Context Onboarding',
                 },
                 {
                     key: '/view-builder',

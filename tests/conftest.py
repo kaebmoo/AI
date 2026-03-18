@@ -24,6 +24,7 @@ from app.models.session import UserSession
 from app.models.otp import OTPRequest
 from app.models.chat import ChatHistory
 from app.models.feedback_models import UserFeedback, GoldenExample
+from app.models.conversation import Conversation  # Required for FK resolution
 from app.config import settings
 
 

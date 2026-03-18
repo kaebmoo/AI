@@ -108,7 +108,11 @@ class Settings(BaseSettings):
     VANNA_CHROMA_PATH: str = "./chroma_db"
     VANNA_DISTANCE_THRESHOLD: float = 1.8
 
-    METADATA_DB_PATH: Optional[str] = None # Defaults to DATABASE_URL path if None 
+    METADATA_DB_PATH: Optional[str] = None # Defaults to DATABASE_URL path if None
+
+    # Business DB path (for onboarding, inspection, etc.)
+    # If not set, falls back to extracting path from DATABASE_URL
+    BUSINESS_DB_PATH: Optional[str] = None
 
     
     # Allowed Domains

@@ -487,3 +487,78 @@ class DimensionFamilyBatchUpdate(BaseModel):
 class DimensionFamilyBatchUpdateResponse(BaseModel):
     updated_count: int
     families: List[DimensionFamilyItem]
+
+
+# ============================================================
+# Context Onboarding Schemas
+# ============================================================
+
+class OnboardingRequest(BaseModel):
+    """Request for context onboarding pipeline."""
+    view_name: str = Field(..., description="View/table name to onboard")
+    dry_run: bool = Field(True, description="Preview SQL without applying")
+    provider: Optional[str] = Field(None, description="AI provider (claude, gemini, matcha)")
+    model: Optional[str] = Field(None, description="Model override")
+    api_url: Optional[str] = Field(None, description="Custom API URL")
+    inspect_only: bool = Field(False, description="Only run inspection (no LLM)")
+
+class InspectRequest(BaseModel):
+    """Request for inspect-only endpoint."""
+    view_name: str = Field(..., description="View/table name to inspect")
+
+class ValidateRequest(BaseModel):
+    """Request for validate endpoint."""
+    view_name: str = Field(..., description="View/table name to validate")
+
+class InspectionSummary(BaseModel):
+    """Summary of inspection results."""
+    row_count: int = 0
+    columns: int = 0
+    detected_structure: str = "unknown"
+    quality_issues: int = 0
+
+class AnalysisSummary(BaseModel):
+    """Summary of LLM analysis results."""
+    data_structure: dict = Field(default_factory=dict)
+    context: dict = Field(default_factory=dict)
+    rules_count: int = 0
+    examples_count: int = 0
+    mappings_count: int = 0
+
+class ConfigSummary(BaseModel):
+    """Summary of generated config."""
+    summary: str = ""
+    sql_count: int = 0
+    sql_statements: Optional[List[str]] = None
+
+class ValidationSummary(BaseModel):
+    """Summary of validation results."""
+    passed: bool = False
+    results: List[dict] = Field(default_factory=list)
+    issues: List[str] = Field(default_factory=list)
+
+class OnboardingResponse(BaseModel):
+    """Response from onboarding pipeline."""
+    status: str = Field(..., description="inspect_only, preview, or applied")
+    inspection: InspectionSummary
+    analysis: Optional[AnalysisSummary] = None
+    config: Optional[ConfigSummary] = None
+    apply: Optional[dict] = None
+    validation: Optional[ValidationSummary] = None
+
+class AvailableView(BaseModel):
+    """A view/table available for onboarding."""
+    name: str
+    type: str = "view"
+    has_config: bool = False
+    row_count: Optional[int] = None
+
+class AvailableViewsResponse(BaseModel):
+    """Response listing available views for onboarding."""
+    unconfigured: List[AvailableView] = Field(default_factory=list)
+    configured: List[AvailableView] = Field(default_factory=list)
+
+class ApplySqlRequest(BaseModel):
+    """Request to apply pre-generated SQL statements directly."""
+    view_name: str = Field(..., description="View name for validation after apply")
+    sql_statements: List[str] = Field(..., description="SQL statements from dry-run preview")

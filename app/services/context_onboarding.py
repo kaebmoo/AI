@@ -996,6 +996,11 @@ class ConfigApplicator:
         results["summary"] = bundle.summary
         return results
 
+    def apply_sql_statements(self, sql_statements: List[str]) -> Dict:
+        """Apply pre-generated SQL statements directly (no LLM needed)."""
+        bundle = ConfigBundle(sql_statements=sql_statements, summary="Applied from cached preview")
+        return self.apply(bundle, dry_run=False)
+
     def _invalidate_caches(self):
         """Invalidate all relevant caches after config changes."""
         try:
@@ -1110,7 +1115,7 @@ class ContextOnboardingService:
         analysis = await service.analyze(inspection, provider="gemini")
 
         # Phase 3: Generate config
-        config = service.generate_config(analysis)
+        config = service.generate_config(analysis, view_name="v_new_view")
 
         # Phase 4: Apply (dry_run first)
         result = service.apply(config, dry_run=True)
@@ -1144,14 +1149,9 @@ class ContextOnboardingService:
             api_url=api_url, api_key=api_key
         )
 
-    def generate_config(self, analysis: Dict, view_name: Optional[str] = None) -> ConfigBundle:
+    def generate_config(self, analysis: Dict, view_name: str) -> ConfigBundle:
         """Phase 3: Generate config from analysis."""
-        vn = view_name or analysis.get("context", {}).get("name", "unknown")
-        # Use the actual view name from context if available
-        if "context" in analysis:
-            # The view_name should be the actual DB view name, not the context name
-            pass
-        generator = ConfigGenerator(view_name or self._last_view_name)
+        generator = ConfigGenerator(view_name)
         logger.info("Phase 3: Generating config...")
         return generator.generate(analysis)
 
@@ -1160,6 +1160,10 @@ class ContextOnboardingService:
         mode = "dry_run" if dry_run else "apply"
         logger.info(f"Phase 4: {mode}...")
         return self.applicator.apply(config, dry_run=dry_run)
+
+    def apply_sql_statements(self, sql_statements: List[str]) -> Dict:
+        """Apply pre-generated SQL statements directly (no LLM needed)."""
+        return self.applicator.apply_sql_statements(sql_statements)
 
     async def validate(self, view_name: str,
                        test_questions: Optional[List[str]] = None) -> ValidationResult:
@@ -1175,7 +1179,6 @@ class ContextOnboardingService:
                                 api_key: Optional[str] = None,
                                 dry_run: bool = True) -> Dict:
         """Run the complete onboarding pipeline."""
-        self._last_view_name = view_name
 
         # Phase 1
         inspection = self.inspect(view_name)
@@ -1219,3 +1222,68 @@ class ContextOnboardingService:
                 "results": validation.test_results if validation else [],
             } if validation else None,
         }
+
+    # Prefix patterns for internal/config tables (not business data)
+    _INTERNAL_TABLE_PREFIXES = (
+        'schema_', 'master_', 'admin_', 'golden_', 'data_warnings',
+        'query_', 'ai_', 'otp_', 'chat_', 'training_',
+        'alembic_', 'keyword_', 'unmatched_', 'view_column_',
+        'v_active_', 'v_ai_', 'v_business_rules_', 'v_schema_for_',
+        'v_semantic_mappings_',
+    )
+    _INTERNAL_TABLE_NAMES = {
+        'users', 'sessions', 'conversations',
+        'user_sessions', 'user_feedback', 'trending_queries',
+        'ref_product_name_mapping',
+    }
+
+    def list_available_views(self) -> Dict:
+        """List all views/tables with their onboarding status."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        # Get all views and tables
+        cursor.execute(
+            "SELECT name, type FROM sqlite_master "
+            "WHERE type IN ('view', 'table') AND name NOT LIKE 'sqlite_%' "
+            "ORDER BY type, name"
+        )
+        all_objects = cursor.fetchall()
+
+        # Get configured contexts (views that already have config)
+        configured_views = set()
+        try:
+            cursor.execute("SELECT main_view FROM schema_contexts WHERE is_active = 1")
+            configured_views = {row[0] for row in cursor.fetchall()}
+        except Exception:
+            pass
+
+        unconfigured = []
+        configured = []
+        for name, obj_type in all_objects:
+            # Skip internal/config tables by prefix or exact name
+            if (name.startswith(self._INTERNAL_TABLE_PREFIXES)
+                    or name in self._INTERNAL_TABLE_NAMES):
+                continue
+
+            # Get row count
+            try:
+                cursor.execute(f'SELECT COUNT(*) FROM "{name}"')
+                row_count = cursor.fetchone()[0]
+            except Exception:
+                row_count = None
+
+            item = {
+                "name": name,
+                "type": obj_type,
+                "has_config": name in configured_views,
+                "row_count": row_count,
+            }
+
+            if name in configured_views:
+                configured.append(item)
+            else:
+                unconfigured.append(item)
+
+        conn.close()
+        return {"unconfigured": unconfigured, "configured": configured}

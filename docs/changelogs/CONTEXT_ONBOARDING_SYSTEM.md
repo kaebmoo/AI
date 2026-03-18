@@ -136,10 +136,67 @@ python scripts/onboard_context.py --view-name v_new_view --provider matcha --mod
 ### Admin API Endpoints
 
 ```
-POST /api/v1/admin/contexts/onboard          # Full pipeline
-POST /api/v1/admin/contexts/onboard/inspect   # Phase 1 only (fast)
-POST /api/v1/admin/contexts/onboard/validate  # Check config exists
+GET  /api/v1/admin/contexts/onboard/available-views  # List views with status
+POST /api/v1/admin/contexts/onboard                   # Full pipeline
+POST /api/v1/admin/contexts/onboard/inspect            # Phase 1 only (fast)
+POST /api/v1/admin/contexts/onboard/validate           # Check config exists
 ```
+
+All endpoints use **Pydantic schemas** (`OnboardingRequest`, `InspectRequest`, `ValidateRequest`) for type-safe request validation.
+
+---
+
+## Part 3: Admin Web UI (2026-03-18)
+
+### Context Onboarding Wizard Page
+
+4-step wizard UI ใน Admin Dashboard สำหรับ onboard view/table ใหม่แบบ visual
+
+**Route:** `/context-onboarding`
+**Menu:** Data Management → Context Onboarding (หลัง Data Contexts)
+
+#### Step 1: Select View
+- Dropdown แสดง views/tables ทั้งหมดจาก `GET /available-views`
+- แยก: Unconfigured (badge เขียว) vs Configured (badge ส้ม = re-onboard)
+- แสดง row count, type (view/table)
+
+#### Step 2: Inspect
+- แสดงผล Phase 1: row count, detected structure (long_table/semi_crosstab/wide_table)
+- Column table: name, type, distinct count, flags (NUMERIC/TIME/PREFIX)
+- Cross-column warnings (semi-crosstab alert)
+- Quality issues list
+- เลือก AI Provider (gemini/claude/matcha)
+
+#### Step 3: AI Analysis & Preview
+- Loading state (10-30 sec)
+- Context configuration preview
+- Generated config stats (rules/examples/mappings counts)
+- SQL preview (collapsible, dry-run output)
+- Config summary markdown
+
+#### Step 4: Results
+- Success/failure status
+- Applied config stats
+- Validation results (passed/issues)
+- Navigation buttons: "Go to Data Contexts", "Onboard Another View"
+
+### Files Created/Modified
+
+| File | Action |
+|------|--------|
+| `frontend-admin/src/pages/ContextOnboarding.tsx` | NEW — wizard page |
+| `frontend-admin/src/services/onboardingService.ts` | NEW — API service + types |
+| `frontend-admin/src/App.tsx` | EDIT — route `/context-onboarding` |
+| `frontend-admin/src/components/Layout/AdminLayout.tsx` | EDIT — menu item (RocketOutlined) |
+| `app/schemas/admin_schemas.py` | EDIT — 9 onboarding schemas |
+| `app/api/v1/admin.py` | EDIT — typed endpoints + `_get_business_db_path()` helper + available-views endpoint |
+| `app/services/context_onboarding.py` | EDIT — `list_available_views()` + fix `generate_config()` signature |
+
+### Backend Bug Fixes (part of Admin UI work)
+
+1. **BUG-1 Fixed:** `generate_config()` — `view_name` เป็น required parameter แล้ว, ลบ `_last_view_name` fragile pattern
+2. **BUG-2 Fixed:** DB path — สร้าง `_get_business_db_path()` helper ใช้ร่วม 4 endpoints (ไม่ hardcode อีกต่อไป)
+3. **BUG-4 Fixed:** Pydantic schemas — 9 schemas เพิ่มใน `admin_schemas.py`, endpoints ทั้งหมดใช้ typed request/response
 
 ---
 

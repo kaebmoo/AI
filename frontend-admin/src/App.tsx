@@ -20,6 +20,7 @@ import Feedback from './pages/Feedback'
 import QueryLogs from './pages/QueryLogs'
 import DataWarnings from './pages/DataWarnings'
 import QueryPatterns from './pages/QueryPatterns'
+import ContextOnboarding from './pages/ContextOnboarding'
 
 // Simple Auth Guard
 const ProtectedRoute = () => {
@@ -42,6 +43,7 @@ function App() {
             <Route path="/users" element={<Users />} />
             <Route path="/schema" element={<Schema />} />
             <Route path="/contexts" element={<Contexts />} />
+            <Route path="/context-onboarding" element={<ContextOnboarding />} />
             <Route path="/analyzer" element={<Analyzer />} />
             <Route path="/mappings" element={<Mappings />} />
             <Route path="/rules" element={<Rules />} />

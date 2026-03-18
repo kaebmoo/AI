@@ -73,6 +73,19 @@
 - **Main View**: ระบุชื่อ Table/View หลักที่จะให้ AI ใช้ในบริบทนี้
 - ดูรายละเอียดเพิ่มเติมใน [คู่มือ Context Management](manual_context_management.md)
 
+### 5.1 Context Onboarding (ฟีเจอร์ใหม่)
+เมนู: **Data Management → Context Onboarding**
+
+เครื่องมือ Wizard สำหรับ onboard view/table ใหม่เข้าระบบ NL-to-SQL แบบอัตโนมัติโดยใช้ AI
+
+**ขั้นตอน:**
+1. **Select View** — เลือก view/table ที่ต้องการ onboard (แสดง badge สถานะ: ยังไม่มี config / มีแล้ว)
+2. **Inspect** — ระบบวิเคราะห์โครงสร้างข้อมูล (ไม่ใช้ AI, เร็วมาก) แสดง column types, detected structure, quality issues
+3. **AI Analysis** — เลือก AI provider แล้วกด Analyze → ระบบสร้าง config ครบ 7 ตาราง (business rules, examples, mappings, etc.)
+4. **Apply & Results** — Review SQL preview แล้วกด Apply → ระบบบันทึก config + validate
+
+- ดูรายละเอียดเพิ่มเติมใน [คู่มือ Context Onboarding](manual_context_onboarding.md)
+
 ---
 
 ## 6. ตัววิเคราะห์โครงสร้าง (Schema Analyzer)

@@ -78,9 +78,42 @@ Skill จะ:
 3. สร้าง config suggestions
 4. ถาม confirm ก่อน insert
 
-### วิธี 3: Admin API (สำหรับ Web UI)
+### วิธี 3: Admin Web UI (แนะนำสำหรับ Admin)
+
+เข้า Admin Dashboard → **Data Management** → **Context Onboarding**
+
+URL: `http://localhost:5173/context-onboarding`
+
+**Wizard 4 ขั้นตอน:**
+
+1. **Select View** — เลือก view/table จาก dropdown
+   - แสดง views ที่ยังไม่มี config (badge เขียว "แนะนำ")
+   - แสดง views ที่มี config แล้ว (badge ส้ม "Re-onboard")
+   - กดปุ่ม "Inspect"
+
+2. **Inspect** — ดูข้อมูลเบื้องต้น (ไม่ใช้ AI, เร็วมาก)
+   - Row count, column count, detected structure
+   - ตาราง columns พร้อม flags (NUMERIC, TIME, PREFIX)
+   - เตือน semi-crosstab ถ้าพบ
+   - เลือก AI Provider → กดปุ่ม "Analyze with AI"
+
+3. **AI Analysis & Preview** — วิเคราะห์ด้วย AI + preview config
+   - แสดง context info, rules count, examples count
+   - SQL Preview (collapsible)
+   - กดปุ่ม "Apply Config to Database"
+
+4. **Results** — ผลการ apply
+   - สรุป config ที่ apply แล้ว
+   - Validation results
+   - ปุ่มไป "Data Contexts" หรือ "Onboard Another View"
+
+### วิธี 4: Admin API (สำหรับ Automation)
 
 ```bash
+# List available views
+curl http://localhost:8000/api/v1/admin/contexts/onboard/available-views \
+  -H "Authorization: Bearer TOKEN"
+
 # Full pipeline
 curl -X POST http://localhost:8000/api/v1/admin/contexts/onboard \
   -H "Authorization: Bearer TOKEN" \
@@ -94,11 +127,13 @@ curl -X POST http://localhost:8000/api/v1/admin/contexts/onboard \
 # Inspect only (fast)
 curl -X POST http://localhost:8000/api/v1/admin/contexts/onboard/inspect \
   -H "Authorization: Bearer TOKEN" \
+  -H "Content-Type: application/json" \
   -d '{"view_name": "v_new_view"}'
 
 # Validate existing config
 curl -X POST http://localhost:8000/api/v1/admin/contexts/onboard/validate \
   -H "Authorization: Bearer TOKEN" \
+  -H "Content-Type: application/json" \
   -d '{"view_name": "v_pl_costtype_nt_mth_clean"}'
 ```
 
