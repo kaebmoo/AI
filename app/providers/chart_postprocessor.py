@@ -292,7 +292,9 @@ Return the result as a JSON object with these keys:
      DO NOT use hierarchical when columns are INDEPENDENT dimensions (cross-dimensions).
    - 'crosstab': When comparing values across a time dimension (month, quarter, year) OR across any two independent dimensions.
      USE THIS when data has: category × time × measure.
-   - 'flat': For single-dimension data, already aggregated, or when unsure.
+   - 'flat': For single-dimension data, already aggregated, when unsure,
+     OR when SQL already has pre-pivoted columns (e.g., month names as columns like "ม.ค.", "ก.พ.", "มี.ค.").
+     USE 'flat' when the SQL output is already in the desired display format and should NOT be re-pivoted.
 5. "hierarchy_columns": (REQUIRED if display_hint='hierarchical') Array of actual column names ordered HIGHEST (parent) to LOWEST (child).
 
 IMPORTANT for time-based comparisons:
@@ -510,6 +512,34 @@ def _detect_col_format(col: str) -> str:
     return 'number'
 
 
+def _build_display_label(col: str, schema_metadata: Optional[List[Dict]] = None) -> str:
+    """Build a human-readable display label for chart axis from column name + schema metadata."""
+    # Try schema_metadata for Thai display name
+    if schema_metadata:
+        meta = next((m for m in schema_metadata if m.get('column_name') == col), None)
+        if meta:
+            display_name = meta.get('display_name_th') or meta.get('display_name_en') or col
+            # Check for unit hint in special_notes or description
+            desc = (meta.get('description') or '').lower()
+            if 'ล้านบาท' in desc:
+                return f"{display_name} (ล้านบาท)"
+            elif 'บาท' in desc or 'baht' in desc:
+                return f"{display_name} (บาท)"
+            elif _detect_col_format(col) == 'currency_thb':
+                return display_name
+            return display_name
+
+    # Fallback: detect from column name keywords
+    lower = col.lower()
+    if 'million' in lower or '_mb' in lower or col.endswith('_m'):
+        return f"{col} (ล้านบาท)"
+    if 'ล้านบาท' in col or 'ล้าน' in lower:
+        return col
+    if any(k in lower for k in _PCT_KW):
+        return f"{col} (%)"
+    return col
+
+
 def _suggest_available_types(
     n_categories: int,
     has_series: bool,
@@ -577,8 +607,10 @@ def enrich_chart_config(
         if ser_col:
             roles.append({"column": ser_col, "role": "series", "label": ser_col})
         if msr_col:
+            display_label = _build_display_label(msr_col, schema_metadata)
             roles.append({
                 "column": msr_col, "role": "measure", "label": msr_col,
+                "display_label": display_label,
                 "format": _detect_col_format(msr_col), "axis": "left",
             })
 

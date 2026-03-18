@@ -7,6 +7,7 @@ export interface ColumnRole {
     column: string;
     role: 'category' | 'measure' | 'series' | 'secondary_measure';
     label?: string;
+    display_label?: string;  // e.g., "รายได้ (ล้านบาท)" — for axis labels
     format?: 'number' | 'currency_thb' | 'percent' | 'date';
     axis?: 'left' | 'right';
 }
@@ -76,6 +77,16 @@ export function resolveChartType(
         // If already an ECharts type (not in map), return as-is
         return VISUALIZATION_TO_ECHARTS[st] !== undefined ? VISUALIZATION_TO_ECHARTS[st] : st;
     }
+
+    // Fallback: use first available_type from chartConfig when suggested_type is null
+    // This handles cases where AI sets visualization='table' but provides chart options
+    if (chartConfig?.available_types?.length) {
+        const first = chartConfig.available_types[0];
+        const mapped = VISUALIZATION_TO_ECHARTS[first];
+        if (mapped !== undefined) return mapped;  // mapped (could be null for 'table')
+        return first;  // ECharts type not in map → return as-is
+    }
+
     if (!visualization) return null;
     return VISUALIZATION_TO_ECHARTS[visualization] ?? null;
 }

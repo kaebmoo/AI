@@ -1067,12 +1067,17 @@ def refresh_schema_cache(
     Refresh schema cache after metadata updates.
     Admin only.
     """
-    # This would be called after updating schema metadata to refresh any cached prompts
-    # The actual implementation depends on how the SchemaService cache is accessed
+    from app.services.schema_service import SchemaService
+    schema_service = SchemaService(db)
+    schema_service.refresh_cache()
+
+    # Also clear query result cache
+    from app.services.query_engine import clear_query_cache
+    clear_query_cache()
 
     return {
         "status": "success",
-        "message": "Schema cache refresh triggered. Changes will take effect on next query."
+        "message": "Schema cache refreshed and query cache cleared. Changes take effect immediately."
     }
 
 
@@ -2149,3 +2154,164 @@ def get_query_logs(
         })
 
     return {"total": total, "items": items}
+
+
+# ============================================================
+# Context Onboarding Endpoints
+# ============================================================
+
+@router.post("/contexts/onboard")
+async def onboard_context(
+    request: dict,
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db)
+):
+    """
+    Full context onboarding pipeline: inspect → analyze (LLM) → generate config → (apply).
+
+    Request body:
+    {
+        "view_name": "v_new_view",
+        "dry_run": true,          // default: true
+        "provider": "gemini",     // optional: claude, gemini, matcha
+        "model": "gemini-2.5-flash",  // optional
+        "api_url": null,          // optional: custom API URL
+        "inspect_only": false     // optional: skip LLM, only inspect
+    }
+    """
+    from app.services.context_onboarding import ContextOnboardingService
+
+    view_name = request.get("view_name")
+    if not view_name:
+        raise HTTPException(status_code=400, detail="view_name is required")
+
+    dry_run = request.get("dry_run", True)
+    inspect_only = request.get("inspect_only", False)
+
+    db_path = str(settings.DATABASE_URL).replace("sqlite:///", "") if hasattr(settings, 'DATABASE_URL') else "nt_fi_report.sqlite"
+    # Handle relative paths
+    import os
+    if not os.path.isabs(db_path):
+        db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), db_path)
+
+    service = ContextOnboardingService(db_path)
+
+    # Phase 1: Inspect
+    try:
+        inspection = service.inspect(view_name)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Inspection failed: {str(e)}")
+
+    if inspect_only:
+        return {
+            "status": "inspect_only",
+            "inspection": inspection.to_dict(),
+        }
+
+    # Phase 2-3: Analyze + Generate
+    try:
+        service._last_view_name = view_name
+        analysis = await service.analyze(
+            inspection,
+            provider=request.get("provider"),
+            model=request.get("model"),
+            api_url=request.get("api_url"),
+        )
+        config = service.generate_config(analysis, view_name=view_name)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+
+    # Phase 4: Apply
+    apply_result = service.apply(config, dry_run=dry_run)
+
+    # Phase 5: Validate (only if applied)
+    validation = None
+    if not dry_run:
+        try:
+            validation = await service.validate(view_name)
+            # Also refresh schema cache
+            try:
+                schema_service = SchemaService(db)
+                schema_service.refresh_cache()
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    return {
+        "status": "applied" if not dry_run else "preview",
+        "inspection": {
+            "row_count": inspection.row_count,
+            "columns": len(inspection.columns),
+            "detected_structure": inspection.detected_structure,
+            "quality_issues": len(inspection.quality_issues),
+        },
+        "analysis": {
+            "data_structure": analysis.get("data_structure", {}),
+            "context": analysis.get("context", {}),
+            "rules_count": len(analysis.get("business_rules", [])),
+            "examples_count": len(analysis.get("golden_examples", [])),
+            "mappings_count": len(analysis.get("semantic_mappings", [])),
+        },
+        "config": {
+            "summary": config.summary,
+            "sql_count": len(config.sql_statements),
+            "sql_statements": config.sql_statements if dry_run else None,
+        },
+        "apply": apply_result if not dry_run else None,
+        "validation": {
+            "passed": validation.passed,
+            "results": validation.test_results,
+        } if validation else None,
+    }
+
+
+@router.post("/contexts/onboard/inspect")
+async def inspect_context(
+    request: dict,
+    current_user: User = Depends(deps.require_admin),
+):
+    """Lightweight: inspect only (no LLM). Fast."""
+    from app.services.context_onboarding import ContextOnboardingService
+
+    view_name = request.get("view_name")
+    if not view_name:
+        raise HTTPException(status_code=400, detail="view_name is required")
+
+    import os
+    db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "nt_fi_report.sqlite")
+    service = ContextOnboardingService(db_path)
+
+    try:
+        inspection = service.inspect(view_name)
+        return {"status": "ok", "inspection": inspection.to_dict()}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/contexts/onboard/validate")
+async def validate_context(
+    request: dict,
+    current_user: User = Depends(deps.require_admin),
+):
+    """Validate that config exists for a view."""
+    from app.services.context_onboarding import ContextOnboardingService
+
+    view_name = request.get("view_name")
+    if not view_name:
+        raise HTTPException(status_code=400, detail="view_name is required")
+
+    import os
+    db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "nt_fi_report.sqlite")
+    service = ContextOnboardingService(db_path)
+
+    try:
+        validation = await service.validate(view_name)
+        return {
+            "status": "ok",
+            "passed": validation.passed,
+            "results": validation.test_results,
+            "issues": validation.issues,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

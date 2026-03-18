@@ -252,6 +252,53 @@ function baseTooltip(): object {
 }
 
 // ============================================================
+// Y-axis label builder — detect metric name from column name
+// ============================================================
+
+/** Keywords that indicate financial/monetary columns */
+const _MONEY_KEYWORDS = [
+    'revenue', 'income', 'expense', 'cost', 'profit', 'amount', 'total', 'sum',
+    'budget', 'value', 'baht', 'รายได้', 'ค่าใช้จ่าย', 'กำไร', 'ยอด', 'งบ', 'มูลค่า',
+    'ต้นทุน', 'ขาดทุน', 'ebt',
+];
+
+/** Build a descriptive Y-axis label from column name and config */
+function buildYAxisLabel(measureCol: string, config?: ChartConfig): string {
+    if (!measureCol) return '';
+
+    // Check column_roles from backend for display_label
+    if (config?.column_roles) {
+        const role = config.column_roles.find(
+            (r: any) => r.role === 'measure' && r.column === measureCol
+        );
+        if (role?.display_label) return role.display_label;
+    }
+
+    // If column name already has Thai unit suffix, return as-is
+    if (measureCol.includes('ล้านบาท') || measureCol.includes('พันบาท')) return measureCol;
+
+    // Detect unit from column name
+    const lower = measureCol.toLowerCase();
+    const isMoney = _MONEY_KEYWORDS.some(k => lower.includes(k));
+
+    // Check for unit hints in column name
+    if (lower.includes('million') || lower.includes('_mb') || lower.endsWith('_m')) {
+        return `${measureCol} (ล้านบาท)`;
+    }
+    if (lower.includes('_billion') || lower.includes('_b')) {
+        return `${measureCol} (พันล้านบาท)`;
+    }
+    if (lower.includes('percent') || lower.includes('pct') || lower.includes('%') || lower.includes('อัตรา')) {
+        return `${measureCol} (%)`;
+    }
+
+    // Generic money column — just show column name (unit shown in tooltip)
+    if (isMoney) return measureCol;
+
+    return measureCol;
+}
+
+// ============================================================
 // Individual chart builders
 // ============================================================
 
@@ -273,7 +320,7 @@ function buildVerticalBar(
             data: categories,
             axisLabel: { rotate: categories.length > 6 ? 30 : 0, fontSize: 11 },
         },
-        yAxis: { type: 'value', axisLabel: { fontSize: 11, formatter: yAxisFormatter } },
+        yAxis: { type: 'value', name: buildYAxisLabel(measureCol, config), nameLocation: 'middle', nameGap: 50, nameTextStyle: { fontSize: 12 }, axisLabel: { fontSize: 11, formatter: yAxisFormatter } },
         series: [{
             type: 'bar',
             data: values.map((v, i) => ({
@@ -299,7 +346,7 @@ function buildHorizontalBar(
         title: config?.title ? { text: config.title, left: 'center', textStyle: { fontSize: 14 } } : undefined,
         tooltip: { ...baseTooltip(), trigger: 'axis', formatter: tooltipFormatter },
         grid: { left: '25%', right: '5%', bottom: '10%', top: config?.title ? '15%' : '10%', containLabel: false },
-        xAxis: { type: 'value', axisLabel: { fontSize: 11, formatter: yAxisFormatter } },
+        xAxis: { type: 'value', name: buildYAxisLabel(measureCol, config), nameLocation: 'middle', nameGap: 30, nameTextStyle: { fontSize: 12 }, axisLabel: { fontSize: 11, formatter: yAxisFormatter } },
         yAxis: {
             type: 'category',
             data: categories,
@@ -337,7 +384,7 @@ function buildLine(
             boundaryGap: false,
             axisLabel: { rotate: categories.length > 6 ? 30 : 0, fontSize: 11 },
         },
-        yAxis: { type: 'value', axisLabel: { fontSize: 11, formatter: yAxisFormatter } },
+        yAxis: { type: 'value', name: buildYAxisLabel(measureCol, config), nameLocation: 'middle', nameGap: 50, nameTextStyle: { fontSize: 12 }, axisLabel: { fontSize: 11, formatter: yAxisFormatter } },
         series: [{
             type: 'line',
             data: values,
@@ -397,7 +444,7 @@ function buildMultiSeries(
             data: categories.map(c => truncateLabel(c, 12)),
             axisLabel: { rotate: categories.length > 6 ? 30 : 0, fontSize: 11 },
         },
-        yAxis: { type: 'value', axisLabel: { fontSize: 11, formatter: yAxisFormatter } },
+        yAxis: { type: 'value', name: buildYAxisLabel(measureCol, config), nameLocation: 'middle', nameGap: 50, nameTextStyle: { fontSize: 12 }, axisLabel: { fontSize: 11, formatter: yAxisFormatter } },
         series: seriesData,
     };
 }
@@ -510,7 +557,7 @@ function buildWaterfall(
             data: categories,
             axisLabel: { rotate: categories.length > 6 ? 30 : 0, fontSize: 11 },
         },
-        yAxis: { type: 'value', axisLabel: { fontSize: 11, formatter: yAxisFormatter } },
+        yAxis: { type: 'value', name: buildYAxisLabel(measureCol, config), nameLocation: 'middle', nameGap: 50, nameTextStyle: { fontSize: 12 }, axisLabel: { fontSize: 11, formatter: yAxisFormatter } },
         series: [
             {
                 name: 'Base',

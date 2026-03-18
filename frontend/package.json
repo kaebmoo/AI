@@ -16,6 +16,7 @@
     "@react-navigation/elements": "^2.6.3",
     "@react-navigation/native": "^7.1.8",
     "@tanstack/react-query": "^5.90.20",
+    "@webdatarocks/react-webdatarocks": "^1.4.22",
     "@wuba/react-native-echarts": "^3.0.1",
     "axios": "^1.13.3",
     "clsx": "^2.1.1",

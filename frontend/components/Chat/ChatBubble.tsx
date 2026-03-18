@@ -5,6 +5,7 @@ import { TechnicalAccordion } from './TechnicalAccordion';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { DataChart } from './DataChart';
 import { DataTable } from './DataTable';
+import { PivotDataView } from './PivotDataView';
 import { ConfidenceBadge, ConfidenceData } from './ConfidenceBadge';
 import { chatService, FeedbackRating, FeedbackCategory } from '@/services/chat';
 
@@ -60,6 +61,7 @@ export const ChatBubble = ({ message, onTrain }: ChatBubbleProps) => {
     };
 
     const [showAllData, setShowAllData] = useState(false);
+    const [showPivot, setShowPivot] = useState(false);
     const [feedbackState, setFeedbackState] = useState<FeedbackRating | null>(message.feedbackRating || null);
     const [showCategoryPicker, setShowCategoryPicker] = useState(false);
     const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
@@ -275,7 +277,7 @@ export const ChatBubble = ({ message, onTrain }: ChatBubbleProps) => {
                             </View>
                         )}
 
-                        {/* Query Result Data - Data Grid / Table */}
+                        {/* Query Result Data - Data Grid / Table (ORIGINAL — always shown) */}
                         {message.data && message.data.length > 0 && (message.data.length > 1 || Object.keys(message.data[0]).length > 2) && (
                             <DataTable
                                 data={dataToShow}
@@ -295,6 +297,34 @@ export const ChatBubble = ({ message, onTrain }: ChatBubbleProps) => {
                                         : `▼ แสดงทั้งหมด ${message.data?.length || 0} รายการ`}
                                 </Text>
                             </TouchableOpacity>
+                        )}
+
+                        {/* Pivot Tool — ADDITIVE, shown below original chart+table */}
+                        {message.data && message.data.length > 2 && Object.keys(message.data[0]).length >= 2 && (
+                            <View className="mt-2">
+                                <TouchableOpacity
+                                    onPress={() => setShowPivot(!showPivot)}
+                                    className={`self-end mr-1 mb-1 flex-row items-center px-3 py-1.5 rounded-full border ${
+                                        showPivot
+                                            ? 'bg-blue-600 border-blue-600'
+                                            : isDark
+                                                ? 'bg-gray-700 border-gray-600'
+                                                : 'bg-gray-100 border-gray-300'
+                                    }`}
+                                >
+                                    <Text className={`text-xs font-semibold ${
+                                        showPivot ? 'text-white' : isDark ? 'text-gray-300' : 'text-gray-600'
+                                    }`}>
+                                        {showPivot ? '✕ ปิด Pivot' : '⊞ เปิด Pivot Tool'}
+                                    </Text>
+                                </TouchableOpacity>
+                                {showPivot && (
+                                    <PivotDataView
+                                        data={message.data}
+                                        title={message.chartConfig?.title}
+                                    />
+                                )}
+                            </View>
                         )}
                     </View>
                 )}

@@ -214,7 +214,8 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
         const overrideConfig = activeType
             ? { ...chartConfig, suggested_type: activeType }
             : chartConfig;
-        return buildEChartsOption(data, visualization, overrideConfig, isDark);
+        const opt = buildEChartsOption(data, visualization, overrideConfig, isDark);
+        return opt;
     }, [data, visualization, chartConfig, activeType, isDark]);
 
     const echartsOptionFullscreen = useMemo(() => {
@@ -643,6 +644,189 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
             percentDiffKey
         };
     }, [data, visualization, chartConfig]);
+
+    // ============================================================
+    // ECharts Rendering Path (BEFORE analysis null-guard)
+    // ECharts uses echartsOption which is computed independently of analysis.
+    // When visualization='table', analysis is null but echartsOption may be valid.
+    // ============================================================
+
+    /** Thai labels for chart type toolbar */
+    const CHART_LABELS: Record<string, string> = {
+        vertical_bar: 'แท่ง',
+        horizontal_bar: 'แท่งแนวนอน',
+        bar_chart: 'แท่ง',
+        line: 'เส้น',
+        line_chart: 'เส้น',
+        multi_line: 'หลายเส้น',
+        pie_chart: 'วงกลม',
+        donut_chart: 'โดนัท',
+        grouped_bar: 'แท่งกลุ่ม',
+        stacked_bar: 'แท่งสะสม',
+        stacked_bar_100: '100% สะสม',
+        area: 'พื้นที่',
+        stacked_area: 'พื้นที่สะสม',
+        waterfall: 'น้ำตก',
+        scatter: 'กระจาย',
+        mixed_bar_line: 'ผสม',
+        treemap: 'แผนผัง',
+    };
+
+    // Toolbar renderer — shared between normal and fullscreen views (ECharts path)
+    const renderEChartsToolbar = (containerStyle?: any) => (
+        showToolbar ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={containerStyle}>
+                <View style={{ flexDirection: 'row', gap: 6, paddingHorizontal: 2 }}>
+                    {availableTypes.map((type) => {
+                        const isActive = type === activeType;
+                        return (
+                            <TouchableOpacity
+                                key={type}
+                                onPress={() => setActiveType(type)}
+                                style={{
+                                    paddingHorizontal: 12,
+                                    paddingVertical: 6,
+                                    borderRadius: 16,
+                                    backgroundColor: isActive ? '#3B82F6' : (isDark ? '#374151' : '#F3F4F6'),
+                                    borderWidth: isActive ? 0 : 1,
+                                    borderColor: isDark ? '#4B5563' : '#E5E7EB',
+                                }}
+                            >
+                                <Text style={{
+                                    fontSize: 12,
+                                    fontWeight: isActive ? '600' : '400',
+                                    color: isActive ? '#FFFFFF' : (isDark ? '#D1D5DB' : '#4B5563'),
+                                }}>
+                                    {CHART_LABELS[type] || type}
+                                </Text>
+                            </TouchableOpacity>
+                        );
+                    })}
+                </View>
+            </ScrollView>
+        ) : null
+    );
+
+    // If ECharts is available and we have a valid option, render chart
+    // This runs BEFORE the analysis null-guard so charts show even for visualization='table'
+    if (isEChartsAvailable() && echartsOption) {
+        return (
+            <View className="my-4 p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm"
+                style={{ width: '100%' }}>
+
+                {/* Header: Title + Expand Button */}
+                <View style={{
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    marginBottom: 8,
+                }}>
+                    <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200"
+                        style={{ flex: 1, flexShrink: 1 }} numberOfLines={2}>
+                        {chartConfig?.title || ''}
+                    </Text>
+                    <TouchableOpacity
+                        onPress={() => setIsFullScreen(true)}
+                        style={{
+                            padding: 6,
+                            borderRadius: 6,
+                            backgroundColor: isDark ? '#374151' : '#F3F4F6',
+                            flexShrink: 0,
+                            marginLeft: 8,
+                        }}
+                        activeOpacity={0.7}
+                    >
+                        <Ionicons name="expand-outline" size={18} color={isDark ? '#D1D5DB' : '#6B7280'} />
+                    </TouchableOpacity>
+                </View>
+
+                {/* Chart Type Toolbar */}
+                {renderEChartsToolbar({ marginBottom: 8 })}
+
+                {/* ECharts Render */}
+                <EChartsWrapper
+                    option={echartsOption}
+                    height={400}
+                    width={Math.min(screenWidth - 48, 800)}
+                />
+
+                {/* Warning */}
+                {chartConfig?.warning && (
+                    <Text className="text-xs text-amber-600 dark:text-amber-400 text-center mt-2">
+                        {chartConfig.warning}
+                    </Text>
+                )}
+
+                {/* Full Screen Modal */}
+                <Modal
+                    visible={isFullScreen}
+                    animationType="slide"
+                    transparent={false}
+                    onRequestClose={() => setIsFullScreen(false)}
+                >
+                    <View style={{ flex: 1, backgroundColor: isDark ? '#111827' : '#FFFFFF', paddingTop: 48 }}>
+                        {/* Modal Header — compact */}
+                        <View style={{
+                            flexDirection: 'row',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            paddingHorizontal: 16,
+                            paddingBottom: 8,
+                            borderBottomWidth: 1,
+                            borderBottomColor: isDark ? '#374151' : '#E5E7EB',
+                        }}>
+                            <Text style={{
+                                flex: 1,
+                                fontSize: 15,
+                                fontWeight: '600',
+                                color: isDark ? '#F3F4F6' : '#1F2937',
+                            }} numberOfLines={2}>
+                                {chartConfig?.title || ''}
+                            </Text>
+                            <TouchableOpacity
+                                onPress={() => setIsFullScreen(false)}
+                                style={{
+                                    padding: 6,
+                                    borderRadius: 6,
+                                    backgroundColor: isDark ? '#374151' : '#F3F4F6',
+                                    marginLeft: 8,
+                                }}
+                            >
+                                <Ionicons name="close" size={20} color={isDark ? '#E5E7EB' : '#374151'} />
+                            </TouchableOpacity>
+                        </View>
+
+                        {/* Toolbar in Modal — compact */}
+                        <View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4 }}>
+                            {renderEChartsToolbar()}
+                        </View>
+
+                        {/* Full Screen ECharts — use option WITHOUT title */}
+                        <View style={{ flex: 1, paddingHorizontal: 8, paddingTop: 4 }}>
+                            <EChartsWrapper
+                                option={echartsOptionFullscreen || echartsOption}
+                                height={screenWidth > 768 ? 580 : 460}
+                                width={screenWidth - 16}
+                            />
+                        </View>
+
+                        {/* Warning in fullscreen */}
+                        {chartConfig?.warning && (
+                            <Text style={{
+                                fontSize: 11,
+                                color: '#D97706',
+                                textAlign: 'center',
+                                paddingBottom: 12,
+                                paddingHorizontal: 16,
+                            }}>
+                                {chartConfig.warning}
+                            </Text>
+                        )}
+                    </View>
+                </Modal>
+            </View>
+        );
+    }
 
     if (!analysis) {
         return null;
@@ -1325,190 +1509,6 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
             </View>
         );
     };
-
-    // ============================================================
-    // ECharts Rendering Path
-    // ============================================================
-
-    /** Thai labels for chart type toolbar */
-    const CHART_LABELS: Record<string, string> = {
-        vertical_bar: 'แท่ง',
-        horizontal_bar: 'แท่งแนวนอน',
-        bar_chart: 'แท่ง',
-        line: 'เส้น',
-        line_chart: 'เส้น',
-        multi_line: 'หลายเส้น',
-        pie_chart: 'วงกลม',
-        donut_chart: 'โดนัท',
-        grouped_bar: 'แท่งกลุ่ม',
-        stacked_bar: 'แท่งสะสม',
-        stacked_bar_100: '100% สะสม',
-        area: 'พื้นที่',
-        stacked_area: 'พื้นที่สะสม',
-        waterfall: 'น้ำตก',
-        scatter: 'กระจาย',
-        mixed_bar_line: 'ผสม',
-        treemap: 'แผนผัง',
-    };
-
-    // Note: hooks (useState, useEffect, useMemo) are now defined at the TOP
-    // of the component (line ~198) to comply with React's rules of hooks.
-    // They run before any early-return statements.
-
-    // Toolbar renderer — shared between normal and fullscreen views (ECharts path)
-    const renderEChartsToolbar = (containerStyle?: any) => (
-        showToolbar ? (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={containerStyle}>
-                <View style={{ flexDirection: 'row', gap: 6, paddingHorizontal: 2 }}>
-                    {availableTypes.map((type) => {
-                        const isActive = type === activeType;
-                        return (
-                            <TouchableOpacity
-                                key={type}
-                                onPress={() => setActiveType(type)}
-                                style={{
-                                    paddingHorizontal: 12,
-                                    paddingVertical: 6,
-                                    borderRadius: 16,
-                                    backgroundColor: isActive ? '#3B82F6' : (isDark ? '#374151' : '#F3F4F6'),
-                                    borderWidth: isActive ? 0 : 1,
-                                    borderColor: isDark ? '#4B5563' : '#E5E7EB',
-                                }}
-                            >
-                                <Text style={{
-                                    fontSize: 12,
-                                    fontWeight: isActive ? '600' : '400',
-                                    color: isActive ? '#FFFFFF' : (isDark ? '#D1D5DB' : '#4B5563'),
-                                }}>
-                                    {CHART_LABELS[type] || type}
-                                </Text>
-                            </TouchableOpacity>
-                        );
-                    })}
-                </View>
-            </ScrollView>
-        ) : null
-    );
-
-    // If ECharts is available and we have a valid chart type, use ECharts
-    if (isEChartsAvailable() && echartsOption) {
-        return (
-            <View className="my-4 p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm"
-                style={{ width: '100%' }}>
-
-                {/* Header: Title + Expand Button */}
-                <View style={{
-                    flexDirection: 'row',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    marginBottom: 8,
-                }}>
-                    <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200"
-                        style={{ flex: 1, flexShrink: 1 }} numberOfLines={2}>
-                        {chartConfig?.title || ''}
-                    </Text>
-                    <TouchableOpacity
-                        onPress={() => setIsFullScreen(true)}
-                        style={{
-                            padding: 6,
-                            borderRadius: 6,
-                            backgroundColor: isDark ? '#374151' : '#F3F4F6',
-                            flexShrink: 0,
-                            marginLeft: 8,
-                        }}
-                        activeOpacity={0.7}
-                    >
-                        <Ionicons name="expand-outline" size={18} color={isDark ? '#D1D5DB' : '#6B7280'} />
-                    </TouchableOpacity>
-                </View>
-
-                {/* Chart Type Toolbar */}
-                {renderEChartsToolbar({ marginBottom: 8 })}
-
-                {/* ECharts Render */}
-                <EChartsWrapper
-                    option={echartsOption}
-                    height={400}
-                    width={Math.min(screenWidth - 48, 800)}
-                />
-
-                {/* Warning */}
-                {chartConfig?.warning && (
-                    <Text className="text-xs text-amber-600 dark:text-amber-400 text-center mt-2">
-                        {chartConfig.warning}
-                    </Text>
-                )}
-
-                {/* Full Screen Modal */}
-                <Modal
-                    visible={isFullScreen}
-                    animationType="slide"
-                    transparent={false}
-                    onRequestClose={() => setIsFullScreen(false)}
-                >
-                    <View style={{ flex: 1, backgroundColor: isDark ? '#111827' : '#FFFFFF', paddingTop: 48 }}>
-                        {/* Modal Header — compact */}
-                        <View style={{
-                            flexDirection: 'row',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            paddingHorizontal: 16,
-                            paddingBottom: 8,
-                            borderBottomWidth: 1,
-                            borderBottomColor: isDark ? '#374151' : '#E5E7EB',
-                        }}>
-                            <Text style={{
-                                flex: 1,
-                                fontSize: 15,
-                                fontWeight: '600',
-                                color: isDark ? '#F3F4F6' : '#1F2937',
-                            }} numberOfLines={2}>
-                                {chartConfig?.title || ''}
-                            </Text>
-                            <TouchableOpacity
-                                onPress={() => setIsFullScreen(false)}
-                                style={{
-                                    padding: 6,
-                                    borderRadius: 6,
-                                    backgroundColor: isDark ? '#374151' : '#F3F4F6',
-                                    marginLeft: 8,
-                                }}
-                            >
-                                <Ionicons name="close" size={20} color={isDark ? '#E5E7EB' : '#374151'} />
-                            </TouchableOpacity>
-                        </View>
-
-                        {/* Toolbar in Modal — compact */}
-                        <View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4 }}>
-                            {renderEChartsToolbar()}
-                        </View>
-
-                        {/* Full Screen ECharts — use option WITHOUT title */}
-                        <View style={{ flex: 1, paddingHorizontal: 8, paddingTop: 4 }}>
-                            <EChartsWrapper
-                                option={echartsOptionFullscreen || echartsOption}
-                                height={screenWidth > 768 ? 580 : 460}
-                                width={screenWidth - 16}
-                            />
-                        </View>
-
-                        {/* Warning in fullscreen */}
-                        {chartConfig?.warning && (
-                            <Text style={{
-                                fontSize: 11,
-                                color: '#D97706',
-                                textAlign: 'center',
-                                paddingBottom: 12,
-                                paddingHorizontal: 16,
-                            }}>
-                                {chartConfig.warning}
-                            </Text>
-                        )}
-                    </View>
-                </Modal>
-            </View>
-        );
-    }
 
     // ============================================================
     // Gifted Charts Fallback (original code below)
