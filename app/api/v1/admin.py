@@ -2101,14 +2101,21 @@ def get_query_logs(
     date_to: Optional[str] = None,
     context: Optional[str] = None,
     user_id: Optional[int] = None,
+    feedback_only: bool = Query(False, description="Only show queries with feedback"),
+    thumbs_down_only: bool = Query(False, description="Only show thumbs-down queries"),
+    has_error: bool = Query(False, description="Only show queries with errors"),
     current_user: User = Depends(deps.require_admin),
     db: Session = Depends(deps.get_db),
 ):
-    """Get paginated query logs from chat_history. Admin only."""
+    """Get paginated query logs with optional feedback join. Admin only."""
     from app.models.chat import ChatHistory
     from app.models.user import User as UserModel
+    from app.models.feedback_models import UserFeedback, FeedbackRating
 
-    query = db.query(ChatHistory).order_by(ChatHistory.created_at.desc())
+    # Left join with feedback
+    query = db.query(ChatHistory, UserFeedback).outerjoin(
+        UserFeedback, ChatHistory.id == UserFeedback.chat_id
+    ).order_by(ChatHistory.created_at.desc())
 
     if date_from:
         try:
@@ -2130,34 +2137,169 @@ def get_query_logs(
     if user_id:
         query = query.filter(ChatHistory.user_id == user_id)
 
+    if feedback_only:
+        query = query.filter(UserFeedback.id != None)
+
+    if thumbs_down_only:
+        query = query.filter(UserFeedback.rating == FeedbackRating.THUMBS_DOWN)
+
+    if has_error:
+        query = query.filter(
+            (ChatHistory.generated_sql == None) | (ChatHistory.generated_sql == "")
+        )
+
     total = query.count()
     rows = query.offset(skip).limit(limit).all()
 
     # Map user IDs to emails
-    user_ids = list(set(r.user_id for r in rows if r.user_id))
+    user_ids = list(set(r[0].user_id for r in rows if r[0].user_id))
     user_map = {}
     if user_ids:
         users = db.query(UserModel).filter(UserModel.id.in_(user_ids)).all()
         user_map = {u.id: u.email for u in users}
 
     items = []
-    for r in rows:
-        items.append({
-            "id": r.id,
-            "user_id": r.user_id,
-            "user_email": user_map.get(r.user_id, "unknown"),
-            "question": r.question,
-            "generated_sql": r.generated_sql,
-            "sql_result_summary": (r.sql_result_summary or "")[:500],
-            "ai_response": (r.ai_response or "")[:300],
-            "tokens_used": r.tokens_used,
-            "execution_time_ms": r.execution_time_ms,
-            "context_name": r.context_name,
-            "feedback_rating": r.feedback_rating,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-        })
+    for chat, feedback in rows:
+        item = {
+            "id": chat.id,
+            "user_id": chat.user_id,
+            "user_email": user_map.get(chat.user_id, "unknown"),
+            "question": chat.question,
+            "generated_sql": chat.generated_sql,  # Full SQL — not truncated
+            "sql_result_summary": (chat.sql_result_summary or "")[:500],
+            "ai_response": (chat.ai_response or "")[:300],
+            "tokens_used": chat.tokens_used,
+            "execution_time_ms": chat.execution_time_ms,
+            "context_name": chat.context_name,
+            "feedback_rating": chat.feedback_rating,
+            "created_at": chat.created_at.isoformat() if chat.created_at else None,
+        }
+        # Attach feedback details if present
+        if feedback:
+            item["feedback"] = {
+                "id": feedback.id,
+                "rating": feedback.rating.value if feedback.rating else None,
+                "category": feedback.feedback_category.value if feedback.feedback_category else None,
+                "text": feedback.feedback_text,
+                "reviewed": feedback.reviewed_at is not None,
+            }
+        else:
+            item["feedback"] = None
+        items.append(item)
 
     return {"total": total, "items": items}
+
+
+@router.get("/feedback-details/{feedback_id}")
+def get_feedback_details(
+    feedback_id: int,
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db),
+):
+    """Get full feedback details including complete ChatHistory."""
+    from app.models.chat import ChatHistory
+    from app.models.feedback_models import UserFeedback
+
+    feedback = db.query(UserFeedback).filter(UserFeedback.id == feedback_id).first()
+    if not feedback:
+        raise HTTPException(status_code=404, detail="Feedback not found")
+
+    chat = db.query(ChatHistory).filter(ChatHistory.id == feedback.chat_id).first()
+
+    return {
+        "feedback": {
+            "id": feedback.id,
+            "rating": feedback.rating.value if feedback.rating else None,
+            "category": feedback.feedback_category.value if feedback.feedback_category else None,
+            "text": feedback.feedback_text,
+            "reviewed_at": str(feedback.reviewed_at) if feedback.reviewed_at else None,
+            "reviewed_by": feedback.reviewed_by,
+            "created_at": str(feedback.created_at) if feedback.created_at else None,
+        },
+        "chat": {
+            "id": chat.id,
+            "question": chat.question,
+            "generated_sql": chat.generated_sql,
+            "sql_result_summary": chat.sql_result_summary,
+            "ai_response": chat.ai_response,
+            "tokens_used": chat.tokens_used,
+            "execution_time_ms": chat.execution_time_ms,
+            "context_name": chat.context_name,
+            "created_at": chat.created_at.isoformat() if chat.created_at else None,
+        } if chat else None,
+    }
+
+
+@router.get("/query-analytics")
+def get_query_analytics(
+    period: str = Query("7d", description="Period: 7d, 30d, 90d"),
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db),
+):
+    """Get aggregated query analytics: error rates, top failures, context distribution."""
+    from app.models.chat import ChatHistory
+    from app.models.feedback_models import UserFeedback, FeedbackRating
+    from datetime import timedelta
+
+    # Parse period
+    days_map = {"7d": 7, "30d": 30, "90d": 90}
+    days = days_map.get(period, 7)
+    since = datetime.utcnow() - timedelta(days=days)
+
+    # Total queries
+    total = db.query(ChatHistory).filter(ChatHistory.created_at >= since).count()
+
+    # Errors (no generated SQL)
+    errors = db.query(ChatHistory).filter(
+        ChatHistory.created_at >= since,
+        (ChatHistory.generated_sql == None) | (ChatHistory.generated_sql == "")
+    ).count()
+
+    # Thumbs down count
+    thumbs_down = db.query(UserFeedback).filter(
+        UserFeedback.created_at >= since,
+        UserFeedback.rating == FeedbackRating.THUMBS_DOWN,
+    ).count()
+
+    # Total feedback
+    total_feedback = db.query(UserFeedback).filter(
+        UserFeedback.created_at >= since
+    ).count()
+
+    # Context distribution
+    from sqlalchemy import func
+    context_rows = db.query(
+        ChatHistory.context_name, func.count(ChatHistory.id)
+    ).filter(
+        ChatHistory.created_at >= since
+    ).group_by(ChatHistory.context_name).all()
+
+    context_distribution = {(ctx or "unknown"): count for ctx, count in context_rows}
+
+    # Feedback category distribution
+    category_rows = db.query(
+        UserFeedback.feedback_category, func.count(UserFeedback.id)
+    ).filter(
+        UserFeedback.created_at >= since,
+        UserFeedback.rating == FeedbackRating.THUMBS_DOWN,
+    ).group_by(UserFeedback.feedback_category).all()
+
+    error_categories = {}
+    for cat, count in category_rows:
+        cat_name = cat.value if cat else "unspecified"
+        error_categories[cat_name] = count
+
+    return {
+        "period": period,
+        "total_queries": total,
+        "error_count": errors,
+        "error_rate": round(errors / total, 3) if total > 0 else 0,
+        "thumbs_down_count": thumbs_down,
+        "thumbs_down_rate": round(thumbs_down / total_feedback, 3) if total_feedback > 0 else 0,
+        "total_feedback": total_feedback,
+        "context_distribution": context_distribution,
+        "error_categories": error_categories,
+    }
 
 
 # ============================================================
@@ -2375,3 +2517,120 @@ async def validate_context(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ═══════════════════════════════════════════════════════════
+# API Key Management (Plan 4B)
+# ═══════════════════════════════════════════════════════════
+
+from pydantic import BaseModel as PydanticBaseModel, Field as PydanticField
+
+
+class APIKeyCreateRequest(PydanticBaseModel):
+    name: str = PydanticField(..., description="Human-readable name for the key")
+    scopes: str = PydanticField("query", description="Comma-separated scopes: query, admin, full")
+    rate_limit_per_minute: int = PydanticField(30, ge=1, le=1000)
+    rate_limit_per_day: int = PydanticField(1000, ge=1, le=100000)
+
+
+class APIKeyResponse(PydanticBaseModel):
+    id: int
+    key_prefix: str
+    name: str
+    user_id: int
+    scopes: str
+    rate_limit_per_minute: int
+    rate_limit_per_day: int
+    is_active: bool
+    last_used_at: Optional[str] = None
+    created_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class APIKeyCreateResponse(APIKeyResponse):
+    raw_key: str = PydanticField(..., description="Full API key — shown ONCE")
+
+
+@router.post("/api-keys", response_model=APIKeyCreateResponse, status_code=status.HTTP_201_CREATED)
+def create_api_key(
+    request: APIKeyCreateRequest,
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db),
+):
+    """Create a new API key. The raw key is returned ONCE and cannot be retrieved later."""
+    from app.services.api_key_service import APIKeyService, KEY_PREFIX
+    service = APIKeyService(db)
+
+    raw_key, api_key = service.create_key(
+        user_id=current_user.id,
+        name=request.name,
+        scopes=request.scopes,
+        rate_limit_per_minute=request.rate_limit_per_minute,
+        rate_limit_per_day=request.rate_limit_per_day,
+    )
+
+    return APIKeyCreateResponse(
+        id=api_key.id,
+        key_prefix=api_key.key_prefix,
+        name=api_key.name,
+        user_id=api_key.user_id,
+        scopes=api_key.scopes,
+        rate_limit_per_minute=api_key.rate_limit_per_minute,
+        rate_limit_per_day=api_key.rate_limit_per_day,
+        is_active=api_key.is_active,
+        last_used_at=str(api_key.last_used_at) if api_key.last_used_at else None,
+        created_at=str(api_key.created_at) if api_key.created_at else None,
+        raw_key=raw_key,
+    )
+
+
+@router.get("/api-keys", response_model=list)
+def list_api_keys(
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db),
+):
+    """List all API keys for the current user."""
+    from app.services.api_key_service import APIKeyService, KEY_PREFIX
+    service = APIKeyService(db)
+    keys = service.list_keys(user_id=current_user.id)
+
+    return [
+        APIKeyResponse(
+            id=k.id, key_prefix=k.key_prefix, name=k.name, user_id=k.user_id,
+            scopes=k.scopes, rate_limit_per_minute=k.rate_limit_per_minute,
+            rate_limit_per_day=k.rate_limit_per_day, is_active=k.is_active,
+            last_used_at=str(k.last_used_at) if k.last_used_at else None,
+            created_at=str(k.created_at) if k.created_at else None,
+        ).model_dump()
+        for k in keys
+    ]
+
+
+@router.delete("/api-keys/{key_id}")
+def revoke_api_key(
+    key_id: int,
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db),
+):
+    """Revoke (soft delete) an API key."""
+    from app.services.api_key_service import APIKeyService, KEY_PREFIX
+    service = APIKeyService(db)
+    success = service.revoke_key(key_id, user_id=current_user.id)
+    if not success:
+        raise HTTPException(status_code=404, detail="API key not found")
+    return {"status": "revoked", "key_id": key_id}
+
+
+@router.get("/api-keys/{key_id}/usage")
+def get_api_key_usage(
+    key_id: int,
+    days: int = Query(30, ge=1, le=365),
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db),
+):
+    """Get usage statistics for an API key."""
+    from app.services.api_key_service import APIKeyService, KEY_PREFIX
+    service = APIKeyService(db)
+    return service.get_usage_stats(key_id, days=days)

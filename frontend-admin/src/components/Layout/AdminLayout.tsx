@@ -22,7 +22,8 @@ import {
     FileSearchOutlined,
     WarningOutlined,
     ForkOutlined,
-    RocketOutlined
+    RocketOutlined,
+    KeyOutlined
 } from '@ant-design/icons';
 import { Layout, Menu, Button, theme, Dropdown, Avatar, Space } from 'antd';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
@@ -50,6 +51,11 @@ const AppLayout: React.FC = () => {
             key: '/dashboard',
             icon: <DashboardOutlined />,
             label: 'Dashboard',
+        },
+        {
+            key: '/admin-agent',
+            icon: <RobotOutlined />,
+            label: 'Admin Agent',
         },
         {
             type: 'group',
@@ -174,6 +180,11 @@ const AppLayout: React.FC = () => {
                     key: '/settings',
                     icon: <SettingOutlined />,
                     label: 'Settings',
+                },
+                {
+                    key: '/api-keys',
+                    icon: <KeyOutlined />,
+                    label: 'API Keys',
                 },
                 {
                     key: '/users',

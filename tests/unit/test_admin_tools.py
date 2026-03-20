@@ -1,0 +1,300 @@
+"""
+Unit Tests for Admin Tools (Plan 1)
+=====================================
+Tests for individual admin tool execution.
+"""
+
+import pytest
+import sqlite3
+from unittest.mock import patch, MagicMock
+from datetime import datetime
+
+from app.tools.admin.base import AdminTool
+from app.tools.admin.registry import AdminToolRegistry
+
+
+# ── Fixtures ──────────────────────────────────────────────
+
+@pytest.fixture
+def admin_tools_db(tmp_path):
+    """Create a temp SQLite DB with config tables matching actual ORM models + sample data."""
+    db_path = str(tmp_path / "test_admin.sqlite")
+    conn = sqlite3.connect(db_path)
+    c = conn.cursor()
+
+    # Schema semantic mapping — matches app/models/schema_models.py SchemaSemanticMapping
+    c.execute("""
+        CREATE TABLE schema_semantic_mapping (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            keyword TEXT NOT NULL UNIQUE,
+            keyword_type TEXT DEFAULT 'term',
+            target_column TEXT NOT NULL,
+            target_condition TEXT NOT NULL DEFAULT '',
+            full_condition TEXT,
+            description TEXT,
+            priority INTEGER DEFAULT 0,
+            is_active INTEGER DEFAULT 1,
+            context_name TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    c.executemany(
+        "INSERT INTO schema_semantic_mapping (keyword, target_column, target_condition, keyword_type, context_name) VALUES (?, ?, ?, ?, ?)",
+        [
+            ("ดาต้าคอม", "SERVICE_GROUP", "= 'Datacom'", "value_alias", "revenue"),
+            ("มือถือ", "SERVICE_GROUP", "= 'Mobile'", "value_alias", "revenue"),
+            ("รายได้", "REVENUE_VALUE", "", "column_alias", None),
+        ]
+    )
+
+    # Business rules — matches app/models/schema_models.py SchemaBusinessRule
+    c.execute("""
+        CREATE TABLE schema_business_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            rule_code TEXT UNIQUE NOT NULL,
+            rule_name TEXT NOT NULL DEFAULT '',
+            rule_description TEXT NOT NULL DEFAULT '',
+            table_name TEXT,
+            applies_to TEXT,
+            example_correct TEXT,
+            example_wrong TEXT,
+            severity TEXT DEFAULT 'warning',
+            is_active INTEGER DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    c.executemany(
+        "INSERT INTO schema_business_rules (rule_code, rule_name, rule_description, severity) VALUES (?, ?, ?, ?)",
+        [
+            ("FILTER_001", "ต้องระบุ YEAR", "ต้องระบุ YEAR เสมอ", "warning"),
+            ("AGG_001", "ห้าม SUM โดยไม่มี GROUP BY", "ห้าม SUM โดยไม่มี GROUP BY", "error"),
+        ]
+    )
+
+    # Golden examples — matches app/models/feedback_models.py GoldenExample
+    c.execute("""
+        CREATE TABLE golden_examples (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id INTEGER,
+            question_pattern TEXT NOT NULL,
+            expected_sql TEXT NOT NULL,
+            category TEXT,
+            is_active INTEGER DEFAULT 1,
+            added_by INTEGER,
+            usage_count INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    c.execute(
+        "INSERT INTO golden_examples (question_pattern, expected_sql, category) VALUES (?, ?, ?)",
+        ("รายได้รวมเดือนมกราคม", "SELECT SUM(REVENUE_VALUE) FROM revenue WHERE MONTH=1", "revenue")
+    )
+
+    # Schema contexts — used via raw SQL (no ORM model)
+    c.execute("""
+        CREATE TABLE schema_contexts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            context_name TEXT UNIQUE,
+            display_name_th TEXT,
+            main_view TEXT,
+            description TEXT,
+            is_active INTEGER DEFAULT 1
+        )
+    """)
+    c.executemany(
+        "INSERT INTO schema_contexts (context_name, display_name_th, main_view) VALUES (?, ?, ?)",
+        [
+            ("revenue", "รายได้", "v_revenue_monthly"),
+            ("expense", "ค่าใช้จ่าย", "v_expense_monthly"),
+        ]
+    )
+
+    conn.commit()
+    conn.close()
+    return db_path
+
+
+@pytest.fixture
+def mock_db_session(admin_tools_db):
+    """Create a mock SQLAlchemy-like session backed by the test DB."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session as SASession
+
+    engine = create_engine(f"sqlite:///{admin_tools_db}")
+    session = SASession(engine)
+    yield session
+    session.close()
+
+
+# ── Registry Tests ────────────────────────────────────────
+
+class TestAdminToolRegistry:
+    """Test admin tool auto-discovery and registry."""
+
+    def test_discover_finds_tools(self):
+        """Registry discovers tools from admin package."""
+        registry = AdminToolRegistry()
+        registry.discover()
+        assert len(registry.tools) >= 10, f"Expected at least 10 tools, found {len(registry.tools)}"
+
+    def test_get_tool_by_name(self):
+        """Can retrieve a specific tool by name."""
+        registry = AdminToolRegistry()
+        registry.discover()
+        tool = registry.get("search_mappings")
+        assert tool is not None
+        assert tool.name == "search_mappings"
+
+    def test_get_all_specs(self):
+        """get_all_specs returns valid function calling specs."""
+        registry = AdminToolRegistry()
+        registry.discover()
+        specs = registry.get_all_specs()
+        assert len(specs) >= 10
+        for spec in specs:
+            assert "function" in spec
+            assert "name" in spec["function"]
+            assert "parameters" in spec["function"]
+
+
+# ── Mapping Tool Tests ────────────────────────────────────
+
+class TestSearchMappings:
+
+    async def test_search_mappings_found(self, mock_db_session):
+        """Search for existing keyword returns matches."""
+        from app.tools.admin.mapping_tools import SearchMappingsTool
+        tool = SearchMappingsTool()
+        result = await tool.execute({"keyword": "ดาต้าคอม"}, mock_db_session)
+        assert result["success"] is True
+        assert result["total"] >= 1
+        assert any("ดาต้าคอม" in m["keyword"] for m in result["data"])
+
+    async def test_search_mappings_not_found(self, mock_db_session):
+        """Search for non-existing keyword returns empty."""
+        from app.tools.admin.mapping_tools import SearchMappingsTool
+        tool = SearchMappingsTool()
+        result = await tool.execute({"keyword": "ไม่มีอยู่จริง"}, mock_db_session)
+        assert result["success"] is True
+        assert result["total"] == 0
+
+
+class TestAddMapping:
+
+    async def test_add_mapping_success(self, mock_db_session):
+        """Add new mapping succeeds."""
+        from app.tools.admin.mapping_tools import AddMappingTool
+        tool = AddMappingTool()
+        result = await tool.execute({
+            "keyword": "อินเตอร์เน็ต",
+            "target_column": "SERVICE_GROUP",
+            "target_value": "Internet",
+        }, mock_db_session)
+        assert result["success"] is True
+        assert "id" in result["data"]
+
+    async def test_add_mapping_duplicate(self, mock_db_session):
+        """Add duplicate mapping returns error."""
+        from app.tools.admin.mapping_tools import AddMappingTool
+        tool = AddMappingTool()
+        result = await tool.execute({
+            "keyword": "ดาต้าคอม",
+            "target_column": "SERVICE_GROUP",
+            "target_value": "Datacom",
+        }, mock_db_session)
+        assert result["success"] is False
+        assert "มี" in result["message"] or "อยู่แล้ว" in result["message"] or "duplicate" in result["message"]
+
+
+# ── Rule Tool Tests ───────────────────────────────────────
+
+class TestSearchRules:
+
+    async def test_search_rules_by_severity(self, mock_db_session):
+        """Search rules filtered by severity returns correct rules."""
+        from app.tools.admin.rule_tools import SearchRulesTool
+        tool = SearchRulesTool()
+        result = await tool.execute({"severity": "error"}, mock_db_session)
+        assert result["success"] is True
+        for rule in result["data"]:
+            assert rule["severity"] == "error"
+
+
+class TestAddRule:
+
+    async def test_add_rule_success(self, mock_db_session):
+        """Add new rule succeeds."""
+        from app.tools.admin.rule_tools import AddRuleTool
+        tool = AddRuleTool()
+        result = await tool.execute({
+            "rule_code": "TEST_001",
+            "description": "กฎทดสอบ",
+            "rule_category": "validation",
+        }, mock_db_session)
+        assert result["success"] is True
+
+    async def test_add_rule_duplicate_code(self, mock_db_session):
+        """Add rule with existing code returns error."""
+        from app.tools.admin.rule_tools import AddRuleTool
+        tool = AddRuleTool()
+        result = await tool.execute({
+            "rule_code": "FILTER_001",
+            "description": "duplicate",
+            "rule_category": "filter",
+        }, mock_db_session)
+        assert result["success"] is False
+
+
+# ── Example Tool Tests ────────────────────────────────────
+
+class TestSearchExamples:
+
+    async def test_search_examples(self, mock_db_session):
+        """Search examples returns results."""
+        from app.tools.admin.example_tools import SearchExamplesTool
+        tool = SearchExamplesTool()
+        result = await tool.execute({"search_text": "รายได้"}, mock_db_session)
+        assert result["success"] is True
+        assert result["total"] >= 1
+
+
+class TestAddExample:
+
+    async def test_add_example(self, mock_db_session):
+        """Add new example succeeds."""
+        from app.tools.admin.example_tools import AddExampleTool
+        tool = AddExampleTool()
+        result = await tool.execute({
+            "question": "ค่าใช้จ่ายรวมปี 68",
+            "sql": "SELECT SUM(EXPENSE_VALUE) FROM expense WHERE YEAR=2025",
+            "context_name": "expense",
+        }, mock_db_session)
+        assert result["success"] is True
+
+
+# ── System Tool Tests ─────────────────────────────────────
+
+class TestRefreshCache:
+
+    async def test_refresh_cache(self, mock_db_session):
+        """Refresh cache succeeds (even if some caches don't exist)."""
+        from app.tools.admin.system_tools import RefreshCacheTool
+        tool = RefreshCacheTool()
+        result = await tool.execute({}, mock_db_session)
+        assert result["success"] is True
+        assert "refreshed" in result["data"]
+
+
+class TestListContexts:
+
+    async def test_list_contexts(self, mock_db_session):
+        """List contexts returns available contexts."""
+        from app.tools.admin.system_tools import ListContextsTool
+        tool = ListContextsTool()
+        result = await tool.execute({}, mock_db_session)
+        assert result["success"] is True
+        assert result["total"] >= 2
+        names = [c["name"] for c in result["data"]]
+        assert "revenue" in names

@@ -1,0 +1,253 @@
+# NT AI Assistant — Remaining Items (Post Plans 0-5)
+
+**Created:** 2026-03-19
+**Source:** Verification audit + code review
+**Status:** งานค้างทั้งหมดจาก Plans 0-5 ที่ implement แล้วแต่ยังไม่ครบ
+
+---
+
+## REMAIN-1: Audit Service Integration into Admin Tools
+
+**Plan:** 3 | **Priority:** ⚡ High | **Effort:** 2-3 ชม.
+
+### ปัญหา
+`audit_service.py` สร้างแล้ว แต่ไม่มี admin tool ไหนเรียก `log_change()` — ทำให้ไม่มี audit trail
+
+### ไฟล์ที่ต้องแก้
+| ไฟล์ | แก้อะไร |
+|------|---------|
+| `app/tools/admin/mapping_tools.py` | AddMappingTool.execute() — เพิ่ม audit log หลัง db.commit() |
+| `app/tools/admin/rule_tools.py` | AddRuleTool.execute() — เพิ่ม audit log หลัง db.commit() |
+| `app/tools/admin/example_tools.py` | AddExampleTool.execute() — เพิ่ม audit log หลัง db.commit() |
+
+### วิธีแก้
+```python
+# เพิ่มหลัง db.commit() ในทุก Add tool:
+try:
+    from app.services.audit_service import AuditService
+    audit = AuditService(db)
+    audit.log_change(
+        action="INSERT",
+        table_name="schema_semantic_mapping",  # หรือตารางที่เกี่ยวข้อง
+        record_id=new_record.id,
+        new_value={"keyword": params["keyword"], ...},
+        source="admin_agent",
+    )
+except Exception:
+    pass  # Audit failure ไม่ควรทำให้ tool fail
+```
+
+### ทดสอบ
+- ถาม Admin Agent ให้เพิ่ม mapping → ตรวจ audit_log table มี record ใหม่
+- `tests/unit/test_audit_service.py` — มีอยู่แล้ว 4 tests
+
+---
+
+## REMAIN-2: AddExampleTool Missing Dedup Check
+
+**Plan:** 3 | **Priority:** ⚡ High | **Effort:** 1 ชม.
+
+### ปัญหา
+`AddMappingTool` + `AddRuleTool` มี DedupEngine check แล้ว แต่ `AddExampleTool` ยังไม่มี → สามารถเพิ่ม example ซ้ำได้
+
+### ไฟล์ที่ต้องแก้
+`app/tools/admin/example_tools.py` — AddExampleTool.execute()
+
+### วิธีแก้
+```python
+# เพิ่มก่อน db.add(example):
+try:
+    from app.services.dedup_engine import DedupEngine
+    dedup = DedupEngine(db)
+    dedup_result = dedup.check_example_duplicate(
+        question=params["question"],
+        sql=params["sql"],
+    )
+    if dedup_result.has_duplicate:
+        return {
+            "success": False,
+            "message": f"พบ example ที่คล้ายกัน ({dedup_result.duplicate_type}): id={dedup_result.existing_id}",
+        }
+except Exception:
+    pass  # Fallback: no dedup check
+```
+
+---
+
+## REMAIN-3: Telegram Bot Registration in main.py
+
+**Plan:** 4 | **Priority:** ⚡ High | **Effort:** 3-4 ชม.
+
+### ปัญหา
+Telegram bot code ครบ (`app/telegram/`) แต่ไม่ได้ register ใน `app/main.py` → bot ไม่ทำงาน
+
+### ไฟล์ที่ต้องแก้/สร้าง
+| ไฟล์ | แก้อะไร |
+|------|---------|
+| `app/config.py` | เพิ่ม TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET, TELEGRAM_BOT_MODE |
+| `app/main.py` | เพิ่ม startup event สำหรับ bot |
+| `app/api/v1/telegram.py` (NEW) | webhook endpoint (optional, ถ้าใช้ webhook mode) |
+
+### config.py
+```python
+# Telegram Bot
+TELEGRAM_BOT_TOKEN: str = ""
+TELEGRAM_WEBHOOK_SECRET: str = ""
+TELEGRAM_BOT_MODE: str = "polling"  # "polling" or "webhook"
+TELEGRAM_WEBHOOK_URL: str = ""  # สำหรับ webhook mode
+```
+
+### main.py startup
+```python
+# ใน lifespan หรือ startup event:
+if settings.TELEGRAM_BOT_TOKEN:
+    from app.telegram.bot import NTAIBot
+    bot = NTAIBot(token=settings.TELEGRAM_BOT_TOKEN)
+    if settings.TELEGRAM_BOT_MODE == "polling":
+        asyncio.create_task(bot.start_polling())
+    else:
+        # Webhook mode: mount as sub-app
+        from app.api.v1.telegram import router as telegram_router
+        app.include_router(telegram_router, prefix=f"{settings.API_V1_STR}/telegram")
+```
+
+### ทดสอบ
+- ตั้ง TELEGRAM_BOT_TOKEN ใน .env → start server → ส่งข้อความหา bot
+- `tests/unit/test_telegram_dispatcher.py` — 8 tests มีอยู่แล้ว
+- `tests/integration/test_telegram_webhook.py` — 3 tests มีอยู่แล้ว
+
+---
+
+## REMAIN-4: MCP Full Delegation (Validation)
+
+**Plan:** 1B-A | **Priority:** 🔧 Medium | **Effort:** 2-3 ชม.
+
+### ปัญหา
+`check_business_rules` delegate แล้ว แต่ `calculate_confidence_score` + `validate_result` ยัง hardcode ใน MCP
+
+### ไฟล์ที่ต้องแก้
+`mcp_servers/nt_validation_mcp.py`
+
+### วิธีแก้
+1. เพิ่ม `calculate_confidence()` ใน `ValidationService`
+2. เพิ่ม `validate_result()` ใน `ValidationService`
+3. MCP functions delegate ไป ValidationService
+4. เก็บ logic เดิมเป็น fallback (กรณี import fail)
+
+### Note
+ปัจจุบัน logic ใน MCP **ทำงานถูกต้อง** — เป็น duplicate code issue ไม่ใช่ bug
+แต่ถ้าแก้ logic ต้องแก้ 2 ที่ (MCP + Service) → ควรรวมเป็นที่เดียว
+
+---
+
+## REMAIN-5: Scheduled Jobs (Auto-Analyzer + GC)
+
+**Plan:** 3 | **Priority:** 🔧 Medium | **Effort:** 4-6 ชม.
+
+### ปัญหา
+Services สร้างแล้ว (`auto_analyzer.py`, `config_gc.py`) แต่ไม่มีอะไร schedule ให้ทำงาน
+
+### ไฟล์ที่ต้องแก้/สร้าง
+| ไฟล์ | แก้อะไร |
+|------|---------|
+| `app/main.py` | เพิ่ม APScheduler หรือ background tasks |
+| `requirements.txt` | เพิ่ม `apscheduler>=3.10` (ถ้าใช้) |
+| `app/services/scheduler.py` (NEW) | Job definitions + scheduler setup |
+
+### Jobs ที่ต้องตั้ง
+| Job | Schedule | Service.method() |
+|-----|----------|-------------------|
+| Auto-analyze failures | ทุก 6 ชม. | `AutoAnalyzer.analyze_recent_failures()` |
+| Config GC scan | ทุก 24 ชม. | `ConfigGC.run_full_scan()` |
+| Apply auto-fixes | ทุก 6 ชม. (หลัง analyze) | ดึง fixes ที่ confidence ≥ 0.8 → apply |
+
+### ทางเลือก
+1. **APScheduler** — simple, in-process, ดีสำหรับ single instance
+2. **Celery Beat** — distributed, ดีสำหรับ multi-instance (Plan 6 SaaS)
+3. **FastAPI BackgroundTasks** — ง่ายสุด แต่ไม่มี scheduling
+
+### แนะนำ: ใช้ APScheduler ก่อน → ย้ายเป็น Celery ตอน Plan 6
+
+---
+
+## REMAIN-6: DB Separation — Config DB Session
+
+**Plan:** 5 | **Priority:** 🔧 Medium | **Effort:** 4-6 ชม.
+
+### ปัญหา
+Migration script (`migrate_config_to_separate_db.py`) สร้างแล้ว แต่ app ยังไม่รู้จัก config.db
+
+### ไฟล์ที่ต้องแก้
+| ไฟล์ | แก้อะไร |
+|------|---------|
+| `app/config.py` | เพิ่ม `CONFIG_DB_URL` setting |
+| `app/db/session.py` | เพิ่ม `config_engine` + `ConfigSessionLocal` |
+| `app/services/schema_service.py` | ใช้ config session สำหรับ schema_contexts, mappings, rules |
+| `app/api/deps.py` | เพิ่ม `get_config_db()` dependency |
+
+### config.py
+```python
+# Config DB (schema_contexts, mappings, rules, hierarchy, etc.)
+CONFIG_DB_URL: str = ""  # Empty = use same DB as DATABASE_URL (backward compatible)
+```
+
+### session.py
+```python
+# Config DB — only if CONFIG_DB_URL is set, otherwise reuse main engine
+if settings.CONFIG_DB_URL:
+    config_engine = create_engine(settings.CONFIG_DB_URL)
+    ConfigSessionLocal = sessionmaker(bind=config_engine)
+else:
+    config_engine = engine  # Same as app DB
+    ConfigSessionLocal = SessionLocal
+```
+
+### Note
+ต้อง backward compatible — ถ้าไม่ตั้ง CONFIG_DB_URL ต้องทำงานเหมือนเดิม (ใช้ DB เดียว)
+
+---
+
+## REMAIN-7: Plan 6 — SaaS / Multi-tenant
+
+**Plan:** 6 | **Priority:** 📋 Future | **Effort:** 2-4 สัปดาห์
+
+### สถานะ
+Design เสร็จ (PLAN_6_SAAS.md) แต่ยังไม่เริ่ม code
+
+### Prerequisite
+- REMAIN-6 (DB Separation) ต้องเสร็จก่อน
+- API Key auth (Plan 4B) ต้องเสร็จก่อน ✅
+
+### ขั้นตอนหลัก
+1. Tenant model + table
+2. Tenant middleware (extract from API key)
+3. Per-tenant config DB + business DB
+4. Upload endpoint (CSV → SQLite)
+5. Auto Context Onboarding per tenant
+6. Tenant isolation tests
+
+---
+
+## REMAIN-8: Plan 1B Phase C — MCP SSE + Auth
+
+**Plan:** 1B | **Priority:** 📋 Future | **Effort:** 1-2 วัน
+
+### สถานะ
+Deferred (ทำตอน Plan 6 SaaS)
+
+### เนื้อหา
+- เปลี่ยน MCP transport จาก stdio → SSE (Server-Sent Events)
+- เพิ่ม API key auth สำหรับ MCP connections
+- รองรับ remote MCP clients
+
+---
+
+## Backlog / Nice-to-Have
+
+| Item | Plan | Detail |
+|------|------|--------|
+| CLAUDE.md outdated | — | ยังอ้าง `revenue.sqlite` ควรเปลี่ยนเป็น `nt_fi_report.sqlite` |
+| MEMORY.md truncated | — | เกิน 200 บรรทัด — ย้าย detail ไป topic files |
+| Admin Agent: per-stage model | 1 | ใช้ cheap model สำหรับ summarize, default model สำหรับ tool selection |
+| Telegram: CSV export | 4 | User ขอ export → bot ส่งไฟล์ CSV |
+| API Key: scope enforcement | 4B | scope=query ใช้ได้แค่ /query/, scope=admin ใช้ได้ /admin/ |

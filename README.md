@@ -4,8 +4,9 @@
 
 ## Project Status
 
-**Phase:** 4.0 (Universal Frontend - In Progress)
-**Current Version:** 0.3.5-beta
+**Phase:** 5.0 (Plans 0-5 Complete)
+**Current Version:** 0.5.0
+**Tests:** 359 passing (0 failures)
 
 ## Features Implemented
 
@@ -53,6 +54,99 @@
 - **Feedback System:**
   - Collect user feedback (Thumbs Up/Down)
   - Admin Dashboard for reviewing AI performance
+
+## Plans 0-5 Implementation (2026-03-19) — All Complete
+
+### Plan 0: Fix Legacy Tests
+- Fixed 15 pre-existing test failures, baseline 279 tests passing
+
+### Plan 1: Admin Agent (Tool-Calling Dispatcher)
+- **Natural language admin interface** — type Thai/English commands to manage system config
+- 14 admin tools: mappings, rules, examples, hierarchy, onboarding, analysis
+- Native function calling (OpenAI tool_choice='auto') with keyword fallback
+- Confirmation flow for destructive operations
+- Tool result summarization via LLM in Thai
+- Frontend: `http://localhost:5173/admin-agent`
+- See: [Admin Agent Manual](docs/manuals/manual_admin_agent.md)
+
+### Plan 1B: Validation Consolidation + Admin MCP
+- Centralized `ValidationService` (validate_sql, check_business_rules, calculate_confidence)
+- 7 built-in validation rules seeded to DB
+- Admin MCP server (`mcp_servers/nt_admin_mcp.py`) — 13 MCP tools wrapping admin tools
+
+### Plan 2: Feedback + Query Log Enhancement
+- Enhanced query logs with feedback join and filters
+- Query analytics endpoint (period, error_rate, context distribution)
+- Feedback detail view
+
+### Plan 3: Self-Learning Loop
+- **DedupEngine:** duplicate detection (exact, case-insensitive, conflict)
+- **AutoAnalyzer:** analyzes failed queries, suggests fixes
+- **ConfigGC:** finds unused mappings, conflicting entries, low-usage examples
+- **AuditService:** records config changes with source tracking
+
+### Plan 4: Telegram Interface
+- Full Telegram bot with email OTP registration
+- Free-text queries with table + chart (PNG) responses
+- Admin commands routed to Admin Agent
+- Message splitting (4096 char limit), Thai font charts
+- See: [Telegram Bot Manual](docs/manuals/manual_telegram_bot.md)
+
+### Plan 4B: OpenMiniCrew Readiness (API Keys + /query/ Endpoint)
+- **API Key management:** create, validate, revoke, rate limiting
+- **Stateless query endpoint:** `POST /api/v1/query/` — question in, answer out
+- **X-API-Key authentication** with scoped access (query/admin/full)
+- Frontend: `http://localhost:5173/api-keys`
+- See: [API Keys Manual](docs/manuals/manual_api_keys.md)
+
+### Plan 5: DB Separation
+- `BusinessDBAdapter` for SQLite/PostgreSQL/MSSQL
+- Migration script to separate config tables from business data
+
+## Architecture Overview
+
+```
+app/
+├── providers/           # AI providers (auto-discovered by registry)
+│   ├── base.py          # AIProvider ABC, QueryResult
+│   ├── claude_provider.py
+│   ├── gemini_provider.py
+│   ├── matcha_provider.py
+│   ├── chart_postprocessor.py
+│   └── registry.py      # provider_registry singleton
+├── services/
+│   ├── ai_service.py         # AIService orchestrator
+│   ├── query_engine.py       # Main entry + result cache + dedup
+│   ├── schema_service.py     # Schema metadata + system prompt cache
+│   ├── admin_agent.py        # Admin Agent dispatcher
+│   ├── validation_service.py # SQL validation
+│   ├── dedup_engine.py       # Duplicate detection
+│   ├── auto_analyzer.py      # Failed query analysis
+│   ├── config_gc.py          # Config garbage collection
+│   ├── audit_service.py      # Change audit trail
+│   ├── api_key_service.py    # API key management
+│   ├── business_db.py        # Multi-DB adapter
+│   └── ...
+├── api/v1/
+│   ├── chat.py          # Main chat + SSE streaming
+│   ├── admin.py         # Admin CRUD endpoints
+│   ├── admin_agent.py   # Admin Agent chat API
+│   └── query.py         # Stateless query API (API key auth)
+├── tools/admin/         # Admin tools (14 tools)
+├── telegram/            # Telegram bot
+│   ├── bot.py           # Bot initialization
+│   ├── dispatcher.py    # Command routing
+│   ├── handlers.py      # Command handlers
+│   ├── formatters.py    # Message formatting
+│   ├── auth.py          # Email OTP auth
+│   └── chart_renderer.py # matplotlib charts
+└── config.py
+mcp_servers/
+├── nt_metadata_mcp.py   # Schema metadata MCP
+├── nt_query_mcp.py      # Query execution MCP
+├── nt_validation_mcp.py # SQL validation MCP
+└── nt_admin_mcp.py      # Admin tools MCP
+```
 
 ## Requirements
 
@@ -173,6 +267,21 @@ Once the backend is running, visit:
 - **[Data Dictionary](docs/DATA_DICTIONARY.md)** - Database schema reference
 - **[CLAUDE.md](CLAUDE.md)** - Instructions for AI coding assistants
 
+### Manuals
+
+- **[Admin Agent Manual](docs/manuals/manual_admin_agent.md)** - Chat-based admin interface
+- **[API Keys Manual](docs/manuals/manual_api_keys.md)** - API key management + /query/ endpoint
+- **[Telegram Bot Manual](docs/manuals/manual_telegram_bot.md)** - Telegram bot setup and usage
+- **[Context Onboarding Manual](docs/manuals/manual_context_onboarding.md)** - Auto-configure new data contexts
+- **[Web Admin Manual](docs/manuals/manual_web_admin_comprehensive.md)** - Full admin UI guide
+
+### Changelogs
+
+- **[Plans 0-5 Implementation](docs/changelogs/PLANS_0_5_IMPLEMENTATION.md)** - 2026-03-19, all plans complete
+- **[Context Onboarding System](docs/changelogs/CONTEXT_ONBOARDING_SYSTEM.md)** - Auto-analysis pipeline
+- **[DB-Driven Hardcode Removal](docs/changelogs/DB_DRIVEN_HARDCODE_REMOVAL.md)** - 6-phase cleanup
+- **[Master Data Hierarchy](docs/changelogs/MASTER_DATA_HIERARCHY.md)** - DB-driven hierarchy system
+
 ## Development Layout
 
 - `app/api`: API route handlers
@@ -191,14 +300,25 @@ Once the backend is running, visit:
 
 ## Testing
 
-- **Verify AI SQL Generation:**
-  ```bash
-  python scripts/verify_sql_syntax.py
-  ```
-- **Test Filtering Rules:**
-  ```bash
-  python scripts/test_filtering_rules.py
-  ```
+**Run all tests:**
+```bash
+pytest tests/ -v
+```
+
+**Current:** 359 tests passing (0 failures)
+
+- **Unit tests:** `tests/unit/` — 25+ test files covering all services
+- **Integration tests:** `tests/integration/` — API endpoint tests
+
+**Verify AI SQL Generation:**
+```bash
+python scripts/verify_sql_syntax.py
+```
+
+**Test Filtering Rules:**
+```bash
+python scripts/test_filtering_rules.py
+```
 
 ---
 

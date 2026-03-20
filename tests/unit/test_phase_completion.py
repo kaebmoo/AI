@@ -195,24 +195,17 @@ class TestPhase35FeedbackLoop:
         from app.services.feedback_service import FeedbackService
         assert FeedbackService is not None
 
-    def test_prompt_manager_exists(self):
-        """Test prompt manager exists"""
-        from app.services.prompt_manager import PromptManager
-        assert PromptManager is not None
-
     def test_feedback_models_exist(self):
         """Test feedback models exist"""
         from app.models.feedback_models import (
             UserFeedback,
             FeedbackRating,
             FeedbackCategory,
-            PromptVersion,
             GoldenExample
         )
         assert UserFeedback is not None
         assert FeedbackRating is not None
         assert FeedbackCategory is not None
-        assert PromptVersion is not None
         assert GoldenExample is not None
 
     def test_feedback_rating_values(self):

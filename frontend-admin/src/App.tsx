@@ -21,6 +21,8 @@ import QueryLogs from './pages/QueryLogs'
 import DataWarnings from './pages/DataWarnings'
 import QueryPatterns from './pages/QueryPatterns'
 import ContextOnboarding from './pages/ContextOnboarding'
+import AdminAgent from './pages/AdminAgent'
+import ApiKeys from './pages/ApiKeys'
 
 // Simple Auth Guard
 const ProtectedRoute = () => {
@@ -58,6 +60,8 @@ function App() {
             <Route path="/query-logs" element={<QueryLogs />} />
             <Route path="/data-warnings" element={<DataWarnings />} />
             <Route path="/query-patterns" element={<QueryPatterns />} />
+            <Route path="/admin-agent" element={<AdminAgent />} />
+            <Route path="/api-keys" element={<ApiKeys />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
           </Route>

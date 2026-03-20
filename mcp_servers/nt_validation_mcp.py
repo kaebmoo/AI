@@ -146,67 +146,9 @@ mcp = FastMCP(
 
 
 # =========================================================
-# Built-in Validation Rules
+# NOTE: BUILTIN_RULES have been moved to DB (migration 026).
+# This MCP now delegates to ValidationService for all rule checks.
 # =========================================================
-
-BUILTIN_RULES = [
-    {
-        "rule_code": "DATE_CONVERSION",
-        "rule_name": "ต้องแปลง DATE จาก Unix Timestamp",
-        "pattern": r"(?i)SELECT.*\bDATE\b(?!.*\/\s*1000)",
-        "check_type": "regex_warning",
-        "severity": "warning",
-        "message": "คอลัมน์ DATE เป็น Unix Timestamp (ms) ควรใช้ YEAR/MONTH แทน หรือแปลงด้วย date(DATE/1000, 'unixepoch')"
-    },
-    {
-        "rule_code": "THAI_COLUMN_QUOTES",
-        "rule_name": "คอลัมน์ภาษาไทยต้องใส่ quotes",
-        "pattern": r"(?i)(กลุ่มธุรกิจ|หมวดบัญชี)(?![\"'])",
-        "check_type": "regex_error",
-        "severity": "error",
-        "message": "คอลัมน์ภาษาไทยต้องใส่ double quotes เช่น \"กลุ่มธุรกิจ\""
-    },
-    {
-        "rule_code": "REVENUE_UNIT",
-        "rule_name": "หน่วยรายได้เป็นบาท",
-        "pattern": r"(?i)(REVENUE_VALUE|revenue_value).*ล้าน",
-        "check_type": "context_warning",
-        "severity": "info",
-        "message": "REVENUE_VALUE มีหน่วยเป็นบาท (ไม่ใช่ล้านบาท)"
-    },
-    {
-        "rule_code": "GROUP_BY_AGGREGATE",
-        "rule_name": "SELECT columns ต้องอยู่ใน GROUP BY หรือ aggregate",
-        "pattern": r"(?i)GROUP\s+BY",
-        "check_type": "aggregate_check",
-        "severity": "warning",
-        "message": "ตรวจสอบว่าคอลัมน์ใน SELECT อยู่ใน GROUP BY หรือใช้ aggregate function"
-    },
-    {
-        "rule_code": "NO_SELECT_STAR",
-        "rule_name": "หลีกเลี่ยง SELECT *",
-        "pattern": r"(?i)SELECT\s+\*",
-        "check_type": "regex_warning",
-        "severity": "info",
-        "message": "ควรระบุคอลัมน์ที่ต้องการแทน SELECT *"
-    },
-    {
-        "rule_code": "LIMIT_REQUIRED",
-        "rule_name": "ควรมี LIMIT",
-        "pattern": r"(?i)^(?!.*LIMIT).*SELECT",
-        "check_type": "regex_warning",
-        "severity": "info",
-        "message": "ควรใส่ LIMIT เพื่อจำกัดจำนวนผลลัพธ์"
-    },
-    {
-        "rule_code": "YEAR_FILTER",
-        "rule_name": "ควรกรองปีข้อมูล",
-        "pattern": r"(?i)^(?!.*(WHERE|AND).*YEAR).*FROM\s+(revenue|expense)",
-        "check_type": "regex_warning",
-        "severity": "warning",
-        "message": "ควรระบุ YEAR ใน WHERE clause เพื่อจำกัดขอบเขตข้อมูล"
-    }
-]
 
 
 # =========================================================
@@ -221,6 +163,7 @@ def check_business_rules(
 ) -> str:
     """
     ตรวจสอบว่า SQL ปฏิบัติตาม business rules หรือไม่
+    Delegates to ValidationService (rules are DB-driven, not hardcoded).
 
     Args:
         sql: SQL query ที่ต้องการตรวจสอบ
@@ -230,10 +173,6 @@ def check_business_rules(
     Returns:
         JSON with passed status, violations, and warnings
     """
-    violations = []
-    warnings = []
-    infos = []
-
     if not sql or not sql.strip():
         return json.dumps({
             "passed": False,
@@ -242,105 +181,39 @@ def check_business_rules(
             "infos": []
         }, ensure_ascii=False)
 
-    sql_upper = sql.upper()
-
-    # 1. Check built-in rules
-    for rule in BUILTIN_RULES:
-        pattern = rule.get("pattern")
-        check_type = rule.get("check_type")
-
-        matched = False
-        if check_type in ["regex_error", "regex_warning"]:
-            if re.search(pattern, sql, re.IGNORECASE | re.DOTALL):
-                matched = True
-        elif check_type == "context_warning":
-            # Check if question mentions the context
-            if question and re.search(pattern, question, re.IGNORECASE):
-                matched = True
-        elif check_type == "aggregate_check":
-            # Special check for GROUP BY
-            if re.search(pattern, sql, re.IGNORECASE):
-                # This is informational - complex validation needs more logic
-                pass
-
-        if matched:
-            item = {
-                "rule": rule["rule_code"],
-                "message": rule["message"],
-                "severity": rule["severity"]
-            }
-            if rule["severity"] == "error":
-                violations.append(item)
-            elif rule["severity"] == "warning":
-                warnings.append(item)
-            else:
-                infos.append(item)
-
-    # 2. Load rules from database
     try:
-        db = get_db()
-        db_rules = db.execute_query('''
-            SELECT rule_code, rule_name, rule_description, applies_to, severity
-            FROM schema_business_rules
-            WHERE is_active = 1
-        ''')
-
-        for rule in db_rules:
-            # Check if this rule applies to current context
-            applies_to = rule.get('applies_to', '')
-            if applies_to and context_name not in applies_to:
-                continue
-
-            # Basic pattern matching from rule_description
-            # More sophisticated matching would require custom logic per rule
-            rule_code = rule.get('rule_code', '')
-
-            # Example: Check specific known rules
-            if rule_code == "DATE_UNIX" and "DATE" in sql_upper:
-                if "/ 1000" not in sql and "YEAR" not in sql_upper:
-                    item = {
-                        "rule": rule_code,
-                        "message": rule.get('rule_description', rule.get('rule_name')),
-                        "severity": rule.get('severity', 'warning')
-                    }
-                    if rule.get('severity') == 'error':
-                        violations.append(item)
-                    else:
-                        warnings.append(item)
-
+        from app.services.validation_service import ValidationService
+        from app.db.session import SessionLocal
+        _db = SessionLocal()
+        try:
+            vs = ValidationService(db=_db)
+            result = vs.check_business_rules(sql, context_name=context_name)
+            return json.dumps(result, ensure_ascii=False, default=str)
+        finally:
+            _db.close()
     except Exception as e:
-        logger.warning(f"Could not load database rules: {e}")
+        logger.warning(f"ValidationService delegation failed, using fallback: {e}")
+        # Fallback: basic checks without DB
+        violations = []
+        warnings = []
+        infos = []
 
-    # 3. Remove duplicates
-    seen_rules = set()
-    unique_violations = []
-    unique_warnings = []
-    unique_infos = []
+        sql_upper = sql.upper()
 
-    for v in violations:
-        if v["rule"] not in seen_rules:
-            seen_rules.add(v["rule"])
-            unique_violations.append(v)
+        # Minimal hardcoded fallback rules (only if ValidationService is unavailable)
+        if re.search(r"(?i)SELECT\s+\*", sql):
+            infos.append({"rule": "NO_SELECT_STAR", "message": "ควรระบุคอลัมน์ที่ต้องการแทน SELECT *", "severity": "info"})
+        if "DATE" in sql_upper and "/ 1000" not in sql and "YEAR" not in sql_upper:
+            warnings.append({"rule": "DATE_CONVERSION", "message": "คอลัมน์ DATE เป็น Unix Timestamp (ms) ควรใช้ YEAR/MONTH แทน", "severity": "warning"})
 
-    for w in warnings:
-        if w["rule"] not in seen_rules:
-            seen_rules.add(w["rule"])
-            unique_warnings.append(w)
-
-    for i in infos:
-        if i["rule"] not in seen_rules:
-            seen_rules.add(i["rule"])
-            unique_infos.append(i)
-
-    passed = len(unique_violations) == 0
-
-    return json.dumps({
-        "passed": passed,
-        "violations": unique_violations,
-        "warnings": unique_warnings,
-        "infos": unique_infos,
-        "total_issues": len(unique_violations) + len(unique_warnings)
-    }, ensure_ascii=False)
+        passed = len(violations) == 0
+        return json.dumps({
+            "passed": passed,
+            "violations": violations,
+            "warnings": warnings,
+            "infos": infos,
+            "total_issues": len(violations) + len(warnings)
+        }, ensure_ascii=False)
 
 
 # =========================================================

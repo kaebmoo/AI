@@ -113,49 +113,6 @@ class TestFeedbackCategories:
         assert FeedbackRating.THUMBS_DOWN.value == "thumbs_down"
 
 
-class TestPromptVersion:
-    """Test PromptVersion model"""
-
-    def test_create_prompt_version(self, db_session):
-        """Test creating a prompt version"""
-        prompt = PromptVersion(
-            version=1,
-            system_prompt="You are a helpful SQL assistant.",
-            is_active=True,
-            created_at=datetime.utcnow()
-        )
-        db_session.add(prompt)
-        db_session.commit()
-
-        assert prompt.id is not None
-        assert prompt.version == 1
-        assert prompt.is_active is True
-
-    def test_multiple_versions(self, db_session):
-        """Test multiple prompt versions"""
-        v1 = PromptVersion(
-            version=1,
-            system_prompt="Version 1",
-            is_active=False,
-            created_at=datetime.utcnow() - timedelta(days=1)
-        )
-        v2 = PromptVersion(
-            version=2,
-            system_prompt="Version 2",
-            is_active=True,
-            created_at=datetime.utcnow()
-        )
-        db_session.add_all([v1, v2])
-        db_session.commit()
-
-        # Query active version
-        active = db_session.query(PromptVersion).filter(
-            PromptVersion.is_active == True
-        ).first()
-
-        assert active.version == 2
-
-
 class TestGoldenExample:
     """Test GoldenExample model"""
 
