@@ -8,7 +8,6 @@ Falls back gracefully if DB is not available.
 
 import asyncio
 import logging
-from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -20,12 +19,14 @@ CONFIG_GC_INTERVAL = 24 * 3600     # 24 hours
 class BackgroundScheduler:
     """Simple asyncio-based scheduler for periodic jobs."""
 
-    def __init__(self, db_factory):
+    def __init__(self, db_factory, config_db_factory=None):
         """
         Args:
             db_factory: Callable that returns a new DB session (e.g., SessionLocal).
+            config_db_factory: Callable that returns a config DB session.
         """
         self._db_factory = db_factory
+        self._config_db_factory = config_db_factory or db_factory
         self._tasks = []
         self._running = False
 
@@ -59,11 +60,11 @@ class BackgroundScheduler:
 
         while self._running:
             try:
-                logger.info(f"[Scheduler] Running {name}...")
+                logger.info("[Scheduler] Running %s...", name)
                 await job_fn()
-                logger.info(f"[Scheduler] {name} completed")
+                logger.info("[Scheduler] %s completed", name)
             except Exception as e:
-                logger.error(f"[Scheduler] {name} failed: {e}")
+                logger.error("[Scheduler] %s failed: %s", name, e)
 
             await asyncio.sleep(interval)
 
@@ -76,9 +77,10 @@ class BackgroundScheduler:
             result = await analyzer.analyze_recent_failures(period_hours=24)
             if result and result.total_failures > 0:
                 logger.info(
-                    f"[AutoAnalyze] {result.total_failures} failures, "
-                    f"{len(result.groups)} groups, "
-                    f"{len(result.suggested_fixes)} suggested fixes"
+                    "[AutoAnalyze] %s failures, %s groups, %s suggested fixes",
+                    result.total_failures,
+                    len(result.groups),
+                    len(result.suggested_fixes),
                 )
                 # Auto-apply high-confidence fixes
                 self._apply_high_confidence_fixes(result, db)
@@ -117,20 +119,22 @@ class BackgroundScheduler:
                         source="auto_analyzer",
                     )
                     config_db.close()
-                    logger.info(f"[AutoApply] Applied {fix.fix_type}: {fix.params}")
+                    logger.info("[AutoApply] Applied %s: %s", fix.fix_type, fix.params)
             except Exception as e:
-                logger.warning(f"[AutoApply] Failed to apply {fix.fix_type}: {e}")
+                logger.warning("[AutoApply] Failed to apply %s: %s", fix.fix_type, e)
 
     async def _job_config_gc(self):
         """Scan for unused/conflicting config entries."""
-        db = self._db_factory()
+        app_db = self._db_factory()
+        config_db = self._config_db_factory()
         try:
             from app.services.config_gc import ConfigGC
-            gc = ConfigGC(db)
+            gc = ConfigGC(config_db=config_db, app_db=app_db)
             issues = gc.run_full_scan()
             if issues:
-                logger.info(f"[ConfigGC] Found {len(issues)} issues")
+                logger.info("[ConfigGC] Found %s issues", len(issues))
                 for issue in issues[:10]:
-                    logger.info(f"  [{issue.severity}] {issue.issue_type}: {issue.description}")
+                    logger.info("  [%s] %s: %s", issue.severity, issue.issue_type, issue.description)
         finally:
-            db.close()
+            config_db.close()
+            app_db.close()

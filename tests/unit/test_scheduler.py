@@ -153,15 +153,23 @@ def test_apply_high_confidence_fixes_only_applies_eligible_mappings():
 
 
 async def test_job_config_gc_runs_scan_and_closes_db():
-    fake_db = FakeDBSession()
-    scheduler = BackgroundScheduler(db_factory=lambda: fake_db)
+    fake_app_db = FakeDBSession()
+    fake_config_db = FakeDBSession()
+    scheduler = BackgroundScheduler(
+        db_factory=lambda: fake_app_db,
+        config_db_factory=lambda: fake_config_db,
+    )
     gc_instance = MagicMock()
     gc_instance.run_full_scan.return_value = [
         SimpleNamespace(severity="warning", issue_type="unused_mapping", description="unused config")
     ]
 
-    with patch("app.services.config_gc.ConfigGC", return_value=gc_instance):
+    with patch("app.services.config_gc.ConfigGC", return_value=gc_instance) as mock_gc_class:
         await scheduler._job_config_gc()
 
     gc_instance.run_full_scan.assert_called_once_with()
-    assert fake_db.closed is True
+    assert fake_app_db.closed is True
+    assert fake_config_db.closed is True
+    _, kwargs = mock_gc_class.call_args
+    assert kwargs["config_db"] is fake_config_db
+    assert kwargs["app_db"] is fake_app_db

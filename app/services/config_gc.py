@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from typing import List
 
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +28,9 @@ class GCIssue:
 class ConfigGC:
     """Detect potentially unused or conflicting config entries."""
 
-    def __init__(self, db: Session):
-        self.db = db
+    def __init__(self, config_db: Session, app_db: Session | None = None):
+        self.config_db = config_db
+        self.app_db = app_db or config_db
 
     def run_full_scan(self) -> List[GCIssue]:
         """Run all GC checks and return issues found."""
@@ -50,12 +51,12 @@ class ConfigGC:
 
             since = datetime.utcnow() - timedelta(days=days)
 
-            mappings = self.db.query(SchemaSemanticMapping).filter(
+            mappings = self.config_db.query(SchemaSemanticMapping).filter(
                 SchemaSemanticMapping.is_active == True
             ).all()
 
             # Get all recent questions
-            recent_questions = self.db.query(ChatHistory.question).filter(
+            recent_questions = self.app_db.query(ChatHistory.question).filter(
                 ChatHistory.created_at >= since,
                 ChatHistory.question != None,
             ).all()
@@ -71,8 +72,8 @@ class ConfigGC:
                         description=f"Mapping '{m.keyword}' not found in any query in last {days} days",
                         severity="info",
                     ))
-        except Exception as e:
-            logger.warning(f"GC unused mappings check failed: {e}")
+        except SQLAlchemyError as e:
+            logger.warning("GC unused mappings check failed: %s", e)
 
         return issues
 
@@ -90,7 +91,7 @@ class ConfigGC:
             from sqlalchemy import func
 
             # Find keywords with multiple target_columns
-            conflicts = self.db.query(
+            conflicts = self.config_db.query(
                 SchemaSemanticMapping.keyword,
                 func.count(SchemaSemanticMapping.id).label("cnt")
             ).filter(
@@ -99,9 +100,9 @@ class ConfigGC:
                 SchemaSemanticMapping.keyword
             ).having(func.count(SchemaSemanticMapping.id) > 1).all()
 
-            for keyword, count in conflicts:
+            for keyword, _count in conflicts:
                 # Get the conflicting mappings
-                dups = self.db.query(SchemaSemanticMapping).filter(
+                dups = self.config_db.query(SchemaSemanticMapping).filter(
                     SchemaSemanticMapping.keyword == keyword,
                     SchemaSemanticMapping.is_active == True,
                 ).all()
@@ -115,8 +116,8 @@ class ConfigGC:
                         description=f"Keyword '{keyword}' maps to multiple columns: {columns}",
                         severity="warning",
                     ))
-        except Exception as e:
-            logger.warning(f"GC conflicting mappings check failed: {e}")
+        except SQLAlchemyError as e:
+            logger.warning("GC conflicting mappings check failed: %s", e)
 
         return issues
 
@@ -129,7 +130,7 @@ class ConfigGC:
 
             cutoff = datetime.utcnow() - timedelta(days=days)
 
-            old_unused = self.db.query(GoldenExample).filter(
+            old_unused = self.config_db.query(GoldenExample).filter(
                 GoldenExample.is_active == True,
                 GoldenExample.usage_count == 0,
                 GoldenExample.created_at <= cutoff,
@@ -143,7 +144,7 @@ class ConfigGC:
                     description=f"Example '{ex.question_pattern[:50]}' has 0 usage after {days} days",
                     severity="info",
                 ))
-        except Exception as e:
-            logger.warning(f"GC low usage examples check failed: {e}")
+        except SQLAlchemyError as e:
+            logger.warning("GC low usage examples check failed: %s", e)
 
         return issues

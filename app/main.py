@@ -25,8 +25,8 @@ async def lifespan(app: FastAPI):
         # Startup: Background scheduler (auto-analyzer, config GC)
         try:
             from app.services.scheduler import BackgroundScheduler
-            from app.db.session import SessionLocal
-            scheduler = BackgroundScheduler(db_factory=SessionLocal)
+            from app.db.session import ConfigSessionLocal, SessionLocal
+            scheduler = BackgroundScheduler(db_factory=SessionLocal, config_db_factory=ConfigSessionLocal)
             scheduler.start()
             app.state.scheduler = scheduler
         except Exception as e:
