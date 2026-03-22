@@ -115,9 +115,22 @@ app/
 │   ├── chart_postprocessor.py
 │   └── registry.py      # provider_registry singleton
 ├── services/
-│   ├── ai_service.py         # AIService orchestrator
+│   ├── ai/                   # AI service implementation package
+│   │   ├── service.py        # AIService facade implementation
+│   │   ├── factory.py        # create_*_service helpers
+│   │   ├── retry_loop.py     # query_with_retry flow
+│   │   ├── hybrid_flow.py    # query_hybrid flow
+│   │   └── hierarchy_context.py
+│   ├── ai_service.py         # Backward-compatible import shim
 │   ├── query_engine.py       # Main entry + result cache + dedup
-│   ├── schema_service.py     # Schema metadata + system prompt cache
+│   ├── schema/               # Schema service implementation package
+│   │   ├── service.py        # SchemaService facade implementation
+│   │   ├── prompt_builder.py
+│   │   ├── keyword_index.py
+│   │   ├── view_manager.py
+│   │   ├── context_store.py
+│   │   └── dimension_families.py
+│   ├── schema_service.py     # Backward-compatible import shim
 │   ├── admin_agent.py        # Admin Agent dispatcher
 │   ├── validation_service.py # SQL validation
 │   ├── dedup_engine.py       # Duplicate detection
@@ -128,8 +141,8 @@ app/
 │   ├── business_db.py        # Multi-DB adapter
 │   └── ...
 ├── api/v1/
+│   ├── admin/           # Admin CRUD package split by domain
 │   ├── chat.py          # Main chat + SSE streaming
-│   ├── admin.py         # Admin CRUD endpoints
 │   ├── admin_agent.py   # Admin Agent chat API
 │   └── query.py         # Stateless query API (API key auth)
 ├── tools/admin/         # Admin tools (14 tools)
@@ -147,6 +160,11 @@ mcp_servers/
 ├── nt_validation_mcp.py # SQL validation MCP
 └── nt_admin_mcp.py      # Admin tools MCP
 ```
+
+Compatibility note:
+
+- `from app.services.ai_service import AIService` และ `from app.services.schema_service import SchemaService` ยังใช้ได้ผ่าน shim เดิม
+- implementation ปัจจุบันอยู่ใต้ `app/services/ai/` และ `app/services/schema/`
 
 ## Requirements
 

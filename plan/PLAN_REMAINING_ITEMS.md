@@ -3,7 +3,7 @@
 # NT AI Assistant — Remaining Items (Post Plans 0-5)
 
 **Created:** 2026-03-19
-**Updated:** 2026-03-21 late (re-verified, post-fix)
+**Updated:** 2026-03-22 late (re-verified, post-refactor doc sync)
 **Source:** Verification audit + code review + PLAN_AUDIT_CHECKLIST_2026-03-21.md
 **Status:** REMAIN-1 ถึง REMAIN-6 implemented แล้ว, scheduler tests ถูกเพิ่มแล้ว, และ `pytest -q` ผ่านทั้งชุด
 
@@ -27,12 +27,17 @@
 - Validation MCP tests now pass after restoring `detail` in confidence factors
 - Telegram integration/unit tests now pass
 - `tests/unit/test_scheduler.py` ถูกเพิ่มแล้วและผ่าน
+- admin/schema/ai refactor plan ถูกปิดแล้ว และเหลือเฉพาะ follow-up hardening แยก
+- schema/vanna SQL interpolation hardening สำหรับจุดที่ยืนยันได้ถูกปิดแล้ว พร้อม regression tests ฝั่ง schema service
 
 ## Remaining follow-up work
 
 ตอนนี้ไม่เหลือ blocker จากรายการ REMAIN เดิมแล้ว และงาน scheduler tests ถูกปิดแล้ว เหลืองาน hardening เชิง code quality เป็นหลัก:
 
 1. เก็บ static analysis warnings ใน API layer
+2. เพิ่ม integration coverage สำหรับ compatibility shim ของ schema/ai services
+3. เก็บ minor consistency debt เช่น `_detect_hierarchy_level()` shim indirection ถ้าคุ้มค่า
+4. พิจารณา hierarchy cache owner transfer ในรอบถัดไปเท่านั้น ไม่ใช่ blocker ปัจจุบัน
 
 ### Scheduler test status
 

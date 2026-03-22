@@ -106,6 +106,8 @@ Backend ส่งผลลัพธ์กลับไปใน role `tool` เ�
 | Component | หน้าที่ | ไฟล์ที่เกี่ยวข้อง |
 | :--- | :--- | :--- |
 | **API Endpoint** | รับ Request, จัดการ Session, บันทึก History | `app/api/v1/chat.py` |
-| **SchemaService** | เตรียม Metadata, Context, System Prompt | `app/services/schema_service.py` |
-| **AIService** | คุยกับ External API (Claude/Gemini), จัดการ Retry | `app/services/ai_service.py` |
-| **Tools Agent** | ตัว Execute SQL, ตรวจสอบความปลอดภัย | `app/services/ai_service.py` (Methods) |
+| **SchemaService** | เตรียม Metadata, Context, System Prompt | `app/services/schema_service.py` shim และ `app/services/schema/` implementation |
+| **AIService** | คุยกับ External API (Claude/Gemini/Matcha), จัดการ Retry/Hybrid flow | `app/services/ai_service.py` shim และ `app/services/ai/` implementation |
+| **Tools Agent / Query Orchestration** | ตัว validate/execute SQL, retry, explanation, confidence | `app/services/ai/hybrid_flow.py`, `app/services/ai/retry_loop.py`, `app/services/mcp_client.py` |
+
+> หมายเหตุ: import path เดิมยังใช้ได้เพื่อ compatibility แต่ implementation หลักถูกแยกเป็น package แล้ว

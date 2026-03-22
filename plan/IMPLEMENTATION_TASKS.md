@@ -26,12 +26,20 @@
 
 ## P0 - ต้องทำก่อน production hardening รอบถัดไป
 
-- [ ] แยก `app/api/v1/admin.py` ออกจากไฟล์ monolith
-- [ ] แยก `app/services/ai_service.py` ออกจากไฟล์ monolith
-- [ ] แยก `app/services/schema_service.py` ออกจากไฟล์ monolith
-- [ ] ปิดช่อง SQL interpolation ที่ยังยืนยันได้ใน `schema_service.py` และ `vanna_service.py`
+- [x] แยก `app/api/v1/admin.py` ออกจากไฟล์ monolith เป็น package ที่ `app/api/v1/admin/`
+- [x] แยก `app/services/ai_service.py` ออกจากไฟล์ monolith เป็น package facade + compatibility shim
+- [x] แยก `app/services/schema_service.py` ออกจากไฟล์ monolith เป็น package facade + compatibility shim
+- [x] ปิดช่อง SQL interpolation ที่ยังยืนยันได้ใน `schema_service.py` และ `vanna_service.py`
 - [ ] ลด `except Exception` ที่ยังมีจำนวนมากใน `app/`
 - [ ] ทำให้ cache / dedup / global in-memory state ปลอดภัยขึ้นสำหรับ multi-worker execution
+
+### Follow-up หลัง refactor หลัก
+
+- [x] เก็บ cleanup ของ `app/services/analyzer_service.py` ให้สอดคล้องกับ public AI service surface ปัจจุบัน
+- [ ] เก็บ minor consistency cleanup ของ `_detect_hierarchy_level()` ถ้าต้องการลด shim indirection ในภายหลัง
+- [ ] พิจารณา hierarchy cache owner transfer ไป `hierarchy_service.py` ถ้าจะลด bridge debt ในรอบถัดไป
+- [ ] ลด static-analysis noise ใน route modules ใต้ `app/api/v1/admin/` เท่าที่คุ้มค่า
+- [ ] เพิ่ม integration coverage สำหรับ compatibility shim ของ `schema_service.py` และ `ai_service.py`
 
 ---
 

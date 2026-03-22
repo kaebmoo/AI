@@ -1,8 +1,36 @@
-# admin.py Split — Execution-Ready Plan
+# admin.py Split — Execution Record
 
-> File: `app/api/v1/admin.py` (2,639 lines, 95 endpoints)
+> Original file: `app/api/v1/admin.py` (2,639 lines, 95 endpoints)
+> Current implementation: `app/api/v1/admin/` package
 > Goal: แยกเป็น package โดยไม่เปลี่ยน API path หรือ import contract
 > Snapshot: 2026-03-22
+
+---
+
+## Execution Status
+
+Status: Implemented and validated
+
+Completed in repository:
+
+- `app/api/v1/admin.py` ถูกแปลงเป็น package `app/api/v1/admin/`
+- route modules ถูกแยกครบตาม target structure
+- API key schemas ถูกย้ายไป `app/schemas/admin_schemas.py`
+- `app/main.py` ยัง import `from app.api.v1.admin import router as admin_router` ได้เหมือนเดิม
+- compatibility shim สำหรับ `_get_business_db_path` ถูกคงไว้ที่ package level เพื่อไม่ให้ test seam และ patch path เดิมพัง
+- onboarding routes ถูกปรับให้ import `ContextOnboardingService` ภายในฟังก์ชันเหมือน monolith เดิม เพื่อรักษา compatibility กับ tests ที่ patch service class
+
+Validation completed:
+
+- `python -c "from app.api.v1.admin import router; print(len(router.routes))"` → 95 routes
+- `python -c "from app.main import app; print(len(app.routes))"` → app import ผ่าน
+- `pytest tests/integration/test_api_key_auth.py -q` → 4 passed
+- `pytest tests/unit/test_context_onboarding.py -q` → 26 passed
+- `pytest tests/integration/test_onboarding_api.py -q` → 10 passed
+
+Open cleanup items:
+
+- เก็บ static-analysis noise บางจุดใน route modules ที่ไม่กระทบ runtime
 
 ---
 
@@ -11,16 +39,28 @@
 ### File Facts
 
 ```
+Original:
 app/api/v1/admin.py
-  Lines:     ~2,639
-  Endpoints: 95
-  Inline helpers:
-    - _ensure_metadata_rows()  (line ~948, used by dimension family endpoints)
-    - _get_business_db_path()  (line ~2310, used by onboarding endpoints only)
-  Inline Pydantic models:
-    - APIKeyCreateRequest      (line ~2533)
-    - APIKeyResponse           (line ~2540)
-    - APIKeyCreateResponse     (line ~2553)
+    Lines:     ~2,639
+    Endpoints: 95
+
+Current:
+app/api/v1/admin/
+    __init__.py
+    _shared.py
+    analytics.py
+    api_keys.py
+    config.py
+    contexts.py
+    golden_examples.py
+    hierarchy.py
+    mappings.py
+    onboarding.py
+    providers.py
+    query_patterns.py
+    rules.py
+    schema.py
+    warnings.py
 ```
 
 ### Top-Level Imports (shared by all sections)
@@ -194,9 +234,17 @@ from app.schemas.admin_schemas import APIKeyCreateRequest, APIKeyResponse, APIKe
 - Run existing API key tests
 - Confirm `/api/v1/admin/api-keys` endpoints work via manual test or TestClient
 
+Result:
+
+- completed
+- schemas now live in `app/schemas/admin_schemas.py`
+- API key integration tests pass
+
 ---
 
 ## Phase A: Core CRUD Modules
+
+Result: completed as part of the atomic package conversion
 
 Split the simplest, most self-contained CRUD sections.
 
@@ -226,7 +274,7 @@ router.include_router(mappings_router)
 router.include_router(rules_router)
 router.include_router(golden_examples_router)
 
-# Remaining endpoints still in legacy admin.py will be added in later phases
+# Final implementation included all route modules in the package to preserve import behavior atomically
 ```
 
 #### `app/api/v1/admin/_shared.py`
@@ -516,8 +564,12 @@ router.include_router(api_keys_router)
 
 ## What This Plan Does NOT Cover
 
-- Splitting `schema_service.py` (next priority, separate plan)
-- Splitting `ai_service.py` (third priority, separate plan)
+- Splitting `schema_service.py` ในรายละเอียดภายใน service package
+- Splitting `ai_service.py` ในรายละเอียดภายใน service package
 - Splitting frontend files (DataChart.tsx, DataTable.tsx)
 - Any business logic changes
 - Any API contract changes
+
+Update 2026-03-22:
+
+- follow-up plans สำหรับ `schema_service.py` และ `ai_service.py` ถูก execute และ validate แล้วใน `plan/PLAN_REFACTOR_ADMIN_SCHEMA_AI.md`

@@ -189,7 +189,7 @@ All endpoints use **Pydantic schemas** (`OnboardingRequest`, `InspectRequest`, `
 | `frontend-admin/src/App.tsx` | EDIT — route `/context-onboarding` |
 | `frontend-admin/src/components/Layout/AdminLayout.tsx` | EDIT — menu item (RocketOutlined) |
 | `app/schemas/admin_schemas.py` | EDIT — 9 onboarding schemas |
-| `app/api/v1/admin.py` | EDIT — typed endpoints + `_get_business_db_path()` helper + available-views endpoint |
+| `app/api/v1/admin/onboarding.py` | EDIT — typed endpoints + `_get_business_db_path()` compatibility shim + available-views endpoint |
 | `app/services/context_onboarding.py` | EDIT — `list_available_views()` + fix `generate_config()` signature |
 
 ### Backend Bug Fixes (part of Admin UI work)

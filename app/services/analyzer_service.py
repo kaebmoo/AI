@@ -1,11 +1,18 @@
-import pandas as pd
 import io
 import json
-from typing import List, Dict, Any, Optional
-from sqlalchemy import create_engine, inspect
+import logging
+from typing import Any, Dict
+
+import pandas as pd
+from sqlalchemy import inspect
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
+
 from app.services.ai_service import AIService
-from app.models.schema_models import SchemaMetadata, SchemaSemanticMapping, SchemaBusinessRule
+
+
+logger = logging.getLogger(__name__)
+
 
 class AnalyzerService:
     def __init__(self, db: Session, ai_service: AIService):
@@ -58,13 +65,25 @@ class AnalyzerService:
                     "data_type": str(col['type']),
                     "nullable": col['nullable']
                 })
-        except Exception as e:
-            raise ValueError(f"Table {table_name} not found or error: {str(e)}")
+        except SQLAlchemyError as e:
+            raise ValueError(f"Table {table_name} not found or error: {str(e)}") from e
 
         return {
             "source": table_name,
             "columns": columns
         }
+
+    @staticmethod
+    def extract_json_payload(response_text: str) -> Dict[str, Any]:
+        cleaned = response_text.strip()
+        if "```json" in cleaned:
+            cleaned = cleaned.split("```json", 1)[1].split("```", 1)[0]
+        elif "```" in cleaned:
+            cleaned = cleaned.split("```", 1)[1].split("```", 1)[0]
+
+        return json.loads(cleaned.strip())
+
+    _extract_json_payload = extract_json_payload
 
     async def get_ai_suggestions(self, schema_info: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -113,30 +132,14 @@ class AnalyzerService:
         }}
         """
         
-        # Use the generic generate_content method we added
         try:
-             # Run in threadpool if it was blocking, but our generate_content is synchronous built on HTTP calls. 
-             # For async FastAPI, we should ideally run this in threadpool.
-             # However, since we are calling it from async method, let's keep it simple for now or use run_in_threadpool if strictly needed.
-             # But wait, generate_content in implementations uses synchronous clients (anthropic, google-genai, httpx).
-             # So we must wrap it.
-             import anyio
-             response_text = await anyio.to_thread.run_sync(
-                 self.ai_service.generate_content, 
-                 prompt
-             )
-             
-             # Extract JSON from response
-             json_str = response_text
-             if "```json" in response_text:
-                 json_str = response_text.split("```json")[1].split("```")[0]
-             elif "```" in response_text:
-                 json_str = response_text.split("```")[1].split("```")[0]
-                 
-             return json.loads(json_str)
-             
-        except Exception as e:
-            print(f"AI Analysis Error: {e}")
+            response_text = await self.ai_service.provider.generate_content(
+                prompt,
+                system_prompt="You are an expert Data Analyst and Database Administrator.",
+            )
+            return self.extract_json_payload(response_text)
+        except (AttributeError, TypeError, ValueError) as e:
+            logger.exception("AI Analysis Error: %s", e)
             return {
                 "error": str(e),
                 "columns": [],

@@ -1,12 +1,67 @@
 # Database Tables Guide
 
+**Version:** 2.0
+**Last Updated:** 2026-03-22
+**Database:** config.db (SQLite)
+
+> This guide documents config DB tables that drive AI SQL generation.
+> It is consumed by Vanna RAG via `vanna_service._sync_documentation()` — each `## ` section becomes a standalone RAG chunk.
+
+---
+
 ## สารบัญ
 
-1. [schema_metadata](#1-schema_metadata)
-2. [schema_business_rules](#2-schema_business_rules)
-3. [schema_semantic_mapping](#3-schema_semantic_mapping)
-4. [schema_context_tables](#4-schema_context_tables)
-5. [golden_examples](#5-golden_examples)
+1. [schema_metadata](#1-schema_metadata) — Column metadata
+2. [schema_business_rules](#2-schema_business_rules) — SQL generation rules
+3. [schema_semantic_mapping](#3-schema_semantic_mapping) — Keyword-to-SQL translation
+4. [schema_contexts](#4-schema_contexts) — Multi-context routing
+5. [golden_examples](#5-golden_examples) — Few-shot learning examples
+6. [view_column_mappings](#6-view_column_mappings) — View-to-source column mapping
+7. [master_hierarchy](#7-master_hierarchy) — Hierarchy level definitions
+8. [master_hierarchy_values](#8-master_hierarchy_values) — Hierarchy values with parent chains
+9. [keyword_value_index](#9-keyword_value_index) — Smart keyword-to-value lookup
+
+---
+
+## Multi-Context Architecture
+
+The system supports multiple data contexts (revenue, expense, pl_costtype, etc.) via the `schema_contexts` table. Each context has:
+
+- A `main_view` that AI queries against (e.g., `revenue_search`, `v_expense_mart`)
+- Detection `keywords` for automatic context routing from user questions
+- Custom AI instructions (`default_instruction`, `instruction_th`)
+- Context-scoped semantic mappings and business rules
+
+**Context routing flow:**
+
+```
+User: "รายได้ นป. เดือนมกราคม 2568"
+      ↓
+Step 0: Context Routing (schema_contexts)
+  → keyword "รายได้" matches → context = "revenue", main_view = "revenue_search"
+      ↓
+Step 1: Semantic Mapping (schema_semantic_mapping)
+  → "นป." → organization_group_abbr = 'นป.'
+      ↓
+Step 1.5: Hierarchy Level Detection (master_hierarchy)
+  → validate that keywords don't mix hierarchy levels
+      ↓
+Step 2: Few-Shot Examples (golden_examples)
+  → find similar question patterns for AI reference
+      ↓
+Step 2.5: Value Lookup (keyword_value_index)
+  → match user keywords to actual DB values
+      ↓
+Step 3: Schema Metadata (schema_metadata)
+  → revenue is_summable=1, year data_type=INTEGER
+      ↓
+Step 4: Business Rules (schema_business_rules)
+  → enforce unit=baht, Thai column quoting, etc.
+      ↓
+Generated SQL:
+SELECT SUM(revenue) FROM revenue_search
+WHERE organization_group_abbr = 'นป.' AND year = 2025 AND month = 1
+```
 
 ---
 
@@ -21,7 +76,7 @@
 ```sql
 CREATE TABLE schema_metadata (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    table_name TEXT NOT NULL,           -- ชื่อตาราง (เช่น "revenue")
+    table_name TEXT NOT NULL,           -- ชื่อตาราง/view (เช่น "revenue", "revenue_search")
     column_name TEXT NOT NULL,          -- ชื่อคอลัมน์ (เช่น "YEAR", "REVENUE_VALUE")
     data_type TEXT,                     -- ชนิดข้อมูล (INTEGER, TEXT, REAL)
     display_name_th TEXT,               -- ชื่อแสดงภาษาไทย (เช่น "ปี")
@@ -29,12 +84,15 @@ CREATE TABLE schema_metadata (
     description TEXT,                   -- คำอธิบายคอลัมน์
     format_hint TEXT,                   -- คำแนะนำรูปแบบ (เช่น "YYYY", "Code")
     example_value TEXT,                 -- ค่าตัวอย่าง (เช่น "2025")
-    is_summable INTEGER DEFAULT 1,     -- สามารถใช้ SUM() ได้หรือไม่ (1=ได้, 0=ไม่ได้)
-    is_groupable INTEGER DEFAULT 1,    -- สามารถใช้ GROUP BY ได้หรือไม่
+    sample_values JSON,                 -- JSON array ของค่าตัวอย่างหลายค่า
+    is_summable INTEGER DEFAULT 0,      -- สามารถใช้ SUM() ได้หรือไม่
+    is_groupable INTEGER DEFAULT 1,     -- สามารถใช้ GROUP BY ได้หรือไม่
     hierarchy_level INTEGER,            -- ระดับลำดับชั้น (สำหรับ org hierarchy)
+    dimension_group TEXT,               -- กลุ่มมิติข้อมูลที่เกี่ยวข้อง (family group)
     special_notes TEXT,                 -- หมายเหตุพิเศษ
     conversion_sql TEXT,                -- SQL สำหรับแปลงค่า (ถ้ามี)
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(table_name, column_name)
 );
 ```
@@ -45,49 +103,52 @@ CREATE TABLE schema_metadata (
 
 ```python
 from app.services.schema_service import SchemaService
+from app.db.session import config_engine, business_engine
 
-service = SchemaService(db_path="revenue.sqlite")
-metadata = service.get_schema_metadata(table_name="revenue")
+service = SchemaService(db_engine=config_engine, business_engine=business_engine)
+metadata = service.get_schema_metadata(table_name="revenue_search")
 
 # สร้าง schema text สำหรับ AI
-schema_text = service.build_schema_text(table_name="revenue")
+schema_text = service.build_schema_text(table_name="revenue_search")
 ```
 
 #### 2. ใช้ในการตรวจสอบความถูกต้องของ SQL
 
-- ตรวจสอบว่าคอลัมน์สามารถใช้ `SUM()` ได้หรือไม่
-- ตรวจสอบว่าคอลัมน์สามารถใช้ `GROUP BY` ได้หรือไม่
+- ตรวจสอบว่าคอลัมน์สามารถใช้ `SUM()` ได้หรือไม่ (`is_summable`)
+- ตรวจสอบว่าคอลัมน์สามารถใช้ `GROUP BY` ได้หรือไม่ (`is_groupable`)
 - ดูว่าต้องมีการแปลงค่าหรือไม่ (เช่น DATE ต้องแปลงจาก Unix timestamp)
+- `dimension_group` ใช้จัดกลุ่มคอลัมน์ที่เกี่ยวข้องกัน (เช่น product columns, org columns)
 
 #### 3. ตัวอย่างข้อมูล
 
 ```sql
 -- Column: YEAR
-table_name: revenue
+table_name: revenue_search
 column_name: YEAR
 data_type: INTEGER
 display_name_th: ปี
 display_name_en: Year
-is_summable: 0  -- ไม่สามารถ SUM ได้
-is_groupable: 1 -- สามารถ GROUP BY ได้
+is_summable: 0
+is_groupable: 1
 special_notes: ปี พ.ศ. = YEAR + 543
 
 -- Column: REVENUE_VALUE
-table_name: revenue
+table_name: revenue_search
 column_name: REVENUE_VALUE
 data_type: REAL
 display_name_th: มูลค่ารายได้
-is_summable: 1  -- สามารถ SUM ได้
-is_groupable: 0 -- ไม่ควร GROUP BY
+is_summable: 1
+is_groupable: 0
 special_notes: หน่วยเป็นบาท
 ```
 
 ### ประโยชน์
 
-✅ AI รู้ว่าคอลัมน์ไหนคืออะไร (ชื่อไทย/อังกฤษ)
-✅ AI รู้ว่าคอลัมน์ไหนใช้ SUM ได้ ไหนใช้ไม่ได้
-✅ AI รู้ว่าต้องแปลงค่าอย่างไร (เช่น DATE, ปี พ.ศ.)
-✅ ลด error จากการใช้คอลัมน์ผิดประเภท
+- AI รู้ว่าคอลัมน์ไหนคืออะไร (ชื่อไทย/อังกฤษ)
+- AI รู้ว่าคอลัมน์ไหนใช้ SUM ได้ ไหนใช้ไม่ได้
+- AI รู้ว่าต้องแปลงค่าอย่างไร (เช่น DATE, ปี พ.ศ.)
+- `dimension_group` ช่วย AI เข้าใจว่าคอลัมน์ไหนเกี่ยวข้องกัน
+- ลด error จากการใช้คอลัมน์ผิดประเภท
 
 ---
 
@@ -105,110 +166,73 @@ CREATE TABLE schema_business_rules (
     rule_code TEXT NOT NULL UNIQUE,     -- รหัสกฎ (เช่น "DATE_CONVERT")
     rule_name TEXT NOT NULL,            -- ชื่อกฎ (เช่น "แปลง DATE ก่อนใช้")
     rule_description TEXT NOT NULL,     -- คำอธิบายกฎ
+    table_name TEXT,                    -- ใช้กับ table/view ไหน (NULL = ทุกตาราง)
     applies_to TEXT,                    -- ใช้กับคอลัมน์ไหนบ้าง (comma-separated)
     example_correct TEXT,               -- ตัวอย่าง SQL ที่ถูกต้อง
     example_wrong TEXT,                 -- ตัวอย่าง SQL ที่ผิด
     severity TEXT DEFAULT 'warning',    -- ระดับความสำคัญ (error, warning, info)
-    is_active INTEGER DEFAULT 1
+    inject_mode TEXT,                   -- ตำแหน่งใน prompt: 'schema_context' หรือ 'instruction'
+    rule_category TEXT,                 -- หมวดหมู่กฎ (context_retention, unit_conversion, etc.)
+    pattern TEXT,                       -- regex pattern สำหรับ validation
+    check_type TEXT DEFAULT 'regex_warning',  -- ประเภทการตรวจ (regex_warning, regex_error, etc.)
+    is_active INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
-### การใช้งาน
+### inject_mode — ตำแหน่งของกฎใน AI Prompt
 
-#### 1. ใช้ในการสร้าง System Prompt
+กฎแต่ละข้อจะถูกฉีดเข้าไปในตำแหน่งต่างกันของ system prompt:
 
-```python
-service = SchemaService(db_path="revenue.sqlite")
-rules = service.get_business_rules(table_name="revenue")
+| inject_mode | ตำแหน่ง | ใช้สำหรับ |
+|---|---|---|
+| `schema_context` | ส่วน schema definition | กฎเกี่ยวกับโครงสร้างข้อมูล (DATE conversion, Thai quoting) |
+| `instruction` | ส่วน instruction | กฎเชิงธุรกิจ (unit conversion, context retention) |
+| `NULL` | ทั้งสอง | กฎทั่วไป |
 
-# สร้าง business rules text สำหรับ AI
-rules_text = service.build_business_rules_text()
+### ตัวอย่างกฎสำคัญ
+
+#### กฎ 1: DATE_CONVERT
+
 ```
-
-#### 2. ตัวอย่างกฎสำคัญ
-
-##### กฎ 1: DATE_CONVERT
-
-```yaml
 rule_code: DATE_CONVERT
-rule_name: แปลง DATE ก่อนใช้
 severity: warning
 applies_to: DATE
+pattern: (?i)SELECT.*\bDATE\b(?!.*/\s*1000)
 
-✅ ถูกต้อง:
-SELECT date(DATE / 1000, 'unixepoch') FROM revenue
-
-❌ ผิด:
-SELECT DATE FROM revenue  -- จะได้ตัวเลข Unix timestamp
+ถูกต้อง: SELECT date(DATE / 1000, 'unixepoch') FROM revenue_search
+ผิด: SELECT DATE FROM revenue_search  -- จะได้ตัวเลข Unix timestamp
 ```
 
-##### กฎ 2: THAI_COLUMN
+#### กฎ 2: THAI_COLUMN_QUOTES
 
-```yaml
-rule_code: THAI_COLUMN
-rule_name: Column ภาษาไทยต้อง quote
+```
+rule_code: THAI_COLUMN_QUOTES
 severity: error
 applies_to: กลุ่มธุรกิจ, หมวดบัญชี
 
-✅ ถูกต้อง:
-SELECT "กลุ่มธุรกิจ" FROM revenue
-
-❌ ผิด:
-SELECT กลุ่มธุรกิจ FROM revenue  -- syntax error
+ถูกต้อง: SELECT "กลุ่มธุรกิจ" FROM revenue_search
+ผิด: SELECT กลุ่มธุรกิจ FROM revenue_search  -- syntax error
 ```
 
-##### กฎ 3: REVENUE_UNIT
+#### กฎ 3: REVENUE_UNIT
 
-```yaml
+```
 rule_code: REVENUE_UNIT
-rule_name: หน่วยรายได้เป็นบาท
 severity: warning
 applies_to: REVENUE_VALUE, AMOUNT
 
 คำเตือน: REVENUE_VALUE และ AMOUNT มีหน่วยเป็น บาท (ไม่ใช่ล้านบาท)
-
-✅ ถูกต้อง:
-SELECT SUM(REVENUE_VALUE) as revenue_baht FROM revenue
-
-❌ ผิด:
-SELECT SUM(REVENUE_VALUE) as revenue_million FROM revenue  -- ผิดหน่วย
-```
-
-##### กฎ 4: USE_YEAR_MONTH
-
-```yaml
-rule_code: USE_YEAR_MONTH
-rule_name: ใช้ YEAR, MONTH แทน DATE
-severity: info
-
-✅ แนะนำ:
-SELECT * FROM revenue WHERE YEAR = 2025 AND MONTH = 1
-
-❌ ไม่แนะนำ:
-SELECT * FROM revenue WHERE date(DATE/1000,'unixepoch') = '2025-01-01'
-```
-
-#### 3. การใช้งานใน Code
-
-```python
-# ดึงกฎทั้งหมด
-rules = service.get_business_rules(table_name="revenue")
-
-# Filter ตาม severity
-error_rules = [r for r in rules if r['severity'] == 'error']
-warning_rules = [r for r in rules if r['severity'] == 'warning']
-
-# แสดงกฎให้ AI เห็น
-for rule in rules:
-    print(f"{rule['rule_name']}: {rule['rule_description']}")
 ```
 
 ### ประโยชน์
 
-✅ AI สร้าง SQL ที่ถูกต้องตามกฎธุรกิจ
-✅ ป้องกัน common mistakes (เช่น ลืม quote column ภาษาไทย)
-✅ มี example ที่ชัดเจนว่าอันไหนถูก อันไหนผิด
-✅ จัดการกฎแบบ centralized ไม่กระจัดกระจายในโค้ด
+- AI สร้าง SQL ที่ถูกต้องตามกฎธุรกิจ
+- `inject_mode` แยกกฎตามตำแหน่งใน prompt (schema vs instruction)
+- `rule_category` จัดกลุ่มกฎ (เช่น context_retention, unit_conversion)
+- `pattern` + `check_type` ใช้ validate SQL output อัตโนมัติ
+- ป้องกัน common mistakes (เช่น ลืม quote column ภาษาไทย)
 
 ---
 
@@ -224,78 +248,53 @@ for rule in rules:
 CREATE TABLE schema_semantic_mapping (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     keyword TEXT NOT NULL UNIQUE,       -- คำค้นหา (เช่น "นป.", "อสังหาริมทรัพย์")
-    keyword_type TEXT DEFAULT 'term',  -- ประเภท (abbreviation, term, synonym)
+    keyword_type TEXT DEFAULT 'term',   -- ประเภท (abbreviation, term, synonym)
     target_column TEXT NOT NULL,        -- คอลัมน์ที่ต้องใช้
     target_condition TEXT NOT NULL,     -- เงื่อนไข SQL (เช่น "= 'value'")
     full_condition TEXT,                -- SQL condition เต็ม (สำหรับกรณีซับซ้อน)
     description TEXT,                   -- คำอธิบาย
-    priority INTEGER DEFAULT 0,         -- ลำดับความสำคัญ (สูง = ใช้ก่อน)
+    priority INTEGER DEFAULT 0,        -- ลำดับความสำคัญ (สูง = ใช้ก่อน)
     is_active INTEGER DEFAULT 1,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    context_name TEXT,                  -- NULL = global (ทุก context), ค่า = เฉพาะ context นั้น
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
-### การใช้งาน
+### context_name — Context Scoping
 
-#### 1. ประเภทของ Semantic Mapping
+Semantic mappings สามารถเป็น global หรือ scoped เฉพาะ context:
 
-##### A. Abbreviation (คำย่อหน่วยงาน)
+| context_name | ความหมาย |
+|---|---|
+| `NULL` | ใช้ได้กับทุก context (global mapping) |
+| `'revenue'` | ใช้เฉพาะ revenue context |
+| `'transfer price'` | ใช้เฉพาะ transfer price context |
 
-```sql
--- คำย่อ "นป."
+### ประเภท Semantic Mapping
+
+#### A. Abbreviation (คำย่อหน่วยงาน)
+
+```
 keyword: นป.
 keyword_type: abbreviation
 target_column: organization_group_abbr
 target_condition: = 'นป.'
 description: กลุ่มขายและปฏิบัติการลูกค้า ภาคเหนือ
-
--- คำย่อ "บชง."
-keyword: บชง.
-keyword_type: abbreviation
-target_column: department_abbr
-target_condition: = 'บชง.'
-description: ฝ่ายบัญชีบริหารและกรอบอัตราค่าบริการ
 ```
 
-**ตัวอย่างการใช้งาน:**
+#### B. Business Term (คำศัพท์ธุรกิจ)
 
 ```
-คำถาม: "รายได้ นป. ปี 2568"
-AI แปลเป็น: WHERE organization_group_abbr = 'นป.' AND year = 2025
-```
-
-##### B. Business Term (คำศัพท์ธุรกิจ)
-
-```sql
--- คำว่า "อสังหาริมทรัพย์"
 keyword: อสังหาริมทรัพย์
 keyword_type: term
 target_column: SERVICE_GROUP
 target_condition: = 'กลุ่มบริการพัฒนาสินทรัพย์'
-description: บริการด้านสินทรัพย์และอสังหาริมทรัพย์
-
--- คำว่า "มือถือ"
-keyword: มือถือ
-keyword_type: term
-target_column: BUSINESS_GROUP
-target_condition: = 'Mobile'
-description: กลุ่มผลิตภัณฑ์โทรศัพท์มือถือ
 ```
 
-**ตัวอย่างการใช้งาน:**
+#### C. Synonym (คำพ้องความหมาย)
 
 ```
-คำถาม: "รายได้อสังหาริมทรัพย์"
-AI แปลเป็น: WHERE SERVICE_GROUP = 'กลุ่มบริการพัฒนาสินทรัพย์'
-
-คำถาม: "รายได้มือถือ"
-AI แปลเป็น: WHERE BUSINESS_GROUP = 'Mobile'
-```
-
-##### C. Synonym (คำพ้องความหมาย)
-
-```sql
--- "ทรัพย์สิน" = "อสังหาริมทรัพย์"
 keyword: ทรัพย์สิน
 keyword_type: synonym
 target_column: SERVICE_GROUP
@@ -303,115 +302,94 @@ target_condition: = 'กลุ่มบริการพัฒนาสิน�
 description: คำพ้องความหมายกับ อสังหาริมทรัพย์
 ```
 
-#### 2. การใช้งานใน Code
+### ตัวอย่างการใช้งาน
+
+```
+คำถาม: "รายได้ นป. ปี 2568"
+AI แปลเป็น: WHERE organization_group_abbr = 'นป.' AND year = 2025
+
+คำถาม: "รายได้อสังหาริมทรัพย์"
+AI แปลเป็น: WHERE SERVICE_GROUP = 'กลุ่มบริการพัฒนาสินทรัพย์'
+```
+
+### การใช้งานใน Code
 
 ```python
 from app.services.schema_service import SchemaService
+from app.db.session import config_engine, business_engine
 
-service = SchemaService(db_path="revenue.sqlite")
+service = SchemaService(db_engine=config_engine, business_engine=business_engine)
 
 # ดึง semantic mappings ทั้งหมด
 mappings = service.get_semantic_mappings()
 
 # ดึงเฉพาะคำย่อ
-abbr_mappings = service.get_abbreviation_mappings()
-# ผลลัพธ์: [{'keyword': 'นป.', 'target_column': 'organization_group_abbr', ...}, ...]
+abbr_mappings = service.get_semantic_mappings(keyword_type="abbreviation")
 
 # ดึงเฉพาะคำศัพท์ธุรกิจ
-term_mappings = service.get_term_mappings()
-# ผลลัพธ์: [{'keyword': 'อสังหาริมทรัพย์', 'target_column': 'SERVICE_GROUP', ...}, ...]
-
-# แสดงใน System Prompt
-semantic_text = service.build_semantic_mapping_text()
-```
-
-#### 3. ตัวอย่างการทำงานใน System Prompt
-
-```python
-# System Prompt จะมีข้อมูลแบบนี้:
-
-"""
-### คำย่อหน่วยงาน (Abbreviations)
-| คำย่อ | Column | Condition | ความหมาย |
-|-------|--------|-----------|----------|
-| นป.   | organization_group_abbr | = 'นป.' | กลุ่มขายและปฏิบัติการลูกค้า ภาคเหนือ |
-| บชง.  | department_abbr | = 'บชง.' | ฝ่ายบัญชีบริหารและกรอบอัตราค่าบริการ |
-
-### คำศัพท์ธุรกิจ (Business Terms)
-| คำค้น | Column | Condition | ความหมาย |
-|-------|--------|-----------|----------|
-| อสังหาริมทรัพย์ | SERVICE_GROUP | = 'กลุ่มบริการพัฒนาสินทรัพย์' | บริการด้านสินทรัพย์ |
-| มือถือ | BUSINESS_GROUP | = 'Mobile' | กลุ่มผลิตภัณฑ์มือถือ |
-
-### วิธีใช้:
-เมื่อพบคำใน query ให้ใช้ condition ที่กำหนด เช่น:
-- "รายได้ นป." → WHERE organization_group_abbr = 'นป.'
-- "รายได้อสังหาริมทรัพย์" → WHERE SERVICE_GROUP = 'กลุ่มบริการพัฒนาสินทรัพย์'
-"""
+term_mappings = service.get_semantic_mappings(keyword_type="term")
 ```
 
 ### ประโยชน์
 
-✅ ผู้ใช้ใช้คำย่อได้ (เช่น "นป.", "บชง.")
-✅ ผู้ใช้ใช้ภาษาธรรมดาได้ (เช่น "อสังหาริมทรัพย์" แทน "กลุ่มบริการพัฒนาสินทรัพย์")
-✅ รองรับหลายคำที่หมายถึงสิ่งเดียวกัน (synonyms)
-✅ จัดการแบบ centralized - เพิ่ม/แก้ไขคำได้ที่เดียว
+- ผู้ใช้ใช้คำย่อได้ (เช่น "นป.", "บชง.")
+- ผู้ใช้ใช้ภาษาธรรมดาได้ (เช่น "อสังหาริมทรัพย์")
+- `context_name` scoping ป้องกัน mapping ชนกันข้าม context
+- รองรับหลายคำที่หมายถึงสิ่งเดียวกัน (synonyms)
 
 ---
 
-## 4. schema_context_tables
+## 4. schema_contexts
 
 ### หน้าที่
 
-เก็บข้อมูล **ความสัมพันธ์ระหว่าง Context และ Table** เพื่อรองรับการทำงานแบบ **Multi-Table Context**
-ช่วยให้ AI รู้ว่าในหนึ่งเรื่อง (Context) ควรไปดึงข้อมูลจากตารางไหนได้บ้าง และแต่ละตารางทำหน้าที่อะไร
+เก็บ **การตั้งค่า context** สำหรับ multi-context routing — ระบบจะเลือก context จาก keywords ในคำถามของผู้ใช้แล้วเชื่อมไปยัง main_view ที่ถูกต้อง
 
 ### โครงสร้างตาราง
 
 ```sql
-CREATE TABLE schema_context_tables (
+CREATE TABLE schema_contexts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    context_id INTEGER,                 -- อ้างอิง ID จาก schema_contexts
-    table_name TEXT,                    -- ชื่อตารางที่เกี่ยวข้อง
-    role TEXT DEFAULT 'main',           -- หน้าที่ ('main'='Fact', 'dimension', 'reference')
-    FOREIGN KEY (context_id) REFERENCES schema_contexts(id)
+    name TEXT NOT NULL UNIQUE,          -- Context identifier (เช่น 'revenue', 'expense')
+    display_name TEXT NOT NULL,         -- ชื่อแสดงใน UI
+    description TEXT,                   -- คำอธิบาย context
+    main_view TEXT NOT NULL,            -- ชื่อ view/table หลักที่ AI จะ query
+    keywords TEXT,                      -- Comma-separated keywords สำหรับ auto-detection
+    priority INTEGER DEFAULT 0,        -- สูงกว่า = ถูกเลือกก่อนเมื่อ keyword ตรงหลาย context
+    database_url TEXT,                  -- Optional: ถ้าใช้ DB อื่น
+    default_instruction TEXT,           -- Custom AI instruction สำหรับ context นี้
+    instruction_th TEXT,                -- คำเตือนภาษาไทยเพิ่มเติม
+    instruction_en TEXT,                -- คำเตือนภาษาอังกฤษเพิ่มเติม
+    sample_queries TEXT,                -- JSON array ของตัวอย่างคำถาม
+    is_active INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    created_by TEXT,
+    metadata TEXT                       -- JSON field สำหรับ settings เพิ่มเติม
 );
 ```
 
-### การใช้งาน
+### ตัวอย่าง Contexts
 
-#### 1. ประเภทของ Role (บทบาทของตาราง)
+| name | display_name | main_view | keywords | priority |
+|---|---|---|---|---|
+| revenue | รายได้ (Revenue) | revenue_search | รายได้,revenue,ขาย,sales | 10 |
+| expense | ค่าใช้จ่าย (Expense) | v_expense_mart | ค่าใช้จ่าย,expense,cost | 9 |
+| pl_costtype | P&L by Cost Type | v_pl_costtype_nt_mth | P&L,กำไรขาดทุน,costtype | 8 |
 
-*   **main**: ตารางหลักที่เก็บข้อมูลสำคัญ (Fact Table) เช่น ยอดขาย, ค่าใช้จ่าย
-*   **dimension**:ตารางมิติข้อมูล เช่น ตารางลูกค้า, ตารางสินค้า, ตารางแผนก
-*   **reference**: ตารางอ้างอิงอื่นๆ
+### Context Routing Flow
 
-#### 2. ตัวอย่างข้อมูล
-
-สมมติ Context: **Revenue** (รายได้) นอกจากตารางหลัก `revenue_search` แล้ว ต้องการให้ AI รู้จักตารางสินค้าและลูกค้าด้วย
-
-```sql
--- 1. Main Table
-context_id: 1 (Revenue)
-table_name: 'revenue_search'
-role: 'main'
-
--- 2. Product Dimension
-context_id: 1 (Revenue)
-table_name: 'product_master'
-role: 'dimension'
-
--- 3. Customer Dimension
-context_id: 1 (Revenue)
-table_name: 'customer_dim'
-role: 'dimension'
-```
+1. User ถามคำถาม เช่น "รายได้รวมปี 2568"
+2. ระบบ scan keywords จาก `schema_contexts` → พบ "รายได้" ใน revenue context
+3. เลือก context "revenue" → main_view = "revenue_search"
+4. โหลด metadata, rules, mappings ที่เกี่ยวข้องกับ revenue
+5. AI generate SQL ที่ query จาก `revenue_search`
 
 ### ประโยชน์
 
-✅ AI สามารถทำ **Cross-Table Query** (JOIN) ได้แม่นยำขึ้น
-✅ รองรับโครงสร้างข้อมูลที่ซับซ้อน (Star Schema)
-✅ ไม่จำเป็นต้องยัดทุกอย่างลง View ใหญ่ตัวเดียว (Modular Design)
+- รองรับหลาย data source โดยไม่ต้องแก้ code
+- Admin เพิ่ม context ใหม่ได้ผ่าน UI
+- แต่ละ context มี instruction เฉพาะ (เช่น expense มีคำเตือนเรื่อง amount ที่อาจติดลบ)
 
 ---
 
@@ -426,376 +404,309 @@ role: 'dimension'
 ```sql
 CREATE TABLE golden_examples (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    chat_id INTEGER,                    -- อ้างอิงจาก chat_history (ถ้ามา จาก feedback)
+    chat_id INTEGER,                    -- อ้างอิงจาก chat_history (cross-DB, ไม่มี FK)
     question_pattern TEXT NOT NULL,     -- รูปแบบคำถาม (เช่น "รายได้รวมเดือน X ปี Y")
     expected_sql TEXT NOT NULL,         -- SQL ที่ถูกต้อง
     category TEXT,                      -- หมวดหมู่ (เช่น "revenue_total", "abbreviation")
     is_active INTEGER DEFAULT 1,
-    added_by INTEGER,                   -- ผู้เพิ่ม (user id)
+    added_by INTEGER,                   -- ผู้เพิ่ม (user id, cross-DB)
     usage_count INTEGER DEFAULT 0,      -- จำนวนครั้งที่ถูกใช้
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
-### การใช้งาน
-
-#### 1. Few-Shot Learning
-
-AI จะได้รับตัวอย่างเหล่านี้ใน System Prompt เพื่อเรียนรู้ว่าควรสร้าง SQL อย่างไร:
-
-```python
-from app.services.matcha_examples import MatchaExamplesService
-
-service = MatchaExamplesService(db_path="revenue.sqlite")
-
-# ดึง golden examples
-golden = service.get_golden_examples()
-
-# ดึงแบบมีหมวดหมู่
-golden_revenue = service.get_golden_examples(category="revenue_total")
-golden_abbr = service.get_golden_examples(category="abbreviation")
-```
-
-#### 2. ตัวอย่าง Golden Examples
-
-##### Example 1: รายได้รวม (ต้อง exclude รายได้อื่น)
+### ตัวอย่าง Golden Examples
 
 ```json
 {
   "question_pattern": "รายได้รวมเดือนมกราคม 2568",
-  "expected_sql": "SELECT SUM(revenue) as total_revenue FROM revenue_search WHERE year = 2025 AND month = 1 AND BUSINESS_GROUP != 'รายได้อื่น'",
-  "category": "revenue_total",
-  "explanation": "รายได้รวมทั้งหมดในเดือนมกราคม 2568 (ค.ศ. 2025) ไม่รวมรายได้อื่น"
+  "expected_sql": "SELECT SUM(revenue) FROM revenue_search WHERE year = 2025 AND month = 1 AND BUSINESS_GROUP != 'รายได้อื่น'",
+  "category": "revenue_total"
 }
 ```
-
-##### Example 2: การใช้คำย่อ
 
 ```json
 {
   "question_pattern": "รายได้ นป. ปี 2568",
-  "expected_sql": "SELECT SUM(revenue) as total_revenue FROM revenue_search WHERE organization_group_abbr = 'นป.' AND year = 2025",
-  "category": "abbreviation",
-  "explanation": "รายได้ของกลุ่มขายและปฏิบัติการลูกค้า ภาคเหนือ (นป.) ในปี 2568"
+  "expected_sql": "SELECT SUM(revenue) FROM revenue_search WHERE organization_group_abbr = 'นป.' AND year = 2025",
+  "category": "abbreviation"
 }
 ```
 
-##### Example 3: การใช้ Business Term
+### การใช้งาน
 
-```json
-{
-  "question_pattern": "รายได้อสังหาริมทรัพย์แยกตามฝ่าย",
-  "expected_sql": "SELECT department, SUM(revenue) as total_revenue FROM revenue_search WHERE SERVICE_GROUP = 'กลุ่มบริการพัฒนาสินทรัพย์' GROUP BY department ORDER BY total_revenue DESC",
-  "category": "business_term",
-  "explanation": "รายได้จากอสังหาริมทรัพย์/สินทรัพย์ แยกตามฝ่าย"
-}
-```
+AI จะได้รับ golden examples ใน System Prompt เพื่อเรียนรู้ pattern ที่ถูกต้อง (Few-Shot Learning) ช่วยลด hallucination และเพิ่มความแม่นยำของ SQL
 
-##### Example 4: Top N และ Bottom N
+### ประโยชน์
 
-```json
-{
-  "question_pattern": "หน่วยงานไหนมีรายได้มากที่สุด 5 อันดับแรก และน้อยที่สุด 5 อันดับแรก",
-  "expected_sql": "SELECT 'มากสุด' as category, department, total FROM (\n    SELECT department, SUM(revenue) as total\n    FROM revenue_search\n    GROUP BY department\n    ORDER BY total DESC\n    LIMIT 5\n)\nUNION ALL\nSELECT 'น้อยสุด' as category, department, total FROM (\n    SELECT department, SUM(revenue) as total\n    FROM revenue_search\n    GROUP BY department\n    ORDER BY total ASC\n    LIMIT 5\n)",
-  "category": "ranking",
-  "explanation": "Top 5 และ Bottom 5 หน่วยงานตามรายได้"
-}
-```
-
-##### Example 5: การคำนวณสัดส่วน
-
-```json
-{
-  "question_pattern": "สัดส่วนรายได้ของกลุ่มธุรกิจ Fixed Line & Broadband",
-  "expected_sql": "SELECT\n    'Fixed Line & Broadband' as BUSINESS_GROUP,\n    SUM(revenue) as group_revenue,\n    (SELECT SUM(revenue) FROM revenue_search WHERE BUSINESS_GROUP != 'รายได้อื่น') as total_revenue,\n    ROUND(SUM(revenue) * 100.0 / (SELECT SUM(revenue) FROM revenue_search WHERE BUSINESS_GROUP != 'รายได้อื่น'), 2) as percentage\nFROM revenue_search\nWHERE BUSINESS_GROUP = 'Fixed Line & Broadband'",
-  "category": "percentage",
-  "explanation": "สัดส่วนรายได้ Fixed Line & Broadband เทียบกับรายได้รวม (ไม่นับรายได้อื่น)"
-}
-```
-
-#### 3. การใช้ Golden Examples ใน AI Prompt
-
-```python
-# สร้าง Few-Shot Examples
-few_shot_text = ""
-for example in golden_examples:
-    few_shot_text += f"""
-### ตัวอย่างที่ {i+1}
-**คำถาม:** {example['question_pattern']}
-
-**SQL:**
-```sql
-{example['expected_sql']}
-```
-
-**คำอธิบาย:** {example.get('explanation', '')}
+- AI เรียนรู้จากตัวอย่างที่ดี (Few-Shot Learning)
+- ลด hallucination — มีตัวอย่างชัดเจนให้ follow
+- เพิ่มความแม่นยำของ SQL สำหรับ common patterns
+- สามารถเพิ่ม/แก้ไข examples ได้ผ่าน Admin UI
 
 ---
 
-"""
+## 6. view_column_mappings
 
-# ใส่ใน System Prompt
+### หน้าที่
 
-system_prompt = f"""
-{base_instruction}
+Map คอลัมน์ของ **view** กลับไปยัง **source table** เพื่อให้ metadata propagation ทำงานได้ — เมื่อมี metadata ของ source table, ระบบสามารถ apply metadata ไปยัง view columns ที่ตรงกันโดยอัตโนมัติ
 
-## Few-Shot Examples (ตัวอย่างที่ดี)
+### โครงสร้างตาราง
 
-{few_shot_text}
-
-{schema_context}
-"""
-
+```sql
+CREATE TABLE view_column_mappings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    view_name TEXT NOT NULL,            -- ชื่อ view (เช่น "revenue_search")
+    view_column TEXT NOT NULL,          -- ชื่อคอลัมน์ใน view (เช่น "revenue")
+    source_table TEXT NOT NULL,         -- ชื่อ source table (เช่น "revenue")
+    source_column TEXT NOT NULL,        -- ชื่อคอลัมน์ใน source (เช่น "REVENUE_VALUE")
+    mapping_type TEXT DEFAULT 'alias',  -- ประเภท: alias | expression | passthrough
+    expression_sql TEXT,                -- SQL expression (สำหรับ mapping_type = 'expression')
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(view_name, view_column)
+);
 ```
 
-#### 4. การเพิ่ม Golden Example จาก User Feedback
+### mapping_type
 
-```python
-from app.api.v1.admin import create_golden_example
+| Type | ความหมาย | ตัวอย่าง |
+|---|---|---|
+| `alias` | คอลัมน์เปลี่ยนชื่อ | view `revenue` ← source `REVENUE_VALUE` |
+| `expression` | คอลัมน์จาก SQL expression | `readable_date` ← `date(DATE/1000, 'unixepoch')` |
+| `passthrough` | ชื่อเดียวกันทั้ง view และ source | `YEAR` ← `YEAR` |
 
-# เมื่อผู้ใช้ให้ feedback ว่า query นี้ดี
-# Admin สามารถเพิ่มเข้า golden_examples ได้
+### ประโยชน์
 
-create_golden_example(
-    question="รายได้ บชง. เดือน 1 ถึง 11",
-    expected_sql="SELECT month, SUM(revenue) as total FROM revenue_search WHERE department_abbr = 'บชง.' AND year = 2025 AND CAST(month AS INTEGER) BETWEEN 1 AND 11 GROUP BY month ORDER BY CAST(month AS INTEGER)",
-    category="date_range",
-    db=db
-)
+- Metadata ที่สร้างสำหรับ source table สามารถ propagate ไปยัง view ได้อัตโนมัติ
+- ไม่ต้องสร้าง metadata ซ้ำสำหรับทุก view
+- รองรับ view ที่มี column rename หรือ expression columns
+
+---
+
+## 7. master_hierarchy
+
+### หน้าที่
+
+กำหนด **ระดับลำดับชั้น** (hierarchy levels) ของข้อมูลในแต่ละ context — ป้องกัน AI จากการ OR ข้าม hierarchy levels ซึ่งจะทำให้ผลลัพธ์ผิดพลาดร้ายแรง (inflated numbers)
+
+### โครงสร้างตาราง
+
+```sql
+CREATE TABLE master_hierarchy (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    context_name TEXT NOT NULL,         -- context ที่ใช้ (เช่น 'revenue')
+    level INTEGER NOT NULL,             -- ลำดับชั้น (0 = top, 1, 2, ...)
+    level_label_th TEXT NOT NULL,       -- ชื่อระดับภาษาไทย (เช่น "กลุ่มธุรกิจ")
+    level_label_en TEXT NOT NULL,       -- ชื่อระดับภาษาอังกฤษ (เช่น "Business Group")
+    level_columns TEXT NOT NULL,        -- JSON array: คอลัมน์ที่เกี่ยวข้อง ["BUSINESS_GROUP"]
+    detection_keywords TEXT NOT NULL,   -- JSON array: keywords สำหรับ detect level
+    is_active INTEGER DEFAULT 1,
+    source TEXT DEFAULT 'auto',         -- 'auto' (extracted) หรือ 'manual' (admin)
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(context_name, level)
+);
+```
+
+### ตัวอย่าง Revenue Product Hierarchy
+
+| level | label_th | label_en | level_columns |
+|---|---|---|---|
+| 0 | กลุ่มธุรกิจ | Business Group | `["BUSINESS_GROUP", "BUSINESS"]` |
+| 1 | กลุ่มบริการ | Service Group | `["SERVICE_GROUP", "SERVICE"]` |
+| 2 | ผลิตภัณฑ์ | Product | `["PRODUCT_NAME", "PRODUCT"]` |
+
+### ทำไมต้องมี Hierarchy?
+
+```
+BUSINESS_GROUP > SERVICE_GROUP > PRODUCT_NAME
+
+ถ้า AI ใช้ OR ข้าม level:
+WHERE BUSINESS_GROUP = 'Fixed Line' OR PRODUCT_NAME = 'Trunk Radio'
+→ จะได้รายได้ Fixed Line ทั้งหมด + Trunk Radio ซ้ำ → ตัวเลขพอง!
+
+ที่ถูกต้อง:
+WHERE BUSINESS_GROUP = 'Fixed Line' AND PRODUCT_NAME = 'Trunk Radio'
 ```
 
 ### ประโยชน์
 
-✅ AI เรียนรู้จากตัวอย่างที่ดี (Few-Shot Learning)
-✅ ลด hallucination - มีตัวอย่างชัดเจนให้ follow
-✅ รวบรวม best practices ไว้ที่เดียว
-✅ เพิ่มความแม่นยำของ SQL ที่ถูกสร้าง
-✅ สามารถเพิ่ม/แก้ไข examples ได้ตามเวลา
+- ป้องกัน "OR across levels" ที่ทำให้ตัวเลขพอง
+- DB-driven — admin เพิ่ม/แก้ hierarchy ได้โดยไม่ต้องแก้ code
+- `source` field แยก auto-extracted vs manual override
+- `detection_keywords` ช่วย AI detect ว่า user ถามเกี่ยวกับ level ไหน
 
 ---
 
-## สรุปการทำงานร่วมกันของทั้ง 4 ตาราง
+## 8. master_hierarchy_values
 
-```
-User Question: "รายได้ นป. เดือนมกราคม 2568"
-      ↓
-┌─────────────────────────────────────────────────────────┐
-│ 1. schema_semantic_mapping                              │
-│    "นป." → organization_group_abbr = 'นป.'              │
-└─────────────────────────────────────────────────────────┘
-      ↓
-┌─────────────────────────────────────────────────────────┐
-│ 2. golden_examples (Few-Shot Learning)                  │
-│    ตัวอย่าง: "รายได้ นป. ปี X"                         │
-│    SQL: SELECT ... WHERE organization_group_abbr = ...  │
-└─────────────────────────────────────────────────────────┘
-      ↓
-┌─────────────────────────────────────────────────────────┐
-│ 3. schema_metadata                                      │
-│    - revenue column: is_summable = 1 (ใช้ SUM ได้)     │
-│    - year column: data_type = INTEGER                   │
-│    - month column: data_type = INTEGER                  │
-└─────────────────────────────────────────────────────────┘
-      ↓
-┌─────────────────────────────────────────────────────────┐
-│ 4. schema_business_rules                                │
-│    - ต้อง CAST(month AS INTEGER) เมื่อเปรียบเทียบ      │
-│    - หน่วยรายได้เป็นบาท                                │
-└─────────────────────────────────────────────────────────┘
-      ↓
-AI Generated SQL:
-SELECT SUM(revenue) as total_revenue
-FROM revenue_search
-WHERE organization_group_abbr = 'นป.'
-  AND year = 2025
-  AND month = 1
-```
+### หน้าที่
 
----
+เก็บ **ค่าจริง** ในแต่ละ hierarchy level พร้อม parent-child chains และ aliases — ใช้สำหรับ validate ว่าค่าที่ user ถามมีอยู่จริงและอยู่ level ไหน
 
-## สรุปหน้าที่ของ 4 ตารางหลัก (LLM Schema Logic)
-
-โครงสร้างตารางเหล่านี้ออกแบบมาเพื่อให้ AI สามารถแปลงภาษาธรรมชาติ (Natural Language) เป็น SQL ได้อย่างแม่นยำ
-
-### 1. `schema_metadata`
-
-**หน้าที่:** เก็บรายละเอียดเชิงเทคนิคของแต่ละ Column เพื่อให้ AI เข้าใจบริบทของข้อมูล
-
-* **Description:** อธิบายความหมายของ Column (ทั้งภาษาไทยและอังกฤษ)
-* **Aggregation Rules:** ระบุว่า Column นั้นสามารถใช้ `SUM()` ได้หรือไม่ (`is_summable`)
-* **Grouping Rules:** ระบุว่าสามารถใช้ `GROUP BY` ได้หรือไม่ (`is_groupable`)
-* **Transformation:** วิธีการแปลงค่าพื้นฐานผ่าน `conversion_sql`
-
-### 2. `schema_business_rules`
-
-**หน้าที่:** เก็บ "กฎเหล็ก" ของธุรกิจในการสร้าง Query
-
-* **Date Handling:** การแปลง Unix timestamp ให้เป็นรูปแบบวันที่ที่อ่านออก
-* **Syntax Rules:** การใส่ Quote สำหรับ Column ภาษาไทย
-* **Unit Logic:** การจัดการหน่วยนับ (เช่น รายได้ต้องเป็น "บาท" เสมอ ไม่ใช่ "ล้านบาท")
-* **Time Granularity:** เน้นการใช้ `YEAR` หรือ `MONTH` แทนการใช้ `DATE` เต็มรูปแบบตามความเหมาะสม
-
-### 3. `schema_semantic_mapping`
-
-**หน้าที่:** ตัวแปลภาษา (Translator) จากคำพูดติดปากหรือคำย่อไปเป็นค่าในฐานข้อมูล
-
-* **Abbreviation:** "นป."  `organization_group_abbr = 'นป.'`
-* **Industry Terms:** "อสังหาริมทรัพย์"  `SERVICE_GROUP = 'กลุ่มบริการพัฒนาสินทรัพย์'`
-* **Common Names:** "มือถือ"  `BUSINESS_GROUP = 'Mobile'`
-
-### 4. `golden_examples`
-
-**หน้าที่:** คลังตัวอย่าง SQL ที่ถูกต้องที่สุด (Few-Shot Learning)
-
-* **Pattern Recognition:** AI เรียนรู้จากตัวอย่างจริงที่เคยตอบถูก
-* **Best Practices:** กำหนดมาตรฐานการเขียน Code ที่ทีมยอมรับ
-* **Efficiency:** ช่วยลดความผิดพลาดในคำถามที่มีความซับซ้อนสูง (Common Patterns)
-
----
-
-## Workflow การทำงานร่วมกัน (Execution Flow)
-
-เมื่อ User ส่งคำถามเข้ามา ระบบจะทำงานตามลำดับดังนี้:
-
-> **User Query:** *"รายได้ นป. เดือนมกราคม 2568"*
-
-| ขั้นตอน                          | แหล่งข้อมูลที่ใช้ | ผลลัพธ์ที่ได้                                                                        |
-| --------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------- |
-| **1. แปลงศัพท์**         | `semantic_mapping`               | แปลง "นป." เป็นเงื่อนไข `organization_group_abbr = 'นป.'`                   |
-| **2. หาตัวอย่าง**       | `golden_examples`                | ค้นหารูปแบบ SQL ที่ใกล้เคียงกับคำถามนี้มาเป็นแนวทาง |
-| **3. เช็คโครงสร้าง** | `schema_metadata`                | ตรวจสอบว่า `revenue` สามารถใช้ `SUM()` ได้                              |
-| **4. บังคับใช้กฎ**     | `business_rules`                 | ตรวจสอบการ CAST ค่าเดือน และการจัดการหน่วยเงิน             |
-
-### 🏁 Generated SQL:
+### โครงสร้างตาราง
 
 ```sql
-SELECT SUM(revenue) 
-FROM revenue_search 
-WHERE organization_group_abbr = 'นป.' 
-  AND report_month = 1 
-  AND report_year = 2025;
-
+CREATE TABLE master_hierarchy_values (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    context_name TEXT NOT NULL,         -- context (เช่น 'revenue')
+    level INTEGER NOT NULL,             -- hierarchy level (ตรงกับ master_hierarchy.level)
+    value TEXT NOT NULL,                -- ค่าจริง (เช่น "Fixed Line & Broadband")
+    parent_value TEXT,                  -- ค่า parent (NULL สำหรับ top level)
+    aliases TEXT,                       -- JSON array: ชื่ออื่นๆ/keywords (เช่น ["fixed line", "บรอดแบนด์"])
+    source TEXT DEFAULT 'auto',         -- 'auto' หรือ 'manual'
+    is_active INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(context_name, level, value)
+);
 ```
+
+### ตัวอย่างข้อมูล
+
+| context | level | value | parent_value | aliases |
+|---|---|---|---|---|
+| revenue | 0 | Fixed Line & Broadband | NULL | `["fixed line", "บรอดแบนด์"]` |
+| revenue | 1 | กลุ่มบริการ Cloud | Fixed Line & Broadband | `["cloud", "คลาวด์"]` |
+| revenue | 2 | Trunk Radio | กลุ่มบริการ Cloud | `["trunk", "วิทยุ"]` |
+
+### ประโยชน์
+
+- Validate ว่าค่าที่ user ถามมีอยู่จริงใน DB
+- Parent chain ใช้ drill-down/roll-up (เช่น "Trunk Radio อยู่ใน Cloud อยู่ใน Fixed Line")
+- `aliases` ช่วย fuzzy matching (user พิมพ์ "cloud" ก็หา "กลุ่มบริการ Cloud" เจอ)
+- Auto-extracted จาก data จริง + admin override ได้
+
+---
+
+## 9. keyword_value_index
+
+### หน้าที่
+
+**Smart keyword lookup** — index ค่าจริงจากทุกคอลัมน์ที่ searchable เพื่อให้ระบบ match คำที่ user พิมพ์กับค่าจริงใน DB ได้เร็ว โดยไม่ต้อง scan data ทุกครั้ง
+
+### โครงสร้างตาราง
+
+```sql
+CREATE TABLE keyword_value_index (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    keyword TEXT NOT NULL,              -- keyword (lowercase, stripped prefixes)
+    column_name TEXT NOT NULL,          -- คอลัมน์ที่ค่านี้อยู่
+    column_value TEXT NOT NULL,         -- ค่าจริงใน DB
+    table_name TEXT NOT NULL,           -- ตาราง/view ที่ค่านี้อยู่
+    context_name TEXT NOT NULL          -- context ที่ค่านี้อยู่
+);
+```
+
+### วิธีสร้าง Index
+
+`keyword_value_index` ถูกสร้างโดย `build_keyword_index()` ใน `app/services/schema/keyword_index.py`:
+
+1. อ่าน searchable columns จาก `schema_metadata` (is_groupable = 1)
+2. Scan DISTINCT values จากทุก searchable column ใน business DB
+3. สร้าง keyword โดยตัด prefix ภาษาไทย (เช่น "กลุ่มบริการ", "สายงาน") และ lowercase
+4. เก็บลง `keyword_value_index` ใน config DB
+
+### ตัวอย่างข้อมูล
+
+| keyword | column_name | column_value | table_name | context_name |
+|---|---|---|---|---|
+| cloud connect | PRODUCT_NAME | บริการ Cloud Connect | revenue_search | revenue |
+| trunk radio | PRODUCT_NAME | Trunk Radio | revenue_search | revenue |
+| fixed line | BUSINESS_GROUP | Fixed Line & Broadband | revenue_search | revenue |
+
+### ใช้ร่วมกับ `get_known_terms()`
+
+Function `get_known_terms()` รวม keywords จาก:
+1. `keyword_value_index` — ค่าจริงจาก data
+2. `master_hierarchy_values` — ค่า + aliases จาก hierarchy
+
+ใช้สำหรับ dictionary keyword extraction แบบ longest-match เพื่อหาคำที่ user พิมพ์ที่ตรงกับค่าจริงใน DB
+
+### ประโยชน์
+
+- Lookup เร็วโดยไม่ต้อง scan business data ทุกครั้ง
+- Keyword stripping ช่วย fuzzy match (เช่น "cloud" หา "บริการ Cloud Connect" เจอ)
+- รองรับหลาย context (revenue, expense, ฯลฯ)
+
+---
+
+## สรุปหน้าที่ของตารางทั้งหมด
+
+| ตาราง | หน้าที่ | ใช้ตอนไหน |
+|---|---|---|
+| `schema_contexts` | เลือก context + main_view | Step 0: Context routing |
+| `schema_semantic_mapping` | แปลคำย่อ/ศัพท์ → SQL condition | Step 1: Keyword translation |
+| `master_hierarchy` | ตรวจ level ของ dimension | Step 1.5: Level validation |
+| `keyword_value_index` | match keyword → actual DB value | Step 2.5: Value lookup |
+| `golden_examples` | ตัวอย่าง SQL ที่ดี | Step 2: Few-shot learning |
+| `schema_metadata` | ข้อมูล column (type, SUM, GROUP BY) | Step 3: Schema context |
+| `schema_business_rules` | กฎการสร้าง SQL | Step 4: Rule enforcement |
+| `view_column_mappings` | map view ↔ source columns | Background: metadata propagation |
+| `master_hierarchy_values` | ค่าจริง + parent chains + aliases | Background: value validation |
 
 ---
 
 ## Best Practices
 
-### 1. การเพิ่มข้อมูล
-
-#### เพิ่ม Schema Metadata
-
-```sql
-INSERT INTO schema_metadata (
-    table_name, column_name, data_type,
-    display_name_th, is_summable, is_groupable
-) VALUES (
-    'revenue', 'NEW_COLUMN', 'TEXT',
-    'คอลัมน์ใหม่', 0, 1
-);
-```
-
-#### เพิ่ม Business Rule
-
-```sql
-INSERT INTO schema_business_rules (
-    rule_code, rule_name, rule_description,
-    example_correct, severity
-) VALUES (
-    'NEW_RULE', 'กฎใหม่', 'คำอธิบายกฎ',
-    'SELECT ... ถูกต้อง', 'warning'
-);
-```
-
-#### เพิ่ม Semantic Mapping
-
-```sql
-INSERT INTO schema_semantic_mapping (
-    keyword, keyword_type, target_column,
-    target_condition, description
-) VALUES (
-    'คำย่อใหม่', 'abbreviation', 'column_name',
-    "= 'value'", 'คำอธิบาย'
-);
-```
-
-#### เพิ่ม Golden Example
-
-```sql
-INSERT INTO golden_examples (
-    question_pattern, expected_sql, category
-) VALUES (
-    'รูปแบบคำถาม', 'SELECT ...', 'category_name'
-);
-```
-
-### 2. การ Refresh Cache
+### การ Refresh Cache
 
 หลังจากเพิ่ม/แก้ไขข้อมูลในตารางเหล่านี้ ต้อง refresh cache:
 
 ```python
 from app.services.schema_service import SchemaService
+from app.db.session import config_engine, business_engine
 
-service = SchemaService(db_path="revenue.sqlite")
+service = SchemaService(db_engine=config_engine, business_engine=business_engine)
 service.refresh_cache()
-
-# System prompt จะถูกสร้างใหม่ครั้งถัดไป
 ```
 
-### 3. การตรวจสอบความถูกต้อง
+### การเพิ่มข้อมูล
 
-```python
-# ตรวจสอบว่ามี metadata ครบหรือไม่
-metadata = service.get_schema_metadata("revenue")
-print(f"Total columns: {len(metadata)}")
+ใช้ Admin API endpoints หรือ Admin Agent tools:
 
-# ตรวจสอบ business rules ที่ active
-rules = service.get_business_rules()
-active_rules = [r for r in rules if r['is_active'] == 1]
-print(f"Active rules: {len(active_rules)}")
-
-# ตรวจสอบ semantic mappings
-mappings = service.get_semantic_mappings()
-print(f"Total mappings: {len(mappings)}")
-
-# ตรวจสอบ golden examples
-from app.services.matcha_examples import MatchaExamplesService
-matcha_service = MatchaExamplesService(db_path="revenue.sqlite")
-golden = matcha_service.get_golden_examples()
-print(f"Total golden examples: {len(golden)}")
-```
+- `/admin/schema/columns` — จัดการ schema_metadata
+- `/admin/rules` — จัดการ business rules
+- `/admin/mappings` — จัดการ semantic mappings
+- `/admin/contexts` — จัดการ contexts
+- `/admin/examples` — จัดการ golden examples
+- `/admin/hierarchy` — จัดการ hierarchy
 
 ---
 
 ## ไฟล์ที่เกี่ยวข้อง
 
-### Database Schema
-
-- [`database/schema_metadata.sql`](../database/schema_metadata.sql) - สคริปต์สร้างตาราง
-- [`database/migrations/003_schema_metadata.sql`](../database/migrations/003_schema_metadata.sql) - Migration
-
 ### Models
 
-- [`app/models/schema_models.py`](../app/models/schema_models.py) - SQLAlchemy models สำหรับ schema_metadata, schema_business_rules, schema_semantic_mapping
-- [`app/models/feedback_models.py`](../app/models/feedback_models.py) - SQLAlchemy model สำหรับ golden_examples
+- [`app/models/schema_models.py`](../app/models/schema_models.py) — SchemaMetadata, SchemaSemanticMapping, SchemaBusinessRule, ViewColumnMapping
+- [`app/models/feedback_models.py`](../app/models/feedback_models.py) — GoldenExample
 
 ### Services
 
-- [`app/services/schema_service.py`](../app/services/schema_service.py) - Service หลักสำหรับจัดการ schema metadata
-- [`app/services/matcha_examples.py`](../app/services/matcha_examples.py) - Service สำหรับจัดการ golden examples
+- [`app/services/schema/service.py`](../app/services/schema/service.py) — SchemaService facade
+- [`app/services/schema/prompt_builder.py`](../app/services/schema/prompt_builder.py) — prompt construction
+- [`app/services/schema/keyword_index.py`](../app/services/schema/keyword_index.py) — keyword_value_index builder
+- [`app/services/schema/view_manager.py`](../app/services/schema/view_manager.py) — view_column_mappings
+- [`app/services/schema/context_store.py`](../app/services/schema/context_store.py) — schema_contexts
+- [`app/services/hierarchy_service.py`](../app/services/hierarchy_service.py) — master_hierarchy/values
+- [`app/services/vanna_service.py`](../app/services/vanna_service.py) — RAG consumption of this guide
 
 ### API Endpoints
 
-- [`app/api/v1/admin.py`](../app/api/v1/admin.py) - Admin API สำหรับจัดการทั้ง 4 ตาราง
+- [`app/api/v1/admin/`](../app/api/v1/admin/) — Admin CRUD package (schema.py, mappings.py, rules.py, etc.)
 
-### Scripts
+### Migrations
 
-- [`scripts/populate_schema_metadata.py`](../scripts/populate_schema_metadata.py) - สคริปต์เติมข้อมูล metadata
+- [`database/migrations/003_schema_metadata.sql`](../database/migrations/003_schema_metadata.sql) — schema_metadata
+- [`database/migrations/004_admin_config.sql`](../database/migrations/004_admin_config.sql) — schema_contexts
+- [`database/migrations/009_master_hierarchy.sql`](../database/migrations/009_master_hierarchy.sql) — master_hierarchy/values
+- [`database/migrations/020_update_schema_contexts.sql`](../database/migrations/020_update_schema_contexts.sql) — instruction_th/en
+- [`database/migrations/030_add_rule_pattern_columns.sql`](../database/migrations/030_add_rule_pattern_columns.sql) — pattern/check_type
 
 ---
 
 ## อ่านเพิ่มเติม
 
-- [DATA_DICTIONARY.md](DATA_DICTIONARY.md) - พจนานุกรมข้อมูลฉบับเต็ม
-- [CLAUDE.md](../CLAUDE.md) - คำแนะนำสำหรับ AI Coding Assistants
-- [Admin-UI-and-Schema-Analyzer-Plan.md](Admin-UI-and-Schema-Analyzer-Plan.md) - แผน Admin UI และ Schema Analyzer
+- [DATA_DICTIONARY.md](DATA_DICTIONARY.md) — พจนานุกรมข้อมูลของ business tables/views
+- [CLAUDE.md](../CLAUDE.md) — คำแนะนำสำหรับ AI Coding Assistants

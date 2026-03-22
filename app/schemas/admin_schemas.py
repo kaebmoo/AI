@@ -328,6 +328,40 @@ class QueryPatternListResponse(BaseModel):
 
 
 # ==========================
+# API Keys
+# ==========================
+
+class APIKeyCreateRequest(BaseModel):
+    """Request schema for creating an API key"""
+    name: str = Field(..., description="Human-readable name for the key")
+    scopes: str = Field("query", description="Comma-separated scopes: query, admin, full")
+    rate_limit_per_minute: int = Field(30, ge=1, le=1000)
+    rate_limit_per_day: int = Field(1000, ge=1, le=100000)
+
+
+class APIKeyResponse(BaseModel):
+    """Response schema for API key metadata"""
+    id: int
+    key_prefix: str
+    name: str
+    user_id: int
+    scopes: str
+    rate_limit_per_minute: int
+    rate_limit_per_day: int
+    is_active: bool
+    last_used_at: Optional[str] = None
+    created_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class APIKeyCreateResponse(APIKeyResponse):
+    """Response schema for API key creation, including raw key shown once"""
+    raw_key: str = Field(..., description="Full API key — shown ONCE")
+
+
+# ==========================
 # Schema Contexts
 # ==========================
 

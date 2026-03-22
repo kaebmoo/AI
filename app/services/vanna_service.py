@@ -1,4 +1,4 @@
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 
 # Lazy imports — vanna/chromadb may not be available in all environments (e.g., Python 3.14)
 try:
@@ -16,8 +16,6 @@ except Exception:
 
 from app.services.schema_service import SchemaService
 from sqlalchemy import text
-from app.models.feedback_models import GoldenExample
-from app.models.schema_models import SchemaSemanticMapping, SchemaBusinessRule, SchemaMetadata
 
 class VannaService(ChromaDB_VectorStore, VannaBase):
     def __init__(self, config: Dict[str, Any] = None):
@@ -95,7 +93,10 @@ class VannaService(ChromaDB_VectorStore, VannaBase):
             ddl = None
             try:
                 with service.engine.connect() as conn:
-                    res = conn.execute(text(f"SELECT sql FROM sqlite_master WHERE type='table' AND name='{table}'"))
+                    res = conn.execute(
+                        text("SELECT sql FROM sqlite_master WHERE type='table' AND name = :table_name"),
+                        {"table_name": table},
+                    )
                     row = res.fetchone()
                     if row:
                         ddl = row[0]
@@ -183,8 +184,8 @@ class VannaService(ChromaDB_VectorStore, VannaBase):
                     if dist <= threshold:
                         filtered_docs.append(doc)
             else:
-                 # Fallback if distances not returned (unlikely)
-                 filtered_docs = documents
+                # Fallback if distances not returned (unlikely)
+                filtered_docs = documents
                  
             return filtered_docs
         except Exception as e:
@@ -222,7 +223,16 @@ class VannaService(ChromaDB_VectorStore, VannaBase):
         t_sql = time.perf_counter() - t0
         
         total_time = time.perf_counter() - start_total
-        logger.info(f"Vanna RAG Timing - Total: {total_time:.4f}s | DDL: {t_ddl:.4f}s (n={len(related_ddl)}) | Doc: {t_doc:.4f}s (n={len(related_doc)}) | SQL: {t_sql:.4f}s (n={len(related_sql)})")
+        logger.info(
+            "Vanna RAG Timing - Total: %.4fs | DDL: %.4fs (n=%s) | Doc: %.4fs (n=%s) | SQL: %.4fs (n=%s)",
+            total_time,
+            t_ddl,
+            len(related_ddl),
+            t_doc,
+            len(related_doc),
+            t_sql,
+            len(related_sql),
+        )
         
         return {
             "ddl": related_ddl,
