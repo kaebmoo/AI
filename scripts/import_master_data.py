@@ -20,6 +20,7 @@ Design:
 """
 
 import csv
+import os
 import sqlite3
 import json
 import re
@@ -29,7 +30,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-DB_PATH = "nt_fi_report.sqlite"
+DB_PATH = os.environ.get("BUSINESS_DB_PATH", "nt_fi_report.sqlite")
 
 # --------------------------------------------------------------------------
 # Master data source file patterns (newest version = no date suffix)

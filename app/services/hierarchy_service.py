@@ -18,6 +18,11 @@ logger = logging.getLogger(__name__)
 
 
 def _get_db_path() -> str:
+    """Get config DB path (master_hierarchy lives in config.db)."""
+    config_url = settings.CONFIG_DB_URL
+    if config_url:
+        return config_url.replace("sqlite:///", "").replace("sqlite://", "")
+    # Fallback: same as DATABASE_URL (backward compatible)
     return settings.DATABASE_URL.replace("sqlite:///", "").replace("sqlite://", "")
 
 

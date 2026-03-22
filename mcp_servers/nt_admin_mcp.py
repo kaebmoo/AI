@@ -35,22 +35,26 @@ _db_session = None
 
 
 def _get_db():
-    """Get a SQLAlchemy session for admin operations."""
+    """Get a SQLAlchemy session for admin operations (config DB).
+
+    Admin tools query config tables (schema_contexts, mappings, rules, etc.)
+    which live in config.db, NOT app.db or business DB.
+    """
     global _db_session
     if _db_session is None:
         from sqlalchemy import create_engine
         from sqlalchemy.orm import Session
 
-        db_path = os.environ.get("DATABASE_URL", "")
-        if db_path.startswith("sqlite:///"):
-            db_path = db_path
-        else:
-            # Default: look for nt_fi_report.sqlite in project root
+        # Priority: CONFIG_DB_URL > DATABASE_URL > hardcoded fallback
+        db_url = os.environ.get("CONFIG_DB_URL", "")
+        if not db_url:
+            db_url = os.environ.get("DATABASE_URL", "")
+        if not db_url:
             project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            db_file = os.path.join(project_root, "nt_fi_report.sqlite")
-            db_path = f"sqlite:///{db_file}"
+            db_file = os.path.join(project_root, "config.db")
+            db_url = f"sqlite:///{db_file}"
 
-        engine = create_engine(db_path)
+        engine = create_engine(db_url)
         _db_session = Session(engine)
 
     return _db_session

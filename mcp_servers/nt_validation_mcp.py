@@ -234,160 +234,33 @@ def calculate_confidence_score(
 ) -> str:
     """
     คำนวณ confidence score สำหรับคำตอบ
-
-    Args:
-        sql_validation_passed: SQL syntax ถูกต้อง
-        sql_issues_count: จำนวน issues จาก SQL validation
-        sql_warnings_count: จำนวน warnings จาก SQL validation
-        rules_passed: ผ่าน business rules ทั้งหมด
-        rules_violations_count: จำนวน rule violations
-        has_similar_example: มี golden example คล้ายกัน
-        example_similarity: ค่าความคล้าย (0-1)
-        result_row_count: จำนวนแถวผลลัพธ์
-        execution_success: execute สำเร็จหรือไม่
-
-    Returns:
-        JSON with score, level, factors, and recommendation
+    Delegates to ValidationService.calculate_confidence() (single source of truth).
     """
-    score = 0
-    factors = []
-
-    # =========================================================
-    # Factor 1: SQL Syntax Validation (25 points)
-    # =========================================================
-    if sql_validation_passed:
-        syntax_score = 25
-        factors.append({
-            "name": "SQL Syntax",
-            "score": syntax_score,
-            "max": 25,
-            "detail": "SQL ถูกต้องตามไวยากรณ์"
-        })
-    else:
-        syntax_score = max(0, 25 - (sql_issues_count * 10))
-        factors.append({
-            "name": "SQL Syntax",
-            "score": syntax_score,
-            "max": 25,
-            "detail": f"พบปัญหา {sql_issues_count} รายการ"
-        })
-    score += syntax_score
-
-    # =========================================================
-    # Factor 2: Business Rules (25 points)
-    # =========================================================
-    if rules_passed:
-        rules_score = 25
-        factors.append({
-            "name": "Business Rules",
-            "score": rules_score,
-            "max": 25,
-            "detail": "ปฏิบัติตามกฎธุรกิจครบถ้วน"
-        })
-    else:
-        rules_score = max(0, 25 - (rules_violations_count * 12))
-        factors.append({
-            "name": "Business Rules",
-            "score": rules_score,
-            "max": 25,
-            "detail": f"มีกฎที่ไม่ตรง {rules_violations_count} ข้อ"
-        })
-    score += rules_score
-
-    # =========================================================
-    # Factor 3: Similar Example Match (25 points)
-    # =========================================================
-    if has_similar_example:
-        if example_similarity >= 0.8:
-            example_score = 25
-            detail = "พบตัวอย่างที่ตรงกันมาก"
-        elif example_similarity >= 0.5:
-            example_score = 18
-            detail = "พบตัวอย่างที่คล้ายกัน"
-        else:
-            example_score = 12
-            detail = "พบตัวอย่างที่เกี่ยวข้อง"
-    else:
-        example_score = 8  # Base score for novel queries
-        detail = "ไม่พบตัวอย่างที่คล้ายกัน (Query ใหม่)"
-
-    factors.append({
-        "name": "Example Match",
-        "score": example_score,
-        "max": 25,
-        "detail": detail
-    })
-    score += example_score
-
-    # =========================================================
-    # Factor 4: Execution Success & Results (25 points)
-    # =========================================================
-    if execution_success:
-        if result_row_count > 0:
-            exec_score = 25
-            detail = f"ได้ผลลัพธ์ {result_row_count} รายการ"
-        else:
-            exec_score = 15
-            detail = "Execute สำเร็จ แต่ไม่มีข้อมูล"
-    else:
-        exec_score = 0
-        detail = "Execute ไม่สำเร็จ"
-
-    factors.append({
-        "name": "Execution",
-        "score": exec_score,
-        "max": 25,
-        "detail": detail
-    })
-    score += exec_score
-
-    # =========================================================
-    # Penalty for warnings
-    # =========================================================
-    warning_penalty = min(10, sql_warnings_count * 2)
-    if warning_penalty > 0:
-        score = max(0, score - warning_penalty)
-        factors.append({
-            "name": "Warning Penalty",
-            "score": -warning_penalty,
-            "max": 0,
-            "detail": f"หักคะแนนจาก {sql_warnings_count} warnings"
-        })
-
-    # =========================================================
-    # Determine Level and Recommendation
-    # =========================================================
-    if score >= 85:
-        level = "high"
-        level_th = "สูง"
-        recommendation = "สามารถใช้ข้อมูลนี้ได้เลย"
-        color = "green"
-    elif score >= 65:
-        level = "medium"
-        level_th = "ปานกลาง"
-        recommendation = "ควรตรวจสอบข้อมูลก่อนใช้งาน"
-        color = "yellow"
-    elif score >= 40:
-        level = "low"
-        level_th = "ต่ำ"
-        recommendation = "ควรตรวจสอบ SQL และผลลัพธ์อย่างละเอียด"
-        color = "orange"
-    else:
-        level = "very_low"
-        level_th = "ต่ำมาก"
-        recommendation = "ไม่แนะนำให้ใช้โดยตรง กรุณาปรึกษาผู้เชี่ยวชาญ"
-        color = "red"
-
-    return json.dumps({
-        "score": score,
-        "max_score": 100,
-        "level": level,
-        "level_th": level_th,
-        "color": color,
-        "factors": factors,
-        "recommendation": recommendation,
-        "summary": f"ความมั่นใจ {score}% ({level_th})"
-    }, ensure_ascii=False)
+    try:
+        from app.services.validation_service import ValidationService
+        vs = ValidationService()
+        result = vs.calculate_confidence(
+            sql_validation_passed=sql_validation_passed,
+            sql_issues_count=sql_issues_count,
+            sql_warnings_count=sql_warnings_count,
+            rules_passed=rules_passed,
+            rules_violations_count=rules_violations_count,
+            has_similar_example=has_similar_example,
+            example_similarity=example_similarity,
+            result_row_count=result_row_count,
+            execution_success=execution_success,
+        )
+        return json.dumps(result, ensure_ascii=False)
+    except Exception as e:
+        logger.warning(f"ValidationService confidence delegation failed: {e}")
+        # Minimal fallback
+        score = 50
+        return json.dumps({
+            "score": score, "max_score": 100,
+            "level": "medium", "level_th": "ปานกลาง", "color": "yellow",
+            "factors": [], "recommendation": "ไม่สามารถคำนวณได้ — fallback",
+            "summary": f"ความมั่นใจ {score}% (ปานกลาง)"
+        }, ensure_ascii=False)
 
 
 # =========================================================
@@ -402,92 +275,21 @@ def validate_result(
 ) -> str:
     """
     ตรวจสอบผลลัพธ์จาก query
-
-    Args:
-        query_result: ผลลัพธ์จาก query (list of dicts)
-        expected_columns: คอลัมน์ที่คาดหวัง (optional)
-        context_name: ชื่อ context
-
-    Returns:
-        JSON with validation results
+    Delegates to ValidationService.validate_result() (single source of truth).
     """
-    issues = []
-    warnings = []
-    stats = {}
-
-    if not query_result:
+    try:
+        from app.services.validation_service import ValidationService
+        vs = ValidationService()
+        result = vs.validate_result(query_result, expected_columns, context_name)
+        return json.dumps(result, ensure_ascii=False, default=str)
+    except Exception as e:
+        logger.warning(f"ValidationService validate_result delegation failed: {e}")
         return json.dumps({
             "valid": True,
             "issues": [],
-            "warnings": [{"message": "ไม่มีข้อมูลในผลลัพธ์"}],
-            "stats": {"row_count": 0}
+            "warnings": [{"message": f"Validation error: {e}"}],
+            "stats": {"row_count": len(query_result) if query_result else 0}
         }, ensure_ascii=False)
-
-    row_count = len(query_result)
-    stats["row_count"] = row_count
-
-    # Get columns from first row
-    if row_count > 0:
-        actual_columns = list(query_result[0].keys())
-        stats["column_count"] = len(actual_columns)
-        stats["columns"] = actual_columns
-
-        # Check expected columns
-        if expected_columns:
-            missing = set(expected_columns) - set(actual_columns)
-            if missing:
-                warnings.append({
-                    "message": f"คอลัมน์ที่คาดหวังไม่พบ: {', '.join(missing)}"
-                })
-
-        # Check for null values
-        null_columns = []
-        for col in actual_columns:
-            null_count = sum(1 for row in query_result if row.get(col) is None)
-            if null_count > 0:
-                null_columns.append(f"{col} ({null_count} nulls)")
-
-        if null_columns:
-            warnings.append({
-                "message": f"พบค่า NULL: {', '.join(null_columns)}"
-            })
-
-        # Check for suspicious values (very large or negative revenue)
-        for col in actual_columns:
-            col_lower = col.lower()
-            if 'revenue' in col_lower or 'amount' in col_lower or 'value' in col_lower:
-                values = [row.get(col) for row in query_result if isinstance(row.get(col), (int, float))]
-                if values:
-                    max_val = max(values)
-                    min_val = min(values)
-                    stats[f"{col}_max"] = max_val
-                    stats[f"{col}_min"] = min_val
-                    stats[f"{col}_sum"] = sum(values)
-
-                    # Warning for very large values (potential unit error)
-                    if max_val > 1e12:  # > 1 trillion
-                        warnings.append({
-                            "message": f"ค่า {col} สูงมาก ({max_val:,.0f}) - ตรวจสอบหน่วยข้อมูล"
-                        })
-
-                    # Warning for negative revenue
-                    if min_val < 0 and 'revenue' in col_lower:
-                        warnings.append({
-                            "message": f"พบค่า {col} ติดลบ ({min_val:,.2f})"
-                        })
-
-    # Check row count warnings
-    if row_count > 1000:
-        warnings.append({
-            "message": f"ผลลัพธ์มีจำนวนมาก ({row_count:,} รายการ) - ควรกรองข้อมูลเพิ่มเติม"
-        })
-
-    return json.dumps({
-        "valid": len(issues) == 0,
-        "issues": issues,
-        "warnings": warnings,
-        "stats": stats
-    }, ensure_ascii=False)
 
 
 # =========================================================

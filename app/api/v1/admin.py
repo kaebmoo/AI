@@ -20,7 +20,6 @@ from app.schemas.admin_schemas import (
     BusinessRuleCreate, BusinessRuleUpdate, BusinessRuleResponse, BusinessRuleListResponse,
     GoldenExampleCreate, GoldenExampleUpdate, GoldenExampleResponse, GoldenExampleListResponse,
     SchemaContextCreate, SchemaContextUpdate, SchemaContextResponse, SchemaContextListResponse,
-    SchemaContextCreate, SchemaContextUpdate, SchemaContextResponse, SchemaContextListResponse,
     ViewCreateRequest, ViewMappingSuggestion,
     ViewColumnMappingResponse, ViewMappingsListResponse, PropagateMetadataResponse,
     ViewSummaryItem, ViewSummaryListResponse,
@@ -48,7 +47,7 @@ router = APIRouter()
 def list_schema_columns(
     table_name: Optional[str] = Query(None, description="Filter by table name"),
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_config_db)
 ):
     """
     List all column metadata.
@@ -70,7 +69,7 @@ def list_schema_columns(
 def get_schema_column(
     column_id: int,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_config_db)
 ):
     """
     Get single column metadata.
@@ -86,7 +85,7 @@ def get_schema_column(
 def create_schema_column(
     data: SchemaMetadataCreate,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db),
+    db: Session = Depends(deps.get_config_db),
     schema_service: SchemaService = Depends(deps.get_schema_service)
 ):
     """
@@ -121,7 +120,7 @@ def update_schema_column(
     column_id: int,
     data: SchemaMetadataUpdate,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db),
+    db: Session = Depends(deps.get_config_db),
     schema_service: SchemaService = Depends(deps.get_schema_service)
 ):
     """
@@ -151,7 +150,7 @@ def update_schema_column(
 def delete_schema_column(
     column_id: int,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db),
+    db: Session = Depends(deps.get_config_db),
     schema_service: SchemaService = Depends(deps.get_schema_service)
 ):
     """
@@ -182,7 +181,7 @@ def list_semantic_mappings(
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
     context_name: Optional[str] = Query(None, description="Filter by context (None=all, 'revenue', 'transfer price', etc.)"),
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_config_db)
 ):
     """
     List all semantic mappings.
@@ -213,7 +212,7 @@ def list_semantic_mappings(
 def get_semantic_mapping(
     mapping_id: int,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_config_db)
 ):
     """
     Get single semantic mapping.
@@ -229,7 +228,7 @@ def get_semantic_mapping(
 def create_semantic_mapping(
     data: SemanticMappingCreate,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db),
+    db: Session = Depends(deps.get_config_db),
     schema_service: SchemaService = Depends(deps.get_schema_service)
 ):
     """
@@ -263,7 +262,7 @@ def update_semantic_mapping(
     mapping_id: int,
     data: SemanticMappingUpdate,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db),
+    db: Session = Depends(deps.get_config_db),
     schema_service: SchemaService = Depends(deps.get_schema_service)
 ):
     """
@@ -305,7 +304,7 @@ def update_semantic_mapping(
 def delete_semantic_mapping(
     mapping_id: int,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db),
+    db: Session = Depends(deps.get_config_db),
     schema_service: SchemaService = Depends(deps.get_schema_service)
 ):
     """
@@ -335,7 +334,7 @@ def list_business_rules(
     severity: Optional[str] = Query(None, description="Filter by severity (error, warning, info)"),
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_config_db)
 ):
     """
     List all business rules.
@@ -362,7 +361,7 @@ def list_business_rules(
 def get_business_rule(
     rule_id: int,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_config_db)
 ):
     """
     Get single business rule.
@@ -378,7 +377,7 @@ def get_business_rule(
 def create_business_rule(
     data: BusinessRuleCreate,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db),
+    db: Session = Depends(deps.get_config_db),
     schema_service: SchemaService = Depends(deps.get_schema_service)
 ):
     """
@@ -412,7 +411,7 @@ def update_business_rule(
     rule_id: int,
     data: BusinessRuleUpdate,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db),
+    db: Session = Depends(deps.get_config_db),
     schema_service: SchemaService = Depends(deps.get_schema_service)
 ):
     """
@@ -442,7 +441,7 @@ def update_business_rule(
 def delete_business_rule(
     rule_id: int,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db),
+    db: Session = Depends(deps.get_config_db),
     schema_service: SchemaService = Depends(deps.get_schema_service)
 ):
     """
@@ -467,7 +466,7 @@ def delete_business_rule(
 def toggle_business_rule(
     rule_id: int,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db),
+    db: Session = Depends(deps.get_config_db),
     schema_service: SchemaService = Depends(deps.get_schema_service)
 ):
     """
@@ -501,7 +500,7 @@ def list_golden_examples(
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_config_db)
 ):
     """
     List all golden examples.
@@ -535,7 +534,7 @@ def list_golden_examples(
 @router.get("/golden-examples/categories", response_model=List[str])
 def list_golden_example_categories(
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_config_db)
 ):
     """
     List all golden example categories.
@@ -551,7 +550,7 @@ def list_golden_example_categories(
 def get_golden_example(
     example_id: int,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_config_db)
 ):
     """
     Get single golden example.
@@ -567,7 +566,7 @@ def get_golden_example(
 def create_golden_example(
     data: GoldenExampleCreate,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db),
+    db: Session = Depends(deps.get_config_db),
     ai_service: AIService = Depends(deps.get_ai_service)
 ):
     """
@@ -596,7 +595,7 @@ def update_golden_example(
     example_id: int,
     data: GoldenExampleUpdate,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db),
+    db: Session = Depends(deps.get_config_db),
     ai_service: AIService = Depends(deps.get_ai_service)
 ):
     """
@@ -620,8 +619,8 @@ def update_golden_example(
     # To fully "update" in Vanna (remove old), we'd need to re-index or use IDs, 
     # but Vanna legacy uses simple vector addition. Adding the correct one is usually enough to override semantic search.
     if example.is_active:
-         ai_service.train(question=example.question_pattern, sql_query=example.expected_sql)
-         
+        ai_service.train(question=example.question_pattern, sql_query=example.expected_sql)
+
     clear_query_cache()
     return GoldenExampleResponse.model_validate(example)
 
@@ -630,7 +629,7 @@ def update_golden_example(
 def delete_golden_example(
     example_id: int,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_config_db)
 ):
     """
     Delete golden example.
@@ -980,7 +979,7 @@ def _ensure_metadata_rows(db: Session, table_name: str, column_names: list, serv
 def batch_update_dimension_families(
     request: DimensionFamilyBatchUpdate,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db),
+    db: Session = Depends(deps.get_config_db),
     service: SchemaService = Depends(deps.get_schema_service)
 ):
     """Batch save dimension_group assignments to DB."""
@@ -1018,7 +1017,7 @@ def auto_populate_dimension_families(
     table_name: str = Query(..., description="Table/view name"),
     overwrite: bool = Query(False, description="Overwrite existing DB assignments"),
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db),
+    db: Session = Depends(deps.get_config_db),
     service: SchemaService = Depends(deps.get_schema_service)
 ):
     """Run auto-detect and save results to DB."""
@@ -1065,14 +1064,15 @@ def auto_populate_dimension_families(
 @router.post("/refresh-cache", response_model=dict)
 def refresh_schema_cache(
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_config_db)
 ):
     """
     Refresh schema cache after metadata updates.
     Admin only.
     """
     from app.services.schema_service import SchemaService
-    schema_service = SchemaService(db)
+    from app.db.session import config_engine, business_engine
+    schema_service = SchemaService(db_engine=config_engine, business_engine=business_engine)
     schema_service.refresh_cache()
 
     # Also clear query result cache
@@ -1094,16 +1094,17 @@ from app.schemas.admin_schemas import DashboardStatsResponse
 @router.get("/stats", response_model=DashboardStatsResponse)
 def get_dashboard_stats(
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    config_db: Session = Depends(deps.get_config_db),
+    app_db: Session = Depends(deps.get_db),
 ):
     """
     Get dashboard statistics.
-    Admin only.
+    Admin only. Queries both app DB (users) and config DB (mappings, rules).
     """
-    total_users = db.query(User).count()
-    total_mappings = db.query(SchemaSemanticMapping).count()
-    total_rules = db.query(SchemaBusinessRule).count()
-    total_columns = db.query(SchemaMetadata).count()
+    total_users = app_db.query(User).count()
+    total_mappings = config_db.query(SchemaSemanticMapping).count()
+    total_rules = config_db.query(SchemaBusinessRule).count()
+    total_columns = config_db.query(SchemaMetadata).count()
 
     return DashboardStatsResponse(
         total_users=total_users,
@@ -1159,7 +1160,7 @@ def clear_query_cache_endpoint(
 @router.get("/config/ai", response_model=dict)
 def get_ai_config(
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_config_db)
 ):
     """
     Get complete AI configuration (providers, models, etc).
@@ -1167,7 +1168,7 @@ def get_ai_config(
 
     Returns config with fallback to .env if database not configured.
     """
-    config_service = AdminConfigService(db)
+    config_service = AdminConfigService()  # Uses config DB
     ai_config = config_service.get_ai_config()
     feature_flags = config_service.get_feature_flags()
 
@@ -1182,7 +1183,7 @@ def get_ai_config(
 def update_ai_config(
     config_update: dict,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_config_db)
 ):
     """
     Update AI configuration.
@@ -1200,7 +1201,7 @@ def update_ai_config(
         "matcha_api_url": "https://aigateway.ntictsolution.com/v1/chat/completions"
     }
     """
-    config_service = AdminConfigService(db)
+    config_service = AdminConfigService()  # Uses config DB
 
     success = config_service.update_ai_config(
         updates=config_update,
@@ -1222,7 +1223,7 @@ def update_ai_config(
 
 @router.get("/config/ai/providers", response_model=List[dict])
 def get_active_providers(
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_config_db)
 ):
     """
     Get list of ACTIVE AI providers (enabled by admin).
@@ -1243,7 +1244,7 @@ def get_active_providers(
         ...
     ]
     """
-    config_service = AdminConfigService(db)
+    config_service = AdminConfigService()  # Uses config DB
     providers = config_service.get_active_providers()
 
     return providers
@@ -1253,7 +1254,7 @@ def get_active_providers(
 def get_available_models(
     provider: str,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_config_db)
 ):
     """
     Get available models for a specific provider.
@@ -1268,7 +1269,7 @@ def get_available_models(
     if provider not in ["claude", "gemini", "matcha"]:
         raise HTTPException(status_code=400, detail="Invalid provider")
 
-    config_service = AdminConfigService(db)
+    config_service = AdminConfigService()  # Uses config DB
     models = config_service.get_available_models(provider)
 
     return models
@@ -1277,13 +1278,13 @@ def get_available_models(
 @router.get("/config/features", response_model=dict)
 def get_feature_flags(
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_config_db)
 ):
     """
     Get all feature flags.
     Admin only.
     """
-    config_service = AdminConfigService(db)
+    config_service = AdminConfigService()  # Uses config DB
     return config_service.get_feature_flags()
 
 
@@ -1292,7 +1293,7 @@ def toggle_feature_flag(
     feature_name: str,
     enabled: bool,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_config_db)
 ):
     """
     Toggle a feature flag.
@@ -1302,7 +1303,7 @@ def toggle_feature_flag(
         feature_name: Feature to toggle (rag_enabled, auto_context_detection, debug_mode, etc)
         enabled: Enable or disable
     """
-    config_service = AdminConfigService(db)
+    config_service = AdminConfigService()  # Uses config DB
 
     success = config_service.toggle_feature(
         feature_name=feature_name,
@@ -1324,7 +1325,7 @@ def toggle_feature_flag(
 @router.post("/config/cache/clear", response_model=dict)
 def clear_config_cache(
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_config_db)
 ):
     """
     Clear configuration cache.
@@ -1332,7 +1333,7 @@ def clear_config_cache(
 
     Use this after making direct database changes.
     """
-    config_service = AdminConfigService(db)
+    config_service = AdminConfigService()  # Uses config DB
     config_service.clear_cache()
 
     return {
@@ -1385,13 +1386,13 @@ def rebuild_keyword_index(
 def list_providers(
     include_inactive: bool = Query(False, description="Include inactive providers"),
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_config_db)
 ):
     """
     Get all AI providers.
     Admin only.
     """
-    config_service = AdminConfigService(db)
+    config_service = AdminConfigService()  # Uses config DB
     providers = config_service.get_all_providers(include_inactive=include_inactive)
 
     return providers
@@ -1401,7 +1402,7 @@ def list_providers(
 def create_provider(
     data: dict,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_config_db)
 ):
     """
     Create a new AI provider.
@@ -1418,7 +1419,7 @@ def create_provider(
         "priority": 15
     }
     """
-    config_service = AdminConfigService(db)
+    config_service = AdminConfigService()  # Uses config DB
 
     success = config_service.create_provider(
         provider_id=data.get("id"),
@@ -1441,13 +1442,13 @@ def update_provider(
     provider_id: str,
     data: dict,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_config_db)
 ):
     """
     Update an existing AI provider.
     Admin only.
     """
-    config_service = AdminConfigService(db)
+    config_service = AdminConfigService()  # Uses config DB
 
     success = config_service.update_provider(
         provider_id=provider_id,
@@ -1470,13 +1471,13 @@ def update_provider(
 def delete_provider(
     provider_id: str,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_config_db)
 ):
     """
     Delete an AI provider (CASCADE deletes models).
     Admin only.
     """
-    config_service = AdminConfigService(db)
+    config_service = AdminConfigService()  # Uses config DB
 
     success = config_service.delete_provider(provider_id)
 
@@ -1495,13 +1496,13 @@ def list_models(
     provider_id: str,
     include_inactive: bool = Query(False, description="Include inactive models"),
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_config_db)
 ):
     """
     Get all models for a provider.
     Admin only.
     """
-    config_service = AdminConfigService(db)
+    config_service = AdminConfigService()  # Uses config DB
     models = config_service.get_models_by_provider(provider_id, include_inactive=include_inactive)
 
     return models
@@ -1512,7 +1513,7 @@ def create_model(
     provider_id: str,
     data: dict,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_config_db)
 ):
     """
     Create a new AI model for a provider.
@@ -1529,7 +1530,7 @@ def create_model(
         "priority": 5
     }
     """
-    config_service = AdminConfigService(db)
+    config_service = AdminConfigService()  # Uses config DB
 
     success = config_service.create_model(
         provider_id=provider_id,
@@ -1554,13 +1555,13 @@ def update_model(
     model_id: int,
     data: dict,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_config_db)
 ):
     """
     Update an existing AI model.
     Admin only.
     """
-    config_service = AdminConfigService(db)
+    config_service = AdminConfigService()  # Uses config DB
 
     success = config_service.update_model(
         model_pk_id=model_id,
@@ -1584,13 +1585,13 @@ def update_model(
 def delete_model(
     model_id: int,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_config_db)
 ):
     """
     Delete an AI model.
     Admin only.
     """
-    config_service = AdminConfigService(db)
+    config_service = AdminConfigService()  # Uses config DB
 
     success = config_service.delete_model(model_id)
 
@@ -1887,7 +1888,7 @@ def list_data_warnings(
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
     context_name: Optional[str] = Query(None, description="Filter by context"),
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db),
+    db: Session = Depends(deps.get_config_db),
 ):
     """List all data warnings. Admin only."""
     query = db.query(DataWarningModel)
@@ -1909,7 +1910,7 @@ def list_data_warnings(
 def get_data_warning(
     warning_id: int,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db),
+    db: Session = Depends(deps.get_config_db),
 ):
     """Get single data warning. Admin only."""
     warning = db.query(DataWarningModel).filter(DataWarningModel.id == warning_id).first()
@@ -1922,7 +1923,7 @@ def get_data_warning(
 def create_data_warning(
     data: DataWarningCreate,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db),
+    db: Session = Depends(deps.get_config_db),
 ):
     """Create new data warning. Admin only."""
     existing = db.query(DataWarningModel).filter(DataWarningModel.code == data.code).first()
@@ -1943,7 +1944,7 @@ def update_data_warning(
     warning_id: int,
     data: DataWarningUpdate,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db),
+    db: Session = Depends(deps.get_config_db),
 ):
     """Update data warning. Admin only."""
     warning = db.query(DataWarningModel).filter(DataWarningModel.id == warning_id).first()
@@ -1966,7 +1967,7 @@ def update_data_warning(
 def delete_data_warning(
     warning_id: int,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db),
+    db: Session = Depends(deps.get_config_db),
 ):
     """Delete data warning. Admin only."""
     warning = db.query(DataWarningModel).filter(DataWarningModel.id == warning_id).first()
@@ -1996,7 +1997,7 @@ def list_query_patterns(
     tier: Optional[str] = Query(None, description="Filter by tier (simple/complex)"),
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db),
+    db: Session = Depends(deps.get_config_db),
 ):
     """List all query complexity patterns. Admin only."""
     query = db.query(QueryComplexityPattern)
@@ -2016,7 +2017,7 @@ def list_query_patterns(
 def get_query_pattern(
     pattern_id: int,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db),
+    db: Session = Depends(deps.get_config_db),
 ):
     """Get single query pattern. Admin only."""
     pattern = db.query(QueryComplexityPattern).filter(QueryComplexityPattern.id == pattern_id).first()
@@ -2029,7 +2030,7 @@ def get_query_pattern(
 def create_query_pattern(
     data: QueryPatternCreate,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db),
+    db: Session = Depends(deps.get_config_db),
 ):
     """Create new query pattern. Admin only."""
     existing = db.query(QueryComplexityPattern).filter(
@@ -2053,7 +2054,7 @@ def update_query_pattern(
     pattern_id: int,
     data: QueryPatternUpdate,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db),
+    db: Session = Depends(deps.get_config_db),
 ):
     """Update query pattern. Admin only."""
     pattern = db.query(QueryComplexityPattern).filter(QueryComplexityPattern.id == pattern_id).first()
@@ -2075,7 +2076,7 @@ def update_query_pattern(
 def delete_query_pattern(
     pattern_id: int,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db),
+    db: Session = Depends(deps.get_config_db),
 ):
     """Delete query pattern. Admin only."""
     pattern = db.query(QueryComplexityPattern).filter(QueryComplexityPattern.id == pattern_id).first()
@@ -2105,7 +2106,7 @@ def get_query_logs(
     thumbs_down_only: bool = Query(False, description="Only show thumbs-down queries"),
     has_error: bool = Query(False, description="Only show queries with errors"),
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db),
+    db: Session = Depends(deps.get_db),  # App DB — chat_history, user_feedback
 ):
     """Get paginated query logs with optional feedback join. Admin only."""
     from app.models.chat import ChatHistory
@@ -2194,7 +2195,7 @@ def get_query_logs(
 def get_feedback_details(
     feedback_id: int,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db),
+    db: Session = Depends(deps.get_db),  # App DB — user_feedback, chat_history
 ):
     """Get full feedback details including complete ChatHistory."""
     from app.models.chat import ChatHistory
@@ -2234,7 +2235,7 @@ def get_feedback_details(
 def get_query_analytics(
     period: str = Query("7d", description="Period: 7d, 30d, 90d"),
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db),
+    db: Session = Depends(deps.get_db),  # App DB — chat_history, user_feedback
 ):
     """Get aggregated query analytics: error rates, top failures, context distribution."""
     from app.models.chat import ChatHistory
@@ -2354,7 +2355,7 @@ def list_onboardable_views(
 async def onboard_context(
     request: OnboardingRequest,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_config_db)
 ):
     """Full context onboarding pipeline: inspect → analyze (LLM) → generate config → (apply)."""
     from app.services.context_onboarding import ContextOnboardingService
@@ -2407,7 +2408,8 @@ async def onboard_context(
                 issues=validation.issues if hasattr(validation, 'issues') else [],
             )
             try:
-                schema_service = SchemaService(db)
+                from app.db.session import config_engine as _ce, business_engine as _be
+                schema_service = SchemaService(db_engine=_ce, business_engine=_be)
                 schema_service.refresh_cache()
             except Exception:
                 pass
@@ -2456,7 +2458,7 @@ async def inspect_context(
 async def apply_sql_statements(
     request: ApplySqlRequest,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_config_db)
 ):
     """Apply pre-generated SQL statements directly (no LLM re-run)."""
     from app.services.context_onboarding import ContextOnboardingService
@@ -2482,7 +2484,8 @@ async def apply_sql_statements(
             "issues": validation.issues if hasattr(validation, 'issues') else [],
         }
         try:
-            schema_service = SchemaService(db)
+            from app.db.session import config_engine as _ce2, business_engine as _be2
+            schema_service = SchemaService(db_engine=_ce2, business_engine=_be2)
             schema_service.refresh_cache()
         except Exception:
             pass
@@ -2557,7 +2560,7 @@ class APIKeyCreateResponse(APIKeyResponse):
 def create_api_key(
     request: APIKeyCreateRequest,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db),
+    db: Session = Depends(deps.get_db),  # App DB — api_keys table
 ):
     """Create a new API key. The raw key is returned ONCE and cannot be retrieved later."""
     from app.services.api_key_service import APIKeyService, KEY_PREFIX
@@ -2589,7 +2592,7 @@ def create_api_key(
 @router.get("/api-keys", response_model=list)
 def list_api_keys(
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db),
+    db: Session = Depends(deps.get_db),  # App DB — api_keys table
 ):
     """List all API keys for the current user."""
     from app.services.api_key_service import APIKeyService, KEY_PREFIX
@@ -2612,7 +2615,7 @@ def list_api_keys(
 def revoke_api_key(
     key_id: int,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db),
+    db: Session = Depends(deps.get_db),  # App DB — api_keys table
 ):
     """Revoke (soft delete) an API key."""
     from app.services.api_key_service import APIKeyService, KEY_PREFIX
@@ -2628,7 +2631,7 @@ def get_api_key_usage(
     key_id: int,
     days: int = Query(30, ge=1, le=365),
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db),
+    db: Session = Depends(deps.get_db),  # App DB — api_key_usage table
 ):
     """Get usage statistics for an API key."""
     from app.services.api_key_service import APIKeyService, KEY_PREFIX

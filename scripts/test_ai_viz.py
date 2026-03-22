@@ -4,6 +4,7 @@ import os
 import sys
 import json
 from dotenv import load_dotenv
+from runtime_config import get_business_db_path
 
 # Add app to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -75,7 +76,7 @@ async def test_visualization_logic():
     """
     
     import sqlite3
-    db_path = "/Users/seal/Documents/GitHub/AI/nt_fi_report.sqlite"
+    db_path = get_business_db_path()
     
     print(f"🔹 Connecting to DB: {db_path}")
     
@@ -121,10 +122,9 @@ async def test_visualization_logic():
 
         if isinstance(result, str):
             try:
-                 # Try to parse if it returned a string
-                 result = json.loads(result)
-            except:
-                 pass
+                result = json.loads(result)
+            except json.JSONDecodeError:
+                pass
 
         if isinstance(result, dict):
             print(json.dumps(result, indent=2, ensure_ascii=False))
@@ -140,7 +140,7 @@ async def test_visualization_logic():
             if viz in ['grouped_bar', 'stacked_bar', 'multi_line']:
                 print("  -> ✅ GOOD: Recommended multi-series chart")
             else:
-                 print(f"  -> ⚠️ WARNING: {viz} might be too simple for this data")
+                print(f"  -> ⚠️ WARNING: {viz} might be too simple for this data")
                  
             cat = config.get('category_column')
             series = config.get('series_column')
@@ -149,7 +149,7 @@ async def test_visualization_logic():
             if cat in ['month', 'year'] and series == 'section':
                 print("  -> ✅ EXCELLENT: Time on X-axis, Section as Series")
             elif cat == 'section' and series in ['month', 'year']:
-                 print("  -> ⚠️ ACCEPTABLE: Section on X-axis, Time as Series (Comparison by Section)")
+                print("  -> ⚠️ ACCEPTABLE: Section on X-axis, Time as Series (Comparison by Section)")
             else:
                 print(f"  -> ❓ CHECK: ({cat} vs {series})")
                 

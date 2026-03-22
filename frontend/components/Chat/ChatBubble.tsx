@@ -229,11 +229,7 @@ export const ChatBubble = ({ message, onTrain }: ChatBubbleProps) => {
                     : 'bg-white dark:bg-gray-800 border-[0.5px] border-gray-200 dark:border-gray-700 rounded-tl-md shadow-slate-200/50 dark:shadow-none'
                     }`}
                 style={!isUser ? {
-                    shadowColor: '#000',
-                    shadowOffset: { width: 0, height: 2 },
-                    shadowOpacity: 0.05,
-                    shadowRadius: 8,
-                    elevation: 2,
+                    boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.05)',
                 } : {}}
             >
                 {isUser ? (

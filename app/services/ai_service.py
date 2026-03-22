@@ -30,7 +30,8 @@ from app.services.mcp_client import MCPClientService
 try:
     from app.services.vanna_service import VannaService
     HAS_VANNA = True
-except ImportError:
+except Exception:
+    # chromadb/pydantic can fail with ConfigError, not just ImportError
     HAS_VANNA = False
     VannaService = None
 from app.config import settings
@@ -69,7 +70,8 @@ def _load_hierarchies_from_db() -> Dict[str, List[Dict]]:
 
     try:
         import sqlite3
-        db_path = settings.DATABASE_URL.replace("sqlite:///", "").replace("sqlite://", "")
+        config_url = settings.CONFIG_DB_URL or settings.DATABASE_URL
+        db_path = config_url.replace("sqlite:///", "").replace("sqlite://", "")
         conn = sqlite3.connect(db_path)
         rows = conn.execute(
             "SELECT context_name, level, level_label_th, level_label_en, level_columns, detection_keywords "
@@ -450,9 +452,9 @@ class AIService:
             # Build prompt for AI
             try:
                 from app.services.schema_service import SchemaService
-                from app.config import settings as app_settings
-                db_path = app_settings.DATABASE_URL.replace("sqlite:///", "").replace("sqlite://", "")
-                temp_schema = SchemaService(db_path=db_path)
+                from app.db.session import config_engine
+                from app.db.session import business_engine as _biz_eng
+                temp_schema = SchemaService(db_engine=config_engine, business_engine=_biz_eng)
                 context_info = temp_schema.get_context_info(context_name)
                 if context_info:
                     context_table = context_info.get('main_view', context_name)
@@ -1101,9 +1103,9 @@ Error: {last_error.get('error', '')}
         # --- Phase 1: Dictionary-based extraction (handles Thai without word segmentation) ---
         try:
             from app.services.schema_service import SchemaService
-            from app.config import settings as app_settings
-            db_path = app_settings.DATABASE_URL.replace("sqlite:///", "").replace("sqlite://", "")
-            schema_svc = SchemaService(db_path=db_path)
+            from app.db.session import config_engine
+            from app.db.session import business_engine as _biz_eng2
+            schema_svc = SchemaService(db_engine=config_engine, business_engine=_biz_eng2)
             known_terms = schema_svc.get_known_terms(context_name)
 
             # Scan question for longest matches
@@ -1198,8 +1200,9 @@ Error: {last_error.get('error', '')}
             return results
 
         try:
-            db_path = app_settings.DATABASE_URL.replace("sqlite:///", "").replace("sqlite://", "")
-            schema_svc = SchemaService(db_path=db_path)
+            from app.db.session import config_engine as _cfg_engine
+            from app.db.session import business_engine as _biz_eng3
+            schema_svc = SchemaService(db_engine=_cfg_engine, business_engine=_biz_eng3)
 
             # Phase 2: also search master_hierarchy_values aliases
             try:

@@ -56,24 +56,26 @@ class NTAIBot:
 
     Usage (polling)::
 
-        bot = NTAIBot(token="BOT_TOKEN", db_url="sqlite:///./nt_fi_report.sqlite")
+        bot = NTAIBot(token="BOT_TOKEN", db_url="sqlite:///./app.db")
         bot.start_polling()
 
     Usage (webhook)::
 
-        bot = NTAIBot(token="BOT_TOKEN", db_url="sqlite:///./nt_fi_report.sqlite")
+        bot = NTAIBot(token="BOT_TOKEN", db_url="sqlite:///./app.db")
         webhook_app = bot.get_webhook_app()
         # Mount: main_app.mount("/telegram", webhook_app)
     """
 
-    def __init__(self, token: str, db_url: Optional[str] = None):
+    def __init__(self, token: str, db_url: Optional[str] = None, webhook_secret: str = ""):
         """
         Args:
             token: Telegram Bot API token.
             db_url: SQLAlchemy database URL.  Falls back to ``settings.DATABASE_URL``.
+            webhook_secret: Secret token for webhook verification (X-Telegram-Bot-Api-Secret-Token).
         """
         self.token = token
         self.db_url = db_url
+        self._webhook_secret = webhook_secret
         self._application = None
 
     # ── Lazy application builder ──────────────────────────────────────────
@@ -154,7 +156,13 @@ class NTAIBot:
 
         @webhook_app.post("/webhook")
         async def webhook_handler(request: Request):
-            """Receive Telegram webhook updates."""
+            """Receive Telegram webhook updates with secret verification."""
+            # Verify webhook secret (Telegram sends this header if configured)
+            if self._webhook_secret:
+                token = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+                if token != self._webhook_secret:
+                    return JSONResponse({"ok": False, "error": "Forbidden"}, status_code=403)
+
             try:
                 from telegram import Update
 

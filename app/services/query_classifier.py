@@ -50,8 +50,8 @@ _PATTERNS_CACHE_TTL = 3600  # 1 hour
 def _load_patterns_from_db() -> Optional[Dict[str, List[str]]]:
     """Load active patterns from query_complexity_patterns table."""
     try:
-        from app.db.session import SessionLocal
-        db = SessionLocal()
+        from app.db.session import ConfigSessionLocal
+        db = ConfigSessionLocal()
         try:
             from sqlalchemy import text
             rows = db.execute(text(

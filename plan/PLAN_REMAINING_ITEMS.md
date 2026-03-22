@@ -1,8 +1,47 @@
+<!-- markdownlint-disable MD024 MD022 MD031 MD032 MD058 MD060 -->
+
 # NT AI Assistant — Remaining Items (Post Plans 0-5)
 
 **Created:** 2026-03-19
-**Source:** Verification audit + code review
-**Status:** งานค้างทั้งหมดจาก Plans 0-5 ที่ implement แล้วแต่ยังไม่ครบ
+**Updated:** 2026-03-21 late (re-verified, post-fix)
+**Source:** Verification audit + code review + PLAN_AUDIT_CHECKLIST_2026-03-21.md
+**Status:** REMAIN-1 ถึง REMAIN-6 implemented แล้ว, scheduler tests ถูกเพิ่มแล้ว, และ `pytest -q` ผ่านทั้งชุด
+
+## Re-verified status of post-audit fixes
+
+- `vanna_service.py`: lazy import guard now catches the real Python 3.14 import failure path and no longer blocks test collection
+- `ai_service.py`: eager import path now falls back safely when Vanna/ChromaDB is unavailable
+- `scheduler.py`: old `days` bug is gone and auto-apply flow exists in code
+- `validation_service.py`: DB rules query now reads `pattern` + `check_type`, and confidence factors include `detail` again
+- `nt_validation_mcp.py`: both `calculate_confidence_score()` and `validate_result()` delegate to `ValidationService`
+- `telegram/bot.py`: webhook secret verification added
+- `main.py`: shutdown cleanup added
+- `query_engine.py`: `_build_provider_kwargs` now uses `ConfigSessionLocal`
+- `nt_admin_mcp.py`: `_get_db()` now prefers `CONFIG_DB_URL`
+- `SchemaService`: default constructor now auto-imports engines from `app.db.session`
+
+## Current verification result
+
+- `pytest -q` = `363 passed, 3 skipped`
+- Vanna-related unit tests now pass in Python 3.14
+- Validation MCP tests now pass after restoring `detail` in confidence factors
+- Telegram integration/unit tests now pass
+- `tests/unit/test_scheduler.py` ถูกเพิ่มแล้วและผ่าน
+
+## Remaining follow-up work
+
+ตอนนี้ไม่เหลือ blocker จากรายการ REMAIN เดิมแล้ว และงาน scheduler tests ถูกปิดแล้ว เหลืองาน hardening เชิง code quality เป็นหลัก:
+
+1. เก็บ static analysis warnings ใน API layer
+
+### Scheduler test status
+
+ไฟล์ `tests/unit/test_scheduler.py` ถูกเพิ่มแล้วเพื่อพิสูจน์ behavior ของ scheduler โดยตรง ครอบคลุมอย่างน้อย:
+
+- start/stop scheduler ไม่สร้าง task ซ้ำ
+- `_job_auto_analyze()` ปิด DB session เสมอ
+- `_apply_high_confidence_fixes()` apply เฉพาะ fix ที่เข้าเงื่อนไข
+- `_job_config_gc()` log issue ได้โดยไม่ทำให้ scheduler ล้ม
 
 ---
 
@@ -11,11 +50,13 @@
 **Plan:** 3 | **Priority:** ⚡ High | **Effort:** 2-3 ชม.
 
 ### ปัญหา
+
 `audit_service.py` สร้างแล้ว แต่ไม่มี admin tool ไหนเรียก `log_change()` — ทำให้ไม่มี audit trail
 
 ### ไฟล์ที่ต้องแก้
+
 | ไฟล์ | แก้อะไร |
-|------|---------|
+| ------ | --------- |
 | `app/tools/admin/mapping_tools.py` | AddMappingTool.execute() — เพิ่ม audit log หลัง db.commit() |
 | `app/tools/admin/rule_tools.py` | AddRuleTool.execute() — เพิ่ม audit log หลัง db.commit() |
 | `app/tools/admin/example_tools.py` | AddExampleTool.execute() — เพิ่ม audit log หลัง db.commit() |

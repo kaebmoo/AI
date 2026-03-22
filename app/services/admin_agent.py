@@ -293,7 +293,7 @@ class AdminAgent:
         from app.providers.registry import provider_registry
         from app.services.admin_config_service import AdminConfigService
 
-        config_service = AdminConfigService(self.db)
+        config_service = AdminConfigService()  # Uses config DB session
         provider_name = config_service.get_config("default_ai_provider", "matcha")
 
         provider_kwargs = {}

@@ -1,11 +1,12 @@
 import requests
 import sys
 import time
-import json
 import sqlite3
+from runtime_config import get_api_base_url, get_business_db_path
 
 # Configuration
-BASE_URL = "http://localhost:8000/api/v1"
+BASE_URL = get_api_base_url()
+DB_PATH = get_business_db_path()
 EMAIL = f"test_rules_{int(time.time())}@ntplc.co.th"
 
 def setup_user_and_token():
@@ -14,7 +15,7 @@ def setup_user_and_token():
     
     # In DEV: Inject known OTP hash
     time.sleep(1) 
-    conn = sqlite3.connect("nt_fi_report.sqlite")
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     import hashlib
     otp_hash = hashlib.sha256("111111".encode()).hexdigest()
@@ -89,7 +90,7 @@ def test_filtering_rule():
     if "BUSINESS_GROUP" in sql or "business_group" in sql_lower:
         print("✅ SUCCESS: Correctly used 'BUSINESS_GROUP'")
     else:
-         print("❌ FAIL: Did not use 'BUSINESS_GROUP'")
+        print("❌ FAIL: Did not use 'BUSINESS_GROUP'")
 
 if __name__ == "__main__":
     test_filtering_rule()

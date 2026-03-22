@@ -1,9 +1,13 @@
+import logging
+
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from app.config import settings
 from app.core.logging import setup_logging
+
+logger = logging.getLogger(__name__)
 from app.core.middleware import RequestIDMiddleware
 from app.core.rate_limiter import limiter, RateLimitExceeded, _rate_limit_exceeded_handler
 from app.services.mcp_client import MCPClientService
@@ -17,9 +21,74 @@ async def lifespan(app: FastAPI):
     mcp_client = MCPClientService()
     async with mcp_client.connected():
         app.state.mcp_client = mcp_client
+
+        # Startup: Background scheduler (auto-analyzer, config GC)
+        try:
+            from app.services.scheduler import BackgroundScheduler
+            from app.db.session import SessionLocal
+            scheduler = BackgroundScheduler(db_factory=SessionLocal)
+            scheduler.start()
+            app.state.scheduler = scheduler
+        except Exception as e:
+            logger.warning(f"Background scheduler init failed: {e}")
+
+        # Startup: Telegram bot (if configured)
+        if settings.TELEGRAM_BOT_TOKEN:
+            try:
+                from app.telegram.bot import NTAIBot
+                bot = NTAIBot(
+                    token=settings.TELEGRAM_BOT_TOKEN,
+                    db_url=settings.DATABASE_URL,
+                    webhook_secret=settings.TELEGRAM_WEBHOOK_SECRET,
+                )
+                app.state.telegram_bot = bot
+
+                if settings.TELEGRAM_BOT_MODE == "webhook":
+                    webhook_app = bot.get_webhook_app()
+                    app.mount("/telegram", webhook_app)
+                    logger.info("Telegram bot mounted as webhook at /telegram/webhook")
+                else:
+                    import asyncio
+                    asyncio.create_task(_start_telegram_polling(bot))
+                    logger.info("Telegram bot starting in polling mode")
+            except ImportError:
+                logger.warning("python-telegram-bot not installed — Telegram bot disabled")
+            except Exception as e:
+                logger.warning(f"Telegram bot init failed: {e}")
+
         yield
-        
-    # Shutdown handled by context manager exit
+
+        # Shutdown: stop scheduler
+        if hasattr(app.state, 'scheduler'):
+            try:
+                await app.state.scheduler.stop()
+            except Exception as e:
+                logger.warning(f"Scheduler shutdown error: {e}")
+
+        # Shutdown: stop Telegram polling
+        if hasattr(app.state, 'telegram_bot'):
+            try:
+                bot_app = app.state.telegram_bot.application
+                if bot_app._running:
+                    await bot_app.updater.stop()
+                    await bot_app.stop()
+                    await bot_app.shutdown()
+            except Exception as e:
+                logger.warning(f"Telegram bot shutdown error: {e}")
+
+
+async def _start_telegram_polling(bot):
+    """Start Telegram polling in background (non-blocking)."""
+    import asyncio
+    try:
+        await asyncio.sleep(2)  # Wait for app to finish startup
+        app_instance = bot.application
+        await app_instance.initialize()
+        await app_instance.start()
+        await app_instance.updater.start_polling(drop_pending_updates=True)
+        logger.info("Telegram bot polling started")
+    except Exception as e:
+        logger.error(f"Telegram polling failed: {e}")
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -35,7 +104,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Set all CORS enabled origins
 # Configure CORS_ORIGINS in .env as comma-separated list of allowed origins
-cors_origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
+cors_origins = settings.get_cors_origins()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,

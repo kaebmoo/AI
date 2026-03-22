@@ -191,10 +191,10 @@ class TelegramDispatcher:
         """Show available data contexts as inline buttons."""
         try:
             from app.services.schema_service import SchemaService
-            from app.config import settings
+            from app.db.session import config_engine
 
-            db_path = settings.DATABASE_URL.replace("sqlite:///", "").replace("sqlite://", "")
-            schema_service = SchemaService(db_path=db_path)
+            from app.db.session import business_engine
+            schema_service = SchemaService(db_engine=config_engine, business_engine=business_engine)
             contexts = schema_service.get_all_contexts()
         except Exception as e:
             logger.error(f"Failed to load contexts: {e}")

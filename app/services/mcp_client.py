@@ -36,12 +36,19 @@ class MCPClientService:
         base_path = os.getcwd()
         env = os.environ.copy()
 
-        # IMPORTANT: Pass database URL to MCP servers
-        # Pydantic loads .env but doesn't set env vars, so we need to pass it explicitly
+        # IMPORTANT: Pass BUSINESS DB path to MCP servers (not app DB!)
+        # MCP servers need the business data DB (revenue, expense views)
+        # not the app DB (users, sessions, chats)
         try:
             from app.config import settings
-            if settings.DATABASE_URL and 'METADATA_DB_URL' not in env:
-                env['METADATA_DB_URL'] = settings.DATABASE_URL
+            if 'METADATA_DB_URL' not in env:
+                bp = settings.BUSINESS_DB_PATH
+                if bp:
+                    if not bp.startswith("sqlite"):
+                        bp = f"sqlite:///{os.path.abspath(bp)}"
+                    env['METADATA_DB_URL'] = bp
+                elif settings.DATABASE_URL:
+                    env['METADATA_DB_URL'] = settings.DATABASE_URL
         except ImportError:
             pass
 

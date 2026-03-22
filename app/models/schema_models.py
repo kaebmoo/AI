@@ -8,10 +8,10 @@ Used by Admin API and SchemaService for AI context management.
 from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, Index, UniqueConstraint
 from sqlalchemy.dialects.sqlite import JSON
 from datetime import datetime
-from app.db.base_class import Base
+from app.db.base_class import ConfigBase
 
 
-class SchemaMetadata(Base):
+class SchemaMetadata(ConfigBase):
     """
     Stores column metadata for AI context.
     Contains information about each column in the revenue database.
@@ -65,7 +65,7 @@ class SchemaMetadata(Base):
         }
 
 
-class SchemaSemanticMapping(Base):
+class SchemaSemanticMapping(ConfigBase):
     """
     Maps keywords (abbreviations, business terms) to SQL conditions.
     Enables AI to understand abbreviations like 'นป.' or terms like 'อสังหาริมทรัพย์'.
@@ -116,7 +116,7 @@ class SchemaSemanticMapping(Base):
         return f"{self.target_column} {self.target_condition}"
 
 
-class ViewColumnMapping(Base):
+class ViewColumnMapping(ConfigBase):
     """
     Maps view columns back to source table columns.
     Enables metadata propagation from raw tables to views.
@@ -151,7 +151,7 @@ class ViewColumnMapping(Base):
         }
 
 
-class SchemaBusinessRule(Base):
+class SchemaBusinessRule(ConfigBase):
     """
     SQL generation rules for AI.
     Contains rules like 'use || instead of CONCAT in SQLite'.
@@ -193,7 +193,7 @@ class SchemaBusinessRule(Base):
         }
 
 
-class DataWarningModel(Base):
+class DataWarningModel(ConfigBase):
     """
     Data warning definitions for data quality alerts.
     Replaces hardcoded DATA_WARNINGS list in warning_detector.py.
@@ -232,7 +232,7 @@ class DataWarningModel(Base):
         }
 
 
-class QueryComplexityPattern(Base):
+class QueryComplexityPattern(ConfigBase):
     """
     Query complexity patterns for tier-based cost control.
     Replaces hardcoded COMPLEX_PATTERNS/SIMPLE_PATTERNS in query_classifier.py.

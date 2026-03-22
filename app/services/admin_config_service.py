@@ -21,11 +21,28 @@ logger = logging.getLogger(__name__)
 class AdminConfigService:
     """
     Manages configuration with database + .env fallback.
+    Reads from config DB (admin_config, ai_providers, ai_models tables).
     """
 
-    def __init__(self, db: Session):
-        self.db = db
+    def __init__(self, db: Session = None):
+        """
+        Args:
+            db: Config DB session. If None, creates one from ConfigSessionLocal.
+                After DB separation, admin_config lives in config.db, not app.db.
+        """
+        if db is not None:
+            self.db = db
+            self._owns_session = False
+        else:
+            from app.db.session import ConfigSessionLocal
+            self.db = ConfigSessionLocal()
+            self._owns_session = True
         self._cache = {}  # Simple in-memory cache
+
+    def close(self):
+        """Close owned session if we created it."""
+        if self._owns_session and self.db:
+            self.db.close()
 
     # ============================================================
     # Core Config Methods (with fallback)

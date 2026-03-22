@@ -18,13 +18,14 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 
-from app.db.base_class import Base
+from app.db.base_class import Base, ConfigBase
 from app.models.user import User
 from app.models.session import UserSession
 from app.models.otp import OTPRequest
 from app.models.chat import ChatHistory
 from app.models.feedback_models import UserFeedback, GoldenExample
 from app.models.conversation import Conversation  # Required for FK resolution
+from app.models.schema_models import SchemaMetadata, SchemaSemanticMapping, SchemaBusinessRule  # Config models
 from app.config import settings
 
 
@@ -41,7 +42,9 @@ def test_engine():
         poolclass=StaticPool  # Share single connection across all uses
     )
     Base.metadata.create_all(bind=engine)
+    ConfigBase.metadata.create_all(bind=engine)  # Config models too (tests use single DB)
     yield engine
+    ConfigBase.metadata.drop_all(bind=engine)
     Base.metadata.drop_all(bind=engine)
 
 

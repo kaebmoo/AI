@@ -38,8 +38,8 @@ _WARNINGS_CACHE_TTL = 3600  # 1 hour
 def _load_warnings_from_db() -> Optional[List[Dict]]:
     """Load active warning definitions from data_warnings table."""
     try:
-        from app.db.session import SessionLocal
-        db = SessionLocal()
+        from app.db.session import ConfigSessionLocal
+        db = ConfigSessionLocal()
         try:
             from app.models.schema_models import DataWarningModel
             rows = db.query(DataWarningModel).filter(

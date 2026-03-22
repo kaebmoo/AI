@@ -15,12 +15,13 @@ class Settings(BaseSettings):
 
     PROJECT_NAME: str = "NT AI Assistant"
     API_V1_STR: str = "/api/v1"
+    ENVIRONMENT: str = "development"
     
     # Database
     # Support both SQLite and PostgreSQL
     # Example SQLite: sqlite:///./sql_app.db
     # Example Postgres: postgresql://user:pass@localhost:5432/db
-    DATABASE_URL: str = "sqlite:///./nt_fi_report.sqlite"
+    DATABASE_URL: str = "sqlite:///./app.db"
 
     # Database Engine - explicit engine type for SQL syntax rules
     # Options: "sqlite", "postgresql", "mssql"
@@ -40,12 +41,12 @@ class Settings(BaseSettings):
         )
 
     # Redis
-    REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_URL: Optional[str] = None
 
     # CORS
     # Comma-separated list of allowed origins, e.g. "https://app.nt.th,https://admin.nt.th"
     # Use "*" only for local development (not recommended for production)
-    CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
+    CORS_ORIGINS: str = ""
 
     # Security
     # REQUIRED: Set a strong random secret key in production via SECRET_KEY env variable
@@ -110,9 +111,9 @@ class Settings(BaseSettings):
 
     METADATA_DB_PATH: Optional[str] = None # Defaults to DATABASE_URL path if None
 
-    # Business DB path (for onboarding, inspection, etc.)
-    # If not set, falls back to extracting path from DATABASE_URL
-    BUSINESS_DB_PATH: Optional[str] = None
+    # Business DB path (for onboarding, inspection, MCP query execution)
+    # Points to the database with business data (revenue, expense, etc.)
+    BUSINESS_DB_PATH: str = "./nt_fi_report.sqlite"
 
     
     # Allowed Domains
@@ -142,5 +143,30 @@ class Settings(BaseSettings):
     LOGIN_RATE_LIMIT: str = "5/minute"
     API_RATE_LIMIT: str = "60/minute"
     CHAT_RATE_LIMIT: str = "20/minute"
+
+    # Telegram Bot
+    TELEGRAM_BOT_TOKEN: str = ""
+    TELEGRAM_BOT_MODE: str = "polling"  # "polling" or "webhook"
+    TELEGRAM_WEBHOOK_SECRET: str = ""
+    TELEGRAM_WEBHOOK_URL: str = ""  # Full URL for webhook mode
+
+    # DB Separation (Plan 5)
+    # Config DB for schema_contexts, mappings, rules, etc.
+    # Empty = use same DB as DATABASE_URL (backward compatible)
+    CONFIG_DB_URL: str = ""
+
+    def is_production_like(self) -> bool:
+        return self.ENVIRONMENT.lower() in {"production", "staging"}
+
+    def get_redis_url(self) -> str:
+        if self.REDIS_URL:
+            return self.REDIS_URL
+        raise ValueError("REDIS_URL is not configured. Set it in the environment before starting worker or cache-backed services.")
+
+    def get_cors_origins(self) -> List[str]:
+        origins = [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
+        if not origins and self.is_production_like():
+            raise ValueError("CORS_ORIGINS is not configured. Set allowed frontend origins in the environment for staging/production.")
+        return origins
 
 settings = Settings()

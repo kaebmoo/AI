@@ -427,8 +427,8 @@ async def chat(
     history, previous_chats = _get_conversation_history(db, conversation_id, current_user.id)
 
     # 4. Resolve context (with history-aware logic)
-    db_path = settings.DATABASE_URL.replace("sqlite:///", "").replace("sqlite://", "")
-    schema_service = SchemaService(db_path=db_path)
+    from app.db.session import config_engine, business_engine
+    schema_service = SchemaService(db_engine=config_engine, business_engine=business_engine)
     context_name, history = _resolve_context_with_history(
         request.context, request.question, previous_chats, history, schema_service
     )
@@ -487,8 +487,8 @@ async def chat_stream(
 
     history, previous_chats = _get_conversation_history(db, conversation_id, current_user.id)
 
-    db_path = settings.DATABASE_URL.replace("sqlite:///", "").replace("sqlite://", "")
-    schema_service = SchemaService(db_path=db_path)
+    from app.db.session import config_engine as _cfg_engine, business_engine as _biz_engine
+    schema_service = SchemaService(db_engine=_cfg_engine, business_engine=_biz_engine)
     context_name, history = _resolve_context_with_history(
         request.context, request.question, previous_chats, history, schema_service
     )

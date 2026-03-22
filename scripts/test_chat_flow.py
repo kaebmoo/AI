@@ -1,9 +1,10 @@
 import requests
-import sys
 import time
 
+from runtime_config import get_api_base_url
+
 # Configuration
-BASE_URL = "http://localhost:8000/api/v1"
+BASE_URL = get_api_base_url()
 email = f"test_chat_{int(time.time())}@example.com"
 
 def test_chat_flow():
@@ -26,7 +27,7 @@ def test_chat_flow():
         # 2. Verify
         print(f"2. Verifying OTP: {otp}...")
         verify_response = requests.post(f"{BASE_URL}/auth/verify", json={
-            "email": EMAIL,
+            "email": email,
             "otp": otp,
             "platform": "web"
         })

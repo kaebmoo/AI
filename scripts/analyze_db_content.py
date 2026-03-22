@@ -1,8 +1,9 @@
 
 import sqlite3
-import sys
 
-DB_PATH = '/Users/seal/Documents/GitHub/AI/nt_fi_report.sqlite'
+from runtime_config import get_business_db_path
+
+DB_PATH = get_business_db_path()
 
 def print_table(headers, rows):
     # Calculate column widths

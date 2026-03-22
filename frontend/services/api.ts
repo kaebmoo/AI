@@ -10,8 +10,23 @@ const DEV_API_URL = Platform.select({
     default: 'http://localhost:8000/api/v1',
 });
 
+const resolveApiBaseUrl = () => {
+    const configuredUrl = process.env.EXPO_PUBLIC_API_URL?.trim();
+    if (configuredUrl) {
+        return configuredUrl.replace(/\/$/, '');
+    }
+
+    if (process.env.NODE_ENV !== 'production') {
+        return DEV_API_URL;
+    }
+
+    throw new Error('EXPO_PUBLIC_API_URL must be configured for production builds.');
+};
+
+export const API_BASE_URL = resolveApiBaseUrl();
+
 const api = axios.create({
-    baseURL: process.env.EXPO_PUBLIC_API_URL || DEV_API_URL,
+    baseURL: API_BASE_URL,
     headers: {
         'Content-Type': 'application/json',
     },

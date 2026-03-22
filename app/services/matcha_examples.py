@@ -18,7 +18,7 @@ def _get_latest_year(db_path: str = None) -> int:
     if not db_path:
         try:
             from app.config import settings
-            db_path = settings.DATABASE_URL.replace("sqlite:///", "").replace("sqlite://", "")
+            db_path = settings.BUSINESS_DB_PATH or settings.DATABASE_URL.replace("sqlite:///", "").replace("sqlite://", "")
         except Exception:
             db_path = "nt_fi_report.sqlite"
     try:
@@ -36,7 +36,7 @@ def _get_exclude_condition(db_path: str = None) -> str:
     if not db_path:
         try:
             from app.config import settings
-            db_path = settings.DATABASE_URL.replace("sqlite:///", "").replace("sqlite://", "")
+            db_path = settings.BUSINESS_DB_PATH or settings.DATABASE_URL.replace("sqlite:///", "").replace("sqlite://", "")
         except Exception:
             db_path = "nt_fi_report.sqlite"
     try:
@@ -414,7 +414,7 @@ def get_business_term_reference(db_path: str = None) -> str:
     if not db_path:
         try:
             from app.config import settings
-            db_path = settings.DATABASE_URL.replace("sqlite:///", "").replace("sqlite://", "")
+            db_path = settings.BUSINESS_DB_PATH or settings.DATABASE_URL.replace("sqlite:///", "").replace("sqlite://", "")
         except Exception:
             db_path = "nt_fi_report.sqlite"
 

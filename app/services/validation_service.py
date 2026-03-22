@@ -174,7 +174,7 @@ class ValidationService:
 
         sql = """
             SELECT rule_code, rule_name, rule_description, severity,
-                   example_correct, example_wrong
+                   example_correct, example_wrong, pattern, check_type
             FROM schema_business_rules
             WHERE is_active = 1
         """
@@ -199,6 +199,76 @@ class ValidationService:
             return rules
         except Exception:
             return []
+
+    def validate_result(
+        self,
+        query_result: List[Dict],
+        expected_columns: List[str] = None,
+        context_name: str = "revenue",
+    ) -> Dict[str, Any]:
+        """Validate query results: check columns, nulls, suspicious values.
+
+        Returns:
+            {"valid": bool, "issues": [...], "warnings": [...], "stats": {...}}
+        """
+        issues = []
+        warnings = []
+        stats = {}
+
+        if not query_result:
+            return {
+                "valid": True,
+                "issues": [],
+                "warnings": [{"message": "ไม่มีข้อมูลในผลลัพธ์"}],
+                "stats": {"row_count": 0},
+            }
+
+        row_count = len(query_result)
+        stats["row_count"] = row_count
+
+        if row_count > 0:
+            actual_columns = list(query_result[0].keys())
+            stats["column_count"] = len(actual_columns)
+            stats["columns"] = actual_columns
+
+            # Check expected columns
+            if expected_columns:
+                missing = set(expected_columns) - set(actual_columns)
+                if missing:
+                    warnings.append({"message": f"คอลัมน์ที่คาดหวังไม่พบ: {', '.join(missing)}"})
+
+            # Check for null values
+            for col in actual_columns:
+                null_count = sum(1 for row in query_result if row.get(col) is None)
+                if null_count > 0:
+                    warnings.append({"message": f"พบค่า NULL ใน {col} ({null_count} rows)"})
+
+            # Check for suspicious values
+            for col in actual_columns:
+                col_lower = col.lower()
+                if any(k in col_lower for k in ('revenue', 'amount', 'value')):
+                    values = [row.get(col) for row in query_result if isinstance(row.get(col), (int, float))]
+                    if values:
+                        max_val = max(values)
+                        min_val = min(values)
+                        stats[f"{col}_max"] = max_val
+                        stats[f"{col}_min"] = min_val
+                        stats[f"{col}_sum"] = sum(values)
+
+                        if max_val > 1e12:
+                            warnings.append({"message": f"ค่า {col} สูงมาก ({max_val:,.0f}) - ตรวจสอบหน่วย"})
+                        if min_val < 0 and 'revenue' in col_lower:
+                            warnings.append({"message": f"พบค่า {col} ติดลบ ({min_val:,.2f})"})
+
+        if row_count > 1000:
+            warnings.append({"message": f"ผลลัพธ์มีจำนวนมาก ({row_count:,} rows)"})
+
+        return {
+            "valid": len(issues) == 0,
+            "issues": issues,
+            "warnings": warnings,
+            "stats": stats,
+        }
 
     def detect_warnings(self, sql: str, results: List[Dict] = None) -> List[Dict]:
         """Detect data quality warnings. Delegates to WarningDetector if available."""
@@ -236,28 +306,34 @@ class ValidationService:
 
         # Factor 1: SQL Syntax (25 pts)
         syntax_score = 25 if sql_validation_passed else max(0, 25 - (sql_issues_count * 10))
-        factors.append({"name": "SQL Syntax", "score": syntax_score, "max": 25})
+        syntax_detail = "SQL ถูกต้อง" if sql_validation_passed else f"พบปัญหา {sql_issues_count} รายการ"
+        factors.append({"name": "SQL Syntax", "score": syntax_score, "max": 25, "detail": syntax_detail})
         score += syntax_score
 
         # Factor 2: Business Rules (25 pts)
         rules_score = 25 if rules_passed else max(0, 25 - (rules_violations_count * 12))
-        factors.append({"name": "Business Rules", "score": rules_score, "max": 25})
+        rules_detail = "ผ่านกฎธุรกิจครบ" if rules_passed else f"มีกฎไม่ตรง {rules_violations_count} ข้อ"
+        factors.append({"name": "Business Rules", "score": rules_score, "max": 25, "detail": rules_detail})
         score += rules_score
 
         # Factor 3: Example Match (25 pts)
         if has_similar_example:
             example_score = 25 if example_similarity >= 0.8 else (18 if example_similarity >= 0.5 else 12)
+            example_detail = "พบตัวอย่างที่คล้ายกัน" if example_similarity >= 0.5 else "พบตัวอย่างที่เกี่ยวข้อง"
         else:
             example_score = 8
-        factors.append({"name": "Example Match", "score": example_score, "max": 25})
+            example_detail = "ไม่พบตัวอย่างที่คล้ายกัน"
+        factors.append({"name": "Example Match", "score": example_score, "max": 25, "detail": example_detail})
         score += example_score
 
         # Factor 4: Execution (25 pts)
         if execution_success:
             exec_score = 25 if result_row_count > 0 else 15
+            exec_detail = f"ได้ผลลัพธ์ {result_row_count} รายการ" if result_row_count > 0 else "Execute สำเร็จ แต่ไม่มีข้อมูล"
         else:
             exec_score = 0
-        factors.append({"name": "Execution", "score": exec_score, "max": 25})
+            exec_detail = "Execute ไม่สำเร็จ"
+        factors.append({"name": "Execution", "score": exec_score, "max": 25, "detail": exec_detail})
         score += exec_score
 
         # Penalty for warnings

@@ -1,19 +1,19 @@
 from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey, Enum, Index
 from sqlalchemy.orm import relationship, backref
 from datetime import datetime
-from app.db.base_class import Base
+from app.db.base_class import Base, ConfigBase
 import enum
 
-class GoldenExample(Base):
+class GoldenExample(ConfigBase):  # Config DB table
     __tablename__ = "golden_examples"
     
     id = Column(Integer, primary_key=True, index=True)
-    chat_id = Column(Integer, ForeignKey("chat_history.id"), nullable=True)
+    chat_id = Column(Integer, nullable=True)  # References chat_history.id (no FK — cross-DB)
     question_pattern = Column(Text, nullable=False)
     expected_sql = Column(Text, nullable=False)
     category = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
-    added_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    added_by = Column(Integer, nullable=True)  # References users.id (no FK — cross-DB)
     usage_count = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
 

@@ -16,7 +16,7 @@ Enhanced Features (v2.0):
 - **View Builder Support**: Create simplified SQL Views with AI-powered column mapping
 
 Usage:
-    schema_service = SchemaService(db_path="revenue.db")
+    schema_service = SchemaService(db_engine=config_engine, business_engine=business_engine)
     prompt = schema_service.build_system_prompt(context_name="expense")
 """
 
@@ -35,28 +35,56 @@ logger = logging.getLogger(__name__)
 class SchemaService:
     """Service สำหรับจัดการ schema metadata"""
     
-    def __init__(self, db_engine: Optional[Engine] = None, db_path: str = "nt_fi_report.sqlite"):
+    def __init__(self, db_engine: Optional[Engine] = None, db_path: str = None,
+                 config_engine: Optional[Engine] = None, business_engine: Optional[Engine] = None):
         """
-        Initialize SchemaService
-        
-        Args:
-            db_engine: SQLAlchemy Engine (preferred for cross-db support)
-            db_path: Path to main database (fallback for legacy sqlite3 calls if engine not provided)
-        """
-        self.db_path = db_path
-        self.engine = db_engine
-        
-        # Fallback engine for SQLite if None provided
-        if not self.engine:
-             self.engine = create_engine(f"sqlite:///{db_path}")
+        Initialize SchemaService.
 
-        self.metadata_db_path = db_path # Simplify: Assume metadata is in the same DB for now
+        If no engines provided, auto-imports from app.db.session (3-DB architecture).
+        Explicit engines take priority for dependency injection and testing.
+
+        Args:
+            db_engine: Legacy param — used as config engine if config_engine not provided.
+            db_path: Explicit DB path override (legacy, for scripts only).
+            config_engine: Engine for config DB (schema_contexts, mappings, rules).
+            business_engine: Engine for business DB (inspecting views/tables).
+        """
+        # Resolve engines: explicit params > auto-import from session > db_path fallback
+        if config_engine or db_engine:
+            self.engine = config_engine or db_engine
+            self.config_engine = self.engine
+        else:
+            try:
+                from app.db.session import config_engine as _auto_cfg
+                self.engine = _auto_cfg
+                self.config_engine = _auto_cfg
+            except ImportError:
+                # Standalone script without app context — use db_path
+                _path = db_path or "nt_fi_report.sqlite"
+                self.engine = create_engine(f"sqlite:///{_path}")
+                self.config_engine = self.engine
+
+        if business_engine:
+            self.business_engine = business_engine
+        else:
+            try:
+                from app.db.session import business_engine as _auto_biz
+                self.business_engine = _auto_biz
+            except ImportError:
+                self.business_engine = self.engine
+
+        self.db_path = db_path or "nt_fi_report.sqlite"
+        self.metadata_db_path = self.db_path
         self._cache: Dict[str, Any] = {}
         self._context_cache: Dict[str, Dict] = {}
-    
+
     def _get_connection(self) -> Connection:
-        """Get database connection from engine"""
-        return self.engine.connect()
+        """Get business DB connection (for inspecting views/tables)"""
+        return self.business_engine.connect()
+
+    def _get_config_connection(self) -> Connection:
+        """Get config DB connection (for schema_contexts, mappings, rules, etc.)"""
+        return self.config_engine.connect()
 
     
     # =========================================================
@@ -64,8 +92,8 @@ class SchemaService:
     # =========================================================
 
     def get_all_tables(self) -> List[str]:
-        """List all tables in the database (excluding system tables)"""
-        inspector = inspect(self.engine)
+        """List all tables/views in the business database (excluding system tables)"""
+        inspector = inspect(self.business_engine)
         tables = inspector.get_table_names()
         view_names = inspector.get_view_names()
         
@@ -109,7 +137,8 @@ class SchemaService:
         # DDL Execution
         sql = f"CREATE VIEW {view_name} AS SELECT {select_clause} FROM {source_table}"
 
-        with self.engine.begin() as conn:
+        # Views must be created in business DB (where source tables exist)
+        with self.business_engine.begin() as conn:
             conn.execute(text(f"DROP VIEW IF EXISTS {view_name}"))
             conn.execute(text(sql))
 
@@ -559,7 +588,7 @@ class SchemaService:
     
     def get_table_info(self, table_name: str) -> List[Dict]:
         """Get column information from DB Inspector"""
-        inspector = inspect(self.engine)
+        inspector = inspect(self.business_engine)
         columns = inspector.get_columns(table_name)
         # Standardize return format {'name': 'x', 'type': 'y'}
         return [{'name': col['name'], 'type': str(col['type'])} for col in columns]
@@ -864,7 +893,7 @@ class SchemaService:
     def get_sample_values(self, table_name: str) -> Dict[str, List[str]]:
         """Get sample values for important columns"""
         samples = {}
-        inspector = inspect(self.engine)
+        inspector = inspect(self.business_engine)
         
         # Get actual columns first
         try:
@@ -1434,7 +1463,7 @@ DATE column is Unix Timestamp (ms). Use YEAR/MONTH columns instead."""
         # 2. Fallback: inspect actual table columns (all string-type columns)
         if table_name:
             try:
-                inspector = inspect(self.engine)
+                inspector = inspect(self.business_engine)
                 all_cols = inspector.get_columns(table_name)
                 cols = [c['name'] for c in all_cols if str(c.get('type', '')).upper() in ('TEXT', 'VARCHAR', 'NVARCHAR')]
                 if cols:
@@ -1462,7 +1491,7 @@ DATE column is Unix Timestamp (ms). Use YEAR/MONTH columns instead."""
 
         columns = self.get_searchable_columns(context_name, table_name)
 
-        inspector = inspect(self.engine)
+        inspector = inspect(self.business_engine)
         try:
             actual_cols = set(col['name'] for col in inspector.get_columns(table_name))
         except Exception:
@@ -1603,7 +1632,7 @@ DATE column is Unix Timestamp (ms). Use YEAR/MONTH columns instead."""
 
         columns = self.get_searchable_columns(context_name, table_name)
 
-        inspector = inspect(self.engine)
+        inspector = inspect(self.business_engine)
         try:
             actual_cols = set(col['name'] for col in inspector.get_columns(table_name))
         except Exception:
@@ -1724,14 +1753,17 @@ DATE column is Unix Timestamp (ms). Use YEAR/MONTH columns instead."""
 # Factory Functions
 # =========================================================
 
-def create_claude_prompt(db_path: str, context_name: str = "revenue") -> str:
-    service = SchemaService(db_path=db_path)
+def create_claude_prompt(db_path: str = None, context_name: str = "revenue") -> str:
+    """Create Claude system prompt. Uses 3-DB architecture by default."""
+    service = SchemaService(db_path=db_path) if db_path else SchemaService()
     return service.build_system_prompt(ai_provider="claude", context_name=context_name)
 
-def create_gemini_prompt(db_path: str, context_name: str = "revenue") -> str:
-    service = SchemaService(db_path=db_path)
+def create_gemini_prompt(db_path: str = None, context_name: str = "revenue") -> str:
+    """Create Gemini system prompt. Uses 3-DB architecture by default."""
+    service = SchemaService(db_path=db_path) if db_path else SchemaService()
     return service.build_system_prompt(ai_provider="gemini", context_name=context_name)
 
 if __name__ == "__main__":
-    service = SchemaService(db_path="nt_fi_report.sqlite")
+    # Uses auto-import from app.db.session (3-DB architecture)
+    service = SchemaService()
     print(service.build_system_prompt(context_name="expense")[:500])

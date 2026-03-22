@@ -5,7 +5,7 @@ from app.config import settings
 
 class CacheService:
     def __init__(self, redis_url: Optional[str] = None):
-        self.redis_url = redis_url or (settings.REDIS_URL if hasattr(settings, "REDIS_URL") else "redis://localhost:6379/0")
+        self.redis_url = redis_url or settings.get_redis_url()
         self._redis = None
 
     @property

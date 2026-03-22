@@ -47,8 +47,7 @@ def business_db():
             table_name TEXT, column_name TEXT, display_name_th TEXT,
             description TEXT, is_summable INTEGER DEFAULT 0,
             is_groupable INTEGER DEFAULT 0, special_notes TEXT,
-            is_active INTEGER DEFAULT 1, data_type TEXT,
-            dimension_group TEXT, updated_at TEXT,
+            data_type TEXT, dimension_group TEXT, updated_at TEXT,
             UNIQUE(table_name, column_name)
         )
     """)
@@ -79,15 +78,17 @@ def business_db():
     conn.execute("""
         CREATE TABLE master_hierarchy (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            context_name TEXT, level INTEGER, label_th TEXT,
-            level_columns TEXT, detection_keywords TEXT, is_active INTEGER DEFAULT 1
+            context_name TEXT, level INTEGER, level_label_th TEXT,
+            level_label_en TEXT, level_columns TEXT, detection_keywords TEXT,
+            is_active INTEGER DEFAULT 1, source TEXT, parent_column TEXT, source_view TEXT
         )
     """)
     conn.execute("""
         CREATE TABLE data_warnings (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            warning_name TEXT, warning_description TEXT,
-            sql_check TEXT, is_active INTEGER DEFAULT 1
+            code TEXT, keywords TEXT, exclude_keywords TEXT,
+            columns_to_check TEXT, message TEXT, severity TEXT DEFAULT 'info',
+            context_name TEXT, is_active INTEGER DEFAULT 1
         )
     """)
 
@@ -205,9 +206,10 @@ MOCK_ANALYSIS = {
     ],
     "data_warnings": [
         {
-            "warning_name": "test_warn",
-            "warning_description": "เตือนทดสอบ",
-            "sql_check": "SELECT 1",
+            "code": "test_warn",
+            "message": "เตือนทดสอบ",
+            "severity": "info",
+            "context_name": "test_revenue",
         }
     ],
 }

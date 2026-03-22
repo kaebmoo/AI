@@ -37,7 +37,7 @@ CONFIG_TABLES = [
     "ai_models",
     "keyword_value_index",
     "view_column_mappings",
-    "dimension_families",
+    "unmatched_keywords",
 ]
 
 

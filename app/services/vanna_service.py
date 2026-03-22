@@ -1,6 +1,19 @@
 from typing import List, Dict, Any, Optional
-from vanna.legacy.chromadb.chromadb_vector import ChromaDB_VectorStore
-from vanna.legacy.base import VannaBase
+
+# Lazy imports — vanna/chromadb may not be available in all environments (e.g., Python 3.14)
+try:
+    from vanna.legacy.chromadb.chromadb_vector import ChromaDB_VectorStore
+    from vanna.legacy.base import VannaBase
+    _VANNA_AVAILABLE = True
+except Exception:
+    # Catch ALL errors: ImportError, ConfigError (pydantic.v1), AttributeError, etc.
+    # chromadb can fail with pydantic.v1.errors.ConfigError on Python 3.14
+    class ChromaDB_VectorStore:
+        pass
+    class VannaBase:
+        pass
+    _VANNA_AVAILABLE = False
+
 from app.services.schema_service import SchemaService
 from sqlalchemy import text
 from app.models.feedback_models import GoldenExample
@@ -8,12 +21,18 @@ from app.models.schema_models import SchemaSemanticMapping, SchemaBusinessRule, 
 
 class VannaService(ChromaDB_VectorStore, VannaBase):
     def __init__(self, config: Dict[str, Any] = None):
+        if not _VANNA_AVAILABLE:
+            raise ImportError(
+                "vanna/chromadb not available in this environment. "
+                "Install with: pip install 'vanna[chromadb]'"
+            )
+
         if config is None:
             config = {}
 
         # Initialize ChromaDB at project root
         db_path = config.get("path", "./chroma_db")
-        self.distance_threshold = config.get("distance_threshold", 1.8)  # Configurable threshold
+        self.distance_threshold = config.get("distance_threshold", 1.8)
 
         # Initialize Vanna's Vector Store
         ChromaDB_VectorStore.__init__(self, config={'path': db_path})

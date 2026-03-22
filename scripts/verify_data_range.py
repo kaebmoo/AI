@@ -1,8 +1,10 @@
 import requests
 import time
 import json
+from runtime_config import get_api_base_url, get_business_db_path
 
-BASE_URL = "http://localhost:8000/api/v1"
+BASE_URL = get_api_base_url()
+DB_PATH = get_business_db_path()
 EMAIL = f"test_data_{int(time.time())}@ntplc.co.th"
 
 def verify_data_range():
@@ -17,7 +19,7 @@ def verify_data_range():
     import sqlite3
     import hashlib
     time.sleep(1)
-    conn = sqlite3.connect("nt_fi_report.sqlite")
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     otp_hash = hashlib.sha256("111111".encode()).hexdigest()
     cursor.execute("UPDATE otp_requests SET otp_code = ? WHERE email = ? AND verified_at IS NULL", (otp_hash, EMAIL))

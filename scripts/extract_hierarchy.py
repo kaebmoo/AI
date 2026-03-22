@@ -14,6 +14,7 @@ This script:
 4. Preserves 'manual' entries (from admin/master data files)
 """
 
+import os
 import sqlite3
 import json
 import argparse
@@ -23,7 +24,7 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-DB_PATH = "nt_fi_report.sqlite"
+DB_PATH = os.environ.get("BUSINESS_DB_PATH", "nt_fi_report.sqlite")
 
 # --------------------------------------------------------------------------
 # Hierarchy definitions per context

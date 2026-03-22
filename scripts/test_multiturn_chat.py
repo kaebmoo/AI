@@ -2,9 +2,11 @@ import requests
 import sys
 import time
 import json
+from runtime_config import get_api_base_url, get_business_db_path
 
 # Configuration
-BASE_URL = "http://localhost:8000/api/v1"
+BASE_URL = get_api_base_url()
+DB_PATH = get_business_db_path()
 EMAIL = f"test_mt_{int(time.time())}@ntplc.co.th"
 PASSWORD = "password"
 
@@ -28,7 +30,7 @@ def test_multiturn_chat():
     # Wait for async task to (hopefully) create the record
     time.sleep(2) 
     
-    conn = sqlite3.connect("nt_fi_report.sqlite")
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     otp_hash = hashlib.sha256("111111".encode()).hexdigest()
     

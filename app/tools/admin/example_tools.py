@@ -99,6 +99,26 @@ class AddExampleTool(AdminTool):
         from app.models.feedback_models import GoldenExample
         from datetime import datetime
 
+        # Dedup check
+        try:
+            from app.services.dedup_engine import DedupEngine
+            dedup = DedupEngine(db)
+            dedup_result = dedup.check_example_duplicate(
+                question=params["question"],
+                sql=params["sql"],
+            )
+            if dedup_result.has_duplicate:
+                return {
+                    "success": False,
+                    "message": f"พบ example ที่คล้ายกัน ({dedup_result.duplicate_type}): id={dedup_result.existing_id}",
+                    "data": {
+                        "duplicate_type": dedup_result.duplicate_type,
+                        "existing_id": dedup_result.existing_id,
+                    }
+                }
+        except Exception:
+            pass  # Fallback: no dedup check
+
         example = GoldenExample(
             question_pattern=params["question"],
             expected_sql=params["sql"],
@@ -109,6 +129,18 @@ class AddExampleTool(AdminTool):
         db.add(example)
         db.commit()
         db.refresh(example)
+
+        # Audit log
+        try:
+            from app.services.audit_service import AuditService
+            AuditService(db).log_change(
+                action="INSERT", table_name="golden_examples",
+                record_id=example.id,
+                new_value={"question": params["question"], "sql": params["sql"][:200]},
+                source="admin_agent",
+            )
+        except Exception:
+            pass
 
         return {
             "success": True,

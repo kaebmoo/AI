@@ -1,6 +1,6 @@
-from datetime import datetime
+import logging
 from typing import Generator, Optional
-from fastapi import Depends, HTTPException, status, Request, Header
+from fastapi import Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from fastapi.security import APIKeyHeader, OAuth2PasswordBearer
 
@@ -12,6 +12,8 @@ from app.services.ai_service import AIService
 from app.providers.registry import provider_registry
 from app.services.mcp_client import MCPClientService
 
+logger = logging.getLogger(__name__)
+
 # Header schemes for authentication
 header_scheme = APIKeyHeader(name="X-Session-Token", auto_error=False)
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
@@ -20,6 +22,15 @@ api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 def get_db() -> Generator:
     try:
         db = SessionLocal()
+        yield db
+    finally:
+        db.close()
+
+def get_config_db() -> Generator:
+    """Get Config DB session (schema_contexts, mappings, rules, admin_config etc.)"""
+    from app.db.session import ConfigSessionLocal
+    db = ConfigSessionLocal()
+    try:
         yield db
     finally:
         db.close()
@@ -50,8 +61,11 @@ def get_current_user(
                 user = db.query(User).filter(User.id == api_key.user_id).first()
                 if user:
                     return user
-        except Exception:
-            pass  # Fall through to session auth
+        except (ImportError, ValueError, AttributeError) as e:
+            logger.debug(f"API key auth failed, falling through to session auth: {e}")
+        except Exception as e:
+            logger.warning(f"Unexpected error in API key auth: {e}")
+            # Still fall through to session auth
 
     # 2. Session token auth
     final_token = token or bearer_token
@@ -89,7 +103,6 @@ def get_mcp_client(request: Request) -> MCPClientService:
 from app.services.admin_config_service import AdminConfigService
 
 def get_ai_service(
-    db: Session = Depends(get_db),
     mcp_client: MCPClientService = Depends(get_mcp_client)
 ) -> AIService:
     """
@@ -97,7 +110,7 @@ def get_ai_service(
     Prioritizes DB config > Env var > Default.
     Uses provider_registry for auto-discovery and fallback.
     """
-    config_service = AdminConfigService(db)
+    config_service = AdminConfigService()  # Uses config DB (admin_config table)
     ai_config = config_service.get_ai_config()
     default_provider = ai_config.get("default_provider", "matcha")
 
@@ -151,10 +164,12 @@ def require_viewer(current_user: User = Depends(get_current_user)) -> User:
     return current_user
 
 from app.services.schema_service import SchemaService
-from app.db.session import engine
+from app.db.session import config_engine, business_engine
 
 def get_schema_service() -> SchemaService:
     """
-    Dependency to get SchemaService with global engine
+    Dependency to get SchemaService.
+    - config_engine: for config tables (schema_contexts, mappings, rules)
+    - business_engine: for inspecting business views/tables
     """
-    return SchemaService(db_engine=engine)
+    return SchemaService(db_engine=config_engine, business_engine=business_engine)

@@ -5,12 +5,20 @@ Tests PNG chart generation from data.
 """
 
 import pytest
+
+try:
+    import matplotlib
+    HAS_MATPLOTLIB = True
+except ImportError:
+    HAS_MATPLOTLIB = False
+
 from app.telegram.chart_renderer import render_chart_to_png
 
 
 class TestRenderBarChart:
     """Bar chart rendering."""
 
+    @pytest.mark.skipif(not HAS_MATPLOTLIB, reason="matplotlib not installed")
     def test_bar_chart_returns_png(self):
         """Bar chart with valid data → non-empty PNG bytes."""
         data = [
@@ -27,6 +35,7 @@ class TestRenderBarChart:
 class TestRenderLineChart:
     """Line chart rendering."""
 
+    @pytest.mark.skipif(not HAS_MATPLOTLIB, reason="matplotlib not installed")
     def test_line_chart_returns_png(self):
         """Line chart with valid data → PNG bytes."""
         data = [
@@ -43,6 +52,7 @@ class TestRenderLineChart:
 class TestRenderPieChart:
     """Pie chart rendering."""
 
+    @pytest.mark.skipif(not HAS_MATPLOTLIB, reason="matplotlib not installed")
     def test_pie_chart_returns_png(self):
         """Pie chart with valid data → PNG bytes."""
         data = [

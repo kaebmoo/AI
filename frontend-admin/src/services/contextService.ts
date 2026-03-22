@@ -1,8 +1,6 @@
 import axios from 'axios';
+import { API_URL } from './api';
 import type { SchemaContext, SchemaContextCreate, SchemaContextUpdate } from '../types/schemaContext';
-
-// Use same base URL as other services or from environment
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
 
 const getAuthHeader = () => {
     const token = localStorage.getItem('token');

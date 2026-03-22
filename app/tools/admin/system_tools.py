@@ -27,7 +27,8 @@ class RefreshCacheTool(AdminTool):
 
         try:
             from app.services.schema_service import SchemaService
-            schema_service = SchemaService(db)
+            from app.db.session import config_engine, business_engine
+            schema_service = SchemaService(db_engine=config_engine, business_engine=business_engine)
             schema_service.refresh_cache()
             refreshed.append("schema_service")
         except Exception as e:
@@ -71,20 +72,17 @@ class ListContextsTool(AdminTool):
 
     async def execute(self, params: Dict[str, Any], db) -> Dict[str, Any]:
         from sqlalchemy import text
+        from app.db.session import ConfigSessionLocal
 
+        # schema_contexts is in config DB, not app DB
+        config_db = ConfigSessionLocal()
         try:
-            result = db.execute(text("SELECT * FROM schema_contexts WHERE is_active = 1 ORDER BY id"))
+            result = config_db.execute(text("SELECT * FROM schema_contexts WHERE is_active = 1 ORDER BY id"))
             rows = result.fetchall()
             columns = result.keys()
-        except Exception:
-            # Fallback: try with connection
-            try:
-                conn = db.connection()
-                result = conn.execute(text("SELECT * FROM schema_contexts WHERE is_active = 1 ORDER BY id"))
-                rows = result.fetchall()
-                columns = result.keys()
-            except Exception as e:
-                return {"success": False, "message": f"ดึง contexts ไม่สำเร็จ: {str(e)}", "data": []}
+        except Exception as e:
+            config_db.close()
+            return {"success": False, "message": f"ดึง contexts ไม่สำเร็จ: {str(e)}", "data": []}
 
         context_list = []
         for row in rows:

@@ -21,8 +21,8 @@ _MODEL_TIER_CACHE_TTL = 3600  # 1 hour
 def _load_model_tiers_from_db() -> Optional[Dict]:
     """Load model tier mappings from ai_models table."""
     try:
-        from app.db.session import SessionLocal
-        db = SessionLocal()
+        from app.db.session import ConfigSessionLocal
+        db = ConfigSessionLocal()
         try:
             from sqlalchemy import text
             rows = db.execute(text(

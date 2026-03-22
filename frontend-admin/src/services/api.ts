@@ -1,8 +1,23 @@
 import axios from 'axios'
 
+const resolveApiUrl = () => {
+    const configuredUrl = import.meta.env.VITE_API_URL?.trim()
+    if (configuredUrl) {
+        return configuredUrl.replace(/\/$/, '')
+    }
+
+    if (import.meta.env.DEV) {
+        return 'http://localhost:8000/api/v1'
+    }
+
+    throw new Error('VITE_API_URL must be configured for production builds.')
+}
+
+export const API_URL = resolveApiUrl()
+
 // Create axios instance
 const api = axios.create({
-    baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1',
+    baseURL: API_URL,
     headers: {
         'Content-Type': 'application/json',
     },

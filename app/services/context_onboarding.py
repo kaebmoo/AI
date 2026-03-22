@@ -554,15 +554,15 @@ Map Thai/English terms users might say → SQL conditions:
 ### 7. Hierarchy
 Identify dimension hierarchies (top → bottom):
 - level (0 = top)
-- label_th (Thai name for this level)
+- level_label_th (Thai name for this level)
 - level_columns (which column(s))
 - detection_keywords (Thai keywords that indicate this level)
 
 ### 8. Data Warnings
 Flag data quality issues users should know about:
-- warning_name
-- warning_description (Thai)
-- sql_check (SQL to verify the issue)
+- code (short warning code)
+- message (Thai description)
+- severity (info, warning, error)
 
 ## Output Format
 Return EXACTLY this JSON structure (no markdown, no explanation — JSON only):
@@ -622,16 +622,16 @@ Return EXACTLY this JSON structure (no markdown, no explanation — JSON only):
   "hierarchy": [
     {{
       "level": 0,
-      "label_th": "ระดับ",
+      "level_label_th": "ระดับ",
       "level_columns": "column_name",
       "detection_keywords": ["kw1", "kw2"]
     }}
   ],
   "data_warnings": [
     {{
-      "warning_name": "name",
-      "warning_description": "description in Thai",
-      "sql_check": "SELECT ..."
+      "code": "WARN_001",
+      "message": "description in Thai",
+      "severity": "info"
     }}
   ]
 }}
@@ -644,11 +644,15 @@ class LLMAnalyzer:
 
     def __init__(self, db_path: str):
         self.db_path = db_path
+        # Config DB path (for reading existing schema_contexts, etc.)
+        from app.config import settings
+        config_url = settings.CONFIG_DB_URL or settings.DATABASE_URL
+        self.config_db_path = config_url.replace("sqlite:///", "").replace("sqlite://", "") or self.db_path
 
     def _get_existing_contexts_summary(self) -> str:
         """Get summary of existing contexts for reference."""
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = sqlite3.connect(self.config_db_path)
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 "SELECT name, display_name, main_view FROM schema_contexts "
@@ -866,17 +870,18 @@ class ConfigGenerator:
         )
 
     def _gen_metadata_sql(self, meta: Dict) -> str:
+        # schema_metadata in config.db has NO is_active column
         return (
             f"INSERT OR REPLACE INTO schema_metadata "
             f"(table_name, column_name, display_name_th, description, "
-            f"is_summable, is_groupable, special_notes, is_active) VALUES ("
+            f"is_summable, is_groupable, special_notes) VALUES ("
             f"'{self._esc(self.view_name)}', "
             f"'{self._esc(meta.get('column_name', ''))}', "
             f"'{self._esc(meta.get('display_name_th', ''))}', "
             f"'{self._esc(meta.get('description', ''))}', "
             f"{1 if meta.get('is_summable') else 0}, "
             f"{1 if meta.get('is_groupable') else 0}, "
-            f"'{self._esc(meta.get('special_notes', ''))}', 1);"
+            f"'{self._esc(meta.get('special_notes', ''))}');"
         )
 
     def _gen_rule_sql(self, rule: Dict) -> str:
@@ -916,23 +921,26 @@ class ConfigGenerator:
 
     def _gen_hierarchy_sql(self, level: Dict, context_name: str) -> str:
         keywords_json = json.dumps(level.get("detection_keywords", []), ensure_ascii=False)
+        # config.db uses level_label_th (not label_th)
         return (
             f"INSERT OR REPLACE INTO master_hierarchy "
-            f"(context_name, level, label_th, level_columns, detection_keywords, is_active) VALUES ("
+            f"(context_name, level, level_label_th, level_columns, detection_keywords, is_active) VALUES ("
             f"'{self._esc(context_name)}', "
             f"{level.get('level', 0)}, "
-            f"'{self._esc(level.get('label_th', ''))}', "
+            f"'{self._esc(level.get('label_th', level.get('level_label_th', '')))}', "
             f"'{self._esc(level.get('level_columns', ''))}', "
             f"'{self._esc(keywords_json)}', 1);"
         )
 
     def _gen_warning_sql(self, warning: Dict) -> str:
+        # config.db data_warnings uses: code, message, severity, context_name, is_active
         return (
             f"INSERT INTO data_warnings "
-            f"(warning_name, warning_description, sql_check, is_active) VALUES ("
-            f"'{self._esc(warning.get('warning_name', ''))}', "
-            f"'{self._esc(warning.get('warning_description', ''))}', "
-            f"'{self._esc(warning.get('sql_check', ''))}', 1);"
+            f"(code, message, severity, context_name, is_active) VALUES ("
+            f"'{self._esc(warning.get('code', warning.get('warning_name', '')))}', "
+            f"'{self._esc(warning.get('message', warning.get('warning_description', '')))}', "
+            f"'{self._esc(warning.get('severity', 'info'))}', "
+            f"'{self._esc(warning.get('context_name', ''))}', 1);"
         )
 
     def _build_summary(self, bundle: ConfigBundle) -> str:
@@ -960,10 +968,20 @@ class ConfigGenerator:
 # ---------------------------------------------------------------------------
 
 class ConfigApplicator:
-    """Apply generated config to the database."""
+    """Apply generated config to the config database."""
 
-    def __init__(self, db_path: str):
-        self.db_path = db_path
+    def __init__(self, db_path: str = None):
+        if db_path:
+            # Explicit path passed (e.g., from tests) — use as-is
+            self.db_path = db_path
+        else:
+            # Production: config writes go to config DB
+            from app.config import settings
+            config_url = settings.CONFIG_DB_URL
+            if config_url:
+                self.db_path = config_url.replace("sqlite:///", "").replace("sqlite://", "")
+            else:
+                self.db_path = settings.DATABASE_URL.replace("sqlite:///", "").replace("sqlite://", "")
 
     def apply(self, bundle: ConfigBundle, dry_run: bool = True) -> Dict:
         """Apply config bundle. Returns results dict."""
@@ -1032,8 +1050,18 @@ class ConfigApplicator:
 class ConfigValidator:
     """Validate applied config by running test queries."""
 
-    def __init__(self, db_path: str):
-        self.db_path = db_path
+    def __init__(self, db_path: str = None):
+        if db_path:
+            # Explicit path passed (e.g., from tests) — use as-is
+            self.db_path = db_path
+        else:
+            # Production: validation checks config DB
+            from app.config import settings
+            config_url = settings.CONFIG_DB_URL
+            if config_url:
+                self.db_path = config_url.replace("sqlite:///", "").replace("sqlite://", "")
+            else:
+                self.db_path = settings.DATABASE_URL.replace("sqlite:///", "").replace("sqlite://", "")
 
     async def validate(self, view_name: str, test_questions: List[str]) -> ValidationResult:
         """Run test questions and check SQL output for correctness."""
@@ -1065,9 +1093,9 @@ class ConfigValidator:
                 "passed": rules['cnt'] > 0,
             })
 
-            # Check metadata exists
+            # Check metadata exists (schema_metadata has no is_active column)
             meta = conn.execute(
-                "SELECT COUNT(*) as cnt FROM schema_metadata WHERE table_name = ? AND is_active = 1",
+                "SELECT COUNT(*) as cnt FROM schema_metadata WHERE table_name = ?",
                 (view_name,)
             ).fetchone()
             result.test_results.append({
@@ -1250,11 +1278,23 @@ class ContextOnboardingService:
         )
         all_objects = cursor.fetchall()
 
-        # Get configured contexts (views that already have config)
+        # Get configured contexts from config DB (schema_contexts may be in separate DB)
         configured_views = set()
         try:
-            cursor.execute("SELECT main_view FROM schema_contexts WHERE is_active = 1")
-            configured_views = {row[0] for row in cursor.fetchall()}
+            from app.config import settings
+            config_url = settings.CONFIG_DB_URL
+            if config_url:
+                config_db_path = config_url.replace("sqlite:///", "").replace("sqlite://", "")
+                config_conn = sqlite3.connect(config_db_path)
+                configured_views = {
+                    row[0] for row in config_conn.execute(
+                        "SELECT main_view FROM schema_contexts WHERE is_active = 1"
+                    ).fetchall()
+                }
+                config_conn.close()
+            else:
+                cursor.execute("SELECT main_view FROM schema_contexts WHERE is_active = 1")
+                configured_views = {row[0] for row in cursor.fetchall()}
         except Exception:
             pass
 

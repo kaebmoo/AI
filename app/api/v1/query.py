@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api import deps
+from app.db.session import get_config_db
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -114,7 +115,7 @@ async def simple_query(
 
 @router.get("/contexts", response_model=List[ContextInfo])
 async def list_contexts(
-    db: Session = Depends(deps.get_db),
+    db: Session = Depends(get_config_db),
 ):
     """List available data contexts. Public — no auth required."""
     from sqlalchemy import text

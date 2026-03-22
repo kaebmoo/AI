@@ -6,7 +6,7 @@
 
 **Phase:** 5.0 (Plans 0-5 Complete)
 **Current Version:** 0.5.0
-**Tests:** 359 passing (0 failures)
+**Tests:** 366 passing (0 failures)
 
 ## Features Implemented
 
@@ -152,19 +152,30 @@ mcp_servers/
 
 - Python 3.10+
 - Node.js 18+ (for Frontend)
-- Redis (for Celery Task Queue)
 - Database: SQLite (Default/Dev) or PostgreSQL/MSSQL (Production)
 
 ---
 
-## 🚀 Quick Start Guide
+## 🗃️ Database Architecture (3-DB)
+
+ระบบแยกฐานข้อมูลเป็น 3 ไฟล์ ห้ามใช้ไฟล์เดียวกัน:
+
+| DB File | ตัวแปร ENV | เนื้อหา |
+|---------|-----------|---------|
+| `app.db` | `DATABASE_URL=sqlite:///./app.db` | users, sessions, chat_history, feedback, api_keys |
+| `config.db` | `CONFIG_DB_URL=sqlite:///./config.db` | schema_contexts, mappings, rules, admin_config, ai_models |
+| `nt_fi_report.sqlite` | `BUSINESS_DB_PATH=./nt_fi_report.sqlite` | revenue, expense, transfer_price + business views |
+
+---
+
+## 🚀 Quick Start Guide (Local Development)
 
 ### 1. Backend Setup
 
 ```bash
 # 1. Clone & Enter Directory
 git clone <repository_url>
-cd nt-revenue-assistant
+cd AI
 
 # 2. Create Virtual Environment
 python3 -m venv venv
@@ -173,82 +184,126 @@ source venv/bin/activate  # Windows: venv\Scripts\activate
 # 3. Install Python Dependencies
 pip install -r requirements.txt
 
-# 4. Configuration
-# Copy .env.example to .env (if available) or create one:
-echo "DATABASE_URL=sqlite:///./nt_fi_report.sqlite" > .env
-echo "AI_PROVIDER=matcha" >> .env  # Default: matcha (or 'claude', 'gemini')
-echo "GOOGLE_AI_API_KEY=your_gemini_key" >> .env
-echo "ANTHROPIC_API_KEY=your_claude_key" >> .env
-echo "MATCHA_AI_API_KEY=your_matcha_key" >> .env
-echo "MATCHA_API_URL=https://aigateway.ntictsolution.com/v1/chat/completions" >> .env
+# 4. Configuration — คัดลอกจาก .env.example แล้วแก้ค่า
+cp .env.example .env
+# แก้ไขค่า API key ใน .env ตาม provider ที่ใช้ (Claude/Gemini/Matcha)
+# ตัวแปรสำคัญ:
+#   DATABASE_URL=sqlite:///./app.db
+#   CONFIG_DB_URL=sqlite:///./config.db
+#   BUSINESS_DB_PATH=./nt_fi_report.sqlite
 
-# 5. Initialize Database & Metadata
-python scripts/init_db.py         # Create tables
-python scripts/setup_rules_db.py  # Inject business rules & abbreviations
-
-# 6. Run Database Migrations (includes admin_config table)
-sqlite3 nt_fi_report.sqlite < database/migrations/004_admin_config.sql
+# 5. Initialize Database
+python scripts/init_db.py  # สร้าง app tables + config tables
 ```
 
-### 2. Frontend Setup
+### 2. Frontend Setup (User App)
 
 ```bash
-# Open a new terminal
 cd frontend
-
-# Install Dependencies
+cp .env.example .env
+# Local dev: ไม่ต้องแก้ .env (fallback ไป localhost:8000 อัตโนมัติ)
+# Production: แก้ EXPO_PUBLIC_API_URL=https://api.your-domain.com/api/v1
 npm install
-
-# Run Web Interface
 npm run web
-# Or run on device:
-# npm run android
-# npm run ios
 ```
 
 ### 3. Admin Web UI Setup
 
 ```bash
 cd frontend-admin
-
-# Install Dependencies
+cp .env.example .env
+# Local dev: ไม่ต้องแก้ .env (fallback ไป localhost:8000 อัตโนมัติ)
+# Production: แก้ VITE_API_URL=https://api.your-domain.com/api/v1
 npm install
-
-# Run Admin Interface
 npm run dev
 ```
 
 ### 4. Start Services
 
-You need to run these 4 processes in parallel (separate terminals):
+รัน 3 terminal พร้อมกัน:
 
 **Terminal 1: Backend API**
 
 ```bash
-# Make sure venv is activated
+source venv/bin/activate
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-**Terminal 2: Celery Worker (Async Tasks)**
-
-```bash
-# Make sure venv is activated and Redis is running
-celery -A app.celery worker -Q email-queue,celery --loglevel=info
-```
-
-**Terminal 3: User Frontend (Expo)**
+**Terminal 2: User Frontend (Expo)**
 
 ```bash
 cd frontend
 npm run web
 ```
 
-**Terminal 4: Admin Web UI**
+**Terminal 3: Admin Web UI**
 
 ```bash
 cd frontend-admin
 npm run dev
 ```
+
+---
+
+## 🚀 Deployment Checklist (Production)
+
+ขั้นตอนที่ต้องทำเมื่อ deploy ขึ้น server จริง — **ห้ามข้ามขั้นตอนใดขั้นตอนหนึ่ง**
+
+### Environment Files (ต้องสร้างทุกตัว)
+
+| ไฟล์ | ตัวแปรสำคัญ | คัดลอกจาก |
+|------|-------------|-----------|
+| `.env` (root) | DATABASE_URL, CONFIG_DB_URL, BUSINESS_DB_PATH, API keys | `.env.example` |
+| `frontend/.env` | EXPO_PUBLIC_API_URL | `frontend/.env.example` |
+| `frontend-admin/.env` | VITE_API_URL | `frontend-admin/.env.example` |
+
+### Backend
+
+```bash
+# 1. สร้าง .env จาก template
+cp .env.example .env
+# แก้ค่า: DATABASE_URL, CONFIG_DB_URL, BUSINESS_DB_PATH, API keys, CORS_ORIGINS
+
+# 2. Install dependencies
+pip install -r requirements.txt
+
+# 3. Initialize databases
+python scripts/init_db.py
+
+# 4. ถ้ามี business data — วาง nt_fi_report.sqlite ใน root
+# 5. ถ้ายังไม่มี config.db (first deploy):
+python scripts/migrate_config_to_separate_db.py --apply
+
+# 6. Start server
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+### Frontend (User App)
+
+```bash
+cd frontend
+cp .env.example .env
+# แก้ EXPO_PUBLIC_API_URL=https://api.your-domain.com/api/v1
+npm install && npm run build:web
+# Deploy static files จาก web-build/
+```
+
+### Frontend (Admin UI)
+
+```bash
+cd frontend-admin
+cp .env.example .env
+# แก้ VITE_API_URL=https://api.your-domain.com/api/v1
+npm install && npm run build
+# Deploy static files จาก dist/
+```
+
+### Verify หลัง Deploy
+
+- [ ] Backend: `curl https://api.your-domain.com/` → `{"message": "NT AI Assistant API"}`
+- [ ] Contexts: `curl https://api.your-domain.com/api/v1/query/contexts` → 4 contexts
+- [ ] Admin UI: เปิด browser → login ได้
+- [ ] User App: ถามคำถาม → ได้คำตอบ
 
 ---
 
@@ -305,7 +360,7 @@ Once the backend is running, visit:
 pytest tests/ -v
 ```
 
-**Current:** 359 tests passing (0 failures)
+**Current:** 366 tests passing (0 failures)
 
 - **Unit tests:** `tests/unit/` — 25+ test files covering all services
 - **Integration tests:** `tests/integration/` — API endpoint tests

@@ -172,8 +172,21 @@ class AddRuleTool(AdminTool):
         # Invalidate cache
         try:
             from app.services.schema_service import SchemaService
-            schema_service = SchemaService(db)
+            from app.db.session import config_engine, business_engine
+            schema_service = SchemaService(db_engine=config_engine, business_engine=business_engine)
             schema_service.refresh_cache()
+        except Exception:
+            pass
+
+        # Audit log
+        try:
+            from app.services.audit_service import AuditService
+            AuditService(db).log_change(
+                action="INSERT", table_name="schema_business_rules",
+                record_id=rule.id,
+                new_value={"rule_code": params["rule_code"], "description": params["description"][:200]},
+                source="admin_agent",
+            )
         except Exception:
             pass
 

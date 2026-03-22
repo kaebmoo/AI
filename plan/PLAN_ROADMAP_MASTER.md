@@ -6,27 +6,47 @@
 
 ---
 
-## สถานะรวม (Updated 2026-03-19)
+## สถานะรวม (Updated 2026-03-21 late — re-verified, post-fix)
 
-| Plan | สถานะ | % | Tests | สิ่งที่ค้าง |
-|------|--------|---|-------|------------|
-| **Plan 0** | ✅ DONE | 100% | 279→359 pass | — |
-| **Plan 1** | ✅ DONE | 100% | 21 tests | — |
-| **Plan 1B-A** | 🟡 PARTIAL | 80% | 14 tests | MCP delegate ไม่ครบ (confidence, validate_result) |
-| **Plan 1B-B** | ✅ DONE | 95% | 8 tests | — |
-| **Plan 2** | ✅ DONE | 95% | 14 tests | — |
-| **Plan 3** | 🟡 PARTIAL | 65% | 19 tests | Audit ไม่ได้ integrate, Scheduled jobs ไม่มี, Dedup ไม่ครบ |
-| **Plan 4** | 🟡 PARTIAL | 70% | 24 tests | Bot ไม่ได้ register ใน main.py, config ไม่มี |
-| **Plan 4B** | ✅ DONE | 95% | 13 tests | — |
-| **Plan 5** | 🟡 PARTIAL | 40% | 7 tests | CONFIG_DB_URL ไม่มี, session factory ไม่มี |
+| Plan | สถานะ | % | Tests | หมายเหตุ |
+|------|--------|---|-------|---------|
+| **Plan 0** | ✅ DONE | 100% | full suite green | legacy blockers ที่เคยทำให้ collection พัง ถูกแก้แล้ว |
+| **Plan 1** | ✅ DONE | 95% | 21 tests | API/tests มีและ suite รวมผ่าน |
+| **Plan 1B-A** | ✅ DONE | 95% | 18 tests | MCP delegate ครบตาม flow ปัจจุบัน |
+| **Plan 1B-B** | ✅ DONE | 90% | 8 tests | Wrapper ทำงาน, session lifecycle ยังเป็น global singleton |
+| **Plan 2** | ✅ DONE | 95% | 14 tests | Endpoints ครบ, suite รวมผ่าน |
+| **Plan 3** | ✅ DONE | 90% | 19 tests | scheduler/auto-apply มีจริงแล้ว, ควรเพิ่ม dedicated scheduler tests |
+| **Plan 4** | ✅ DONE | 90% | 25 tests | Telegram integration tests ผ่าน |
+| **Plan 4B** | ✅ DONE | 95% | 13 tests | Query endpoint ทำงาน, mock-heavy tests |
+| **Plan 5** | ✅ DONE | 100% | 7 tests | 3-DB live, ConfigBase แยก, business_engine ครบทุก call path |
 | **Plan 6** | ⬜ DESIGN | 0% | 0 | ยังไม่เริ่ม code |
 | **Plan 1B-C** | ⬜ DEFERRED | 0% | 0 | ทำตอน Plan 6 |
 
-**Tests รวม: 359 passed, 0 failed**
+**Current verification note:** `pytest -q` on this workspace = `363 passed, 3 skipped`.
+
+### ข้อจำกัดที่ยังมี (honest assessment)
+- End-to-end tests ส่วนใหญ่ mock-heavy — ยืนยัน contract แต่ไม่ยืนยัน behavior ครบ
+- Scheduler มี dedicated test file แล้ว แต่ยังควรขยาย coverage เมื่อ logic ซับซ้อนขึ้น
+- ยังมี static analysis warnings ใน API layer บางไฟล์ แม้ runtime/test จะผ่านแล้ว
+
+### Re-verification Result (2026-03-21 late)
+
+- `pytest -q` ผ่านทั้งชุด
+- Vanna-related tests ผ่านใน Python 3.14
+- Validation MCP tests ผ่านหลังคืน `detail` ใน confidence factor
+- Telegram tests ผ่านทั้ง integration และ unit
+- Scheduler tests ถูกเพิ่มและผ่านแล้ว
+
+### Recommended hardening
+
+1. เก็บ static analysis warnings ใน API layer
+2. ขยาย coverage ของ scheduler tests หากมี logic ใหม่เพิ่ม
 
 ---
 
 ## Dependency Map
+
+หมายเหตุ: แผนภาพด้านล่างเป็น dependency/historical snapshot ของลำดับการทำงาน ไม่ใช่สถานะ verification ล่าสุด
 
 ```
 Plan 0 ✅ ──────────────────────────────────────── (DONE)

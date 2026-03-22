@@ -1,4 +1,4 @@
-import api from './api';
+import api, { API_BASE_URL } from './api';
 
 export interface ChatRequest {
     question: string;
@@ -115,7 +115,7 @@ export const chatService = {
     streamMessage: async (payload: ChatRequest, callbacks: SSECallbacks) => {
         const { storage } = require('./storage');
         const token = await storage.getItem('session_token');
-        const baseURL = api.defaults.baseURL || 'http://localhost:8000/api/v1';
+        const baseURL = api.defaults.baseURL || API_BASE_URL;
 
         try {
             const response = await fetch(`${baseURL}/chat/stream`, {

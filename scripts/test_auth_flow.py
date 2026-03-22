@@ -1,9 +1,10 @@
 import requests
-import sys
 import time
 
+from runtime_config import get_api_base_url
+
 # Configuration
-BASE_URL = "http://localhost:8000/api/v1"
+BASE_URL = get_api_base_url()
 EMAIL = f"test_{int(time.time())}@example.com"
 
 def test_login():

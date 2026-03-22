@@ -4,12 +4,13 @@ Script ตรวจสอบ database structure จริง
 """
 
 import sqlite3
-import json
 
-def check_database_structure(db_path):
+from runtime_config import get_business_db_path
+
+def check_database_structure(database_path):
     """ตรวจสอบ structure ของ database"""
     
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(database_path)
     conn.row_factory = sqlite3.Row
     
     print("=== ตรวจสอบ Database Structure ===")
@@ -48,7 +49,7 @@ def check_database_structure(db_path):
                 print("  Sample data:")
                 for sample in samples:
                     print(f"    {dict(sample)}")
-        except:
+        except sqlite3.Error:
             print("  (ไม่สามารถอ่านข้อมูล)")
     
     # 3. ตรวจสอบ Views
@@ -62,10 +63,10 @@ def check_database_structure(db_path):
     
     conn.close()
 
-def check_semantic_mappings(db_path):
+def check_semantic_mappings(database_path):
     """ตรวจสอบ semantic mappings ที่มีอยู่"""
     
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(database_path)
     conn.row_factory = sqlite3.Row
     
     print("\n=== Semantic Mappings ===")
@@ -85,6 +86,6 @@ def check_semantic_mappings(db_path):
     conn.close()
 
 if __name__ == "__main__":
-    db_path = "/Users/seal/Documents/GitHub/AI/nt_fi_report.sqlite"
-    check_database_structure(db_path)
-    check_semantic_mappings(db_path)
+    database_path = get_business_db_path()
+    check_database_structure(database_path)
+    check_semantic_mappings(database_path)

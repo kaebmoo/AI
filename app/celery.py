@@ -4,8 +4,8 @@ from app.config import settings
 # Create Celery application
 celery_app = Celery(
     "worker",
-    broker=settings.REDIS_URL if hasattr(settings, "REDIS_URL") and settings.REDIS_URL else "redis://localhost:6379/0",
-    backend=settings.REDIS_URL if hasattr(settings, "REDIS_URL") and settings.REDIS_URL else "redis://localhost:6379/0"
+    broker=settings.get_redis_url(),
+    backend=settings.get_redis_url()
 )
 
 celery_app.conf.task_routes = {

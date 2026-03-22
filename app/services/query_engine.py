@@ -231,9 +231,9 @@ def _build_provider_kwargs(provider_name: str, ai_config: dict) -> dict:
 
     # === Tier 1: Try DB for env var names ===
     try:
-        from app.db.session import SessionLocal
+        from app.db.session import ConfigSessionLocal
         from sqlalchemy import text
-        db = SessionLocal()
+        db = ConfigSessionLocal()  # ai_providers is in config DB
         try:
             row = db.execute(text(
                 "SELECT api_key_env_var, api_url_env_var, default_api_url "
@@ -315,14 +315,14 @@ class QueryEngine:
     ):
         self.mcp_client = mcp_client
         self.db = db_session
-        self.admin_config = admin_config or (AdminConfigService(db_session) if db_session else None)
+        self.admin_config = admin_config or AdminConfigService()  # Uses config DB session
         self._schema_service = None
 
     @property
     def schema_service(self) -> SchemaService:
         if not self._schema_service:
-            db_path = settings.DATABASE_URL.replace("sqlite:///", "").replace("sqlite://", "")
-            self._schema_service = SchemaService(db_path=db_path)
+            from app.db.session import config_engine, business_engine
+            self._schema_service = SchemaService(db_engine=config_engine, business_engine=business_engine)
         return self._schema_service
 
     async def query(

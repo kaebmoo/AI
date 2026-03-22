@@ -7,8 +7,14 @@ import re
 class ContextRouter:
     """Service to determine the appropriate data context for a question"""
     
-    def __init__(self, db_path: str = "nt_fi_report.sqlite"):
-        self.db_path = db_path
+    def __init__(self, db_path: str = None):
+        from app.config import settings
+        if db_path:
+            self.db_path = db_path
+        elif settings.CONFIG_DB_URL:
+            self.db_path = settings.CONFIG_DB_URL.replace("sqlite:///", "").replace("sqlite://", "")
+        else:
+            self.db_path = settings.DATABASE_URL.replace("sqlite:///", "").replace("sqlite://", "")
         self._cache = None
         self._last_refresh = 0
         
