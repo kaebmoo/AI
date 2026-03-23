@@ -40,6 +40,7 @@ async def lifespan(app: FastAPI):
                     token=settings.TELEGRAM_BOT_TOKEN,
                     db_url=settings.DATABASE_URL,
                     webhook_secret=settings.TELEGRAM_WEBHOOK_SECRET,
+                    mcp_client=mcp_client,
                 )
                 app.state.telegram_bot = bot
 

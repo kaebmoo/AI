@@ -66,16 +66,21 @@ async def simple_query(
 
         # Get MCP client from app state (same as chat endpoint)
         mcp_client = getattr(http_request.app.state, "mcp_client", None)
-        if not mcp_client:
+        if mcp_client:
+            engine = QueryEngine(mcp_client=mcp_client, db_session=db)
+            result = await engine.query(
+                question=request_body.question,
+                context=request_body.context,
+            )
+        else:
             from app.services.mcp_client import MCPClientService
             mcp_client = MCPClientService()
-
-        engine = QueryEngine(mcp_client=mcp_client, db_session=db)
-
-        result = await engine.query(
-            question=request_body.question,
-            context=request_body.context,
-        )
+            async with mcp_client.connected():
+                engine = QueryEngine(mcp_client=mcp_client, db_session=db)
+                result = await engine.query(
+                    question=request_body.question,
+                    context=request_body.context,
+                )
 
         # QueryEngineResult has .query_result (QueryResult) + .context_name + .execution_time_ms
         qr = result.query_result

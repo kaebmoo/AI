@@ -10,6 +10,8 @@ import time
 from collections import defaultdict
 from typing import Optional
 
+from app.services.mcp_client import MCPClientService
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -66,7 +68,13 @@ class NTAIBot:
         # Mount: main_app.mount("/telegram", webhook_app)
     """
 
-    def __init__(self, token: str, db_url: Optional[str] = None, webhook_secret: str = ""):
+    def __init__(
+        self,
+        token: str,
+        db_url: Optional[str] = None,
+        webhook_secret: str = "",
+        mcp_client: Optional[MCPClientService] = None,
+    ):
         """
         Args:
             token: Telegram Bot API token.
@@ -76,6 +84,7 @@ class NTAIBot:
         self.token = token
         self.db_url = db_url
         self._webhook_secret = webhook_secret
+        self._mcp_client = mcp_client
         self._application = None
 
     # ── Lazy application builder ──────────────────────────────────────────
@@ -103,6 +112,7 @@ class NTAIBot:
         # Store db_url in bot_data so handlers can create sessions
         app.bot_data["db_url"] = self.db_url
         app.bot_data["rate_limiter"] = _limiter
+        app.bot_data["mcp_client"] = self._mcp_client
 
         # Register handlers (order matters -- commands first)
         app.add_handler(CommandHandler("start", handle_start))

@@ -805,6 +805,37 @@ class AdminConfigService:
 
         return api_key
 
+    def get_provider_record(self, provider: str) -> Optional[Dict[str, Any]]:
+        """
+        Get provider metadata from ai_providers.
+
+        Returns:
+            Provider metadata dict or None if not found
+        """
+        try:
+            row = self.db.execute(text(
+                """
+                SELECT id, is_active, api_key_env_var, api_url_env_var, default_api_url
+                FROM ai_providers
+                WHERE id = :id
+                LIMIT 1
+                """
+            ), {"id": provider}).fetchone()
+        except Exception as e:
+            logger.debug(f"Failed to load provider record for '{provider}': {e}")
+            return None
+
+        if not row:
+            return None
+
+        return {
+            "id": row[0],
+            "is_active": bool(row[1]),
+            "api_key_env_var": row[2],
+            "api_url_env_var": row[3],
+            "default_api_url": row[4],
+        }
+
     # ============================================================
     # Provider Management (NEW)
     # ============================================================

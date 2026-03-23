@@ -249,16 +249,25 @@ class TelegramDispatcher:
             from app.services.query_engine import QueryEngine
             from app.services.mcp_client import MCPClientService
 
-            mcp_client = MCPClientService()
-            engine = QueryEngine(mcp_client=mcp_client, db_session=db)
-
             selected_context = context.user_data.get("context")
+            shared_mcp_client = context.bot_data.get("mcp_client")
 
-            result = await engine.query(
-                question=text,
-                context=selected_context,
-                history=context.user_data.get("history", []),
-            )
+            if shared_mcp_client:
+                engine = QueryEngine(mcp_client=shared_mcp_client, db_session=db)
+                result = await engine.query(
+                    question=text,
+                    context=selected_context,
+                    history=context.user_data.get("history", []),
+                )
+            else:
+                mcp_client = MCPClientService()
+                async with mcp_client.connected():
+                    engine = QueryEngine(mcp_client=mcp_client, db_session=db)
+                    result = await engine.query(
+                        question=text,
+                        context=selected_context,
+                        history=context.user_data.get("history", []),
+                    )
 
             qr = result.query_result
 

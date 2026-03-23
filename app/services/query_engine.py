@@ -217,7 +217,11 @@ _ENV_FALLBACK = {
 }
 
 
-def _build_provider_kwargs(provider_name: str, ai_config: dict) -> dict:
+def _build_provider_kwargs(
+    provider_name: str,
+    ai_config: dict,
+    admin_config_service: Optional[AdminConfigService] = None,
+) -> dict:
     """
     Build provider kwargs with 3-tier resolution:
     1. DB (ai_providers table) → resolve env var name → get actual value from os.environ
@@ -228,25 +232,25 @@ def _build_provider_kwargs(provider_name: str, ai_config: dict) -> dict:
     api_key_env_var = None
     api_url_env_var = None
     default_api_url = None
+    provider_record = None
+    owns_admin_config = False
 
     # === Tier 1: Try DB for env var names ===
     try:
-        from app.db.session import ConfigSessionLocal
-        from sqlalchemy import text
-        db = ConfigSessionLocal()  # ai_providers is in config DB
-        try:
-            row = db.execute(text(
-                "SELECT api_key_env_var, api_url_env_var, default_api_url "
-                "FROM ai_providers WHERE id = :id AND is_active = 1"
-            ), {"id": provider_name}).fetchone()
-            if row:
-                api_key_env_var = row[0]
-                api_url_env_var = row[1]
-                default_api_url = row[2]
-        finally:
-            db.close()
+        if admin_config_service is None:
+            admin_config_service = AdminConfigService()
+            owns_admin_config = True
+
+        provider_record = admin_config_service.get_provider_record(provider_name)
+        if provider_record and provider_record.get("is_active"):
+            api_key_env_var = provider_record.get("api_key_env_var")
+            api_url_env_var = provider_record.get("api_url_env_var")
+            default_api_url = provider_record.get("default_api_url")
     except Exception as e:
         logger.debug(f"DB lookup failed for provider '{provider_name}': {e}")
+    finally:
+        if owns_admin_config and admin_config_service is not None:
+            admin_config_service.close()
 
     # === Resolve API Key ===
     if api_key_env_var:
@@ -388,7 +392,11 @@ class QueryEngine:
         selected_provider = provider or ai_config.get("default_provider", settings.AI_PROVIDER)
 
         # Build provider kwargs dynamically: DB → .env → hardcoded fallback
-        resolved_kwargs = _build_provider_kwargs(selected_provider, ai_config)
+        resolved_kwargs = _build_provider_kwargs(
+            selected_provider,
+            ai_config,
+            admin_config_service=self.admin_config,
+        )
         # Caller overrides take precedence
         for k, v in resolved_kwargs.items():
             provider_kwargs.setdefault(k, v)

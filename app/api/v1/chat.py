@@ -407,6 +407,7 @@ async def chat(
     request: ChatRequest,
     current_request: Request,
     current_user: User = Depends(deps.get_current_user),
+    schema_service: SchemaService = Depends(deps.get_schema_service),
     db: Session = Depends(deps.get_db),
 ):
     """
@@ -427,8 +428,6 @@ async def chat(
     history, previous_chats = _get_conversation_history(db, conversation_id, current_user.id)
 
     # 4. Resolve context (with history-aware logic)
-    from app.db.session import config_engine, business_engine
-    schema_service = SchemaService(db_engine=config_engine, business_engine=business_engine)
     context_name, history = _resolve_context_with_history(
         request.context, request.question, previous_chats, history, schema_service
     )
@@ -474,6 +473,7 @@ async def chat_stream(
     request: ChatRequest,
     current_request: Request,
     current_user: User = Depends(deps.get_current_user),
+    schema_service: SchemaService = Depends(deps.get_schema_service),
     db: Session = Depends(deps.get_db),
 ):
     """
@@ -487,8 +487,6 @@ async def chat_stream(
 
     history, previous_chats = _get_conversation_history(db, conversation_id, current_user.id)
 
-    from app.db.session import config_engine as _cfg_engine, business_engine as _biz_engine
-    schema_service = SchemaService(db_engine=_cfg_engine, business_engine=_biz_engine)
     context_name, history = _resolve_context_with_history(
         request.context, request.question, previous_chats, history, schema_service
     )
