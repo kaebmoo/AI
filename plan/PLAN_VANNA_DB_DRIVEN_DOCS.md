@@ -1,7 +1,9 @@
 # Plan: Vanna Documentation — Static File to DB-Driven
 
 **Project root:** `/Users/seal/Documents/GitHub/AI/`
-**Date:** 2026-03-23 (rev 4 — final)
+**Date:** 2026-03-23 (rev 5)
+
+**Status update:** core DB-driven Vanna docs flow, admin CRUD, sync-status tracking, and admin UI are already in place. The next round should shift from architecture delivery to retrieval-quality verification, business-view documentation refresh, and operational hardening.
 
 ---
 
@@ -65,6 +67,27 @@
 - จำนวน chunks ต่อ context summary ต้อง <= 1 (ห้ามยาวเกิน 800 words)
 - Manual doc content ห้ามซ้ำกับ rule text ที่ sync จาก `schema_business_rules` แล้ว
 - Context summary ห้ามมี business rule details — แค่ structural info (columns, hierarchy, summable/groupable)
+
+---
+
+## Next round follow-up
+
+### Phase 7A: Retrieval QA pack
+
+- สร้างชุดคำถามตัวอย่างต่อ context หลัก และบันทึก expected retrieved docs
+- ตรวจ false positive/false negative หลังเปลี่ยนเป็น DB-driven docs
+- สรุป threshold tuning ที่เหมาะกับ production data จริง
+
+### Phase 7B: Business DB docs refresh
+
+- อัปเดตเอกสารอ้างอิงของ business views ให้ตรงกับ `schema_contexts.main_view`
+- เก็บตัวอย่าง query ที่ hierarchy-safe และใช้ lowercase/view columns ตามของจริง
+- เชื่อม process นี้กับ onboarding context ใหม่
+
+### Phase 7C: Operations and recovery
+
+- เขียน runbook สำหรับ migration 031, seeding, admin CRUD, sync, และ rollback/recovery
+- เก็บ monitoring note เรื่อง sync duration, reset/retrain failures, และ missing-table handling
 
 ---
 

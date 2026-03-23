@@ -29,7 +29,7 @@ const Settings: React.FC = () => {
     const [error, setError] = useState<string | null>(null);
 
     const [aiConfig, setAiConfig] = useState<AIConfig | null>(null);
-    const [providers, setProviders] = useState<AIProvider[]>([]);
+    const [, setProviders] = useState<AIProvider[]>([]);
     const [featureFlags, setFeatureFlags] = useState<FeatureFlags | null>(null);
 
     const [availableModels, setAvailableModels] = useState<Record<string, string[]>>({});

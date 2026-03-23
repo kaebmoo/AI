@@ -21,6 +21,8 @@ from app.schemas.hierarchy_schemas import (
 from app.services.hierarchy_service import hierarchy_service
 from app.services.query_engine import clear_query_cache
 
+from ._shared import mark_brain_dirty
+
 router = APIRouter()
 
 
@@ -60,6 +62,7 @@ def create_hierarchy_level(
     """Create or update a hierarchy level."""
     result = hierarchy_service.upsert_level(context_name, body.level, body.model_dump())
     clear_query_cache()
+    mark_brain_dirty()
     return result
 
 
@@ -74,6 +77,7 @@ def update_hierarchy_level(
     data = {key: value for key, value in body.model_dump().items() if value is not None}
     result = hierarchy_service.upsert_level(context_name, level, data)
     clear_query_cache()
+    mark_brain_dirty()
     return result
 
 
@@ -86,6 +90,7 @@ def delete_hierarchy_level(
     """Soft-delete a hierarchy level."""
     hierarchy_service.delete_level(context_name, level)
     clear_query_cache()
+    mark_brain_dirty()
     return None
 
 
@@ -112,6 +117,7 @@ def create_hierarchy_value(
     """Create a hierarchy value."""
     result = hierarchy_service.create_value(context_name, body.model_dump())
     clear_query_cache()
+    mark_brain_dirty()
     return result
 
 
@@ -125,6 +131,7 @@ def update_hierarchy_value(
     data = {key: value for key, value in body.model_dump().items() if value is not None}
     result = hierarchy_service.update_value(value_id, data)
     clear_query_cache()
+    mark_brain_dirty()
     return result
 
 
@@ -136,6 +143,7 @@ def delete_hierarchy_value(
     """Soft-delete a hierarchy value."""
     hierarchy_service.delete_value(value_id)
     clear_query_cache()
+    mark_brain_dirty()
     return None
 
 
@@ -147,6 +155,7 @@ def extract_hierarchy(
     """Trigger auto-extract hierarchy from data."""
     result = hierarchy_service.auto_extract(context_name)
     clear_query_cache()
+    mark_brain_dirty()
     return result
 
 
@@ -163,6 +172,7 @@ def bootstrap_hierarchy(
         raise HTTPException(400, result["error"])
     hierarchy_service._invalidate_cache()
     clear_query_cache()
+    mark_brain_dirty()
     return result
 
 
@@ -229,6 +239,7 @@ async def import_csv_hierarchy(
         imported += 1
 
     clear_query_cache()
+    mark_brain_dirty()
     return {"success": True, "imported": imported, "filename": file.filename}
 
 
@@ -260,4 +271,5 @@ def resolve_unmatched_keyword(
     """Mark an unmatched keyword as resolved."""
     hierarchy_service.resolve_unmatched_keyword(keyword, context_name)
     clear_query_cache()
+    mark_brain_dirty()
     return {"success": True}

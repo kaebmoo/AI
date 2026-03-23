@@ -249,3 +249,28 @@ class QueryComplexityPattern(ConfigBase):
     __table_args__ = (
         UniqueConstraint('tier', 'pattern', name='uq_tier_pattern'),
     )
+
+
+class VannaDocumentation(ConfigBase):
+    """
+    Manually authored knowledge documents for Vanna RAG.
+    Replaces static file dependency on docs/DATABASE_TABLES_GUIDE.md.
+    Auto-generated context summaries are NOT stored here — they are
+    generated on-the-fly by _sync_context_summaries() during brain sync.
+    """
+    __tablename__ = "vanna_documentation"
+
+    id = Column(Integer, primary_key=True, index=True)
+    doc_key = Column(String(100), nullable=False, unique=True)
+    title = Column(String(500), nullable=False)
+    content = Column(Text, nullable=False)
+    category = Column(String(50), default='guide')
+    context_name = Column(String(100), nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index('ix_vanna_doc_active', 'is_active'),
+        Index('ix_vanna_doc_category', 'category'),
+    )

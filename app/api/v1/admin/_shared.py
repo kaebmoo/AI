@@ -58,3 +58,27 @@ def get_business_db_path() -> str:
         return db_path
 
     return os.path.join(project_root, "nt_fi_report.sqlite")
+
+
+def mark_brain_dirty():
+    """Record that brain-relevant config has changed.
+
+    Called after mutations to contexts, mappings, rules, golden examples,
+    schema metadata, hierarchy, vanna docs, or onboarding apply.
+    Admin sees needs_sync indicator until they trigger Sync Brain.
+    """
+    try:
+        from datetime import datetime
+        from app.services.admin_config_service import AdminConfigService
+        svc = AdminConfigService()
+        try:
+            svc.set_config(
+                'last_brain_relevant_change_at',
+                datetime.utcnow().isoformat(),
+                config_type='system',
+                category='system',
+            )
+        finally:
+            svc.close()
+    except Exception:
+        pass

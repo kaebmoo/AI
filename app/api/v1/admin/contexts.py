@@ -12,6 +12,7 @@ from app.schemas.admin_schemas import (
 )
 from app.services.query_engine import clear_query_cache
 from app.services.schema_service import SchemaService
+from ._shared import mark_brain_dirty
 
 router = APIRouter()
 
@@ -39,6 +40,7 @@ def create_context(
     try:
         context = service.create_context(data.model_dump())
         clear_query_cache()
+        mark_brain_dirty()
         return SchemaContextResponse.model_validate(context)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -57,6 +59,7 @@ def update_context(
         if not context:
             raise HTTPException(status_code=404, detail="Context not found")
         clear_query_cache()
+        mark_brain_dirty()
         return SchemaContextResponse.model_validate(context)
     except HTTPException:
         raise
@@ -73,4 +76,5 @@ def delete_context(
     """Delete schema context. Admin only."""
     service.delete_context(context_id)
     clear_query_cache()
+    mark_brain_dirty()
     return None

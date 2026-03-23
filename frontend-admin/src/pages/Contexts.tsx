@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Table, Button, Modal, Form, Input, InputNumber, Switch, message, Tag, Space, Card } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, SyncOutlined } from '@ant-design/icons';
-import type { SchemaContext, SchemaContextCreate, SchemaContextUpdate } from '../types/schemaContext';
+import type { SchemaContext } from '../types/schemaContext';
 import { contextService } from '../services/contextService';
 import { adminService } from '../services/adminService';
 

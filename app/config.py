@@ -169,4 +169,9 @@ class Settings(BaseSettings):
             raise ValueError("CORS_ORIGINS is not configured. Set allowed frontend origins in the environment for staging/production.")
         return origins
 
+    def get_cors_origin_regex(self) -> Optional[str]:
+        if self.is_production_like():
+            return None
+        return r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
+
 settings = Settings()

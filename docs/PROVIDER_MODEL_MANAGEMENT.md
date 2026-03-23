@@ -1,8 +1,10 @@
 # AI Provider and Model Management
 
+Updated: 2026-03-23
+
 ## Overview
 
-NT AI Assistant now supports dynamic AI provider and model management through a comprehensive admin interface. This allows administrators to add, configure, and manage multiple AI providers and their models without code changes.
+NT AI Assistant supports dynamic AI provider and model management through the admin interface. Administrators can add, configure, and manage multiple AI providers and their models without code changes, and the admin dashboard now reads the same effective runtime state used by backend config resolution.
 
 ## Features
 
@@ -13,6 +15,8 @@ NT AI Assistant now supports dynamic AI provider and model management through a 
 - **Admin UI**: Full CRUD interface for managing providers and models
 - **Priority System**: Control display order and selection preferences
 - **Default Provider Selection**: Set which provider/model to use by default
+- **Effective Runtime Endpoint**: A single API response for Dashboard and admin surfaces
+- **Cross-Page Alignment**: Settings save now syncs `admin_config`, `ai_providers.is_default`, and `ai_models.is_default`
 
 ## Architecture
 
@@ -31,6 +35,16 @@ NT AI Assistant now supports dynamic AI provider and model management through a 
 3. **Hardcoded Defaults (Safety Net)**
    - Built-in defaults ensure system always works
    - Activates only if both database and .env are unavailable
+
+### Runtime Source of Truth
+
+Operationally, the runtime decision still comes from `admin_config` keys such as:
+
+- `default_ai_provider`
+- `{provider}_enabled`
+- `{provider}_model`
+
+To reduce drift across admin pages, provider/model CRUD and Settings save now synchronize the related default flags back into `ai_providers` and `ai_models`. Admin pages that need the actual runtime state should use `GET /api/v1/admin/config/ai/effective` instead of inferring it themselves.
 
 ### API Key Management
 
@@ -129,7 +143,7 @@ CREATE TABLE ai_models (
 
 ### Accessing Provider Management
 
-1. Log in to Admin Panel: `http://localhost:3001/login`
+1. Log in to Admin Panel: `http://localhost:5173/login` or `http://localhost:5175/login`
 2. Navigate to **AI Configuration → AI Providers**
 
 ### Managing Providers
@@ -206,6 +220,19 @@ PUT    /api/v1/admin/models/{id}            # Update model
 DELETE /api/v1/admin/models/{id}            # Delete model
 ```
 
+### Effective Runtime State
+
+```
+GET /api/v1/admin/config/ai/effective       # Runtime provider/model state for admin surfaces
+GET /api/v1/admin/dashboard-overview        # Dashboard view-model incl. runtime state + alerts
+```
+
+`/config/ai/effective` is the preferred contract when:
+
+- Dashboard needs the provider/model currently in force
+- QA needs to verify whether defaults are aligned
+- Admin UI wants to show if fallback values are in use
+
 ## Configuration Examples
 
 ### Example 1: Add New Provider (OpenAI)
@@ -243,8 +270,15 @@ The system integrates with the existing `admin_config` table:
 
 - `admin_config.default_ai_provider` → Overrides `ai_providers.is_default`
 - `admin_config.{provider}_enabled` → Overrides `ai_providers.is_active`
+- `admin_config.{provider}_model` → Overrides the provider default model row
 
 This ensures backward compatibility with existing configurations.
+
+As of the current admin refresh:
+
+- saving Settings syncs default flags into `ai_providers` and `ai_models`
+- editing a provider/model invalidates Dashboard queries so the overview refreshes with consistent values
+- Dashboard exposes warnings when provider/model defaults drift or when fallback metadata is being used
 
 ## Frontend Integration
 
@@ -308,12 +342,30 @@ Features:
    UPDATE admin_config SET config_value = 'gemini' WHERE config_key = 'default_ai_provider';
    ```
 
+3. Re-check `GET /api/v1/admin/config/ai/effective` and confirm:
+   - `provider_alignment = true`
+   - `model_alignment = true`
+
 ### Issue: Changes not taking effect
 
 **Solution**:
 1. Refresh browser cache
 2. Clear config cache via API
 3. Restart backend if needed
+
+### Issue: Dashboard shows a mismatch warning
+
+This indicates one of these conditions:
+
+1. `admin_config.default_ai_provider` differs from `ai_providers.is_default`
+2. `{provider}_model` differs from the model row flagged as default in `ai_models`
+3. provider/model metadata could not be fully loaded, so fallback values were used
+
+Recommended fix path:
+
+1. Open Providers and Models from the Dashboard alert CTA
+2. Save the intended defaults once through admin UI
+3. Refresh Dashboard and verify the warning disappears
 
 ## Best Practices
 
@@ -340,6 +392,10 @@ Features:
    - Use environment variables only (`.env` file)
    - Rotate keys regularly
    - See [API Key Management Plan](./API_KEY_MANAGEMENT_PLAN.md) for future encrypted database storage
+
+6. **Verification**:
+   - After any provider/model change, verify Dashboard, Providers, Models, and Settings all agree
+   - Use `GET /api/v1/admin/dashboard-overview` for one-shot QA of alignment, fallback usage, and active counts
 
 ## Future Enhancements
 

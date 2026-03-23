@@ -21,6 +21,7 @@ from app.schemas.admin_schemas import (
 from app.services.schema_service import SchemaService
 
 from . import _get_business_db_path
+from ._shared import mark_brain_dirty
 
 router = APIRouter()
 
@@ -96,6 +97,7 @@ async def onboard_context(
                 schema_service.refresh_cache()
             except Exception:
                 pass
+            mark_brain_dirty()
         except Exception:
             pass
 
@@ -167,6 +169,7 @@ async def apply_sql_statements(
             schema_service.refresh_cache()
         except Exception:
             pass
+        mark_brain_dirty()
     except Exception:
         pass
 

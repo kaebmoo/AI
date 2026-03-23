@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import {
-  Card, Table, Button, Modal, Form, Input, Select, InputNumber,
+  Table, Button, Modal, Form, Input, Select, InputNumber,
   Tag, Space, Typography, message, Popconfirm, Alert, Statistic, Row, Col
 } from 'antd'
 import {
@@ -10,7 +10,7 @@ import {
 import { apiKeyService } from '../services/apiKeyService'
 import type { APIKey, APIKeyWithRawKey, UsageStats } from '../services/apiKeyService'
 
-const { Text, Paragraph } = Typography
+const { Text } = Typography
 
 const ApiKeys: React.FC = () => {
   const [keys, setKeys] = useState<APIKey[]>([])

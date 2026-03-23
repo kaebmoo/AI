@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
     Card, Row, Col, Statistic, Table, Tag, Button, Space, Modal,
-    Input, Switch, message, Spin, Alert, Typography, Tooltip, List
+    Input, Switch, message, Spin, Typography, Tooltip
 } from 'antd';
 import {
     LikeOutlined, DislikeOutlined, CheckCircleOutlined,
@@ -12,6 +12,15 @@ import type { FeedbackStats, PendingFeedback, TrendingQuery } from '../services/
 
 const { Text, Paragraph } = Typography;
 const { TextArea } = Input;
+
+const listRowStyle: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+    padding: '10px 0',
+    borderBottom: '1px solid #f0f0f0',
+};
 
 const CATEGORY_LABELS: Record<string, { label: string; color: string }> = {
     wrong_data: { label: 'ข้อมูลไม่ถูกต้อง', color: 'red' },
@@ -152,38 +161,38 @@ const Feedback: React.FC = () => {
             {/* Stats Cards */}
             {stats && (
                 <Row gutter={16} style={{ marginBottom: 24 }}>
-                    <Col span={6}>
+                    <Col xs={24} md={12} xl={6}>
                         <Card>
                             <Statistic title="Total Feedback" value={stats.total_feedback} />
                         </Card>
                     </Col>
-                    <Col span={6}>
+                    <Col xs={24} md={12} xl={6}>
                         <Card>
                             <Statistic
                                 title="Satisfaction Rate"
                                 value={stats.satisfaction_rate}
                                 suffix="%"
                                 precision={1}
-                                valueStyle={{ color: stats.satisfaction_rate >= 70 ? '#3f8600' : '#cf1322' }}
+                                styles={{ content: { color: stats.satisfaction_rate >= 70 ? '#3f8600' : '#cf1322' } }}
                             />
                         </Card>
                     </Col>
-                    <Col span={6}>
+                    <Col xs={24} md={12} xl={6}>
                         <Card>
                             <Statistic
                                 title="Thumbs Up"
                                 value={stats.thumbs_up}
                                 prefix={<LikeOutlined />}
-                                valueStyle={{ color: '#3f8600' }}
+                                styles={{ content: { color: '#3f8600' } }}
                             />
                         </Card>
                     </Col>
-                    <Col span={6}>
+                    <Col xs={24} md={12} xl={6}>
                         <Card>
                             <Statistic
                                 title="Pending Reviews"
                                 value={stats.pending_reviews}
-                                valueStyle={{ color: stats.pending_reviews > 0 ? '#cf1322' : '#3f8600' }}
+                                styles={{ content: { color: stats.pending_reviews > 0 ? '#cf1322' : '#3f8600' } }}
                             />
                         </Card>
                     </Col>
@@ -206,9 +215,9 @@ const Feedback: React.FC = () => {
                 </Card>
             )}
 
-            <Row gutter={16}>
+            <Row gutter={[16, 16]}>
                 {/* Pending Feedback Table */}
-                <Col span={16}>
+                <Col xs={24} xl={16}>
                     <Card title={`Pending Reviews (${pending.length})`}>
                         <Table
                             dataSource={pending}
@@ -221,24 +230,22 @@ const Feedback: React.FC = () => {
                 </Col>
 
                 {/* Trending Queries */}
-                <Col span={8}>
+                <Col xs={24} xl={8}>
                     <Card
                         title={<><FireOutlined /> Trending Queries (7 days)</>}
                     >
                         {trending.length > 0 ? (
-                            <List
-                                size="small"
-                                dataSource={trending}
-                                renderItem={(item, index) => (
-                                    <List.Item>
+                            <div>
+                                {trending.map((item, index) => (
+                                    <div key={`${item.question}-${index}`} style={listRowStyle}>
                                         <Text ellipsis style={{ flex: 1 }}>
                                             <Tag color="blue">{index + 1}</Tag>
                                             {item.question}
                                         </Text>
                                         <Tag>{item.count}x</Tag>
-                                    </List.Item>
-                                )}
-                            />
+                                    </div>
+                                ))}
+                            </div>
                         ) : (
                             <Text type="secondary">No trending queries</Text>
                         )}

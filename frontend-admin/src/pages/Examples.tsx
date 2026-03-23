@@ -1,14 +1,12 @@
 import React, { useState } from 'react';
-import { Table, Button, Space, Modal, Form, Input, Select, Switch, Tag, message, Popconfirm, Card, Typography, Row, Col } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, CopyOutlined, SearchOutlined } from '@ant-design/icons';
+import { Table, Button, Space, Modal, Form, Input, Switch, Tag, message, Popconfirm, Card } from 'antd';
+import { PlusOutlined, EditOutlined, DeleteOutlined, CopyOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getExamples, createExample, updateExample, deleteExample, getExampleCategories } from '../services/examples';
+import { getExamples, createExample, updateExample, deleteExample } from '../services/examples';
 import type { GoldenExample } from '../services/examples';
 import type { ColumnsType } from 'antd/es/table';
 
-const { Option } = Select;
 const { TextArea } = Input;
-const { Text } = Typography;
 
 const Examples: React.FC = () => {
     const [isModalVisible, setIsModalVisible] = useState(false);
@@ -16,7 +14,7 @@ const Examples: React.FC = () => {
     const [searchText, setSearchText] = useState('');
     const [form] = Form.useForm();
     const queryClient = useQueryClient();
-    const [selectedCategory, setSelectedCategory] = useState<string | undefined>(undefined);
+    const [selectedCategory] = useState<string | undefined>(undefined);
 
     const { data, isLoading } = useQuery({
         queryKey: ['examples', selectedCategory],

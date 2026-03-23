@@ -201,7 +201,7 @@ async def build_explanation(
     dim_families: Optional[Dict],
     hierarchy_info: Optional[List[Dict]],
     schema_metadata: Optional[List[Dict]],
-) -> str:
+) -> Any:
     if not data:
         return f"ไม่พบข้อมูลที่ตรงกับเงื่อนไข\n\nSQL ที่ใช้:\n```sql\n{sql_query}\n```\n\nอาจเป็นเพราะ:\n- ไม่มีข้อมูลที่ตรงกับคำค้นหา\n- ชื่อคอลัมน์หรือค่าที่ใช้ค้นหาอาจไม่ถูกต้อง"
 
@@ -251,7 +251,7 @@ async def build_explanation(
 
         t_explain = time.perf_counter() - t0
         logger.info("Hybrid Mode: Explanation Generation took %.4fs", t_explain)
-        return str(explanation)
+        return explanation
     except RECOVERABLE_FLOW_EXCEPTIONS as explain_error:
         logger.warning("Could not get explanation: %s", explain_error)
         return f"พบข้อมูล {len(data)} รายการ"

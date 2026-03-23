@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import {
   Card, Input, Button, List, Typography, Tag, Space, Spin,
-  Drawer, message, Popconfirm, Divider, Empty
+  Drawer, message, Empty
 } from 'antd'
 import {
   SendOutlined, RobotOutlined, UserOutlined,
@@ -10,9 +10,7 @@ import {
 } from '@ant-design/icons'
 import { adminAgentService } from '../services/adminAgentService'
 import type {
-  AdminChatResponse,
-  ConversationSummary,
-  Message as AgentMessage
+  ConversationSummary
 } from '../services/adminAgentService'
 
 const { Text, Paragraph } = Typography
@@ -247,7 +245,7 @@ const AdminAgent: React.FC = () => {
       {/* Messages */}
       <Card
         style={{ flex: 1, overflow: 'auto', marginBottom: 16 }}
-        bodyStyle={{ padding: 16 }}
+        styles={{ body: { padding: 16 } }}
       >
         {messages.length === 0 ? (
           <Empty
@@ -361,7 +359,7 @@ const AdminAgent: React.FC = () => {
         title="Conversation History"
         open={showHistory}
         onClose={() => setShowHistory(false)}
-        width={400}
+        size="large"
       >
         <List
           dataSource={conversations}

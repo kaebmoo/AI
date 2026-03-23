@@ -281,6 +281,7 @@ npm run dev
 # 1. สร้าง .env จาก template
 cp .env.example .env
 # แก้ค่า: DATABASE_URL, CONFIG_DB_URL, BUSINESS_DB_PATH, API keys, CORS_ORIGINS
+# สำหรับ dev admin ถ้าใช้ Vite หลายพอร์ต ให้ใส่ทั้ง 5173 และ 5175 ใน CORS_ORIGINS
 
 # 2. Install dependencies
 pip install -r requirements.txt

@@ -31,6 +31,16 @@ def get_ai_config(
     }
 
 
+@router.get("/config/ai/effective", response_model=dict)
+def get_effective_ai_config(
+    _current_user: User = Depends(deps.require_admin),
+    _db: Session = Depends(deps.get_config_db),
+):
+    """Get the effective runtime AI configuration used by admin surfaces."""
+    config_service = AdminConfigService()
+    return config_service.get_effective_ai_state()
+
+
 @router.put("/config/ai", response_model=dict)
 def update_ai_config(
     config_update: dict,

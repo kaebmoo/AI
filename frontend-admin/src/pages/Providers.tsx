@@ -6,7 +6,6 @@ import {
     Modal,
     Form,
     Input,
-    Select,
     Switch,
     Tag,
     message,
@@ -17,8 +16,6 @@ import {
     EditOutlined,
     PlusOutlined,
     DeleteOutlined,
-    CheckCircleOutlined,
-    StarOutlined,
     StarFilled
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -46,6 +43,7 @@ const Providers: React.FC = () => {
             message.success('Provider created successfully');
             closeModal();
             queryClient.invalidateQueries({ queryKey: ['providers'] });
+            queryClient.invalidateQueries({ queryKey: ['dashboard_overview'] });
         },
         onError: (error: any) => {
             message.error(`Failed to create provider: ${error.response?.data?.detail || error.message}`);
@@ -58,6 +56,7 @@ const Providers: React.FC = () => {
             message.success('Provider updated successfully');
             closeModal();
             queryClient.invalidateQueries({ queryKey: ['providers'] });
+            queryClient.invalidateQueries({ queryKey: ['dashboard_overview'] });
         },
         onError: (error: any) => {
             message.error(`Failed to update provider: ${error.response?.data?.detail || error.message}`);
@@ -69,6 +68,7 @@ const Providers: React.FC = () => {
         onSuccess: () => {
             message.success('Provider deleted successfully');
             queryClient.invalidateQueries({ queryKey: ['providers'] });
+            queryClient.invalidateQueries({ queryKey: ['dashboard_overview'] });
         },
         onError: (error: any) => {
             message.error(`Failed to delete provider: ${error.response?.data?.detail || error.message}`);

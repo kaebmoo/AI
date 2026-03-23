@@ -1,7 +1,7 @@
 # NT AI Assistant - Implementation Status
 
 > ประเภทเอกสาร: สถานะความคืบหน้าเทียบกับ source code จริง
-> Snapshot date: 2026-03-22
+> Snapshot date: 2026-03-23
 > วิธีอ่าน: เอกสารนี้สรุปเฉพาะสิ่งที่ยืนยันได้จาก repository ปัจจุบัน ไม่อิง roadmap เก่าเพียงอย่างเดียว
 
 ---
@@ -17,12 +17,12 @@
 | Infrastructure / Core API | 90% | FastAPI app, Celery, Redis cache, scheduler, MCP client, 3-DB config |
 | Authentication / Access Control | 80% | OTP login, session token, admin/viewer dependency, API key auth |
 | AI Query Core | 90% | chat, SSE stream, query engine, validation, provider orchestration |
-| Admin Platform | 90% | admin CRUD, admin agent, onboarding, provider/model/settings pages |
+| Admin Platform | 95% | admin CRUD, admin agent, onboarding, provider/model/settings pages, refreshed dashboard, Vanna knowledge UI |
 | User Frontend (Expo) | 75% | login/verify, main chat app, conversation service, chart/table components |
 | Telegram Interface | 85% | bot, dispatcher, handlers, chart renderer, webhook/polling support |
 | Testing | 65% | pytest fixtures, 25 unit modules, 9 integration modules |
 | Reports / Export | 10% | ยังไม่เห็น report service/endpoints จริงใน backend |
-| Deployment / Hardening | 50% | docker-compose.prod.yml มี, env examples มี, แต่ CI/CD และ infra hardening ยังไม่ครบ |
+| Deployment / Hardening | 55% | docker-compose.prod.yml มี, env examples มี, dev CORS hardening ดีขึ้น แต่ CI/CD และ infra hardening ยังไม่ครบ |
 
 **สรุป:** โปรเจกต์อยู่ในช่วง late-build / hardening มากกว่าช่วง initial implementation
 
@@ -72,6 +72,9 @@
 - Data warnings / dimension families / hierarchy manager
 - Admin Agent UI
 - API key management UI
+- Vanna knowledge management UI
+- blended operational dashboard backed by `/api/v1/admin/dashboard-overview`
+- effective runtime AI config endpoint for cross-page consistency
 
 จำนวนหน้า admin ที่พบใน repo ตอนนี้: **23 หน้า**
 
@@ -173,7 +176,15 @@
 
 ### สถานะ
 
-ส่วน admin platform เป็นหนึ่งในส่วนที่สมบูรณ์ที่สุดของ repo ตอนนี้ แต่ยังมี technical debt สูงเพราะ logic ส่วนใหญ่กองใน `app/api/v1/admin.py`
+ส่วน admin platform เป็นหนึ่งในส่วนที่สมบูรณ์ที่สุดของ repo ตอนนี้ แต่ยังมี technical debt สูงเพราะ logic ส่วนใหญ่กองใน route layer และยังต้องเก็บ second-pass polish บางหน้า
+
+อัปเดตรอบ 2026-03-23:
+
+- admin shell ถูกจัด navigation ใหม่เพื่อลด sidebar ที่ยาวเกินไป
+- route-level lazy loading ถูกเพิ่มใน `frontend-admin/src/App.tsx`
+- Dashboard ไม่ใช้ข้อความ hardcoded สำหรับ provider/model แล้ว
+- browser QA ครอบคลุมหน้า Providers, Models, API Keys, Vanna Knowledge, Admin Agent
+- deprecation cleanup ของ Ant Design ถูกเก็บเพิ่มในหลายหน้า
 
 ## Phase 4: User Frontend (Expo)
 
@@ -225,6 +236,11 @@ Phase นี้ควรเปลี่ยนจาก “ยังไม่เ�
 ### สถานะ
 
 Phase นี้อยู่ในสภาพใช้งานจริงแล้ว ไม่ใช่เพียง prototype backend
+
+เพิ่มเติม:
+
+- Vanna documentation กลายเป็น DB-driven knowledge docs พร้อม sync status
+- brain-relevant mutations หลาย route ถูกผูกกับ freshness tracking แล้ว
 
 ## Phase 6: Reports & Export
 
@@ -286,6 +302,8 @@ Phase นี้อยู่ในสภาพใช้งานจริงแ�
 3. แยกไฟล์ monolith ขนาดใหญ่
 4. ลด broad exception และ hardening เรื่อง reliability
 5. เก็บ UX ของ Expo app ให้สอดคล้องกับ capability ฝั่ง backend ที่เพิ่มขึ้นแล้ว
+6. เก็บ admin second-pass polish เช่น dense page consistency, vendor chunk reduction, และ dashboard contract tests
+7. ทำ Vanna retrieval QA เชิงคุณภาพหลังเปลี่ยน corpus เป็น DB-driven
 
 ---
 

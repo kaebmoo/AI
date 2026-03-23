@@ -596,3 +596,43 @@ class ApplySqlRequest(BaseModel):
     """Request to apply pre-generated SQL statements directly."""
     view_name: str = Field(..., description="View name for validation after apply")
     sql_statements: List[str] = Field(..., description="SQL statements from dry-run preview")
+
+
+# ============================================================
+# Vanna Documentation Schemas
+# ============================================================
+
+class VannaDocCreate(BaseModel):
+    doc_key: str
+    title: str
+    content: str
+    category: str = "guide"
+    context_name: Optional[str] = None
+
+
+class VannaDocUpdate(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+    category: Optional[str] = None
+    context_name: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class VannaDocResponse(BaseModel):
+    id: int
+    doc_key: str
+    title: str
+    content: str
+    category: str
+    context_name: Optional[str] = None
+    is_active: bool
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class VannaDocListResponse(BaseModel):
+    docs: List[VannaDocResponse]
+    total: int

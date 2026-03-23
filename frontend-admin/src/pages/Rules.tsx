@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Table, Button, Space, Modal, Form, Input, Select, Switch, Tag, message, Popconfirm, Card, Typography } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, CheckCircleOutlined, CloseCircleOutlined, SearchOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getRules, createRule, updateRule, deleteRule, toggleRule } from '../services/rules';
 import type { BusinessRule } from '../services/rules';
@@ -8,7 +8,7 @@ import type { ColumnsType } from 'antd/es/table';
 
 const { Option } = Select;
 const { TextArea } = Input;
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
 const Rules: React.FC = () => {
     const [isModalVisible, setIsModalVisible] = useState(false);

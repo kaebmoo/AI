@@ -4,15 +4,23 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from app.api import deps
 from app.config import settings
 from app.db.session import business_engine, config_engine
-from app.models.schema_models import SchemaBusinessRule, SchemaMetadata, SchemaSemanticMapping
+from app.models.schema_models import (
+    DataWarningModel,
+    QueryComplexityPattern,
+    SchemaBusinessRule,
+    SchemaMetadata,
+    SchemaSemanticMapping,
+)
 from app.models.user import User
 from app.schemas.admin_schemas import DashboardStatsResponse
+from app.services.admin_config_service import AdminConfigService
+from app.services.feedback_service import FeedbackService
 from app.services.query_engine import clear_query_cache
 from app.services.schema_service import SchemaService
 from app.services.vanna_service import VannaService
@@ -22,8 +30,8 @@ router = APIRouter()
 
 @router.post("/refresh-cache", response_model=dict)
 def refresh_schema_cache(
-    current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_config_db),
+    _current_user: User = Depends(deps.require_admin),
+    _db: Session = Depends(deps.get_config_db),
 ):
     """Refresh schema cache after metadata updates. Admin only."""
     schema_service = SchemaService(db_engine=config_engine, business_engine=business_engine)
@@ -37,7 +45,7 @@ def refresh_schema_cache(
 
 @router.get("/stats", response_model=DashboardStatsResponse)
 def get_dashboard_stats(
-    current_user: User = Depends(deps.require_admin),
+    _current_user: User = Depends(deps.require_admin),
     config_db: Session = Depends(deps.get_config_db),
     app_db: Session = Depends(deps.get_db),
 ):
@@ -50,9 +58,156 @@ def get_dashboard_stats(
     )
 
 
+@router.get("/dashboard-overview", response_model=dict)
+def get_dashboard_overview(
+    _current_user: User = Depends(deps.require_admin),
+    config_db: Session = Depends(deps.get_config_db),
+    app_db: Session = Depends(deps.get_db),
+):
+    """Get a blended admin dashboard view-model backed by runtime data."""
+    from app.models.chat import ChatHistory
+
+    feedback_service = FeedbackService(app_db)
+    config_service = AdminConfigService(config_db)
+
+    now = datetime.utcnow()
+    since_7d = now - timedelta(days=7)
+
+    total_queries_7d = app_db.query(ChatHistory).filter(ChatHistory.created_at >= since_7d).count()
+    error_count_7d = app_db.query(ChatHistory).filter(
+        ChatHistory.created_at >= since_7d,
+        (ChatHistory.generated_sql == None) | (ChatHistory.generated_sql == ""),
+    ).count()
+    averages = app_db.query(
+        func.avg(ChatHistory.execution_time_ms),
+        func.avg(ChatHistory.tokens_used),
+    ).filter(ChatHistory.created_at >= since_7d).one()
+    avg_execution_time_ms_7d = round(float(averages[0] or 0), 1)
+    avg_tokens_used_7d = int(round(float(averages[1] or 0), 0))
+
+    context_rows = app_db.execute(text("""
+        SELECT COALESCE(context_name, 'unknown') AS context_name, COUNT(*) AS count
+        FROM chat_history
+        WHERE created_at >= :since
+        GROUP BY context_name
+        ORDER BY count DESC
+        LIMIT 5
+    """), {"since": since_7d}).fetchall()
+    top_contexts_7d = [{
+        "context_name": row[0] or "unknown",
+        "count": row[1],
+    } for row in context_rows]
+
+    feedback_stats = feedback_service.get_statistics(days=30)
+    pending_reviews = feedback_service.get_pending_reviews(limit=5)
+    trending_queries = feedback_service.get_trending_queries(days=7, limit=5)
+    effective_ai = config_service.get_effective_ai_state()
+
+    context_counts = config_db.execute(text("""
+        SELECT
+            COUNT(*) AS total_contexts,
+            SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) AS active_contexts
+        FROM schema_contexts
+    """)).fetchone()
+    total_contexts = int((context_counts[0] or 0) if context_counts else 0)
+    active_contexts = int((context_counts[1] or 0) if context_counts else 0)
+
+    total_users = app_db.query(User).count()
+    total_mappings = config_db.query(SchemaSemanticMapping).count()
+    total_rules = config_db.query(SchemaBusinessRule).count()
+    total_columns = config_db.query(SchemaMetadata).count()
+    active_warnings = config_db.query(DataWarningModel).filter(DataWarningModel.is_active == True).count()
+    active_patterns = config_db.query(QueryComplexityPattern).filter(QueryComplexityPattern.is_active == True).count()
+
+    pending_review_items = [{
+        "id": feedback.id,
+        "question": chat.question,
+        "rating": feedback.rating.value if feedback.rating else None,
+        "created_at": feedback.created_at.isoformat() if feedback.created_at else None,
+    } for feedback, chat in pending_reviews]
+
+    alerts = []
+    if effective_ai["fallback_in_use"]:
+        alerts.append({
+            "level": "warning",
+            "title": "AI config is using fallback values",
+            "message": "Provider or model metadata is not fully loading from ai_providers/ai_models, so the UI is falling back to legacy config values.",
+            "href": "/models",
+        })
+    if not effective_ai["provider_alignment"]:
+        alerts.append({
+            "level": "warning",
+            "title": "Default provider is out of sync",
+            "message": "The default provider from admin_config does not match the provider table flag.",
+            "href": "/providers",
+        })
+    if not effective_ai["model_alignment"]:
+        alerts.append({
+            "level": "warning",
+            "title": "Default model is out of sync",
+            "message": "The default model from admin_config does not match the provider's default model row.",
+            "href": "/models",
+        })
+    if feedback_stats.get("pending_reviews", 0) > 0:
+        alerts.append({
+            "level": "info",
+            "title": "Pending feedback needs review",
+            "message": f"There are {feedback_stats['pending_reviews']} feedback items waiting for admin review.",
+            "href": "/feedback",
+        })
+    if active_warnings > 0:
+        alerts.append({
+            "level": "info",
+            "title": "Data warnings are active",
+            "message": f"{active_warnings} warning rules are active. Review if operators are seeing repeated data-quality warnings.",
+            "href": "/data-warnings",
+        })
+    if total_queries_7d > 0 and error_count_7d / total_queries_7d >= 0.1:
+        alerts.append({
+            "level": "warning",
+            "title": "Query error rate is elevated",
+            "message": f"{error_count_7d} of the last {total_queries_7d} queries failed to produce SQL.",
+            "href": "/query-logs",
+        })
+
+    return {
+        "generated_at": now.isoformat(),
+        "effective_ai": effective_ai,
+        "usage": {
+            "total_queries_7d": total_queries_7d,
+            "error_count_7d": error_count_7d,
+            "error_rate_7d": round(error_count_7d / total_queries_7d, 3) if total_queries_7d else 0,
+            "avg_execution_time_ms_7d": avg_execution_time_ms_7d,
+            "avg_tokens_used_7d": avg_tokens_used_7d,
+            "top_contexts_7d": top_contexts_7d,
+        },
+        "feedback": {
+            "total_feedback_30d": feedback_stats.get("total_feedback", 0),
+            "thumbs_up_30d": feedback_stats.get("thumbs_up", 0),
+            "thumbs_down_30d": feedback_stats.get("thumbs_down", 0),
+            "satisfaction_rate_30d": feedback_stats.get("satisfaction_rate", 0),
+            "pending_reviews": feedback_stats.get("pending_reviews", 0),
+            "pending_review_items": pending_review_items,
+            "trending_queries_7d": trending_queries,
+            "category_breakdown": feedback_stats.get("category_breakdown", {}),
+        },
+        "data_admin": {
+            "total_users": total_users,
+            "total_mappings": total_mappings,
+            "total_rules": total_rules,
+            "total_columns": total_columns,
+            "total_contexts": total_contexts,
+            "active_contexts": active_contexts,
+            "active_warnings": active_warnings,
+            "active_patterns": active_patterns,
+        },
+        "alerts": alerts,
+    }
+
+
 @router.post("/sync-brain", response_model=dict)
 def sync_brain_knowledge(
-    current_user: User = Depends(deps.require_admin),
+    _current_user: User = Depends(deps.require_admin),
     service: SchemaService = Depends(deps.get_schema_service),
 ):
     """Trigger Vanna brain sync. Admin only."""
@@ -62,6 +217,22 @@ def sync_brain_knowledge(
             "distance_threshold": settings.VANNA_DISTANCE_THRESHOLD,
         })
         vanna.sync_brain(service)
+
+        # Record sync timestamp
+        try:
+            config_svc = AdminConfigService()
+            try:
+                config_svc.set_config(
+                    'last_brain_sync_at',
+                    datetime.utcnow().isoformat(),
+                    config_type='system',
+                    category='system',
+                )
+            finally:
+                config_svc.close()
+        except Exception:
+            pass
+
         return {"status": "success", "message": "Brain sync completed successfully"}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -69,7 +240,7 @@ def sync_brain_knowledge(
 
 @router.post("/clear-query-cache", response_model=dict)
 def clear_query_cache_endpoint(
-    current_user: User = Depends(deps.require_admin),
+    _current_user: User = Depends(deps.require_admin),
 ):
     """Clear the in-memory query result cache."""
     cleared = clear_query_cache()
@@ -87,13 +258,12 @@ def get_query_logs(
     feedback_only: bool = Query(False, description="Only show queries with feedback"),
     thumbs_down_only: bool = Query(False, description="Only show thumbs-down queries"),
     has_error: bool = Query(False, description="Only show queries with errors"),
-    current_user: User = Depends(deps.require_admin),
+    _current_user: User = Depends(deps.require_admin),
     db: Session = Depends(deps.get_db),
 ):
     """Get paginated query logs with optional feedback join. Admin only."""
     from app.models.chat import ChatHistory
     from app.models.feedback_models import FeedbackRating, UserFeedback
-    from app.models.user import User as UserModel
 
     query = db.query(ChatHistory, UserFeedback).outerjoin(UserFeedback, ChatHistory.id == UserFeedback.chat_id).order_by(ChatHistory.created_at.desc())
 
@@ -124,7 +294,7 @@ def get_query_logs(
     user_ids = list({row[0].user_id for row in rows if row[0].user_id})
     user_map = {}
     if user_ids:
-        users = db.query(UserModel).filter(UserModel.id.in_(user_ids)).all()
+        users = db.query(User).filter(User.id.in_(user_ids)).all()
         user_map = {user.id: user.email for user in users}
 
     items = []
@@ -158,7 +328,7 @@ def get_query_logs(
 @router.get("/feedback-details/{feedback_id}")
 def get_feedback_details(
     feedback_id: int,
-    current_user: User = Depends(deps.require_admin),
+    _current_user: User = Depends(deps.require_admin),
     db: Session = Depends(deps.get_db),
 ):
     """Get full feedback details including complete chat history."""
@@ -197,7 +367,7 @@ def get_feedback_details(
 @router.get("/query-analytics")
 def get_query_analytics(
     period: str = Query("7d", description="Period: 7d, 30d, 90d"),
-    current_user: User = Depends(deps.require_admin),
+    _current_user: User = Depends(deps.require_admin),
     db: Session = Depends(deps.get_db),
 ):
     """Get aggregated query analytics."""
@@ -218,18 +388,24 @@ def get_query_analytics(
     ).count()
     total_feedback = db.query(UserFeedback).filter(UserFeedback.created_at >= since).count()
 
-    context_rows = db.query(ChatHistory.context_name, func.count(ChatHistory.id)).filter(
-        ChatHistory.created_at >= since
-    ).group_by(ChatHistory.context_name).all()
+    context_rows = db.execute(text("""
+        SELECT COALESCE(context_name, 'unknown') AS context_name, COUNT(*) AS count
+        FROM chat_history
+        WHERE created_at >= :since
+        GROUP BY context_name
+    """), {"since": since}).fetchall()
     context_distribution = {(context_name or "unknown"): count for context_name, count in context_rows}
 
-    category_rows = db.query(UserFeedback.feedback_category, func.count(UserFeedback.id)).filter(
-        UserFeedback.created_at >= since,
-        UserFeedback.rating == FeedbackRating.THUMBS_DOWN,
-    ).group_by(UserFeedback.feedback_category).all()
+    category_rows = db.execute(text("""
+        SELECT feedback_category, COUNT(*) AS count
+        FROM user_feedback
+        WHERE created_at >= :since
+          AND rating = :rating
+        GROUP BY feedback_category
+    """), {"since": since, "rating": FeedbackRating.THUMBS_DOWN.value}).fetchall()
     error_categories = {}
     for category, count in category_rows:
-        cat_name = category.value if category else "unspecified"
+        cat_name = str(category) if category else "unspecified"
         error_categories[cat_name] = count
 
     return {

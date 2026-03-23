@@ -16,6 +16,7 @@ from app.schemas.admin_schemas import (
 )
 from app.services.ai_service import AIService
 from app.services.query_engine import clear_query_cache
+from ._shared import mark_brain_dirty
 
 router = APIRouter()
 
@@ -91,6 +92,7 @@ def create_golden_example(
         )
 
     clear_query_cache()
+    mark_brain_dirty()
     return GoldenExampleResponse.model_validate(example)
 
 
@@ -121,6 +123,7 @@ def update_golden_example(
         )
 
     clear_query_cache()
+    mark_brain_dirty()
     return GoldenExampleResponse.model_validate(example)
 
 
@@ -138,4 +141,5 @@ def delete_golden_example(
     db.delete(example)
     db.commit()
     clear_query_cache()
+    mark_brain_dirty()
     return None

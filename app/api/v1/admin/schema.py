@@ -34,7 +34,7 @@ from app.services.ai_service import AIService
 from app.services.query_engine import clear_query_cache
 from app.services.schema_service import SchemaService
 
-from ._shared import ensure_metadata_rows
+from ._shared import ensure_metadata_rows, mark_brain_dirty
 
 router = APIRouter()
 
@@ -95,6 +95,7 @@ def create_schema_column(
 
     schema_service.refresh_cache()
     clear_query_cache()
+    mark_brain_dirty()
     return SchemaMetadataResponse.model_validate(column)
 
 
@@ -121,6 +122,7 @@ def update_schema_column(
 
     schema_service.refresh_cache()
     clear_query_cache()
+    mark_brain_dirty()
     return SchemaMetadataResponse.model_validate(column)
 
 
@@ -141,6 +143,7 @@ def delete_schema_column(
 
     schema_service.refresh_cache()
     clear_query_cache()
+    mark_brain_dirty()
     return None
 
 
@@ -168,6 +171,7 @@ def create_view(
             mapping=mapping_dicts,
         )
         clear_query_cache()
+        mark_brain_dirty()
         return {
             "status": "success",
             "message": f"View {data.view_name} created with column mappings and metadata propagated",
@@ -249,6 +253,7 @@ def propagate_view_metadata(
 ):
     """Propagate metadata from source table(s) to a view."""
     result = service.propagate_metadata_to_view(view_name)
+    mark_brain_dirty()
     missing = result.get("missing_columns", [])
     message = f"Propagated: {result['created']} created, {result['updated']} updated, {result.get('skipped', 0)} skipped"
     if missing:
@@ -366,6 +371,7 @@ def batch_update_dimension_families(
             updated += 1
 
     db.commit()
+    mark_brain_dirty()
 
     families_data = service.get_dimension_families_with_source(request.table_name)
     families = [
@@ -409,6 +415,7 @@ def auto_populate_dimension_families(
                 updated += 1
 
     db.commit()
+    mark_brain_dirty()
 
     families_data = service.get_dimension_families_with_source(table_name)
     families = [

@@ -1,8 +1,12 @@
 # Admin Configuration System
 
+Updated: 2026-03-23
+
 ## Overview
 
-NT AI Assistant มีระบบจัดการ configuration แบบ dynamic ที่ให้ admin สามารถเปลี่ยนการตั้งค่า AI providers, models, และ features ผ่าน Web UI โดยไม่ต้อง restart server หรือแก้ code
+NT AI Assistant มีระบบจัดการ configuration แบบ dynamic ที่ให้ admin สามารถเปลี่ยนการตั้งค่า AI providers, models, features, และ Vanna knowledge ผ่าน Web UI โดยไม่ต้อง restart server หรือแก้ code
+
+รอบล่าสุดของ admin refresh เพิ่ม runtime contract ที่ชัดขึ้นสำหรับ provider/model, dashboard view-model จาก backend จริง, และ brain sync freshness tracking สำหรับงาน Vanna/database
 
 ---
 
@@ -91,9 +95,13 @@ CREATE TABLE schema_contexts (
 
 | id | name | display_name | main_view | keywords |
 |----|------|--------------|-----------|----------|
-| 1 | revenue | รายได้ (Revenue) | revenue | รายได้,revenue,ขาย,sales |
-| 2 | expense | ค่าใช้จ่าย (Expense) | expense | ค่าใช้จ่าย,expense,cost |
+| 1 | revenue | รายได้ (Revenue) | revenue_search | รายได้,revenue,ขาย,sales |
+| 2 | expense | ค่าใช้จ่าย (Expense) | v_expense_mart | ค่าใช้จ่าย,expense,cost |
 | 3 | transfer_price | ราคาโอน | v_transfer_price | ราคาโอน,transfer price |
+
+Notes:
+- `schema_contexts` เป็นตัวกำหนด `main_view` ของแต่ละ context และถูกใช้ทั้งใน query routing, admin onboarding, dashboard coverage, และ Vanna context summaries
+- เมื่อ mutation เกิดกับ contexts, mappings, rules, schema metadata, hierarchy, golden examples, หรือ Vanna docs ระบบจะ mark `last_brain_relevant_change_at` เพื่อให้ admin เห็นว่า knowledge เปลี่ยนแล้ว
 
 ---
 
@@ -121,6 +129,9 @@ class AdminConfigService:
     def get_ai_config(self) -> Dict[str, Any]:
         """Get complete AI configuration"""
 
+    def get_effective_ai_state(self) -> Dict[str, Any]:
+      """Get effective runtime provider/model state for admin surfaces"""
+
     def get_active_providers(self) -> List[Dict[str, Any]]:
         """Get list of enabled providers"""
 
@@ -145,7 +156,17 @@ providers = config_service.get_active_providers()
 #   {"id": "matcha", "name": "Matcha", "model": "gpt-4.1", "is_default": True},
 #   {"id": "gemini", "name": "Gemini", "model": "gemini-3-flash", "is_default": False}
 # ]
+
+# Get effective runtime state used by Dashboard and QA
+effective = config_service.get_effective_ai_state()
+# Includes provider/model alignment, fallback usage, counts, and last_brain_sync_at
 ```
+
+### Runtime Alignment Rules
+
+- `admin_config.default_ai_provider` และ `{provider}_model` ยังเป็น runtime keys ที่ backend ใช้ตัดสิน effective provider/model
+- Settings save และ provider/model CRUD จะ sync default flags กลับไปที่ `ai_providers.is_default` และ `ai_models.is_default` เพื่อลด drift ระหว่างหน้า admin
+- Dashboard ใช้ `/api/v1/admin/config/ai/effective` และ `/api/v1/admin/dashboard-overview` เพื่อแสดง runtime state ที่ backend ใช้อยู่จริง
 
 ---
 
@@ -242,6 +263,43 @@ Toggle a feature flag
 
 Clear configuration cache
 
+**GET /api/v1/admin/config/ai/effective**
+
+Returns the effective runtime configuration that admin pages should trust.
+
+```json
+{
+  "default_provider": {
+    "id": "matcha",
+    "display_name": "Matcha (NT Gateway)",
+    "is_active": true
+  },
+  "default_model": {
+    "id": "gpt-4.1",
+    "display_name": "gpt-4.1",
+    "is_active": true,
+    "tier": "default"
+  },
+  "provider_source": "database",
+  "fallback_in_use": false,
+  "provider_alignment": true,
+  "model_alignment": true,
+  "active_provider_count": 3,
+  "active_model_count": 8,
+  "last_brain_sync_at": "2026-03-23T09:15:00"
+}
+```
+
+**GET /api/v1/admin/dashboard-overview**
+
+Returns the blended dashboard view-model used by the refreshed admin home:
+
+- effective runtime AI state
+- 7-day usage and error rates
+- feedback queue and trending queries
+- data admin coverage metrics
+- operational alerts for drift, fallback, warnings, and review backlog
+
 ---
 
 ## Frontend Implementation
@@ -299,6 +357,14 @@ useEffect(() => {
 3. **Cache Management**
    - Clear cache button
 
+4. **Runtime Consistency**
+  - Dashboard, Providers, Models, and Settings now converge on the same runtime state
+  - Query invalidation refreshes Dashboard after provider/model changes
+
+5. **Brain Operations**
+  - Dashboard can trigger schema cache refresh, query cache clear, and Vanna brain sync
+  - brain freshness is tracked via `last_brain_sync_at` and `last_brain_relevant_change_at`
+
 **Screenshot:**
 
 ```
@@ -338,7 +404,7 @@ useEffect(() => {
 
 **Via Admin UI (Recommended):**
 
-1. Login to admin panel: `http://localhost:5173/`
+1. Login to admin panel: `http://localhost:5173/` or `http://localhost:5175/`
 2. Navigate to Settings
 3. Select "Matcha" in Default Provider dropdown
 4. Click "Save Configuration"
@@ -377,6 +443,7 @@ Only used if database value doesn't exist
 - Frontend ModelSelector no longer shows Claude
 - `/api/v1/admin/config/ai/providers` excludes Claude
 - Users cannot select Claude even if they try
+- Dashboard alert state updates after save because the dashboard query is invalidated
 
 ---
 
@@ -389,6 +456,14 @@ Only used if database value doesn't exist
 3. Select new model from dropdown (e.g., "gpt-4o")
 4. Click "Save Configuration"
 5. ✅ All users now use gpt-4o when selecting Matcha
+
+### Scenario: Verify Runtime Drift Before Release
+
+1. Open Dashboard
+2. Check the runtime alignment tag in System Health
+3. If a warning appears, open Providers or Models from the alert CTA
+4. Save the intended defaults once through admin UI
+5. Refresh Dashboard to confirm the warning disappears
 
 ---
 
@@ -453,6 +528,11 @@ psql -d nt_fi_report < database/migrations/004_admin_config.sql
 - Triggers for timestamp management
 - Views for admin UI
 
+Additional runtime/admin pieces added after the original migration:
+- effective AI runtime endpoint in `app/api/v1/admin/config.py`
+- dashboard overview endpoint in `app/api/v1/admin/analytics.py`
+- brain dirty markers in admin mutation routes via `app/api/v1/admin/_shared.py`
+
 ---
 
 ## Best Practices
@@ -467,6 +547,12 @@ psql -d nt_fi_report < database/migrations/004_admin_config.sql
 ❌ **DON'T:** Hardcode configuration in code
 - Requires deployment
 - No flexibility
+
+### 1.1 Trust Effective Runtime State for Cross-Page Display
+
+✅ **DO:** Use `/api/v1/admin/config/ai/effective` or `/api/v1/admin/dashboard-overview` when a page needs the current provider/model runtime state
+
+❌ **DON'T:** Reconstruct effective state independently on each page from mixed sources
 
 ### 2. Use .env for Secrets
 
@@ -518,6 +604,28 @@ curl -X POST http://localhost:8000/api/v1/admin/config/cache/clear
 **Reason:** Database value takes priority
 
 **Solution:** Either:
+
+1. Remove or update the corresponding `admin_config` row
+2. Clear config cache
+3. Re-check `/api/v1/admin/config/ai/effective` to confirm the runtime source
+
+### Issue: Login works on one Vite port but fails on another in development
+
+**Reason:** `CORS_ORIGINS` does not include the active admin port
+
+**Solution:**
+
+1. Include both `http://localhost:5173` and `http://localhost:5175` in `CORS_ORIGINS`
+2. In development, backend also allows localhost/127.0.0.1 by regex via `settings.get_cors_origin_regex()`
+3. Keep explicit origins correct anyway before staging/production
+
+### Issue: Brain sync freshness is unclear after changing mappings/rules/schema
+
+**Solution:**
+
+1. Check `GET /api/v1/admin/brain-sync-status` or the Dashboard sync timestamp
+2. If `needs_sync=true`, trigger Sync Brain from Dashboard or Vanna Knowledge
+3. Re-test Vanna-backed retrieval after sync
 1. Remove from database, or
 2. Update via Admin UI (which updates database)
 

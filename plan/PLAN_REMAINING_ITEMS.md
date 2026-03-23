@@ -39,6 +39,64 @@
 3. เก็บ minor consistency debt เช่น `_detect_hierarchy_level()` shim indirection ถ้าคุ้มค่า
 4. พิจารณา hierarchy cache owner transfer ในรอบถัดไปเท่านั้น ไม่ใช่ blocker ปัจจุบัน
 
+---
+
+## Next Round Plan — Web Admin
+
+งานรอบถัดไปฝั่ง web admin ควรเป็นการเก็บความแน่นและความเชื่อถือของ workspace ที่เพิ่ง refresh ไปแล้ว มากกว่าการเปิด feature ใหม่เพิ่มทันที
+
+### ADMIN-N1: Secondary page polish and consistency
+
+- ทำ visual/spacing pass ให้หน้า Settings, Query Logs, Providers, Models, API Keys, และ Vanna Knowledge ใช้มาตรฐาน page framing เดียวกัน
+- ลด card ซ้อนหลายชั้นและ heading ซ้ำ
+- เก็บ empty/loading/error states ให้สม่ำเสมอ
+
+### ADMIN-N2: Dashboard contract and browser regression tests
+
+- เพิ่ม API contract coverage สำหรับ `/api/v1/admin/dashboard-overview` และ `/api/v1/admin/config/ai/effective`
+- เพิ่ม regression checks สำหรับ navigation persistence, lower-menu visibility, และ CTA routing จาก dashboard alerts
+- เก็บ browser QA checklist สำหรับ release รอบถัดไป
+
+### ADMIN-N3: Performance follow-up
+
+- วิเคราะห์ shared vendor chunk ที่ยังใหญ่หลัง route-level split
+- แยก import หนักที่ดึงเข้าทุกหน้าโดยไม่จำเป็น
+- พิจารณา page-level data prefetch เฉพาะหน้าที่คุ้มค่า
+
+### ADMIN-N4: Admin API decomposition
+
+- ย้าย logic ที่ยังกองใน route layer ไป service layer เพิ่มเติม
+- เก็บ naming และ invalidation policy ของ admin queries ให้ชัดเจนขึ้น
+- ลด risk จาก broad exception handling ใน admin runtime paths
+
+---
+
+## Next Round Plan — Vanna / Database
+
+### VANNA-N1: Retrieval quality verification
+
+- ทดสอบ 5-10 คำถามจริงต่อ context หลักหลังเปลี่ยน corpus เป็น DB-driven
+- ตรวจ retrieved docs ว่าตรง expected context/rule/hierarchy หรือไม่
+- จัด baseline query set สำหรับ revenue, expense, transfer_price, และ P&L
+
+### VANNA-N2: Documentation coverage audit
+
+- review `vanna_documentation` seed docs และ manual docs ที่ admin เพิ่ม
+- แยก content ที่ควรอยู่ใน business rules ออกจาก content เชิง workflow/guide
+- ตรวจว่าคำอธิบาย hierarchy กับ value lookup ไม่ซ้ำและไม่ชน retrieval กันเอง
+
+### VANNA-N3: Business DB documentation refresh
+
+- ปรับ docs ฝั่ง database/view ให้ตรงกับ main views ที่ใช้งานจริง (`revenue_search`, `v_expense_mart`, `v_pl_costtype_nt_mth`)
+- เพิ่ม context-specific examples ที่ไม่ drift จาก schema metadata ปัจจุบัน
+- วาง process ให้ onboarding context ใหม่มี doc follow-up ชัดเจน
+
+### VANNA-N4: Sync operations hardening
+
+- เพิ่ม runbook สำหรับ migration `031_vanna_documentation.sql`, brain sync, และ post-sync verification
+- ตรวจ behavior เมื่อ migration ยังไม่ถูก apply หรือ table หาย
+- เก็บ operational note เรื่อง Chroma reset/retrain duration และ failure handling
+
 ### Scheduler test status
 
 ไฟล์ `tests/unit/test_scheduler.py` ถูกเพิ่มแล้วเพื่อพิสูจน์ behavior ของ scheduler โดยตรง ครอบคลุมอย่างน้อย:

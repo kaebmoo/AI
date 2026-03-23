@@ -19,6 +19,7 @@ export interface AIProviderDetailed {
     default_api_url?: string;
     description?: string;
     priority: number;
+    default_model?: string;
     created_at?: string;
     updated_at?: string;
 }
@@ -101,7 +102,10 @@ export const providerService = {
     },
 
     createProvider: async (data: CreateProviderRequest): Promise<AIProviderDetailed> => {
-        const response = await axios.post(`${API_URL}/admin/providers`, data, {
+        const response = await axios.post(`${API_URL}/admin/providers`, {
+            ...data,
+            id: data.provider_id,
+        }, {
             headers: getAuthHeader()
         });
         return response.data;

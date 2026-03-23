@@ -31,12 +31,15 @@ def create_provider(
 ):
     """Create a new AI provider. Admin only."""
     config_service = AdminConfigService()
+    provider_key = data.get("id") or data.get("provider_id")
     success = config_service.create_provider(
-        provider_id=data.get("id"),
+        provider_id=provider_key,
         name=data.get("name"),
         display_name=data.get("display_name"),
         icon=data.get("icon", "bulb"),
         api_key_env_var=data.get("api_key_env_var"),
+        api_url_env_var=data.get("api_url_env_var"),
+        default_api_url=data.get("default_api_url"),
         description=data.get("description"),
         priority=data.get("priority", 0),
     )
@@ -61,6 +64,9 @@ def update_provider(
         icon=data.get("icon"),
         is_active=data.get("is_active"),
         is_default=data.get("is_default"),
+        api_key_env_var=data.get("api_key_env_var"),
+        api_url_env_var=data.get("api_url_env_var"),
+        default_api_url=data.get("default_api_url"),
         description=data.get("description"),
         priority=data.get("priority"),
     )

@@ -288,7 +288,55 @@ class AdminConfigService:
                 if not self.set_config(key, value, config_type, "ai", updated_by):
                     success = False
 
+        if success:
+            default_provider_id = normalized.get("default_ai_provider")
+            if default_provider_id:
+                self._sync_provider_default_flags(default_provider_id)
+
+                default_model_key = f"{default_provider_id}_model"
+                default_model_id = normalized.get(default_model_key) or self.get_config(default_model_key, "")
+                if default_model_id:
+                    self._sync_model_default_flags(default_provider_id, default_model_id)
+
+            for key, value in normalized.items():
+                if key.endswith("_model") and value:
+                    provider_id = key[:-6]
+                    self._sync_model_default_flags(provider_id, value)
+
         return success
+
+    def _sync_provider_default_flags(self, default_provider_id: str) -> None:
+        try:
+            self.db.execute(
+                text(
+                    """
+                    UPDATE ai_providers
+                    SET is_default = CASE WHEN id = :provider_id THEN 1 ELSE 0 END
+                    """
+                ),
+                {"provider_id": default_provider_id},
+            )
+            self.db.commit()
+        except Exception:
+            logger.debug("Failed to sync provider default flags", exc_info=True)
+            self.db.rollback()
+
+    def _sync_model_default_flags(self, provider_id: str, default_model_id: str) -> None:
+        try:
+            self.db.execute(
+                text(
+                    """
+                    UPDATE ai_models
+                    SET is_default = CASE WHEN provider_id = :provider_id AND model_id = :model_id THEN 1 ELSE 0 END
+                    WHERE provider_id = :provider_id
+                    """
+                ),
+                {"provider_id": provider_id, "model_id": default_model_id},
+            )
+            self.db.commit()
+        except Exception:
+            logger.debug("Failed to sync model default flags for provider %s", provider_id, exc_info=True)
+            self.db.rollback()
 
     def get_active_providers(self) -> List[Dict[str, Any]]:
         """
@@ -331,6 +379,7 @@ class AdminConfigService:
                     # Check if provider is enabled in admin_config
                     enabled_key = f"{provider_id}_enabled"
                     is_enabled = self.get_config(enabled_key, "true") == "true"
+                    configured_model = self.get_config(f"{provider_id}_model", row[4] or "default")
 
                     if is_enabled:
                         providers.append({
@@ -339,7 +388,7 @@ class AdminConfigService:
                             "display_name": row[2] or row[1],
                             "icon": row[3] or "bulb",
                             "is_default": provider_id == default_provider,  # Use admin_config value
-                            "model": row[4] or "default"
+                            "model": configured_model or row[4] or "default"
                         })
 
                 # Only return if we found enabled providers
@@ -384,6 +433,148 @@ class AdminConfigService:
             })
 
         return providers
+
+    def get_effective_ai_state(self) -> Dict[str, Any]:
+        """
+        Get the effective runtime AI provider/model state for admin surfaces.
+
+        Returns:
+            Dict describing the effective provider/model, source, and alignment
+        """
+        ai_config = self.get_ai_config()
+        feature_flags = self.get_feature_flags()
+        provider_records = self.get_all_providers(include_inactive=True)
+        active_providers = self.get_active_providers()
+
+        provider_lookup = {provider["id"]: provider for provider in provider_records}
+        active_provider_ids = {provider["id"] for provider in active_providers}
+
+        default_provider_id = ai_config.get("default_provider") or ""
+        default_provider = provider_lookup.get(default_provider_id)
+        if default_provider is None:
+            default_provider = next(
+                (provider for provider in active_providers if provider["id"] == default_provider_id),
+                None,
+            )
+
+        config_source = "database" if provider_records and any(
+            provider.get("source") == "database" for provider in provider_records
+        ) else "fallback"
+
+        provider_table_default = next(
+            (provider["id"] for provider in provider_records if provider.get("is_default")),
+            None,
+        )
+        provider_alignment = provider_table_default in (None, default_provider_id)
+
+        default_model_id = ai_config.get(f"{default_provider_id}_model", "") if default_provider_id else ""
+        default_model = None
+        model_alignment = True
+        total_models = 0
+        active_models = 0
+
+        if provider_records:
+            for provider in provider_records:
+                models = self.get_models_by_provider(provider["id"], include_inactive=True)
+                total_models += len(models)
+                active_models += sum(1 for model in models if model.get("is_active"))
+                if provider["id"] == default_provider_id:
+                    default_model = next(
+                        (model for model in models if model["model_id"] == default_model_id),
+                        None,
+                    )
+                    table_default_model = next(
+                        (model for model in models if model.get("is_default")),
+                        None,
+                    )
+                    table_default_model_id = table_default_model["model_id"] if table_default_model else None
+                    model_alignment = table_default_model_id in (None, default_model_id)
+                    if default_model is None:
+                        default_model = table_default_model
+        else:
+            for provider in active_providers:
+                models = self.get_available_models(provider["id"])
+                total_models += len(models)
+                active_models += len(models)
+                if provider["id"] == default_provider_id:
+                    default_model = next(
+                        (
+                            {
+                                "model_id": model_id,
+                                "display_name": model_id,
+                                "is_active": True,
+                                "is_default": model_id == default_model_id,
+                                "tier": "default",
+                            }
+                            for model_id in models
+                            if model_id == default_model_id
+                        ),
+                        None,
+                    )
+
+        enabled_features = [name for name, enabled in feature_flags.items() if enabled]
+
+        return {
+            "default_provider": {
+                "id": default_provider_id,
+                "name": (default_provider or {}).get("name") or default_provider_id,
+                "display_name": (default_provider or {}).get("display_name")
+                or (default_provider or {}).get("name")
+                or default_provider_id,
+                "is_active": default_provider_id in active_provider_ids,
+            },
+            "default_model": {
+                "id": default_model_id,
+                "display_name": (default_model or {}).get("display_name") or default_model_id,
+                "is_active": (default_model or {}).get("is_active", bool(default_model_id)),
+                "tier": (default_model or {}).get("tier", "default"),
+            },
+            "provider_source": config_source,
+            "fallback_in_use": config_source != "database",
+            "provider_alignment": provider_alignment,
+            "model_alignment": model_alignment,
+            "active_provider_count": len(active_providers),
+            "total_provider_count": len(provider_records) if provider_records else len(active_providers),
+            "active_model_count": active_models,
+            "total_model_count": total_models,
+            "active_providers": active_providers,
+            "enabled_features": enabled_features,
+            "feature_flags": feature_flags,
+            "last_brain_sync_at": self.get_config("last_brain_sync_at"),
+        }
+
+    def _sync_provider_runtime_config(
+        self,
+        provider_id: str,
+        *,
+        is_active: Optional[bool] = None,
+        is_default: Optional[bool] = None,
+        default_model: Optional[str] = None,
+    ) -> None:
+        """Keep legacy admin_config keys aligned with provider/model tables."""
+        if is_active is not None:
+            self.set_config(
+                f"{provider_id}_enabled",
+                "true" if is_active else "false",
+                config_type="ai_provider",
+                category="ai",
+            )
+
+        if is_default:
+            self.set_config(
+                "default_ai_provider",
+                provider_id,
+                config_type="ai_provider",
+                category="ai",
+            )
+
+        if default_model is not None:
+            self.set_config(
+                f"{provider_id}_model",
+                default_model,
+                config_type="model",
+                category="ai",
+            )
 
     def get_available_models(self, provider: str) -> List[str]:
         """
@@ -664,12 +855,28 @@ class AdminConfigService:
                 "default_api_url": row[8],
                 "description": row[9],
                 "priority": row[10],
-                "default_model": row[11]
+                "default_model": row[11],
+                "source": "database"
             } for row in results]
 
         except Exception as e:
             logger.error(f"Failed to get providers: {e}")
-            return []
+            fallback_providers = self.get_active_providers()
+            return [{
+                "id": provider["id"],
+                "name": provider["name"],
+                "display_name": provider.get("display_name"),
+                "icon": provider.get("icon", "bulb"),
+                "is_active": True,
+                "is_default": provider.get("is_default", False),
+                "api_key_env_var": None,
+                "api_url_env_var": None,
+                "default_api_url": None,
+                "description": "Loaded from fallback configuration",
+                "priority": 0,
+                "default_model": provider.get("model"),
+                "source": "fallback",
+            } for provider in fallback_providers]
 
     def create_provider(
         self,
@@ -678,6 +885,8 @@ class AdminConfigService:
         display_name: Optional[str] = None,
         icon: str = "bulb",
         api_key_env_var: Optional[str] = None,
+        api_url_env_var: Optional[str] = None,
+        default_api_url: Optional[str] = None,
         description: Optional[str] = None,
         priority: int = 0
     ) -> bool:
@@ -687,10 +896,12 @@ class AdminConfigService:
                 text("""
                     INSERT INTO ai_providers (
                         id, name, display_name, icon, is_active, is_default,
-                        api_key_env_var, description, priority
+                        api_key_env_var, api_url_env_var, default_api_url,
+                        description, priority
                     ) VALUES (
                         :id, :name, :display_name, :icon, 1, 0,
-                        :api_key_env_var, :description, :priority
+                        :api_key_env_var, :api_url_env_var, :default_api_url,
+                        :description, :priority
                     )
                 """),
                 {
@@ -699,11 +910,14 @@ class AdminConfigService:
                     "display_name": display_name or name,
                     "icon": icon,
                     "api_key_env_var": api_key_env_var,
+                    "api_url_env_var": api_url_env_var,
+                    "default_api_url": default_api_url,
                     "description": description,
                     "priority": priority
                 }
             )
             self.db.commit()
+            self._sync_provider_runtime_config(provider_id, is_active=True)
             return True
 
         except Exception as e:
@@ -719,6 +933,9 @@ class AdminConfigService:
         icon: Optional[str] = None,
         is_active: Optional[bool] = None,
         is_default: Optional[bool] = None,
+        api_key_env_var: Optional[str] = None,
+        api_url_env_var: Optional[str] = None,
+        default_api_url: Optional[str] = None,
         description: Optional[str] = None,
         priority: Optional[int] = None
     ) -> bool:
@@ -758,6 +975,18 @@ class AdminConfigService:
                 updates.append("description = :description")
                 params["description"] = description
 
+            if api_key_env_var is not None:
+                updates.append("api_key_env_var = :api_key_env_var")
+                params["api_key_env_var"] = api_key_env_var
+
+            if api_url_env_var is not None:
+                updates.append("api_url_env_var = :api_url_env_var")
+                params["api_url_env_var"] = api_url_env_var
+
+            if default_api_url is not None:
+                updates.append("default_api_url = :default_api_url")
+                params["default_api_url"] = default_api_url
+
             if priority is not None:
                 updates.append("priority = :priority")
                 params["priority"] = priority
@@ -766,6 +995,12 @@ class AdminConfigService:
                 sql = f"UPDATE ai_providers SET {', '.join(updates)} WHERE id = :id"
                 self.db.execute(text(sql), params)
                 self.db.commit()
+
+            self._sync_provider_runtime_config(
+                provider_id,
+                is_active=is_active,
+                is_default=is_default,
+            )
 
             return True
 
@@ -837,7 +1072,22 @@ class AdminConfigService:
 
         except Exception as e:
             logger.error(f"Failed to get models: {e}")
-            return []
+            fallback_model_ids = self.get_available_models(provider_id)
+            default_model = self.get_config(f"{provider_id}_model", "")
+            return [{
+                "id": index + 1,
+                "provider_id": provider_id,
+                "model_id": model_id,
+                "display_name": model_id,
+                "is_active": True,
+                "is_default": model_id == default_model,
+                "context_window": None,
+                "supports_vision": False,
+                "cost_per_1m_tokens": None,
+                "description": "Loaded from fallback configuration",
+                "priority": 0,
+                "tier": "default",
+            } for index, model_id in enumerate(fallback_model_ids)]
 
     def create_model(
         self,
@@ -884,6 +1134,8 @@ class AdminConfigService:
             )
             self.db.commit()
             clear_model_tier_cache()
+            if is_default:
+                self._sync_provider_runtime_config(provider_id, default_model=model_id)
             return True
 
         except Exception as e:
@@ -963,6 +1215,14 @@ class AdminConfigService:
                 self.db.execute(text(sql), params)
                 self.db.commit()
                 clear_model_tier_cache()
+
+            if is_default:
+                default_model_id = self.db.execute(
+                    text("SELECT model_id FROM ai_models WHERE id = :id"),
+                    {"id": model_pk_id},
+                ).fetchone()
+                if default_model_id:
+                    self._sync_provider_runtime_config(provider_id, default_model=default_model_id[0])
 
             return True
 

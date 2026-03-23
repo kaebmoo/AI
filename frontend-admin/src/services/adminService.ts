@@ -38,6 +38,86 @@ export interface FeatureFlags {
     value_lookup_enabled: boolean;
 }
 
+export interface DashboardAlert {
+    level: 'info' | 'warning' | 'success';
+    title: string;
+    message: string;
+    href?: string;
+}
+
+export interface DashboardContextUsage {
+    context_name: string;
+    count: number;
+}
+
+export interface DashboardPendingReview {
+    id: number;
+    question: string;
+    rating: string | null;
+    created_at: string | null;
+}
+
+export interface EffectiveAIState {
+    default_provider: {
+        id: string;
+        name: string;
+        display_name: string;
+        is_active: boolean;
+    };
+    default_model: {
+        id: string;
+        display_name: string;
+        is_active: boolean;
+        tier: string;
+    };
+    provider_source: string;
+    fallback_in_use: boolean;
+    provider_alignment: boolean;
+    model_alignment: boolean;
+    active_provider_count: number;
+    total_provider_count: number;
+    active_model_count: number;
+    total_model_count: number;
+    active_providers: AIProvider[];
+    enabled_features: string[];
+    feature_flags: FeatureFlags;
+    last_brain_sync_at: string | null;
+}
+
+export interface DashboardOverview {
+    generated_at: string;
+    effective_ai: EffectiveAIState;
+    usage: {
+        total_queries_7d: number;
+        error_count_7d: number;
+        error_rate_7d: number;
+        avg_execution_time_ms_7d: number;
+        avg_tokens_used_7d: number;
+        top_contexts_7d: DashboardContextUsage[];
+    };
+    feedback: {
+        total_feedback_30d: number;
+        thumbs_up_30d: number;
+        thumbs_down_30d: number;
+        satisfaction_rate_30d: number;
+        pending_reviews: number;
+        pending_review_items: DashboardPendingReview[];
+        trending_queries_7d: Array<{ question: string; count: number }>;
+        category_breakdown: Record<string, number>;
+    };
+    data_admin: {
+        total_users: number;
+        total_mappings: number;
+        total_rules: number;
+        total_columns: number;
+        total_contexts: number;
+        active_contexts: number;
+        active_warnings: number;
+        active_patterns: number;
+    };
+    alerts: DashboardAlert[];
+}
+
 export const adminService = {
     refreshCache: async () => {
         const response = await axios.post(`${API_URL}/admin/refresh-cache`, {}, {
@@ -53,9 +133,23 @@ export const adminService = {
         return response.data;
     },
 
+    getDashboardOverview: async (): Promise<DashboardOverview> => {
+        const response = await axios.get(`${API_URL}/admin/dashboard-overview`, {
+            headers: getAuthHeader()
+        });
+        return response.data;
+    },
+
     // AI Configuration Management
     getAIConfig: async () => {
         const response = await axios.get(`${API_URL}/admin/config/ai`, {
+            headers: getAuthHeader()
+        });
+        return response.data;
+    },
+
+    getEffectiveAIConfig: async (): Promise<EffectiveAIState> => {
+        const response = await axios.get(`${API_URL}/admin/config/ai/effective`, {
             headers: getAuthHeader()
         });
         return response.data;
@@ -101,6 +195,13 @@ export const adminService = {
 
     clearConfigCache: async () => {
         const response = await axios.post(`${API_URL}/admin/config/cache/clear`, {}, {
+            headers: getAuthHeader()
+        });
+        return response.data;
+    },
+
+    clearQueryCache: async () => {
+        const response = await axios.post(`${API_URL}/admin/clear-query-cache`, {}, {
             headers: getAuthHeader()
         });
         return response.data;

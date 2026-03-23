@@ -18,6 +18,8 @@ from app.schemas.admin_schemas import (
 from app.services.query_engine import clear_query_cache
 from app.services.schema_service import SchemaService
 
+from ._shared import mark_brain_dirty
+
 router = APIRouter()
 
 
@@ -76,6 +78,7 @@ def create_business_rule(
 
     schema_service.refresh_cache()
     clear_query_cache()
+    mark_brain_dirty()
     return BusinessRuleResponse.model_validate(rule)
 
 
@@ -102,6 +105,7 @@ def update_business_rule(
 
     schema_service.refresh_cache()
     clear_query_cache()
+    mark_brain_dirty()
     return BusinessRuleResponse.model_validate(rule)
 
 
@@ -122,6 +126,7 @@ def delete_business_rule(
 
     schema_service.refresh_cache()
     clear_query_cache()
+    mark_brain_dirty()
     return None
 
 
@@ -144,4 +149,5 @@ def toggle_business_rule(
 
     schema_service.refresh_cache()
     clear_query_cache()
+    mark_brain_dirty()
     return BusinessRuleResponse.model_validate(rule)

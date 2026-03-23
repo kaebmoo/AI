@@ -21,6 +21,7 @@ from .providers import router as providers_router
 from .query_patterns import router as query_patterns_router
 from .rules import router as rules_router
 from .schema import router as schema_router
+from .vanna_docs import router as vanna_docs_router
 from .warnings import router as warnings_router
 
 router = APIRouter()
@@ -37,3 +38,4 @@ router.include_router(warnings_router)
 router.include_router(query_patterns_router)
 router.include_router(analytics_router)
 router.include_router(api_keys_router)
+router.include_router(vanna_docs_router)

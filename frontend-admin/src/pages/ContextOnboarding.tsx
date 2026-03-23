@@ -101,7 +101,7 @@ const ContextOnboarding: React.FC = () => {
 
     const renderStep1 = () => (
         <Card title={<><DatabaseOutlined /> Select View / Table</>}>
-            <Space direction="vertical" size="large" style={{ width: '100%' }}>
+            <Space orientation="vertical" size="large" style={{ width: '100%' }}>
                 <div>
                     <Text strong>Choose a view or table to onboard:</Text>
                     <Select
@@ -201,7 +201,7 @@ const ContextOnboarding: React.FC = () => {
         }));
 
         return (
-            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+            <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
                 <Card title="Inspection Results" size="small">
                     <Descriptions bordered size="small" column={3}>
                         <Descriptions.Item label="View Name">{inspectionData.view_name}</Descriptions.Item>
@@ -282,7 +282,7 @@ const ContextOnboarding: React.FC = () => {
                 )}
 
                 <Card title="AI Analysis" size="small">
-                    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                    <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
                         <div>
                             <Text strong>Select AI Provider (optional):</Text>
                             <Select
@@ -355,7 +355,7 @@ const ContextOnboarding: React.FC = () => {
         const { analysis, config } = onboardResult;
 
         return (
-            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+            <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
                 {/* Context Info — BUG-3 FIX: use correct field names */}
                 {analysis?.context && (
                     <Card title="Context Configuration" size="small">
@@ -478,7 +478,7 @@ const ContextOnboarding: React.FC = () => {
         const applyInfo = applyResult.apply || {};
 
         return (
-            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+            <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
                 <Result
                     status={isSuccess ? 'success' : 'warning'}
                     title={isSuccess ? 'Config Applied Successfully' : 'Apply Failed'}

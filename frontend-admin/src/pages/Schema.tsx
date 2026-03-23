@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Table, Button, Space, Modal, Form, Input, Select, Switch, Tag, message, Popconfirm } from 'antd';
-import { EditOutlined, PlusOutlined, DeleteOutlined, SearchOutlined } from '@ant-design/icons';
+import { EditOutlined, PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getSchemaColumns, updateSchemaColumn, createSchemaColumn, deleteSchemaColumn } from '../services/schema';
 import type { SchemaMetadata } from '../services/schema';

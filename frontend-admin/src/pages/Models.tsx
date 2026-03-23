@@ -24,7 +24,7 @@ import {
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { providerService } from '../services/providerService';
-import type { AIModel, AIProviderDetailed } from '../services/providerService';
+import type { AIModel } from '../services/providerService';
 import type { ColumnsType } from 'antd/es/table';
 
 const { TextArea } = Input;
@@ -57,6 +57,8 @@ const Models: React.FC = () => {
             message.success('Model created successfully');
             closeModal();
             queryClient.invalidateQueries({ queryKey: ['models', selectedProviderId] });
+            queryClient.invalidateQueries({ queryKey: ['providers'] });
+            queryClient.invalidateQueries({ queryKey: ['dashboard_overview'] });
         },
         onError: (error: any) => {
             message.error(`Failed to create model: ${error.response?.data?.detail || error.message}`);
@@ -70,6 +72,8 @@ const Models: React.FC = () => {
             message.success('Model updated successfully');
             closeModal();
             queryClient.invalidateQueries({ queryKey: ['models', selectedProviderId] });
+            queryClient.invalidateQueries({ queryKey: ['providers'] });
+            queryClient.invalidateQueries({ queryKey: ['dashboard_overview'] });
         },
         onError: (error: any) => {
             message.error(`Failed to update model: ${error.response?.data?.detail || error.message}`);
@@ -81,6 +85,8 @@ const Models: React.FC = () => {
         onSuccess: () => {
             message.success('Model deleted successfully');
             queryClient.invalidateQueries({ queryKey: ['models', selectedProviderId] });
+            queryClient.invalidateQueries({ queryKey: ['providers'] });
+            queryClient.invalidateQueries({ queryKey: ['dashboard_overview'] });
         },
         onError: (error: any) => {
             message.error(`Failed to delete model: ${error.response?.data?.detail || error.message}`);

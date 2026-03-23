@@ -5,6 +5,49 @@
 
 ---
 
+## 2026-03-23 Addendum
+
+Vanna configuration is still driven by `.env` for path and retrieval threshold, but the documentation and operations workflow has changed substantially:
+
+- Vanna manual knowledge now lives in `vanna_documentation`
+- Admin has a dedicated `Vanna Knowledge` page for CRUD and sync operations
+- brain freshness is tracked with `last_brain_sync_at` and `last_brain_relevant_change_at`
+- `docs/DATABASE_TABLES_GUIDE.md` is now a human reference file, not the runtime source of truth
+
+### Current operational flow
+
+1. Admin edits Vanna docs, contexts, mappings, rules, schema, hierarchy, or golden examples
+2. admin routes call `mark_brain_dirty()` to set `last_brain_relevant_change_at`
+3. Dashboard or Vanna Knowledge shows that a sync is needed
+4. Admin runs `POST /api/v1/admin/sync-brain`
+5. backend records `last_brain_sync_at`
+
+### Current admin endpoints
+
+```text
+GET    /api/v1/admin/vanna-docs
+POST   /api/v1/admin/vanna-docs
+PUT    /api/v1/admin/vanna-docs/{id}
+DELETE /api/v1/admin/vanna-docs/{id}
+GET    /api/v1/admin/brain-sync-status
+POST   /api/v1/admin/sync-brain
+```
+
+### What remains in `.env`
+
+- `VANNA_CHROMA_PATH`
+- `VANNA_DISTANCE_THRESHOLD`
+
+### What moved out of static files
+
+- manual knowledge docs for retrieval
+- sync freshness tracking
+- admin-triggered documentation maintenance
+
+For the broader migration plan, see `plan/PLAN_VANNA_DB_DRIVEN_DOCS.md`.
+
+---
+
 ## 📝 Changes Made
 
 ### 1. Added Config to `.env`

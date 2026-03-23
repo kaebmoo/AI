@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
-    Card, Table, Tag, Input, DatePicker, Select, Space, Button,
-    Modal, Typography, Descriptions, message, Spin
+    Card, Table, Tag, DatePicker, Select, Space, Button,
+    Modal, Typography, Descriptions, message
 } from 'antd';
 import { ReloadOutlined, SearchOutlined, EyeOutlined } from '@ant-design/icons';
 import api from '../services/api';

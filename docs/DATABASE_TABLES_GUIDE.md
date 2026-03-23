@@ -4,8 +4,12 @@
 **Last Updated:** 2026-03-22
 **Database:** config.db (SQLite)
 
+> **Note:** This file is for human reference only. Vanna RAG documentation is now
+> managed via the `vanna_documentation` table and auto-generated context summaries.
+> Manage via Admin UI: Knowledge Base > Vanna Knowledge.
+> See `app/services/vanna_service.py` for the DB-driven sync logic.
+>
 > This guide documents config DB tables that drive AI SQL generation.
-> It is consumed by Vanna RAG via `vanna_service._sync_documentation()` — each `## ` section becomes a standalone RAG chunk.
 
 ---
 

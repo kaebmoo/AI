@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
-    Table, Button, Select, Tag, Space, Card, message, Modal, Typography, Input, Popconfirm
+    Table, Button, Select, Tag, Space, Card, message, Modal, Typography, Input
 } from 'antd';
 import {
     SyncOutlined, RobotOutlined, SaveOutlined, ThunderboltOutlined
@@ -10,7 +10,7 @@ import {
     getFamilies, analyzeFamilies, batchUpdateFamilies, autoPopulateFamilies,
 } from '../services/dimensionFamilies';
 import type {
-    DimensionFamilyItem, DimensionFamilyColumn, DimensionFamilySuggestion
+    DimensionFamilyItem, DimensionFamilySuggestion
 } from '../services/dimensionFamilies';
 import { contextService } from '../services/contextService';
 
@@ -34,7 +34,7 @@ const SOURCE_COLORS: Record<string, string> = {
 const DimensionFamilies: React.FC = () => {
     const [tables, setTables] = useState<string[]>([]);
     const [selectedTable, setSelectedTable] = useState<string>('');
-    const [families, setFamilies] = useState<DimensionFamilyItem[]>([]);
+    const [, setFamilies] = useState<DimensionFamilyItem[]>([]);
     const [rows, setRows] = useState<FamilyRow[]>([]);
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);

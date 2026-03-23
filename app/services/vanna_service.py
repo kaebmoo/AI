@@ -1,4 +1,6 @@
 from typing import List, Dict, Any
+import io
+import contextlib
 
 # Lazy imports — vanna/chromadb may not be available in all environments (e.g., Python 3.14)
 try:
@@ -54,33 +56,54 @@ class VannaService(ChromaDB_VectorStore, VannaBase):
         This wipes and re-trains to ensure consistency.
         """
         print("🧠 Starting Vanna Brain Sync...")
-        
+
         # Clear existing collections to avoid duplicates
         try:
             collections_to_clear = ["ddl", "documentation", "sql"]
             for col_name in collections_to_clear:
                 try:
                     self.chroma_client.delete_collection(name=col_name)
-                    print(f"   ✅ Cleared collection: {col_name}")
                 except Exception:
                     # Collection doesn't exist yet
                     pass
             print("   ✅ Cleared all existing vectors")
-            
+
             # Re-initialize collections after deletion
             # This is crucial because the self.*_collection attributes still point to the deleted objects
             self.ddl_collection = self.chroma_client.get_or_create_collection(name="ddl")
             self.documentation_collection = self.chroma_client.get_or_create_collection(name="documentation")
             self.sql_collection = self.chroma_client.get_or_create_collection(name="sql")
             print("   ✅ Re-initialized collections")
-            
+
         except Exception as e:
             print(f"   ⚠️  Could not clear collections: {e}")
-        
-        self._sync_ddl(schema_service)
-        self._sync_documentation(schema_service)
-        self._sync_golden_examples(schema_service)
-        
+
+        # Suppress verbose per-item "Adding documentation...." from Vanna base
+        # by redirecting stdout during training, then printing a clean summary
+        captured_stdout = io.StringIO()
+        captured_stderr = io.StringIO()
+
+        try:
+            with contextlib.redirect_stdout(captured_stdout), contextlib.redirect_stderr(captured_stderr):
+                self._sync_ddl(schema_service)
+                self._sync_documentation(schema_service)
+                self._sync_golden_examples(schema_service)
+        finally:
+            pass
+
+        # Parse captured output for summary counts
+        captured_output = "\n".join(
+            part for part in [captured_stdout.getvalue().strip(), captured_stderr.getvalue().strip()] if part
+        )
+        lines = captured_output.split('\n') if captured_output else []
+        adding_count = sum(1 for l in lines if 'Adding' in l)
+        # Print non-"Adding" lines (our own summary prints) + a count summary
+        for line in lines:
+            if 'Adding' not in line and line.strip():
+                print(line)
+        if adding_count > 0:
+            print(f"   - Trained {adding_count} total vector entries")
+
         print("✅ Vanna Brain Sync Complete.")
 
     def _sync_ddl(self, service: SchemaService):
@@ -109,52 +132,82 @@ class VannaService(ChromaDB_VectorStore, VannaBase):
                 print(f"   - Trained DDL: {table}")
 
     def _sync_documentation(self, service: SchemaService):
-        """Train Documentation from Business Rules, Mappings, and Guide"""
-        
+        """Train Documentation — DB-driven, no static files."""
+
         # 1. Business Rules
         with service.engine.connect() as conn:
             rules = conn.execute(text("SELECT * FROM schema_business_rules WHERE is_active=1")).mappings().all()
             for rule in rules:
                 doc_text = f"**Rule: {rule['rule_name']}**\nCode: {rule['rule_code']}\nDescription: {rule['rule_description']}\nCorrect Example: {rule['example_correct']}\nSeverity: {rule['severity']}"
                 self.train(documentation=doc_text)
-        
+
         # 2. Semantic Mappings (Group by type for better context)
         with service.engine.connect() as conn:
             mappings = conn.execute(text("SELECT * FROM schema_semantic_mapping WHERE is_active=1")).mappings().all()
             for m in mappings:
                 doc_text = f"**Term Mapping**\nKeyword: '{m['keyword']}' means column `{m['target_column']}` ({m['keyword_type']})\nCondition: {m['target_condition']}\nNote: {m['description']}"
                 self.train(documentation=doc_text)
-                
-        # 3. External Guide (DATABASE_TABLES_GUIDE.md) with Chunking
+
+        # 3. Auto-generated context summaries (replaces static guide file)
+        self._sync_context_summaries(service)
+
+        # 4. Manual documentation from vanna_documentation table
         try:
-            import os
-            guide_path = "docs/DATABASE_TABLES_GUIDE.md"
-            
-            if os.path.exists(guide_path):
-                with open(guide_path, "r", encoding="utf-8") as f:
-                    content = f.read()
-                
-                # Split by Markdown sections (##)
-                sections = content.split('\n## ')
-                trained_count = 0
-                
-                for i, section in enumerate(sections):
-                    section = section.strip()
-                    if not section: continue
-                    
-                    # Re-add header for clarity (except maybe first intro)
-                    header = f"## {section}" if i > 0 else section
-                    
-                    if len(header) > 100:
-                        self.train(documentation=header)
-                        trained_count += 1
-                        
-                print(f"   - Trained DATABASE_TABLES_GUIDE.md ({trained_count} chunks)")
-            else:
-                print(f"   ! Guide file not found: {guide_path}")
-                
+            with service.engine.connect() as conn:
+                docs = conn.execute(text(
+                    "SELECT title, content FROM vanna_documentation WHERE is_active = 1 ORDER BY category, doc_key"
+                )).mappings().all()
+                for doc in docs:
+                    self.train(documentation=f"## {doc['title']}\n{doc['content']}")
+            print(f"   - Trained {len(docs)} documentation entries from DB")
         except Exception as e:
-            print(f"   ! Could not train from guide file: {e}")
+            print(f"   ! Could not load vanna_documentation: {e}")
+
+    def _sync_context_summaries(self, service: SchemaService):
+        """Auto-generate and train one documentation chunk per active context."""
+        contexts = service.get_all_contexts()
+        if not contexts:
+            print("   - No active contexts found for summary generation")
+            return
+
+        trained = 0
+        for ctx in contexts:
+            try:
+                main_view = ctx.get('main_view', '')
+                display_name = ctx.get('display_name', ctx.get('name', ''))
+                description = ctx.get('description', '')
+
+                metadata = service.get_schema_metadata(main_view)
+                summable = [m['column_name'] for m in metadata if m.get('is_summable')]
+                groupable = [m['column_name'] for m in metadata if m.get('is_groupable')]
+
+                summary = f"## Context: {display_name} ({ctx['name']})\n"
+                summary += f"Main View: {main_view}\n"
+                if description:
+                    summary += f"Description: {description}\n"
+                summary += f"\nSummable columns (ใช้ SUM ได้): {', '.join(summable) or 'none'}\n"
+                summary += f"Groupable columns (ใช้ GROUP BY ได้): {', '.join(groupable[:15]) or 'none'}\n"
+
+                try:
+                    from app.services.hierarchy_service import hierarchy_service
+                    levels = hierarchy_service.get_levels(ctx['name'])
+                    if levels:
+                        chain = ' > '.join(lv['level_label_th'] for lv in levels)
+                        summary += f"\nHierarchy: {chain}\n"
+                        summary += "CRITICAL: ห้าม OR ข้ามระดับ hierarchy — ทำให้ตัวเลขผิดเพี้ยนหลายสิบเท่า\n"
+                except Exception:
+                    pass
+
+                # NOTE: instruction_th is intentionally excluded from context summaries.
+                # It contains rule-like content already trained via business_rules.
+                # Including it would duplicate policy guidance and skew retrieval ranking.
+
+                self.train(documentation=summary)
+                trained += 1
+            except Exception as e:
+                print(f"   ! Could not generate summary for context '{ctx.get('name')}': {e}")
+
+        print(f"   - Generated {trained} context summaries")
 
     def _sync_golden_examples(self, service: SchemaService):
         """Train SQL from Golden Examples"""

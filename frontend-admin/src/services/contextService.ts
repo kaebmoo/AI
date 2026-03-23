@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { API_URL } from './api';
-import type { SchemaContext, SchemaContextCreate, SchemaContextUpdate } from '../types/schemaContext';
+import type { SchemaContextCreate, SchemaContextUpdate } from '../types/schemaContext';
 
 const getAuthHeader = () => {
     const token = localStorage.getItem('token');
