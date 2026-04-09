@@ -105,7 +105,7 @@ MATCHA_API_URL="https://aigateway.ntictsolution.com/v1/chat/completions"
 
 # AI Models
 GEMINI_MODEL="gemini-3-pro-preview"
-CLAUDE_MODEL="claude-sonnet-4-5-20250929"
+CLAUDE_MODEL="claude-sonnet-4-6"
 MATCHA_MODEL="gpt-4.1"
 
 # CoT / SQL Generation Features

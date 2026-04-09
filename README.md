@@ -435,7 +435,7 @@ Access at: `http://localhost:5173/settings` (Admin login required)
    - Configure Matcha API gateway URL
 
 2. **Model Selection**
-   - Claude: claude-sonnet-4-5, claude-opus-4, claude-haiku-3-5
+   - Claude: claude-sonnet-4-6, claude-opus-4-6, claude-haiku-4-5
    - Gemini: gemini-3-flash, gemini-2.0-flash-exp, gemini-1.5-pro
    - Matcha: gpt-4.1, gpt-4o, gpt-4-turbo, gpt-3.5-turbo
 

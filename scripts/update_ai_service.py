@@ -44,7 +44,7 @@ NEW_CONTENT = r'''class AIService:
         if provider == "claude":
             self.provider = ClaudeProvider(
                 api_key=api_key,
-                model=model or "claude-sonnet-4-20250514"
+                model=model or "claude-sonnet-4-6"
             )
         elif provider == "gemini":
             self.provider = GeminiProvider(

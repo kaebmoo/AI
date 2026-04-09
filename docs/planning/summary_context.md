@@ -402,7 +402,7 @@ class ChatResponse(BaseModel):
 
 | Provider | Model | Status |
 |----------|-------|--------|
-| Claude | claude-sonnet-4-20250514 | ✅ Supported |
+| Claude | claude-sonnet-4-6 | ✅ Supported |
 | Gemini | gemini-2.0-flash-exp | ✅ Supported |
 | Matcha | gpt-4o (internal gateway) | ✅ Supported |
 

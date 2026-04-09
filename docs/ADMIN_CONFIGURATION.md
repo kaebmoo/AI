@@ -67,7 +67,7 @@ CREATE TABLE admin_config (
 | `claude_enabled` | `true` | `ai_provider` | Enable Claude |
 | `gemini_enabled` | `true` | `ai_provider` | Enable Gemini |
 | `matcha_enabled` | `true` | `ai_provider` | Enable Matcha |
-| `claude_model` | `claude-sonnet-4-5-20250929` | `model` | Claude model |
+| `claude_model` | `claude-sonnet-4-6` | `model` | Claude model |
 | `gemini_model` | `gemini-3-flash-preview` | `model` | Gemini model |
 | `matcha_model` | `gpt-4.1` | `model` | Matcha model |
 | `matcha_api_url` | `https://aigateway...` | `api_key` | Matcha gateway |
@@ -216,7 +216,7 @@ Returns complete AI configuration
     "claude_enabled": true,
     "gemini_enabled": true,
     "matcha_enabled": true,
-    "claude_model": "claude-sonnet-4-5-20250929",
+    "claude_model": "claude-sonnet-4-6",
     "gemini_model": "gemini-3-flash-preview",
     "matcha_model": "gpt-4.1",
     "matcha_api_url": "https://aigateway.ntictsolution.com/v1/chat/completions"
@@ -239,7 +239,7 @@ Update AI configuration
 {
   "default_provider": "claude",
   "claude_enabled": true,
-  "claude_model": "claude-opus-4-20250514"
+  "claude_model": "claude-opus-4-6"
 }
 ```
 
@@ -249,9 +249,9 @@ Get available models for a provider
 
 ```json
 [
-  "claude-sonnet-4-5-20250929",
-  "claude-opus-4-20250514",
-  "claude-haiku-3-5-20241022"
+  "claude-sonnet-4-6",
+  "claude-opus-4-6",
+  "claude-haiku-4-5-20251001"
 ]
 ```
 
@@ -377,7 +377,7 @@ useEffect(() => {
 │ │ Default Provider: [Matcha ▼]            │ │
 │ │                                         │ │
 │ │ ┌─ Claude (Anthropic) ────────  [✓]───┐│ │
-│ │ │ Model: [claude-sonnet-4-5 ▼]        ││ │
+│ │ │ Model: [claude-sonnet-4-6 ▼]       ││ │
 │ │ └─────────────────────────────────────┘│ │
 │ │                                         │ │
 │ │ ┌─ Matcha (NT Gateway) ──────  [✓]───┐│ │

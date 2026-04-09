@@ -30,7 +30,7 @@ class ClaudeProvider(AIProvider):
     def __init__(
         self,
         api_key: str,
-        model: str = "claude-sonnet-4-20250514",
+        model: str = "claude-sonnet-4-6",
         extended_thinking: bool = False,
         thinking_budget_tokens: int = 8000,
     ):
@@ -162,7 +162,7 @@ class ClaudeProvider(AIProvider):
     @ai_retry
     async def generate_content(self, prompt: str, system_prompt: Optional[str] = None, history: Optional[List[Dict]] = None) -> str:
         # Extended Thinking support
-        THINKING_SUPPORTED_PREFIXES = ("claude-sonnet-4", "claude-opus-4")
+        THINKING_SUPPORTED_PREFIXES = ("claude-sonnet-4", "claude-opus-4", "claude-haiku-4")
         model_supports_thinking = any(self.model.startswith(p) for p in THINKING_SUPPORTED_PREFIXES)
         use_thinking = self.extended_thinking and model_supports_thinking
 

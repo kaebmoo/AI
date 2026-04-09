@@ -83,7 +83,7 @@ class Settings(BaseSettings):
     
     # Model Configuration
     GEMINI_MODEL: str = "gemini-2.0-flash-exp"
-    CLAUDE_MODEL: str = "claude-sonnet-4-20250514"
+    CLAUDE_MODEL: str = "claude-sonnet-4-6"
 
     # Claude Extended Thinking
     CLAUDE_EXTENDED_THINKING: bool = False

@@ -71,7 +71,7 @@ VALUES
 -- AI Model Configuration
 INSERT INTO admin_config (config_key, config_value, config_type, category, display_name, description, is_active, is_sensitive)
 VALUES
-    ('claude_model', 'claude-sonnet-4-5-20250929', 'model', 'ai', 'Claude Model', 'Claude model to use', 1, 0),
+    ('claude_model', 'claude-sonnet-4-6', 'model', 'ai', 'Claude Model', 'Claude model to use', 1, 0),
     ('gemini_model', 'gemini-3-flash-preview', 'model', 'ai', 'Gemini Model', 'Gemini model to use', 1, 0),
     ('matcha_model', 'gpt-4.1', 'model', 'ai', 'Matcha Model', 'Matcha model to use', 1, 0);
 

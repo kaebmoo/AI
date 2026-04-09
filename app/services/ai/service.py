@@ -115,7 +115,7 @@ class AIService:
         if provider_name == "claude":
             self.provider = ClaudeProvider(
                 api_key,
-                model or "claude-sonnet-4-20250514",
+                model or "claude-sonnet-4-6",
                 extended_thinking=kwargs.get("extended_thinking", False),
                 thinking_budget_tokens=kwargs.get("thinking_budget_tokens", 8000),
             )

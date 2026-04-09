@@ -153,7 +153,7 @@ curl -X POST http://localhost:8000/api/v1/admin/contexts/onboard/validate \
 --provider gemini --model gemini-2.5-flash
 
 # Claude
---provider claude --model claude-sonnet-4-5-20250929
+--provider claude --model claude-sonnet-4-6
 
 # Matcha (GPT-4.1)
 --provider matcha --model gpt-4.1

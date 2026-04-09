@@ -28,7 +28,7 @@
 
 | Provider | Status | Models |
 |----------|--------|--------|
-| Claude (Anthropic) | Done | claude-sonnet-4, claude-opus-4, claude-haiku-3.5 |
+| Claude (Anthropic) | Done | claude-sonnet-4-6, claude-opus-4-6, claude-haiku-4-5 |
 | Gemini (Google AI) | Done | gemini-3-flash, gemini-2.0-flash-exp |
 | Matcha (NT Gateway) | Done | gpt-4.1, gpt-4o, gpt-4-turbo |
 | Provider auto-discovery | Done | `registry.py` auto-discovers on import |

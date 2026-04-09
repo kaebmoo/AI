@@ -1192,7 +1192,7 @@ def create_mock_message(response_data: dict) -> Message:
         type="message",
         role="assistant",
         content=content,
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-6",
         stop_reason=response_data.get("stop_reason", "end_turn"),
         usage=Usage(
             input_tokens=response_data.get("input_tokens", 100),

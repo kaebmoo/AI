@@ -610,7 +610,7 @@ pip install deepseek-sdk  # (ถ้ามี official SDK)
 | Provider | Default Model (งานยาก) | Cheap Model (งานง่าย) |
 |----------|----------------------|---------------------|
 | Matcha | gpt-4.1 | gpt-4.1-mini |
-| Claude | claude-sonnet-4.5 | claude-haiku-3.5 |
+| Claude | claude-sonnet-4-6 | claude-haiku-4-5 |
 | Gemini | gemini-3-flash | gemini-2.0-flash-exp |
 
 ---

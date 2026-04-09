@@ -392,7 +392,7 @@
 |--------|------|-------------|---------|-------------|
 | id | Integer | PK | auto | |
 | provider_id | Text | FK → ai_providers.id, CASCADE, NOT NULL | — | Provider ที่เป็นเจ้าของ |
-| model_id | Text | NOT NULL | — | Model ID (gpt-4o, claude-sonnet-4-5) |
+| model_id | Text | NOT NULL | — | Model ID (gpt-4o, claude-sonnet-4-6) |
 | display_name | Text | | NULL | ชื่อแสดง |
 | is_active | Boolean | | 1 | เปิด/ปิดได้ |
 | is_default | Boolean | | 0 | Default model ของ provider |

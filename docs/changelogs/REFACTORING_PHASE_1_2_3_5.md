@@ -143,7 +143,7 @@ That's it — auto-discovered on next import. No registration needed.
 
 | Provider | cheap | mid (default) |
 |----------|-------|---------------|
-| Claude | claude-haiku-3-5-20241022 | claude-sonnet-4-20250514 |
+| Claude | claude-haiku-4-5-20251001 | claude-sonnet-4-6 |
 | Gemini | gemini-2.0-flash-exp | gemini-3-flash-preview |
 | Matcha | gpt-4o-mini | gpt-4o |
 
