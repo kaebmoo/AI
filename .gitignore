@@ -196,6 +196,9 @@ tests/data_export_1770174160824.csv
 .claude/
 ai_prompt_log.txt
 AUDIT.md
+AGENTS.md
+CLAUDE.md
+test_prompt_output.txt
 nt_fi_report.sqlite.backup.20260321_204626
 nt_fi_report.sqlite.backup.20260321_210718
 nt_fi_report.sqlite.backup.20260321_213726
