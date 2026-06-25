@@ -68,6 +68,10 @@ class AuthService:
         ).first()
         
         if session:
+            # Reject sessions belonging to deactivated users
+            if not session.user or not session.user.is_active:
+                return None
+
             # Update last activity
             session.last_activity = datetime.utcnow()
             
@@ -112,6 +116,8 @@ class AuthService:
         """Authenticate user with email and password"""
         user = self.db.query(User).filter(User.email == email).first()
         if not user:
+            return None
+        if not user.is_active:
             return None
         if not user.hashed_password:
             return None

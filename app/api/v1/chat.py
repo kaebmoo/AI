@@ -442,6 +442,7 @@ async def chat(
         mode=request.mode or "hybrid",
         history=history,
         max_retries=request.max_retries,
+        user_id=current_user.id,
     )
 
     # 6. Save session data for chart-only re-render (non-fatal)
@@ -535,6 +536,7 @@ async def chat_stream(
                 history=history,
                 max_retries=request.max_retries,
                 on_status=on_status,
+                user_id=current_user.id,
             ))
 
             # Stream status events while query runs

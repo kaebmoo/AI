@@ -167,6 +167,58 @@ def get_db() -> QueryDatabaseAdapter:
     return _db_adapter
 
 
+def quote_identifier(db: QueryDatabaseAdapter, name: str) -> str:
+    if db.engine == "mssql":
+        return f"[{name.replace(']', ']]')}]"
+    return '"' + name.replace('"', '""') + '"'
+
+
+def table_columns(db: QueryDatabaseAdapter, table_name: str) -> List[str]:
+    quoted_table = quote_identifier(db, table_name)
+    if db.engine == "sqlite":
+        rows = db.execute_query(f"PRAGMA table_info({quoted_table})")
+        return [row["name"] for row in rows]
+    ph = db.get_placeholder()
+    if db.engine == "postgresql":
+        rows = db.execute_query(
+            f"SELECT column_name AS name FROM information_schema.columns WHERE table_name = {ph}",
+            (table_name,),
+        )
+    elif db.engine == "mssql":
+        rows = db.execute_query(
+            f"SELECT COLUMN_NAME AS name FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = {ph}",
+            (table_name,),
+        )
+    else:
+        rows = []
+    return [row["name"] for row in rows]
+
+
+def safe_table(db: QueryDatabaseAdapter, table_name: str) -> str:
+    """Validate table_name against real tables/views, return a quoted identifier.
+
+    Identifiers can't be passed as bind params, so allowlist against the live
+    catalog and reject anything unknown before interpolating.
+    """
+    if db.engine == "sqlite":
+        rows = db.execute_query("SELECT name FROM sqlite_master WHERE type IN ('table','view')")
+    elif db.engine == "postgresql":
+        rows = db.execute_query("SELECT table_name AS name FROM information_schema.tables")
+    elif db.engine == "mssql":
+        rows = db.execute_query("SELECT TABLE_NAME AS name FROM INFORMATION_SCHEMA.TABLES")
+    else:
+        rows = []
+    if table_name not in {r["name"] for r in rows}:
+        raise ValueError(f"Unknown table: {table_name}")
+    return quote_identifier(db, table_name)
+
+
+def safe_column(db: QueryDatabaseAdapter, table_name: str, column_name: str) -> str:
+    if column_name not in table_columns(db, table_name):
+        raise ValueError(f"Unknown column: {column_name}")
+    return quote_identifier(db, column_name)
+
+
 # =========================================================
 # Constants
 # =========================================================
@@ -409,20 +461,21 @@ def get_sample_values(
     try:
         db = get_db()
 
-        # Quote column name for safety
-        quoted_column = f'"{column_name}"'
+        # Allowlist + quote identifiers before interpolating.
+        quoted_table = safe_table(db, table_name)
+        quoted_column = safe_column(db, table_name, column_name)
 
         # Get sample distinct values
         if db.engine == "mssql":
             values_sql = f'''
                 SELECT DISTINCT TOP {limit} {quoted_column}
-                FROM {table_name}
+                FROM {quoted_table}
                 WHERE {quoted_column} IS NOT NULL
             '''
         else:
             values_sql = f'''
                 SELECT DISTINCT {quoted_column}
-                FROM {table_name}
+                FROM {quoted_table}
                 WHERE {quoted_column} IS NOT NULL
                 LIMIT {limit}
             '''
@@ -433,7 +486,7 @@ def get_sample_values(
         # Get total distinct count
         count_sql = f'''
             SELECT COUNT(DISTINCT {quoted_column}) as cnt
-            FROM {table_name}
+            FROM {quoted_table}
             WHERE {quoted_column} IS NOT NULL
         '''
         count_result = db.execute_query(count_sql)
@@ -646,37 +699,41 @@ def get_table_stats(table_name: str = "revenue_search") -> Dict[str, Any]:
     try:
         db = get_db()
 
+        # Allowlist + quote the table name (validates it exists, blocks injection)
+        quoted_table = safe_table(db, table_name)
+
         # Get row count
-        count_sql = f"SELECT COUNT(*) as cnt FROM {table_name}"
+        count_sql = f"SELECT COUNT(*) as cnt FROM {quoted_table}"
         count_result = db.execute_query(count_sql)
         row_count = count_result[0]['cnt'] if count_result else 0
 
         # Get columns (using PRAGMA for SQLite, INFORMATION_SCHEMA for others)
         columns = []
         if db.engine == "sqlite":
-            col_sql = f"PRAGMA table_info({table_name})"
-            col_result = db.execute_query(col_sql)
-            columns = [{"name": row['name'], "type": row['type']} for row in col_result]
+            col_result = db.execute_query(f"PRAGMA table_info({quoted_table})")
+            columns = [{"name": row["name"], "type": row["type"]} for row in col_result]
         elif db.engine == "postgresql":
+            ph = db.get_placeholder()
             col_sql = f"""
                 SELECT column_name as name, data_type as type
                 FROM information_schema.columns
-                WHERE table_name = '{table_name}'
+                WHERE table_name = {ph}
             """
-            columns = db.execute_query(col_sql)
+            columns = db.execute_query(col_sql, (table_name,))
         elif db.engine == "mssql":
+            ph = db.get_placeholder()
             col_sql = f"""
                 SELECT COLUMN_NAME as name, DATA_TYPE as type
                 FROM INFORMATION_SCHEMA.COLUMNS
-                WHERE TABLE_NAME = '{table_name}'
+                WHERE TABLE_NAME = {ph}
             """
-            columns = db.execute_query(col_sql)
+            columns = db.execute_query(col_sql, (table_name,))
 
         # Get sample row
         if db.engine == "mssql":
-            sample_sql = f"SELECT TOP 1 * FROM {table_name}"
+            sample_sql = f"SELECT TOP 1 * FROM {quoted_table}"
         else:
-            sample_sql = f"SELECT * FROM {table_name} LIMIT 1"
+            sample_sql = f"SELECT * FROM {quoted_table} LIMIT 1"
 
         sample_result = db.execute_query(sample_sql)
         sample_row = sample_result[0] if sample_result else {}

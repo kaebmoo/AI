@@ -57,9 +57,9 @@ def get_current_user(
                 api_key_service.track_usage(api_key.id)
                 # Store API key info in request state for scope checking
                 request.state.api_key = api_key
-                # Return the key owner
+                # Return the key owner (only if still active)
                 user = db.query(User).filter(User.id == api_key.user_id).first()
-                if user:
+                if user and user.is_active:
                     return user
         except (ImportError, ValueError, AttributeError) as e:
             logger.debug(f"API key auth failed, falling through to session auth: {e}")
@@ -141,15 +141,29 @@ def get_ai_service(
 
     return AIService(provider=provider_instance, mcp_client=mcp_client)
 
-def require_admin(current_user: User = Depends(get_current_user)) -> User:
+def require_admin(request: Request, current_user: User = Depends(get_current_user)) -> User:
     """
-    Dependency to require admin role
+    Dependency to require admin role.
+
+    If the request was authenticated with an API key, the key must also carry
+    the 'admin' (or 'full') scope — an admin-owned key scoped to 'query' cannot
+    reach admin endpoints.
     """
     if current_user.role != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privileges required"
         )
+
+    api_key = getattr(request.state, "api_key", None)
+    if api_key is not None:
+        from app.services.api_key_service import APIKeyService, KEY_PREFIX
+        if not APIKeyService.has_scope(api_key, "admin"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="API key lacks 'admin' scope"
+            )
+
     return current_user
 
 def require_viewer(current_user: User = Depends(get_current_user)) -> User:

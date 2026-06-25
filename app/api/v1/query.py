@@ -71,6 +71,7 @@ async def simple_query(
             result = await engine.query(
                 question=request_body.question,
                 context=request_body.context,
+                user_id=current_user.id,
             )
         else:
             from app.services.mcp_client import MCPClientService
@@ -80,6 +81,7 @@ async def simple_query(
                 result = await engine.query(
                     question=request_body.question,
                     context=request_body.context,
+                    user_id=current_user.id,
                 )
 
         # QueryEngineResult has .query_result (QueryResult) + .context_name + .execution_time_ms

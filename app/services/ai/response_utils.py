@@ -98,11 +98,11 @@ def extract_sql(text: str) -> Optional[str]:
     if sql_match:
         return sql_match.group(1).strip()
 
-    code_match = re.search(r"```\s*(SELECT.*?)\s*```", text, re.DOTALL | re.IGNORECASE)
+    code_match = re.search(r"```\s*((?:WITH|SELECT).*?)\s*```", text, re.DOTALL | re.IGNORECASE)
     if code_match:
         return code_match.group(1).strip()
 
-    select_match = re.search(r"(SELECT\s+.*?(?:;|$))", text, re.DOTALL | re.IGNORECASE)
+    select_match = re.search(r"((?:WITH|SELECT)\s+.*?(?:;|$))", text, re.DOTALL | re.IGNORECASE)
     if select_match:
         sql = select_match.group(1).strip()
         if "\n\n" in sql:

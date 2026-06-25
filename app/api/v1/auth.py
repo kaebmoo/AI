@@ -87,7 +87,10 @@ def verify_otp(
              
         # Create User if not exists
         user = auth_service.get_or_create_user(verify_data.email)
-        
+
+        if not user.is_active:
+            raise HTTPException(status_code=403, detail="Account is deactivated")
+
         # Create Session
         ip_address = request.client.host if request.client else "unknown"
         session = auth_service.create_session(

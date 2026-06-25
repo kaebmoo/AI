@@ -15,7 +15,11 @@ class User(Base):
     department = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
     role = Column(String, default="user") # user, admin, viewer
-    allowed_bu_access = Column(String, nullable=True) 
+    # Stub for future BU-level read access (Plan 6 / multi-tenant). NULL = no
+    # restriction. NOT enforced today — all authenticated users see all business
+    # data. To activate: filter queries (and scope the result cache) by this value
+    # in the query pipeline. Kept intentionally — do not delete as "unused".
+    allowed_bu_access = Column(String, nullable=True)
     
     # Password based auth
     hashed_password = Column(String, nullable=True)

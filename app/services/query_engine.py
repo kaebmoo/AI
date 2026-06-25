@@ -179,11 +179,14 @@ def clear_query_cache() -> int:
 _dedup_store: Dict[str, float] = {}
 
 
-def _dedup_check(user_question: str, provider: str) -> bool:
-    """Return True if this is a duplicate request within DEDUP_TTL_SECONDS."""
+def _dedup_check(user_question: str, provider: str, user_id: Optional[int] = None) -> bool:
+    """Return True if this is a duplicate request within DEDUP_TTL_SECONDS.
+
+    Scoped per-user so two users asking the same question don't block each other.
+    """
     from app.config import settings as _settings
     ttl = getattr(_settings, "DEDUP_TTL_SECONDS", 5.0)
-    key = hashlib.md5(f"{_normalize_question(user_question)}|{provider}".encode()).hexdigest()
+    key = hashlib.md5(f"{user_id}|{_normalize_question(user_question)}|{provider}".encode()).hexdigest()
     now = time.time()
     # Prune expired entries (lazy cleanup)
     expired = [k for k, ts in _dedup_store.items() if now - ts > ttl]
@@ -340,6 +343,7 @@ class QueryEngine:
         conversation_id: str = None,
         provider_kwargs: Dict = None,
         on_status: Callable = None,
+        user_id: Optional[int] = None,
     ) -> QueryEngineResult:
         """
         Main entry point.
@@ -375,7 +379,7 @@ class QueryEngine:
             return cached
 
         # --- Request dedup: block identical requests within N seconds ---
-        if _dedup_check(question, selected_provider_name):
+        if _dedup_check(question, selected_provider_name, user_id):
             logger.warning(f"QueryEngine: Dedup — duplicate request blocked: {question[:50]}…")
             return QueryEngineResult(
                 query_result=QueryResult(

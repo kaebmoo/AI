@@ -185,7 +185,8 @@ class APIKeyService:
 
         return True
 
-    def has_scope(self, api_key: APIKey, required_scope: str) -> bool:
-        """Check if API key has the required scope."""
-        scopes = api_key.scopes.split(",")
+    @staticmethod
+    def has_scope(api_key: APIKey, required_scope: str) -> bool:
+        """Check if API key has the required scope. 'full' implies all scopes."""
+        scopes = [s.strip() for s in (api_key.scopes or "").split(",")]
         return required_scope in scopes or "full" in scopes

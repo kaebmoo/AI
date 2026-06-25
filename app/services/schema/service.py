@@ -382,7 +382,7 @@ class SchemaService:
             'account_group_name', 'account_name', 'gl_name'
         ]
         
-        with self.engine.connect() as conn:
+        with self.business_engine.connect() as conn:
             for col_name in columns_to_try:
                 # Find matching column (case-insensitive check might be needed for some DBs)
                 # For now assume exact match or simple case variant
