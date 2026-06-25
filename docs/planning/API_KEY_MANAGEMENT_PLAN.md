@@ -133,7 +133,7 @@ UPDATE admin_config
 SET
     config_value = encrypt_aes('sk-ant-api03-...', encryption_key),
     is_sensitive = 1,
-    updated_by = 'admin@ntplc.co.th',
+    updated_by = 'admin@example.com',
     metadata = '{"encrypted": true, "algorithm": "AES-256-GCM"}'
 WHERE config_key = 'anthropic_api_key';
 ```
@@ -596,10 +596,10 @@ const APIKeyModal = ({ provider, onSave, onClose }) => {
 ├─────────────────────────────────────────────────────────────┤
 │ Timestamp           | Provider | Action   | User           │
 │─────────────────────|──────────|──────────|────────────────│
-│ 2025-02-09 15:30:21 | Claude   | Updated  | admin@nt.co.th │
-│ 2025-02-09 14:15:03 | Gemini   | Validated| admin@nt.co.th │
-│ 2025-02-08 10:22:45 | Claude   | Created  | admin@nt.co.th │
-│ 2025-02-07 16:01:12 | Matcha   | Viewed   | admin@nt.co.th │
+│ 2025-02-09 15:30:21 | Claude   | Updated  | admin@example.com │
+│ 2025-02-09 14:15:03 | Gemini   | Validated| admin@example.com │
+│ 2025-02-08 10:22:45 | Claude   | Created  | admin@example.com │
+│ 2025-02-07 16:01:12 | Matcha   | Viewed   | admin@example.com │
 └─────────────────────────────────────────────────────────────┘
 
 Filters: [Provider ▼] [Action ▼] [User ▼] [Date Range]
@@ -1084,7 +1084,7 @@ if __name__ == "__main__":
 
 ```sql
 -- ============================================================
--- NT AI Assistant - API Key Management
+-- AI Assistant - API Key Management
 -- Purpose: Secure storage and management of AI provider API keys
 -- Version: 1.0
 -- Date: 2025-02-09

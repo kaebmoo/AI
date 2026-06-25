@@ -1,8 +1,8 @@
-# NT AI Assistant - Production Implementation Plan
+# AI Assistant - Production Implementation Plan
 
 ## Executive Summary
 
-โครงการพัฒนาระบบ AI Assistant สำหรับสอบถามข้อมูลรายได้และยอดขายของ NT ผ่าน Web Application และ Telegram Bot โดยใช้ Claude AI เป็นตัวประมวลผลคำถามและสร้าง SQL Query
+โครงการพัฒนาระบบ AI Assistant สำหรับสอบถามข้อมูลรายได้และยอดขายขององค์กร ผ่าน Web Application และ Telegram Bot โดยใช้ Claude AI เป็นตัวประมวลผลคำถามและสร้าง SQL Query
 
 **เป้าหมายหลัก:**
 - ให้บริการสอบถามข้อมูลรายได้/ยอดขายผ่าน Web App และ Telegram Bot
@@ -55,7 +55,7 @@
 │                         DATA LAYER                                           │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
 │  │   MSSQL      │  │  PostgreSQL  │  │    Redis     │  │ File Storage │     │
-│  │  (NT Data)   │  │  (App Data)  │  │   (Cache)    │  │   (MinIO)    │     │
+│  │  (Business Data)   │  │  (App Data)  │  │   (Cache)    │  │   (MinIO)    │     │
 │  │ 10.200.1.92  │  │              │  │              │  │              │     │
 │  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘     │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -408,7 +408,7 @@ from typing import List
 
 class Settings(BaseSettings):
     # Allowed email domains
-    ALLOWED_EMAIL_DOMAINS: List[str] = ["nt.co.th", "ntplc.co.th"]
+    ALLOWED_EMAIL_DOMAINS: List[str] = ["example.com", "example.com"]
     
     # OTP Settings
     OTP_LENGTH: int = 6
@@ -603,7 +603,7 @@ class EmailService:
         )
         
         message = MIMEMultipart("alternative")
-        message["Subject"] = f"[NT AI Assistant] Your verification code: {otp_code}"
+        message["Subject"] = f"[AI Assistant] Your verification code: {otp_code}"
         message["From"] = self.from_email
         message["To"] = to_email
         
@@ -850,7 +850,7 @@ class ClaudeRevenueAssistant:
         return [
             {
                 "name": "execute_sql",
-                "description": """Execute a read-only SQL query against the NT revenue database.
+                "description": """Execute a read-only SQL query against the revenue database.
                 Use this to retrieve revenue data from EXPORT_NT_REVENUE_SUB_PRODUCT 
                 or sales data from EXPORT_SPv7_PM.
                 Only SELECT and WITH statements are allowed.""",
@@ -898,7 +898,7 @@ class ClaudeRevenueAssistant:
     
     def _build_system_prompt(self) -> str:
         """Build system prompt with schema information"""
-        return f"""คุณเป็น AI Assistant สำหรับวิเคราะห์ข้อมูลรายได้และยอดขายของ NT (National Telecom)
+        return f"""คุณเป็น AI Assistant สำหรับวิเคราะห์ข้อมูลรายได้และยอดขายของ องค์กร
 
 ## Database Schema
 {self.schema_info}
@@ -2259,8 +2259,8 @@ class TestOTPService:
         """Test that allowed domains pass validation"""
         service = OTPService(Mock(), Mock())
         
-        assert service.validate_email_domain("user@nt.co.th") == True
-        assert service.validate_email_domain("user@ntplc.co.th") == True
+        assert service.validate_email_domain("user@example.com") == True
+        assert service.validate_email_domain("user@example.com") == True
     
     def test_validate_email_domain_not_allowed(self):
         """Test that non-allowed domains fail validation"""
@@ -2289,7 +2289,7 @@ class TestOTPService:
         service = OTPService(mock_db, Mock())
         
         with pytest.raises(OTPExpiredError):
-            service.verify_otp("user@nt.co.th", "123456", "web")
+            service.verify_otp("user@example.com", "123456", "web")
 ```
 
 **Integration Test Examples:**
@@ -2348,7 +2348,7 @@ class RevenueAssistantUser(HttpUser):
     def on_start(self):
         # Login
         response = self.client.post("/api/v1/auth/login", json={
-            "email": "test@nt.co.th"
+            "email": "test@example.com"
         })
         # ... complete OTP flow
         self.token = "..."
@@ -2522,7 +2522,7 @@ services:
 ENV=production
 DEBUG=false
 SECRET_KEY=<generate-secure-key>
-ALLOWED_HOSTS=revenue.nt.co.th
+ALLOWED_HOSTS=revenue.example.com
 
 # Database
 DATABASE_URL=postgresql://user:pass@postgres-primary:5432/nt_assistant
@@ -2540,11 +2540,11 @@ CLAUDE_MODEL=claude-sonnet-4-6
 CLAUDE_MAX_TOKENS=4096
 
 # Email
-SMTP_HOST=smtp.nt.co.th
+SMTP_HOST=smtp.example.com
 SMTP_PORT=587
 SMTP_USER=<username>
 SMTP_PASSWORD=<password>
-FROM_EMAIL=noreply@nt.co.th
+FROM_EMAIL=noreply@example.com
 
 # Telegram
 TELEGRAM_BOT_TOKEN=<bot-token>
@@ -2556,7 +2556,7 @@ MINIO_SECRET_KEY=<secret-key>
 MINIO_BUCKET=nt-assistant
 
 # Security
-ALLOWED_EMAIL_DOMAINS=nt.co.th,ntplc.co.th
+ALLOWED_EMAIL_DOMAINS=example.com,example.com
 SESSION_EXPIRY_HOURS=24
 OTP_EXPIRY_MINUTES=10
 ```
@@ -2852,6 +2852,6 @@ API documentation will be auto-generated using FastAPI's OpenAPI support and hos
 
 ---
 
-**Prepared for:** NT (National Telecom) - Finance Department  
-**Project:** NT AI Assistant  
-**Classification:** Internal Use Only
+**Prepared for:** องค์กร - Finance Department
+**Project:** AI Assistant
+**Distribution:** Source-available public reference

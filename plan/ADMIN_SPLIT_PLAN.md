@@ -254,7 +254,7 @@ Split the simplest, most self-contained CRUD sections.
 
 ```python
 """
-NT AI Assistant - Admin API Package
+AI Assistant - Admin API Package
 ====================================
 Split from monolithic admin.py into domain-specific modules.
 All endpoint paths remain unchanged.
@@ -491,7 +491,7 @@ After all phases complete:
 
 ```python
 """
-NT AI Assistant - Admin API Package
+AI Assistant - Admin API Package
 ====================================
 Split from monolithic admin.py into domain-specific modules.
 All endpoint paths remain unchanged.

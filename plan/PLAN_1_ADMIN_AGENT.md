@@ -171,7 +171,7 @@ class AdminAgent:
         return AgentResponse(message=response.content)
     
     def _build_system_prompt(self) -> str:
-        return """คุณเป็น Admin Assistant สำหรับระบบ NT AI Assistant
+        return """คุณเป็น Admin Assistant สำหรับระบบ AI Assistant
         
 หน้าที่:
 - ช่วย admin จัดการ config ของระบบ NL-to-SQL

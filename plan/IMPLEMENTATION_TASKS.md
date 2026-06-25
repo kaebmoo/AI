@@ -1,4 +1,4 @@
-# NT AI Assistant - Current Implementation Tasks
+# AI Assistant - Current Implementation Tasks
 
 > ประเภทเอกสาร: backlog และงานถัดไปที่อิงจาก source ปัจจุบัน
 > Snapshot date: 2026-03-22

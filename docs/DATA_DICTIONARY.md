@@ -1,4 +1,4 @@
-# NT AI Assistant - Data Dictionary
+# AI Assistant - Data Dictionary
 
 ## Document Information
 
@@ -17,8 +17,8 @@
 
 | Context | main_view | Description |
 |---|---|---|
-| revenue | `revenue_search` | รายได้ NT แยกตามหน่วยงาน, ผลิตภัณฑ์, บัญชี |
-| expense | `v_expense_mart` | ค่าใช้จ่าย NT แยกตามหน่วยงาน, บัญชี |
+| revenue | `revenue_search` | รายได้ แยกตามหน่วยงาน, ผลิตภัณฑ์, บัญชี |
+| expense | `v_expense_mart` | ค่าใช้จ่าย แยกตามหน่วยงาน, บัญชี |
 | pl_costtype | `v_pl_costtype_nt_mth_clean` | กำไรขาดทุนแยกตาม cost type รายเดือน |
 | transfer price | `v_transfer_price` | ราคาโอนภายในระหว่างหน่วยงาน |
 
@@ -28,7 +28,7 @@
 
 ### Overview
 
-View รายได้ NT — ใช้เป็น main_view สำหรับ revenue context
+View รายได้ — ใช้เป็น main_view สำหรับ revenue context
 Source table: `revenue` (column names เป็น lowercase ใน view, UPPERCASE ใน raw table)
 
 ### Time Columns
@@ -108,7 +108,7 @@ Hierarchy levels ถูกกำหนดใน `master_hierarchy` table — ด
 
 ### Overview
 
-View ค่าใช้จ่าย NT — ใช้เป็น main_view สำหรับ expense context
+View ค่าใช้จ่าย — ใช้เป็น main_view สำหรับ expense context
 Source table: `expense` (column names เป็น lowercase ใน view)
 
 ### Columns
@@ -132,7 +132,7 @@ Source table: `expense` (column names เป็น lowercase ใน view)
 | account_name            | TEXT    | ชื่อบัญชี                      | GL_NAME_NT1     |
 | account_group_name      | TEXT    | กลุ่มบัญชี                     | GROUP_NAME      |
 | account_group_code      | TEXT    | รหัสกลุ่มบัญชี                 | CODE_GROUP      |
-| nt                      | TEXT    | บริษัท                         | NT              |
+| nt                      | TEXT    | บริษัท                         |               |
 | type                    | TEXT    | ประเภทรายการ                   | TYPE            |
 | expense                 | REAL    | ยอดค่าใช้จ่าย (**หน่วยบาท**)   | EXPENSE_VALUE   |
 

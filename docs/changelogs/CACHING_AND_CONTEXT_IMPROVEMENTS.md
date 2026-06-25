@@ -1,4 +1,4 @@
-# NT AI Assistant — Caching & Context Improvements
+# AI Assistant — Caching & Context Improvements
 
 **Date:** 2026-03-06
 **Inspired by:** openminicrew project caching & context patterns

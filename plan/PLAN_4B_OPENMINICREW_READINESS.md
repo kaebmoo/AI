@@ -1,4 +1,4 @@
-# Plan 4B: NT AI Readiness สำหรับ OpenMiniCrew Integration
+# Plan 4B: AI Assistant Readiness สำหรับ OpenMiniCrew Integration
 
 **Priority:** ทำคู่กับ Plan 4 (Telegram) หรือก่อนก็ได้  
 **ประมาณเวลา:** 2-3 วัน  
@@ -9,7 +9,7 @@
 
 ## 1. สถานการณ์ปัจจุบัน
 
-### NT AI Assistant ฝั่ง API
+### AI Assistant ฝั่ง API
 
 - **Auth:** Session token เท่านั้น (X-Session-Token header หรือ Bearer token)
   - ได้จาก OTP email verification หรือ password login
@@ -29,14 +29,14 @@
 
 | Gap | รายละเอียด | แก้ที่ไหน |
 |-----|-----------|----------|
-| **Auth** | OpenMiniCrew ไม่สามารถ login OTP ได้ | NT AI: เพิ่ม API key auth |
-| **Response format** | ChatResponse ซับซ้อน (chart_config, visualization) | NT AI: เพิ่ม simplified endpoint |
-| **User mapping** | OpenMiniCrew user_id (Telegram chat_id) ≠ NT AI user_id (DB int) | NT AI: map telegram_chat_id → user |
-| **Context** | OpenMiniCrew ไม่รู้ว่า NT AI มี contexts อะไร | NT AI: public context list endpoint |
-| **Rate limit** | ไม่มี per-API-key rate limit | NT AI: เพิ่ม |
-| **Error format** | NT AI error → HTTPException detail string | ต้อง consistent |
+| **Auth** | OpenMiniCrew ไม่สามารถ login OTP ได้ | AI Assistant: เพิ่ม API key auth |
+| **Response format** | ChatResponse ซับซ้อน (chart_config, visualization) | AI Assistant: เพิ่ม simplified endpoint |
+| **User mapping** | OpenMiniCrew user_id (Telegram chat_id) ≠ AI Assistant user_id (DB int) | AI Assistant: map telegram_chat_id → user |
+| **Context** | OpenMiniCrew ไม่รู้ว่า AI Assistant มี contexts อะไร | AI Assistant: public context list endpoint |
+| **Rate limit** | ไม่มี per-API-key rate limit | AI Assistant: เพิ่ม |
+| **Error format** | AI Assistant error → HTTPException detail string | ต้อง consistent |
 
-## 2. สิ่งที่ NT AI Assistant ต้องเตรียม
+## 2. สิ่งที่ AI Assistant ต้องเตรียม
 
 ### 2.1 API Key Authentication (สำคัญสุด)
 
@@ -76,7 +76,7 @@ OpenMiniCrew → POST /api/v1/chat/
                Header: X-API-Key: <API_KEY>
                        │
                        ▼
-NT AI deps.py:
+AI Assistant deps.py:
   1. ดึง X-API-Key header
   2. Hash key → lookup ใน api_keys table
   3. ตรวจ: is_active, expires_at, rate limit
@@ -175,21 +175,21 @@ def list_contexts():
     ]
 ```
 
-### 2.4 User Mapping: Telegram chat_id → NT AI user
+### 2.4 User Mapping: Telegram chat_id → AI Assistant user
 
-**ปัญหา:** OpenMiniCrew ส่ง `user_id` เป็น Telegram chat_id (string) แต่ NT AI ใช้ user_id เป็น DB integer
+**ปัญหา:** OpenMiniCrew ส่ง `user_id` เป็น Telegram chat_id (string) แต่ AI Assistant ใช้ user_id เป็น DB integer
 
 **วิธี 1 (แนะนำ): API key เป็น proxy auth**
 - Admin สร้าง API key สำหรับ OpenMiniCrew bot
-- API key link กับ NT AI user (เจ้าของ bot)
+- API key link กับ AI Assistant user (เจ้าของ bot)
 - ทุก query ผ่าน API key → เป็น user คนเดียว
 - เหมาะกับ single-user / small team
 
 **วิธี 2: Per-user API key (multi-user)**
 - ผู้ใช้แต่ละคน register ผ่าน `/start` ใน Telegram (Plan 4)
-- ระบบ map telegram_chat_id → NT AI user
+- ระบบ map telegram_chat_id → AI Assistant user
 - OpenMiniCrew ส่ง `telegram_chat_id` ใน request header
-- NT AI lookup user จาก telegram_chat_id
+- AI Assistant lookup user จาก telegram_chat_id
 
 ```python
 class SimpleQueryRequest(BaseModel):
@@ -253,12 +253,12 @@ CREATE TABLE api_key_usage (
 
 ## 3. OpenMiniCrew Tool Design (ฝั่ง OpenMiniCrew)
 
-หลังจาก NT AI เตรียมพร้อมแล้ว OpenMiniCrew สร้าง tool ได้ง่ายมาก:
+หลังจาก AI Assistant เตรียมพร้อมแล้ว OpenMiniCrew สร้าง tool ได้ง่ายมาก:
 
 ```python
 # openminicrew/tools/nt_query.py
 
-"""NT AI Query Tool — ถามข้อมูลการเงินจาก NT AI Assistant"""
+"""AI Assistant Query Tool — ถามข้อมูลการเงินจาก AI Assistant"""
 
 import httpx
 from tools.base import BaseTool
@@ -271,10 +271,10 @@ log = get_logger(__name__)
 
 class NTQueryTool(BaseTool):
     name = "nt_query"
-    description = "ถามข้อมูลการเงิน NT เช่น รายได้ ค่าใช้จ่าย กำไรขาดทุน ผลดำเนินงาน"
+    description = "ถามข้อมูลการเงิน เช่น รายได้ ค่าใช้จ่าย กำไรขาดทุน ผลดำเนินงาน"
     commands = ["/nt", "/ntquery", "/finance"]
     direct_output = True
-    preferred_tier = "cheap"  # tool ไม่เรียก LLM เอง — NT AI จัดการให้
+    preferred_tier = "cheap"  # tool ไม่เรียก LLM เอง — AI Assistant จัดการให้
 
     async def execute(self, user_id: str, args: str = "", 
                       context: str = "", **kwargs) -> str:
@@ -287,7 +287,7 @@ class NTQueryTool(BaseTool):
             )
 
         if not NT_AI_API_URL or not NT_AI_API_KEY:
-            return "NT AI API ยังไม่ได้ตั้งค่า กรุณาเพิ่ม NT_AI_API_URL และ NT_AI_API_KEY ใน .env"
+            return "AI Assistant API ยังไม่ได้ตั้งค่า กรุณาเพิ่ม NT_AI_API_URL และ NT_AI_API_KEY ใน .env"
 
         try:
             async with httpx.AsyncClient(timeout=60) as client:
@@ -307,7 +307,7 @@ class NTQueryTool(BaseTool):
                 data = resp.json()
 
             if data.get("error"):
-                return f"NT AI Error: {data['error']}"
+                return f"AI Assistant Error: {data['error']}"
 
             # Format response for Telegram
             answer = data.get("answer", "ไม่มีคำตอบ")
@@ -325,9 +325,9 @@ class NTQueryTool(BaseTool):
             return result
 
         except httpx.TimeoutException:
-            return "NT AI ใช้เวลานานเกินไป กรุณาลองใหม่"
+            return "AI Assistant ใช้เวลานานเกินไป กรุณาลองใหม่"
         except Exception as e:
-            log.error(f"NT Query failed: {e}")
+            log.error(f"Query failed: {e}")
             db.log_tool_usage(user_id, self.name, args[:100], 
                             status="failed", error_message=str(e))
             return f"เกิดข้อผิดพลาด: {e}"
@@ -336,7 +336,7 @@ class NTQueryTool(BaseTool):
         return {
             "name": self.name,
             "description": (
-                "ถามข้อมูลการเงิน NT เช่น รายได้ ค่าใช้จ่าย กำไรขาดทุน ผลดำเนินงาน "
+                "ถามข้อมูลการเงิน เช่น รายได้ ค่าใช้จ่าย กำไรขาดทุน ผลดำเนินงาน "
                 "ค้นหาตามกลุ่มธุรกิจ กลุ่มบริการ ช่วงเวลา เปรียบเทียบ"
             ),
             "parameters": {
@@ -378,7 +378,7 @@ NT_AI_API_URL=http://localhost:8000
 NT_AI_API_KEY=<API_KEY>
 ```
 
-## 4. Dependency Map (ฝั่ง NT AI)
+## 4. Dependency Map (ฝั่ง AI Assistant)
 
 ```
 2.1 API Key Auth  ←── ต้องทำก่อนทุกอย่าง
@@ -396,7 +396,7 @@ NT_AI_API_KEY=<API_KEY>
       └──→ 2.7 Usage Tracking
 ```
 
-## 5. ไฟล์ทั้งหมดที่ต้องสร้าง/แก้ (ฝั่ง NT AI)
+## 5. ไฟล์ทั้งหมดที่ต้องสร้าง/แก้ (ฝั่ง AI Assistant)
 
 ### ไฟล์ใหม่
 
@@ -421,7 +421,7 @@ NT_AI_API_KEY=<API_KEY>
 | `frontend-admin/src/App.tsx` | เพิ่ม route /api-keys |
 | `frontend-admin/src/components/Layout/AdminLayout.tsx` | เพิ่ม menu item |
 
-### ไฟล์ที่ต้องสร้างฝั่ง OpenMiniCrew (หลัง NT AI พร้อม)
+### ไฟล์ที่ต้องสร้างฝั่ง OpenMiniCrew (หลัง AI Assistant พร้อม)
 
 | ไฟล์ | หน้าที่ |
 |------|---------|
@@ -433,7 +433,7 @@ NT_AI_API_KEY=<API_KEY>
 ## Claude Code Instructions
 
 ```
-## ฝั่ง NT AI Assistant
+## ฝั่ง AI Assistant
 
 ### ไฟล์ที่ต้องอ่านก่อน
 - app/api/deps.py (current auth flow — session token)
@@ -470,14 +470,14 @@ Phase 4: Rate Limiting + Usage Tracking
 
 ## กฎ
 - API key ต้อง hash (SHA-256) ก่อน store — แสดง key ครั้งเดียวตอนสร้าง
-- key format: "ntai_" + 32 random chars (ให้ identify ได้ว่าเป็น key ของ NT AI)
+- key format: "ntai_" + 32 random chars (ให้ identify ได้ว่าเป็น key ของ AI Assistant)
 - /query/ endpoint ต้องไม่สร้าง conversation, ไม่เก็บ chart session
 - /query/ ยังคงเก็บ ChatHistory (เพื่อ audit trail) แต่ conversation_id = None
 - rate limit default: 30/min, 1000/day (configurable per key)
 - API key auth ต้อง backward compatible — session token ยังใช้ได้เหมือนเดิม
 - ห้ามเปลี่ยน /chat/ endpoint ที่มีอยู่ (frontend ยังใช้อยู่)
 
-## ฝั่ง OpenMiniCrew (ทำหลัง NT AI Phase 2 เสร็จ)
+## ฝั่ง OpenMiniCrew (ทำหลัง AI Assistant Phase 2 เสร็จ)
 
 ### ไฟล์ที่ต้องอ่านก่อน
 - tools/base.py (BaseTool pattern)
@@ -487,12 +487,12 @@ Phase 4: Rate Limiting + Usage Tracking
 ### ลำดับ
 1. เพิ่ม NT_AI_API_URL, NT_AI_API_KEY ใน core/config.py + .env.example
 2. สร้าง tools/nt_query.py (NTQueryTool)
-3. ทดสอบ: /nt รายได้รวมปี 68 → ได้คำตอบจาก NT AI
+3. ทดสอบ: /nt รายได้รวมปี 68 → ได้คำตอบจาก AI Assistant
 4. (Optional) สร้าง tools/nt_admin.py สำหรับ admin commands
 
 ### กฎ OpenMiniCrew
 - ไม่แก้ไฟล์ existing — สร้างเฉพาะไฟล์ใหม่
 - ใช้ httpx (async) ไม่ใช่ requests (sync) เพราะ execute() เป็น async
-- timeout 60 วินาที (NT AI อาจช้าถ้า LLM ทำงานหนัก)
+- timeout 60 วินาที (AI Assistant อาจช้าถ้า LLM ทำงานหนัก)
 - format table เป็น monospace สำหรับ Telegram
 ```

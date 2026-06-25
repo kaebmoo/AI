@@ -1,4 +1,4 @@
-# NT AI Assistant - Production Implementation Plan v2.0
+# AI Assistant - Production Implementation Plan v2.0
 
 ## Document Information
 
@@ -13,7 +13,7 @@
 
 ## Executive Summary
 
-โครงการพัฒนาระบบ AI Assistant สำหรับสอบถามข้อมูลรายได้ ยอดขาย ค่าใช้จ่าย หรือข้อมูลทางการเงินของ NT ผ่าน Web Application และ Telegram Bot โดยใช้ Claude AI เป็นตัวประมวลผลคำถามและสร้าง SQL Query
+โครงการพัฒนาระบบ AI Assistant สำหรับสอบถามข้อมูลรายได้ ยอดขาย ค่าใช้จ่าย หรือข้อมูลทางการเงินขององค์กร ผ่าน Web Application และ Telegram Bot โดยใช้ Claude AI เป็นตัวประมวลผลคำถามและสร้าง SQL Query
 
 **เป้าหมายหลัก:**
 
@@ -78,7 +78,7 @@
 │                         DATA LAYER                                           │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
 │  │   MSSQL      │  │  PostgreSQL  │  │    Redis     │  │ File Storage │     │
-│  │  (NT Data)   │  │  (App Data)  │  │   (Cache)    │  │   (MinIO)    │     │
+│  │  (Business Data)   │  │  (App Data)  │  │   (Cache)    │  │   (MinIO)    │     │
 │  │ 10.200.1.92  │  │              │  │              │  │              │     │
 │  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘     │
 │                           │                                │                 │
@@ -447,11 +447,11 @@ limit_req_zone $binary_remote_addr zone=report_limit:10m rate=10r/m;
 
 server {
     listen 443 ssl;
-    server_name revenue.nt.co.th;
+    server_name revenue.example.com;
   
     # SSL configuration
-    ssl_certificate /etc/ssl/certs/revenue.nt.co.th.crt;
-    ssl_certificate_key /etc/ssl/private/revenue.nt.co.th.key;
+    ssl_certificate /etc/ssl/certs/revenue.example.com.crt;
+    ssl_certificate_key /etc/ssl/private/revenue.example.com.key;
   
     # Security headers
     add_header X-Frame-Options "SAMEORIGIN" always;
@@ -1503,7 +1503,7 @@ stages:
   - deploy-production
 
 variables:
-  DOCKER_IMAGE: registry.nt.co.th/revenue-assistant
+  DOCKER_IMAGE: registry.example.com/revenue-assistant
   POSTGRES_DB: test_db
   POSTGRES_USER: test_user
   POSTGRES_PASSWORD: test_pass
@@ -1609,7 +1609,7 @@ deploy-staging:
       "
   environment:
     name: staging
-    url: https://staging-revenue.nt.co.th
+    url: https://staging-revenue.example.com
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
 
@@ -1621,7 +1621,7 @@ integration-test:
     - pip install pytest httpx
     - pytest tests/integration/ -v --staging-url=$STAGING_URL
   variables:
-    STAGING_URL: https://staging-revenue.nt.co.th
+    STAGING_URL: https://staging-revenue.example.com
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
   needs:
@@ -1651,7 +1651,7 @@ deploy-production:
       "
   environment:
     name: production
-    url: https://revenue.nt.co.th
+    url: https://revenue.example.com
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
       when: manual  # Require manual approval
@@ -1904,6 +1904,6 @@ celery_app.conf.beat_schedule['daily-archive'] = {
 
 ---
 
-**Prepared for:** NT (National Telecom) - Finance Department
-**Project:** NT AI Assistant
-**Classification:** Internal Use Only
+**Prepared for:** องค์กร - Finance Department
+**Project:** AI Assistant
+**Distribution:** Source-available public reference

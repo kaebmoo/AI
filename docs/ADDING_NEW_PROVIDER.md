@@ -1,6 +1,6 @@
 # Adding a New AI Provider
 
-> คู่มือสำหรับเพิ่ม AI Provider ใหม่เข้าระบบ NT AI Assistant
+> คู่มือสำหรับเพิ่ม AI Provider ใหม่เข้าระบบ AI Assistant
 > ระบบรองรับ provider ไม่จำกัดจำนวน โดยไม่ต้องแก้ไข core code
 
 ---
@@ -16,7 +16,7 @@ app/providers/
 ├── chart_postprocessor.py # Shared explain/chart logic
 ├── claude_provider.py     # Built-in: Anthropic Claude
 ├── gemini_provider.py     # Built-in: Google Gemini
-├── matcha_provider.py     # Built-in: OpenAI-compatible (NT Gateway)
+├── matcha_provider.py     # Built-in: OpenAI-compatible (Gateway)
 └── deepseek_provider.py   # ← ไฟล์ใหม่ที่คุณสร้าง
 ```
 
@@ -53,7 +53,7 @@ class AIProvider(ABC):
 
 ```python
 """
-NT AI Assistant - DeepSeek Provider
+AI Assistant - DeepSeek Provider
 =====================================
 DeepSeek API implementation (OpenAI-compatible).
 """

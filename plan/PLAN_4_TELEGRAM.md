@@ -3,13 +3,13 @@
 **Priority:** 4  
 **ประมาณเวลา:** 3-5 วัน  
 **Prerequisite:** Plan 1 (Admin Agent)  
-**อ้างอิง:** เดิมคือ Phase 4 ของ NT AI Refactoring Plan (deferred), ใช้ OpenMiniCrew เป็นฐาน
+**อ้างอิง:** เดิมคือ Phase 4 ของ AI Assistant Refactoring Plan (deferred), ใช้ OpenMiniCrew เป็นฐาน
 
 ---
 
 ## 1. แนวคิด
 
-ให้ทั้ง user ทั่วไป และ admin ใช้งาน NT AI Assistant ผ่าน Telegram:
+ให้ทั้ง user ทั่วไป และ admin ใช้งาน AI Assistant ผ่าน Telegram:
 
 | ผู้ใช้ | ทำอะไรได้ |
 |--------|----------|
@@ -18,9 +18,9 @@
 
 ## 2. สถาปัตยกรรม: 2 ทางเลือก
 
-### ทางเลือก A: Telegram Bot ใน NT AI Assistant (แนะนำ)
+### ทางเลือก A: Telegram Bot ใน AI Assistant (แนะนำ)
 
-เพิ่ม Telegram interface ตรงใน NT AI Assistant โดยไม่ผ่าน OpenMiniCrew
+เพิ่ม Telegram interface ตรงใน AI Assistant โดยไม่ผ่าน OpenMiniCrew
 
 ```
 Telegram User Message
@@ -41,7 +41,7 @@ app/telegram/
 
 ### ทางเลือก B: OpenMiniCrew เป็น Telegram Gateway
 
-เพิ่ม tool ใน OpenMiniCrew ที่เรียก NT AI Assistant API
+เพิ่ม tool ใน OpenMiniCrew ที่เรียก AI Assistant API
 
 ```
 Telegram → OpenMiniCrew Dispatcher
@@ -56,7 +56,7 @@ Telegram → OpenMiniCrew Dispatcher
 
 ### แนะนำ: ทางเลือก A
 
-เพราะ NT AI ใช้ async/FastAPI อยู่แล้ว เพิ่ม Telegram webhook ง่ายกว่าไปวน HTTP อีกชั้น แต่ยืม pattern (dispatcher, formatters, rate limit) จาก OpenMiniCrew
+เพราะ AI Assistant ใช้ async/FastAPI อยู่แล้ว เพิ่ม Telegram webhook ง่ายกว่าไปวน HTTP อีกชั้น แต่ยืม pattern (dispatcher, formatters, rate limit) จาก OpenMiniCrew
 
 ## 3. User Flow
 
@@ -155,7 +155,7 @@ TELEGRAM_REQUIRE_EMAIL_VERIFY=true  # true = ต้อง OTP verify email ก�
 User พิมพ์ /start
         │
         ▼
-Bot: "สวัสดี กรุณาพิมพ์ email ที่ลงทะเบียนในระบบ NT AI Assistant"
+Bot: "สวัสดี กรุณาพิมพ์ email ที่ลงทะเบียนในระบบ AI Assistant"
         │
 User: "pornthep@nt.th"
         │
@@ -225,7 +225,7 @@ async def render_chart_to_image(chart_config: Dict, data: List[Dict]) -> bytes:
   /Users/seal/Documents/GitHub/openminicrew/interfaces/telegram_common.py
   /Users/seal/Documents/GitHub/openminicrew/dispatcher.py
   
-- NT AI Assistant:
+- AI Assistant:
   app/api/v1/chat.py (QueryEngine flow)
   app/services/query_engine.py (execute query)
   app/services/admin_agent.py (จาก Plan 1)

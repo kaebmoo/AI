@@ -1,6 +1,6 @@
 <!-- markdownlint-disable MD024 -->
 
-# NT AI Assistant - Plan Audit Checklist
+# AI Assistant - Plan Audit Checklist
 
 Date: 2026-03-21
 Workspace: `/Users/seal/Documents/GitHub/AI`

@@ -157,8 +157,8 @@ Expose admin tools (จาก Plan 1) เป็น MCP server ด้วย เ�
 from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP(
-    name="NT Admin Server",
-    instructions="Admin operations for NT AI Assistant: manage mappings, rules, examples, onboarding."
+    name=" Admin Server",
+    instructions="Admin operations for AI Assistant: manage mappings, rules, examples, onboarding."
 )
 
 @mcp.tool()

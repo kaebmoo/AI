@@ -7,7 +7,7 @@
 
 ## ภาพรวม
 
-ระบบ API Keys ช่วยให้ระบบภายนอก (เช่น OpenMiniCrew, custom scripts) สามารถเรียกใช้ NT AI Assistant ได้โดยไม่ต้องผ่าน session-based authentication โดยใช้ stateless API key
+ระบบ API Keys ช่วยให้ระบบภายนอก (เช่น OpenMiniCrew, custom scripts) สามารถเรียกใช้ AI Assistant ได้โดยไม่ต้องผ่าน session-based authentication โดยใช้ stateless API key
 
 ## สร้าง API Key
 

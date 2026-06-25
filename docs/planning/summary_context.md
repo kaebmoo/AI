@@ -1,8 +1,8 @@
-# NT AI Assistant - Implementation Summary
+# AI Assistant - Implementation Summary
 
 ## Overview
 
-AI Revenue Query Assistant สำหรับ NT (National Telecom) ที่ใช้ AI แปลงคำถามภาษาไทยเป็น SQL
+AI Revenue Query Assistant สำหรับ องค์กร ที่ใช้ AI แปลงคำถามภาษาไทยเป็น SQL
 
 ---
 
@@ -133,7 +133,7 @@ class RetryStatus:
 2. ค้นหาค่าจริงใน database
 3. ส่ง hints กลับให้ AI:
    ```
-   Column 'PRODUCT_NAME': ค่าที่มีในระบบ เช่น 'บริการ NT Broadband'...
+   Column 'PRODUCT_NAME': ค่าที่มีในระบบ เช่น 'บริการ Broadband'...
    Column 'organization_group_abbr': ค่าที่มีในระบบ เช่น 'อป.', 'ขบ.'...
    ```
 4. AI ปรับ SQL ใหม่ (เช่น ใช้ LIKE แทน =)

@@ -168,11 +168,11 @@ def _hierarchy_alias_search(self, question, context_name):
 │  ┌─ Hierarchy Values (Tree View) ──────────────────────┐│
 │  │ ▼ Fixed Line & Broadband                [auto]      ││
 │  │   ▼ กลุ่มบริการ Internet Retail          [manual]   ││
-│  │     • บริการ NT Broadband                [manual]   ││
-│  │     • บริการ NT WiFi                     [manual]   ││
+│  │     • บริการ Broadband                [manual]   ││
+│  │     • บริการ WiFi                     [manual]   ││
 │  │   ▼ บริการโทรศัพท์ประจำที่ (Fixed Line) [manual]   ││
-│  │     • NT Home Phone                      [manual]   ││
-│  │     • NT Business Trunk Line             [manual]   ││
+│  │     •  Home Phone                      [manual]   ││
+│  │     •  Business Trunk Line             [manual]   ││
 │  │ ▼ Digital                                [auto]      ││
 │  │   ...                                                ││
 │  └──────────────────────────────────────────────────────┘│

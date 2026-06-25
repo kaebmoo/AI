@@ -1,18 +1,18 @@
-# NT AI Assistant — Refactoring Plan
+# AI Assistant — Refactoring Plan
 ## Applying OpenMiniCrew Architectural Patterns
 
 **Version:** 1.0
 **Date:** 2026-03-04
-**Author:** Pornthep (AVP Finance, NT) + Claude
+**Author:** Pornthep (AVP Finance) + Claude
 **Status:** Phase 1, 2, 3, 5 completed (2026-03-04) — Phase 4 pending
 
 ---
 
 ## 1. ที่มาและเหตุผล
 
-### 1.1 สถานะปัจจุบันของ NT AI Assistant
+### 1.1 สถานะปัจจุบันของ AI Assistant
 
-NT AI Assistant เป็นระบบถาม-ตอบข้อมูลการเงินผ่าน Web Application ใช้ AI (Claude/Gemini/Matcha) แปลงคำถามภาษาไทยเป็น SQL แล้ว execute กับฐานข้อมูล โครงสร้างหลัก:
+AI Assistant เป็นระบบถาม-ตอบข้อมูลการเงินผ่าน Web Application ใช้ AI (Claude/Gemini/Matcha) แปลงคำถามภาษาไทยเป็น SQL แล้ว execute กับฐานข้อมูล โครงสร้างหลัก:
 
 - **Backend:** FastAPI (Python) ที่ `app/`
 - **Frontend:** React Native (Expo) ที่ `frontend/`
@@ -57,9 +57,9 @@ OpenMiniCrew เป็น personal AI assistant framework (github.com/kaebmoo/op
 
 ### 1.4 เป้าหมาย
 
-1. Refactor NT AI ให้โครงสร้าง clean ขึ้น โดยนำ patterns จาก OpenMiniCrew มาใช้
+1. Refactor AI Assistant ให้โครงสร้าง clean ขึ้น โดยนำ patterns จาก OpenMiniCrew มาใช้
 2. ลด coupling ระหว่าง components ให้แต่ละส่วนแก้ไขแยกกันได้
-3. เตรียมโครงสร้างให้ OpenMiniCrew เรียกใช้ NT AI engine ผ่าน API (Telegram gateway)
+3. เตรียมโครงสร้างให้ OpenMiniCrew เรียกใช้ AI Assistant engine ผ่าน API (Telegram gateway)
 4. ทำเป็น phase ทำ phase ไหนก็ได้ ระบบเดิมยังทำงานได้ตลอด
 
 ---
@@ -73,7 +73,7 @@ OpenMiniCrew เป็น personal AI assistant framework (github.com/kaebmoo/op
 │  Web App (React)    Telegram (OpenMiniCrew)    External API    │
 │  ┌───────────┐     ┌──────────────────┐       ┌──────────┐   │
 │  │ frontend  │     │ tools/nt_query.py│       │ REST API │   │
-│  │ frontend- │     │ เรียก NT AI API  │       │ /api/v1/ │   │
+│  │ frontend- │     │ เรียก AI Assistant API  │       │ /api/v1/ │   │
 │  │ admin     │     └────────┬─────────┘       └────┬─────┘   │
 │  └─────┬─────┘              │                      │          │
 └────────┼────────────────────┼──────────────────────┼──────────┘
@@ -614,11 +614,11 @@ class ReportExportTool(BaseTool):
 
 ---
 
-### Phase 4: เชื่อม OpenMiniCrew กับ NT AI
+### Phase 4: เชื่อม OpenMiniCrew กับ AI Assistant
 
 **เป้าหมาย:** ให้ user ถามข้อมูลการเงินผ่าน Telegram ได้
 
-**แนวทาง:** สร้าง tool ใหม่ใน OpenMiniCrew ที่เรียก NT AI API ผ่าน HTTP
+**แนวทาง:** สร้าง tool ใหม่ใน OpenMiniCrew ที่เรียก AI Assistant API ผ่าน HTTP
 
 **ไฟล์ที่จะสร้างใหม่ (ใน OpenMiniCrew project):**
 
@@ -635,12 +635,12 @@ from tools.base import BaseTool
 class NTQueryTool(BaseTool):
     name = "nt_query"
     description = (
-        "สอบถามข้อมูลรายได้ ค่าใช้จ่าย P&L หรือข้อมูลทางการเงินของ NT "
+        "สอบถามข้อมูลรายได้ ค่าใช้จ่าย P&L หรือข้อมูลทางการเงินขององค์กร "
         "เช่น 'รายได้เดือนนี้เท่าไหร่' 'ค่าใช้จ่ายแยกตามฝ่าย' 'เปรียบเทียบรายได้ปีนี้กับปีก่อน'"
     )
     commands = ["/ntquery", "/revenue", "/expense", "/finance"]
     direct_output = True
-    preferred_tier = "cheap"  # dispatcher ใช้ cheap, NT AI จัดการ LLM เอง
+    preferred_tier = "cheap"  # dispatcher ใช้ cheap, AI Assistant จัดการ LLM เอง
 
     async def execute(self, user_id: str, args: str = "", **kwargs) -> str:
         from core.config import _require
@@ -659,7 +659,7 @@ class NTQueryTool(BaseTool):
         return self._format_for_telegram(data)
 
     def _format_for_telegram(self, data: dict) -> str:
-        """Format NT AI response สำหรับ Telegram (markdown)"""
+        """Format AI Assistant response สำหรับ Telegram (markdown)"""
         parts = []
 
         # คำตอบ
@@ -694,7 +694,7 @@ class NTQueryTool(BaseTool):
                 "properties": {
                     "args": {
                         "type": "string",
-                        "description": "คำถามเกี่ยวกับข้อมูลการเงินของ NT เช่น 'รายได้เดือนมกราคม 2568'"
+                        "description": "คำถามเกี่ยวกับข้อมูลการเงินขององค์กร เช่น 'รายได้เดือนมกราคม 2568'"
                     }
                 },
                 "required": ["args"],
@@ -705,13 +705,13 @@ class NTQueryTool(BaseTool):
 **ต้องเพิ่มใน .env ของ OpenMiniCrew:**
 ```bash
 NT_AI_BASE_URL=http://localhost:8000
-NT_AI_API_TOKEN=<session token จาก NT AI auth system>
+NT_AI_API_TOKEN=<session token จาก AI Assistant auth system>
 ```
 
 **Authentication:**
-NT AI ใช้ Email OTP + session token ดังนั้นต้อง:
-1. สร้าง service account user ใน NT AI สำหรับ bot
-2. หรือเพิ่ม API key authentication endpoint ใน NT AI (recommended)
+AI Assistant ใช้ Email OTP + session token ดังนั้นต้อง:
+1. สร้าง service account user ใน AI Assistant สำหรับ bot
+2. หรือเพิ่ม API key authentication endpoint ใน AI Assistant (recommended)
 
 **ทางเลือกอนาคต (4B):**
 ถ้า latency เป็นปัญหา สามารถ import QueryEngine ตรงแทน HTTP:
@@ -824,7 +824,7 @@ Phase 1 ──→ Phase 2 ──→ Phase 3 (independent)
 4. **Project root:** `/Users/seal/Documents/GitHub/openminicrew/`
 5. **Tool registry auto-discovers** — สร้างไฟล์ใน `tools/` แค่นั้น ไม่ต้อง register ที่ไหน
 
-### 5.3 กฎเกี่ยวกับ NT AI Data
+### 5.3 กฎเกี่ยวกับ AI Assistant Data
 
 1. **REVENUE_VALUE หน่วยเป็นบาท** ไม่ใช่ล้านบาท
 2. **DATE column เก็บเป็น Unix Timestamp (Milliseconds)** ต้องใช้ YEAR, MONTH แทน
@@ -835,7 +835,7 @@ Phase 1 ──→ Phase 2 ──→ Phase 3 (independent)
 ### 5.4 File Paths Reference
 
 ```
-NT AI Assistant:
+AI Assistant:
   Root:        /Users/seal/Documents/GitHub/AI/
   Backend:     /Users/seal/Documents/GitHub/AI/app/
   AI Service:  /Users/seal/Documents/GitHub/AI/app/services/ai_service.py
@@ -914,8 +914,8 @@ OpenMiniCrew:
 | Gemini SDK ใช้ sync client ต้อง wrap ใน asyncio.to_thread | Medium | ทำอยู่แล้วใน GeminiProvider._run_async() — ย้ายไปด้วย |
 | Matcha provider ใช้ httpx ต่างจาก Claude ที่ใช้ anthropic SDK | Low | แต่ละ provider จัดการ HTTP client เอง ไม่ share |
 | chart_postprocessor ที่รวมมาอาจมี edge case ที่ต่างกัน | Medium | เขียน test เปรียบเทียบ output เดิม vs ใหม่ ก่อน merge |
-| OpenMiniCrew เรียก NT AI API ต้อง auth | Medium | Phase 4 ต้อง solve auth ก่อน (แนะนำเพิ่ม API key auth) |
-| Database lock ถ้าหลาย process เข้า SQLite พร้อมกัน | Low | NT AI ใช้ WAL mode อยู่แล้ว + production ควรใช้ PostgreSQL |
+| OpenMiniCrew เรียก AI Assistant API ต้อง auth | Medium | Phase 4 ต้อง solve auth ก่อน (แนะนำเพิ่ม API key auth) |
+| Database lock ถ้าหลาย process เข้า SQLite พร้อมกัน | Low | AI Assistant ใช้ WAL mode อยู่แล้ว + production ควรใช้ PostgreSQL |
 
 ---
 

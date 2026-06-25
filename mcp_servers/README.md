@@ -1,8 +1,8 @@
-# NT AI Assistant - MCP Servers
+# AI Assistant - MCP Servers
 
 ## Overview
 
-MCP (Model Context Protocol) Servers สำหรับ NT AI Assistant ช่วยให้ AI สามารถ:
+MCP (Model Context Protocol) Servers สำหรับ AI Assistant ช่วยให้ AI สามารถ:
 - รู้จัก schema และ metadata ของ database
 - แปลงคำย่อและคำพ้องความหมาย
 - ตรวจสอบและรัน SQL อย่างปลอดภัย
@@ -52,7 +52,7 @@ python mcp_servers/test_query_mcp.py     # 5/5 tests
 
 ---
 
-## NT Metadata MCP (14 Tools)
+## Metadata MCP (14 Tools)
 
 ### Context Management
 
@@ -99,7 +99,7 @@ python mcp_servers/test_query_mcp.py     # 5/5 tests
 
 ---
 
-## NT Query MCP (5 Tools)
+## Query MCP (5 Tools)
 
 | Tool | Description | Example |
 |------|-------------|---------|
@@ -314,7 +314,7 @@ python-dotenv>=1.0.0
 ## Test Results
 
 ```
-NT Metadata MCP Server - Test Suite
+Metadata MCP Server - Test Suite
 ====================================
 [PASS] Contexts
 [PASS] Routing
@@ -326,7 +326,7 @@ NT Metadata MCP Server - Test Suite
 
 Total: 7/7 tests passed
 
-NT Query MCP Server - Test Suite
+Query MCP Server - Test Suite
 ====================================
 [PASS] Validate SQL (8/8 cases)
 [PASS] Execute Query
@@ -351,4 +351,4 @@ Total: 5/5 tests passed
 
 ## License
 
-Internal Use Only - NT (National Telecom)
+Source-available public reference

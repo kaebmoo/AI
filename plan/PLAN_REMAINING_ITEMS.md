@@ -1,6 +1,6 @@
 <!-- markdownlint-disable MD024 MD022 MD031 MD032 MD058 MD060 -->
 
-# NT AI Assistant — Remaining Items (Post Plans 0-5)
+# AI Assistant — Remaining Items (Post Plans 0-5)
 
 **Created:** 2026-03-19
 **Updated:** 2026-03-22 late (re-verified, post-refactor doc sync)

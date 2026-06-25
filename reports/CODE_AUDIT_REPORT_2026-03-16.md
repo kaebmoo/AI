@@ -1,4 +1,4 @@
-# NT AI Assistant - Code Audit Report
+# AI Assistant - Code Audit Report
 
 > ประเภทเอกสาร: technical audit / hardening report
 > Refreshed against current source: 2026-03-22

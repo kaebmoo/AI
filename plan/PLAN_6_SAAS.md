@@ -17,7 +17,7 @@ Tenant เรียก API มาถามคำถาม → เราคืน
 Tenant App/Dashboard
         │ HTTP POST /api/v1/tenant/{tenant_id}/chat
         ▼
-NT AI Assistant API
+AI Assistant API
         │
         ├── Tenant config (config.db per tenant)
         ├── Tenant business DB (connection string)
@@ -38,7 +38,7 @@ Tenant upload CSV/Excel → ระบบสร้าง SQLite ให้ → onb
 Tenant Web UI
         │ Upload CSV/Excel
         ▼
-NT AI Upload Service
+AI Assistant Upload Service
         │
         ├── แปลง CSV → SQLite table
         ├── Auto Context Onboarding (Plan existing)
@@ -59,7 +59,7 @@ Tenant ให้ connection string → เราเชื่อม DB ตรง 
 Tenant DB (PostgreSQL/MSSQL)
         │ Read-only connection
         ▼
-NT AI Business DB Adapter (Plan 5)
+AI Assistant Business DB Adapter (Plan 5)
         │
         ├── Schema inspection
         ├── Context Onboarding
@@ -68,13 +68,13 @@ NT AI Business DB Adapter (Plan 5)
 
 ### 1.4 Model D: MCP Server (developer-focused)
 
-Expose NT AI เป็น MCP Server ให้ Claude Desktop / Claude Code เรียกใช้
+Expose AI Assistant เป็น MCP Server ให้ Claude Desktop / Claude Code เรียกใช้
 
 ```
 Claude Desktop / Claude Code
         │ MCP Protocol
         ▼
-NT AI MCP Server (มีอยู่แล้วบางส่วนใน mcp_servers/)
+AI Assistant MCP Server (มีอยู่แล้วบางส่วนใน mcp_servers/)
         │
         ├── query tool: ถามข้อมูลภาษาไทย
         ├── metadata tool: ดู schema/contexts

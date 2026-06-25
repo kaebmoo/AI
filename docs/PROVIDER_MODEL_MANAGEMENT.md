@@ -4,7 +4,7 @@ Updated: 2026-03-23
 
 ## Overview
 
-NT AI Assistant supports dynamic AI provider and model management through the admin interface. Administrators can add, configure, and manage multiple AI providers and their models without code changes, and the admin dashboard now reads the same effective runtime state used by backend config resolution.
+AI Assistant supports dynamic AI provider and model management through the admin interface. Administrators can add, configure, and manage multiple AI providers and their models without code changes, and the admin dashboard now reads the same effective runtime state used by backend config resolution.
 
 ## Features
 

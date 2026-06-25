@@ -100,7 +100,7 @@ Admin UI (database) → .env file → Hardcoded defaults
 AI_PROVIDER="gemini"                        # default provider: claude | gemini | matcha
 ANTHROPIC_API_KEY="sk-ant-api03-..."        # Claude API key
 GOOGLE_AI_API_KEY="AIzaSy..."               # Gemini API key
-MATCHA_AI_API_KEY="sk-..."                  # Matcha (NT Gateway) API key
+MATCHA_AI_API_KEY="sk-..."                  # Matcha (Gateway) API key
 MATCHA_API_URL="https://aigateway.ntictsolution.com/v1/chat/completions"
 
 # AI Models

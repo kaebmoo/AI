@@ -1,4 +1,4 @@
-# NT AI Assistant - Implementation Status
+# AI Assistant - Implementation Status
 
 > ประเภทเอกสาร: สถานะความคืบหน้าเทียบกับ source code จริง
 > Snapshot date: 2026-03-23

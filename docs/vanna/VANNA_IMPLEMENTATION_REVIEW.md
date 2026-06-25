@@ -1,7 +1,7 @@
 # Vanna.ai & Vector Database Implementation Review
 
 **Date:** 2026-02-06
-**System:** NT AI Assistant with RAG Integration
+**System:** AI Assistant with RAG Integration
 
 ---
 

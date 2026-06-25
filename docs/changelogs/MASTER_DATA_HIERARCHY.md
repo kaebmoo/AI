@@ -1,4 +1,4 @@
-# NT AI Assistant — Master Data & DB-Driven Hierarchy
+# AI Assistant — Master Data & DB-Driven Hierarchy
 
 **Date:** 2026-03-07
 **Status:** Phase 1 (Foundation) complete. Phase 2-4 planned.

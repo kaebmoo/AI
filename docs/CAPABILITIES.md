@@ -1,4 +1,4 @@
-# NT AI Assistant — Capabilities Overview
+# AI Assistant — Capabilities Overview
 
 **Last Updated:** 2026-03-06
 
@@ -30,7 +30,7 @@
 |----------|--------|--------|
 | Claude (Anthropic) | Done | claude-sonnet-4-6, claude-opus-4-6, claude-haiku-4-5 |
 | Gemini (Google AI) | Done | gemini-3-flash, gemini-2.0-flash-exp |
-| Matcha (NT Gateway) | Done | gpt-4.1, gpt-4o, gpt-4-turbo |
+| Matcha (Gateway) | Done | gpt-4.1, gpt-4o, gpt-4-turbo |
 | Provider auto-discovery | Done | `registry.py` auto-discovers on import |
 | Provider fallback | Done | If primary fails → try next configured |
 | Tier-based model selection | Done | cheap/default/premium per provider |

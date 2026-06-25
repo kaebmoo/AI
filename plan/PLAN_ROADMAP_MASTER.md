@@ -1,4 +1,4 @@
-# NT AI Assistant — Roadmap Master Plan
+# AI Assistant — Roadmap Master Plan
 
 **Date:** 2026-03-19 (Updated)
 **Project Root:** `/Users/seal/Documents/GitHub/AI/`

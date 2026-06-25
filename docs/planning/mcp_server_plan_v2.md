@@ -1,4 +1,4 @@
-# แผนการพัฒนา MCP Server สำหรับ NT AI Assistant (V2)
+# แผนการพัฒนา MCP Server สำหรับ AI Assistant (V2)
 **ปรับปรุงให้สอดคล้องกับ Project ปัจจุบัน**
 
 **Last Updated:** 2026-02-03
@@ -17,8 +17,8 @@
 | Schema Metadata | ✅ Done | `schema_metadata`, `schema_semantic_mapping`, `schema_business_rules` |
 | Frontend Context Selector | ✅ Done | `ContextSelector.tsx` |
 | Admin Context Management | ✅ Done | `frontend-admin/src/pages/Contexts.tsx` |
-| **NT Metadata MCP** | ✅ Done | `mcp_servers/nt_metadata_mcp.py` |
-| **NT Query MCP** | ✅ Done | `mcp_servers/nt_query_mcp.py` |
+| **Metadata MCP** | ✅ Done | `mcp_servers/nt_metadata_mcp.py` |
+| **Query MCP** | ✅ Done | `mcp_servers/nt_query_mcp.py` |
 
 ### MCP Server Progress
 
@@ -133,7 +133,7 @@
 │                    DATA SOURCES (Existing)                       │
 │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ │
 │  │ SQLite          │  │ PostgreSQL      │  │ MSSQL           │ │
-│  │ nt_fi_report    │  │ (App DB)        │  │ (NT Data)       │ │
+│  │ nt_fi_report    │  │ (App DB)        │  │ (Business Data)       │ │
 │  │ .sqlite         │  │                 │  │                 │ │
 │  │                 │  │                 │  │                 │ │
 │  │ Tables:         │  │ Tables:         │  │ Tables:         │ │
@@ -149,7 +149,7 @@
 
 ## 📦 Phase 1: Core MCP Servers ✅ COMPLETE
 
-### 1.1 NT Metadata MCP Server ✅ COMPLETE
+### 1.1 Metadata MCP Server ✅ COMPLETE
 
 **ไฟล์:** `mcp_servers/nt_metadata_mcp.py`
 **Database:** `nt_fi_report.sqlite` (รองรับ SQLite, PostgreSQL, MSSQL)
@@ -260,7 +260,7 @@ Total: 7/7 tests passed
 
 ---
 
-### 1.2 NT Query MCP Server ✅ COMPLETE
+### 1.2 Query MCP Server ✅ COMPLETE
 
 **ไฟล์:** `mcp_servers/nt_query_mcp.py`
 
@@ -294,8 +294,8 @@ from typing import Dict, List
 import re
 
 mcp = FastMCP(
-    name="NT Query Server",
-    instructions="Execute and validate SQL queries for NT AI Assistant"
+    name="Query Server",
+    instructions="Execute and validate SQL queries for AI Assistant"
 )
 
 # Reuse DatabaseConfig and MCPDatabaseAdapter from nt_metadata_mcp
@@ -513,7 +513,7 @@ if __name__ == "__main__":
 
 ## 🛡️ Phase 2: Validation MCP Server ✅ COMPLETE
 
-### 2.1 NT Validation MCP
+### 2.1 Validation MCP
 
 **ไฟล์:** `mcp_servers/nt_validation_mcp.py`
 
@@ -545,7 +545,7 @@ from typing import Dict, List
 import re
 
 mcp = FastMCP(
-    name="NT Validation Server",
+    name="Validation Server",
     instructions="Validate SQL queries and calculate confidence scores"
 )
 
@@ -704,7 +704,7 @@ from typing import Dict, List, Optional
 import os
 
 mcp = FastMCP(
-    name="NT Reporting Server",
+    name="Reporting Server",
     instructions="Compare query results with official reports"
 )
 

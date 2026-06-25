@@ -1,4 +1,4 @@
-# NT AI Assistant
+# AI Assistant
 
 โครงการพัฒนาระบบ AI Assistant สำหรับสอบถามข้อมูลรายได้ ยอดขาย ค่าใช้จ่าย และข้อมูลทางการเงิน ของหน่วยงาน ผ่าน Web Application (React Native) และ API Backend (FastAPI) โดยใช้ GenAI (Claude/Gemini/Matcha) เป็นตัวประมวลผลคำถามและสร้าง SQL Query อัตโนมัติ
 
@@ -14,7 +14,7 @@
 - **Frontend:** React Native (Expo) supporting Web, Android, iOS
 - **Database:** SQLAlchemy setup (SQLite/PostgreSQL/MSSQL support)
 - **Authentication:**
-  - Email OTP (Limited to configured domains e.g. `ntplc.co.th`)
+  - Email OTP (Limited to configured domains e.g. `example.com`)
   - Session Management (Token-based)
 - **Services:**
   - **AI Service (Core):**
@@ -319,7 +319,7 @@ npm install && npm run build
 
 ### Verify หลัง Deploy
 
-- [ ] Backend: `curl https://api.your-domain.com/` → `{"message": "NT AI Assistant API"}`
+- [ ] Backend: `curl https://api.your-domain.com/` → `{"message": "AI Assistant API"}`
 - [ ] Contexts: `curl https://api.your-domain.com/api/v1/query/contexts` → 4 contexts
 - [ ] Admin UI: เปิด browser → login ได้
 - [ ] User App: ถามคำถาม → ได้คำตอบ

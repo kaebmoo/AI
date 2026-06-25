@@ -12,7 +12,7 @@
 # เพิ่มใน MatchaProvider class
 def _build_enhanced_matcha_prompt(self) -> str:
     """Enhanced prompt specifically for Matcha"""
-    return """คุณเป็น AI ผู้เชี่ยวชาญด้านการวิเคราะห์ข้อมูลรายได้ของ NT Telecom ประเทศไทย
+    return """คุณเป็น AI ผู้เชี่ยวชาญด้านการวิเคราะห์ข้อมูลรายได้ของ Telecom ประเทศไทย
 
 ## ความสามารถพิเศษ
 - เข้าใจคำย่อไทย เช่น "นป.", "บชง.", "สญ."

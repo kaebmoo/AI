@@ -1,4 +1,4 @@
-# NT AI Assistant — Master Test Plan (All Plans)
+# AI Assistant — Master Test Plan (All Plans)
 
 **Date:** 2026-03-19  
 **Project Root:** `/Users/seal/Documents/GitHub/AI/`  
@@ -572,7 +572,7 @@ Prerequisite: Plan 4 + Plan 4B
 4. User: "export เป็น csv" → bot ส่งไฟล์
 ```
 
-### Scenario 4: OpenMiniCrew queries NT AI
+### Scenario 4: OpenMiniCrew queries AI Assistant
 
 ```
 Prerequisite: Plan 4B

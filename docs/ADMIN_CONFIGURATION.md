@@ -4,7 +4,7 @@ Updated: 2026-03-23
 
 ## Overview
 
-NT AI Assistant มีระบบจัดการ configuration แบบ dynamic ที่ให้ admin สามารถเปลี่ยนการตั้งค่า AI providers, models, features, และ Vanna knowledge ผ่าน Web UI โดยไม่ต้อง restart server หรือแก้ code
+AI Assistant มีระบบจัดการ configuration แบบ dynamic ที่ให้ admin สามารถเปลี่ยนการตั้งค่า AI providers, models, features, และ Vanna knowledge ผ่าน Web UI โดยไม่ต้อง restart server หรือแก้ code
 
 รอบล่าสุดของ admin refresh เพิ่ม runtime contract ที่ชัดขึ้นสำหรับ provider/model, dashboard view-model จาก backend จริง, และ brain sync freshness tracking สำหรับงาน Vanna/database
 
@@ -183,7 +183,7 @@ Returns active AI providers (enabled by admin)
   {
     "id": "matcha",
     "name": "Matcha",
-    "display_name": "Matcha (NT Gateway)",
+    "display_name": "Matcha (Gateway)",
     "model": "gpt-4.1",
     "icon": "leaf",
     "is_default": true
@@ -271,7 +271,7 @@ Returns the effective runtime configuration that admin pages should trust.
 {
   "default_provider": {
     "id": "matcha",
-    "display_name": "Matcha (NT Gateway)",
+    "display_name": "Matcha (Gateway)",
     "is_active": true
   },
   "default_model": {
@@ -380,7 +380,7 @@ useEffect(() => {
 │ │ │ Model: [claude-sonnet-4-6 ▼]       ││ │
 │ │ └─────────────────────────────────────┘│ │
 │ │                                         │ │
-│ │ ┌─ Matcha (NT Gateway) ──────  [✓]───┐│ │
+│ │ ┌─ Matcha (Gateway) ──────  [✓]───┐│ │
 │ │ │ Model: [gpt-4.1 ▼]                  ││ │
 │ │ │ API URL: [https://aigateway...]     ││ │
 │ │ └─────────────────────────────────────┘│ │
@@ -415,7 +415,7 @@ useEffect(() => {
 ```sql
 UPDATE admin_config
 SET config_value = 'matcha',
-    updated_by = 'admin@ntplc.co.th',
+    updated_by = 'admin@example.com',
     updated_at = CURRENT_TIMESTAMP
 WHERE config_key = 'default_ai_provider';
 ```
@@ -452,7 +452,7 @@ Only used if database value doesn't exist
 **Via Admin UI:**
 
 1. Go to Settings
-2. Find "Matcha (NT Gateway)" section
+2. Find "Matcha (Gateway)" section
 3. Select new model from dropdown (e.g., "gpt-4o")
 4. Click "Save Configuration"
 5. ✅ All users now use gpt-4o when selecting Matcha

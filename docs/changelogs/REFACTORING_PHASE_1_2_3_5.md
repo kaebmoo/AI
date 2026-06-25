@@ -1,4 +1,4 @@
-# NT AI Assistant — Refactoring Changelog
+# AI Assistant — Refactoring Changelog
 
 **Date:** 2026-03-04
 **Phases Completed:** 1, 2, 3, 5 (Phase 4 skipped — OpenMiniCrew integration)

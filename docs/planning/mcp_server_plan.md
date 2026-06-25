@@ -1,4 +1,4 @@
-# แผนการพัฒนา MCP-Based NT AI Assistant
+# แผนการพัฒนา MCP-Based AI Assistant
 
 **เพื่อเพิ่มความแม่นยำและความน่าเชื่อถือในการตอบคำถาม**
 
@@ -116,7 +116,7 @@
 │  Application DBs     │   │  Official Reports    │
 │  • SQLite (metadata) │   │  • Excel/CSV         │
 │  • PostgreSQL (app)  │   │  • Power BI API      │
-│  • MSSQL (NT data)   │   │  • Internal Systems  │
+│  • MSSQL ( data)   │   │  • Internal Systems  │
 └──────────────────────┘   └──────────────────────┘
 ```
 
@@ -136,7 +136,7 @@ import psycopg2
 import pymssql
 from typing import Dict, List
 
-mcp = FastMCP("NT Multi-DB Connector")
+mcp = FastMCP("Multi-DB Connector")
 
 # Database configurations
 DB_CONFIGS = {
@@ -349,7 +349,7 @@ from mcp.server.fastmcp import FastMCP
 from typing import List, Dict
 import sqlite3
 
-mcp = FastMCP("NT Metadata Server")
+mcp = FastMCP("Metadata Server")
 
 METADATA_DB = "/data/metadata.db"
 
@@ -566,7 +566,7 @@ from mcp.server.fastmcp import FastMCP
 import sqlparse
 from typing import Dict
 
-mcp = FastMCP("NT Validation Server")
+mcp = FastMCP("Validation Server")
 
 @mcp.tool()
 def validate_sql_syntax(sql: str, db_type: str = "mssql") -> Dict:
@@ -685,7 +685,7 @@ from mcp.server.fastmcp import FastMCP
 import pandas as pd
 from typing import Dict
 
-mcp = FastMCP("NT Reporting Server")
+mcp = FastMCP("Reporting Server")
 
 @mcp.tool()
 def fetch_official_report(
@@ -778,7 +778,7 @@ def compare_with_official_report(
 from mcp.server.fastmcp import FastMCP
 import sqlparse
 
-mcp = FastMCP("NT SQL Explainer")
+mcp = FastMCP("SQL Explainer")
 
 @mcp.tool()
 def explain_sql_in_thai(sql: str) -> Dict:
@@ -1467,7 +1467,7 @@ Week 5: Monitoring & Polish
 *วันที่: 2 กุมภาพันธ์ 2026*
 *เวอร์ชัน: 1.0*
 
-# แผนการพัฒนา MCP-Based NT AI Assistant (ฉบับปรับปรุง)
+# แผนการพัฒนา MCP-Based AI Assistant (ฉบับปรับปรุง)
 
 **พร้อมกลยุทธ์ Multi-Level Verification**
 
@@ -1567,7 +1567,7 @@ Level 3: AD-HOC QUERIES (5-10% ของคำถาม)
 from mcp.server.fastmcp import FastMCP
 from typing import Dict
 
-mcp = FastMCP("NT Query Classifier")
+mcp = FastMCP("Query Classifier")
 
 @mcp.tool()
 def classify_query_level(question: str, sql: str) -> Dict:
@@ -1645,7 +1645,7 @@ def classify_query_level(question: str, sql: str) -> Dict:
 from mcp.server.fastmcp import FastMCP
 from typing import Dict, List
 
-mcp = FastMCP("NT Validation Server")
+mcp = FastMCP("Validation Server")
 
 @mcp.tool()
 def validate_with_rollup(

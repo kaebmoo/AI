@@ -120,7 +120,7 @@ class DataDrivenMatchaProvider:
             if rule['example_correct']:
                 rules_text += f"  ✅ ตัวอย่างถูก: `{rule['example_correct']}`\n"
         
-        return f"""คุณเป็น AI Assistant สำหรับวิเคราะห์ข้อมูลรายได้ NT
+        return f"""คุณเป็น AI Assistant สำหรับวิเคราะห์ข้อมูลรายได้
 
 {schema_text}
 {mappings_text}

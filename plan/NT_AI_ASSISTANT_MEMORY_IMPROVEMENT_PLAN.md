@@ -1,4 +1,4 @@
-# แผนปรับปรุง Memory & Chat History — NT AI Assistant
+# แผนปรับปรุง Memory & Chat History — AI Assistant
 # สำหรับ Claude Code Execution
 
 > **Project Path**: `/Users/seal/Documents/GitHub/AI`

@@ -145,7 +145,7 @@ curl -X POST http://localhost:8000/api/v1/admin/contexts/onboard/validate \
 |----------|------|---------|
 | **gemini** | เร็ว, ราคาถูก, Thai context ดี | งานทั่วไป, ทดสอบ |
 | **claude** | วิเคราะห์ลึก, structured output ดี | view ซับซ้อน |
-| **matcha** | ใช้ผ่าน NT Gateway, OpenAI-compatible | production, org policy |
+| **matcha** | ใช้ผ่าน Gateway, OpenAI-compatible | production, org policy |
 
 **เปลี่ยน provider:**
 ```bash

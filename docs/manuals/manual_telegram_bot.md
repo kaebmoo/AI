@@ -40,7 +40,7 @@ curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" \
 
 ผู้ใช้ต้องลงทะเบียนด้วยอีเมลองค์กรก่อนใช้งาน:
 
-1. พิมพ์ `/start yourname@nt.co.th`
+1. พิมพ์ `/start yourname@example.com`
 2. Bot จะส่ง OTP ไปที่อีเมล
 3. พิมพ์ OTP 6 หลักที่ได้รับ
 4. ลงทะเบียนสำเร็จ — เริ่มถามคำถามได้เลย
