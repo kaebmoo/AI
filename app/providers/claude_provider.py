@@ -176,6 +176,32 @@ class ClaudeProvider(AIProvider):
         )
         return parsed_result
 
+    async def generate_structured(self, prompt: str, schema: Dict[str, Any], system_prompt: Optional[str] = None, schema_name: str = "result") -> Optional[Dict]:
+        """Structured output via forced tool call (tool_choice)."""
+        sys_content = system_prompt or ""
+        if sys_content:
+            sys_content = [{"type": "text", "text": sys_content, "cache_control": {"type": "ephemeral"}}]
+
+        self.last_usage = None
+        try:
+            response = await self.client.messages.create(
+                model=self.model,
+                max_tokens=2048,
+                system=sys_content,
+                messages=[{"role": "user", "content": prompt}],
+                tools=[{"name": schema_name, "description": "Return the structured result.", "input_schema": schema}],
+                tool_choice={"type": "tool", "name": schema_name},
+                temperature=0,  # no top_p — Claude 4.5+ rejects the pair (F2.6 lesson)
+            )
+            self._record_usage(response)
+            for block in response.content:
+                if block.type == "tool_use":
+                    return self._validate_required(block.input, schema)
+            return None
+        except Exception as e:
+            logger.warning(f"ClaudeProvider.generate_structured failed: {e}")
+            return None
+
     @ai_retry
     async def generate_content(self, prompt: str, system_prompt: Optional[str] = None, history: Optional[List[Dict]] = None) -> str:
         # Extended Thinking support

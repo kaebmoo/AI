@@ -189,3 +189,26 @@ class AIProvider(ABC):
     ) -> str:
         """Generate content with optional native multi-turn history."""
         pass
+
+    async def generate_structured(
+        self,
+        prompt: str,
+        schema: Dict[str, Any],  # JSON Schema (type/properties/required/enum subset)
+        system_prompt: Optional[str] = None,
+        schema_name: str = "result",
+    ) -> Optional[Dict]:
+        """Return a dict conforming to schema, or None if unsupported/invalid.
+
+        Callers MUST have a text-parse fallback — None is a normal outcome.
+        """
+        return None
+
+    @staticmethod
+    def _validate_required(data: Any, schema: Dict[str, Any]) -> Optional[Dict]:
+        """Shallow check that required keys exist. Returns data or None."""
+        if not isinstance(data, dict):
+            return None
+        for key in schema.get("required", []):
+            if key not in data:
+                return None
+        return data

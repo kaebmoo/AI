@@ -285,6 +285,7 @@ Phase นี้อยู่ในสภาพใช้งานจริงแ�
 - **Telegram chart type เคารพ visualization จาก AI** — อ่านจาก explanation dict (F5.4)
 - **Token accounting เป็นค่าจริงจาก provider usage** — `TokenUsage`/`last_usage` ทุก provider, `QueryResult.usage_breakdown` per-stage, เลิก hardcode 500 (B9, F7.1-2)
 - **Request trace หนึ่งบรรทัด JSON ต่อ query** — `query_trace {...}` จาก QueryEngine (รวม cache hit), stage timings ย่อยลด noise เป็น debug (F7.3)
+- **Structured output สำหรับ intent extraction** — `generate_structured` ทั้ง 3 providers (Claude forced tool, Matcha json_schema→json_object, Gemini json mime), extract_intent structured-first + text fallback, suggest_mappings ด้วย (F8) — two_pass flag ยัง default OFF
 
 ### ยังขาด
 

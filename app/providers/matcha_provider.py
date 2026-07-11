@@ -38,6 +38,8 @@ class MatchaProvider(AIProvider):
         self.api_key = api_key
         self.api_url = api_url
         self.model = model
+        # None = unknown, True/False = remembered gateway capability for json_schema
+        self._supports_json_schema = None
 
     def is_configured(self) -> bool:
         return bool(self.api_key and self.api_url)
@@ -138,6 +140,57 @@ class MatchaProvider(AIProvider):
         )
 
         return parsed_result
+
+    async def generate_structured(self, prompt: str, schema: Dict[str, Any], system_prompt: Optional[str] = None, schema_name: str = "result") -> Optional[Dict]:
+        """Structured output via response_format json_schema, falling back to json_object.
+
+        Gateway capability is remembered per instance so we don't probe every call.
+        """
+        async def _post(payload):
+            headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {self.api_key}'}
+            async with httpx.AsyncClient(verify=settings.MATCHA_SSL_VERIFY, timeout=settings.MATCHA_TIMEOUT) as client:
+                resp = await client.post(self.api_url, headers=headers, json=payload)
+                resp.raise_for_status()
+                return resp.json()
+
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        self.last_usage = None
+        try:
+            result = None
+            if self._supports_json_schema is not False:
+                try:
+                    result = await _post({
+                        "model": self.model, "messages": messages, "temperature": 0,
+                        "response_format": {"type": "json_schema", "json_schema": {
+                            "name": schema_name, "schema": schema, "strict": True}},
+                    })
+                    self._supports_json_schema = True
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code in (400, 422):
+                        logger.info("Matcha gateway rejected json_schema — falling back to json_object")
+                        self._supports_json_schema = False
+                    else:
+                        raise
+
+            if result is None:
+                # json_object mode + schema embedded in the prompt
+                schema_prompt = f"{prompt}\n\nตอบเป็น JSON object ตาม schema นี้เท่านั้น:\n{json.dumps(schema, ensure_ascii=False)}"
+                messages[-1] = {"role": "user", "content": schema_prompt}
+                result = await _post({
+                    "model": self.model, "messages": messages, "temperature": 0,
+                    "response_format": {"type": "json_object"},
+                })
+
+            self._record_usage(result)
+            content = result["choices"][0]["message"]["content"]
+            return self._validate_required(json.loads(content), schema)
+        except Exception as e:
+            logger.warning(f"MatchaProvider.generate_structured failed: {e}")
+            return None
 
     async def generate_content(self, prompt: str, system_prompt: Optional[str] = None, history: Optional[List[Dict]] = None) -> str:
         """Generate content using Matcha/OpenAI-compatible API with optional native multi-turn history."""

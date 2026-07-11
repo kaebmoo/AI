@@ -852,6 +852,56 @@ async def query_hybrid(
     )
 
 
+INTENT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "intent_type": {"type": "string", "enum": ["aggregation", "comparison", "trend", "detail", "ranking", "lookup"]},
+        "metrics": {"type": "array", "items": {"type": "string"}},
+        "aggregate_function": {"type": "string", "enum": ["SUM", "COUNT", "AVG", "MIN", "MAX"]},
+        "dimensions": {"type": "array", "items": {"type": "string"}},
+        "filters": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "column": {"type": "string"},
+                    "operator": {"type": "string", "enum": ["=", "LIKE", ">", "<", ">=", "<=", "IN", "BETWEEN"]},
+                    "value": {},
+                },
+                "required": ["column", "operator", "value"],
+            },
+        },
+        "time_range": {
+            "type": ["object", "null"],
+            "properties": {"year": {"type": ["integer", "null"]}, "month": {"type": ["integer", "null"]}},
+        },
+        "ordering": {
+            "type": ["object", "null"],
+            "properties": {"column": {"type": "string"}, "direction": {"type": "string", "enum": ["ASC", "DESC"]}},
+        },
+        "limit": {"type": ["integer", "null"]},
+        "matched_mappings": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"keyword": {"type": "string"}, "sql_condition": {"type": "string"}},
+                "required": ["keyword", "sql_condition"],
+            },
+        },
+    },
+    "required": ["intent_type", "metrics", "filters"],
+}
+
+
+def _intent_rules() -> str:
+    return """**กฎสำคัญ:**
+1. ตรวจสอบ semantic mappings ใน system prompt ก่อน -- ถ้ามี keyword ที่ตรง ให้ใส่ใน matched_mappings พร้อม sql_condition ที่คัดลอกมาจาก mapping
+2. ถ้า User ระบุปี พ.ศ. ให้แปลงเป็น ค.ศ. (พ.ศ. - 543) ใส่ใน time_range.year
+3. ถ้าไม่แน่ใจค่า filter ให้ใช้ LIKE operator
+4. **Follow-up context**: ถ้ามีประวัติสนทนาก่อนหน้า ให้ใช้เป็นบริบท เช่น ถ้าถามก่อนหน้าเรื่อง "ค่าล่วงเวลา" แล้วถาม "ค่าเฉลี่ยเท่าไหร่" → ต้อง inherit filter "ค่าล่วงเวลา" จากคำถามก่อนหน้าด้วย
+5. ห้ามสร้าง SQL -- ระบุเฉพาะ intent เท่านั้น"""
+
+
 async def extract_intent(
     service: "AIService",
     question: str,
@@ -866,14 +916,21 @@ async def extract_intent(
 ) -> Optional[Dict]:
     del context_name
 
-    intent_prompt = f"""คำถาม: {question}
+    prompt_header = f"""คำถาม: {question}
 
 **บริบท:** ข้อมูล{context_thai} (ใช้ตาราง {context_table}){history_context}
 
 {rag_context}
 
 ---
-**Task:** วิเคราะห์คำถามข้างต้นและส่งคืน JSON ที่มีโครงสร้างตามนี้เท่านั้น ห้ามมี text อื่นนอก JSON:
+**Task:** วิเคราะห์คำถามข้างต้นและระบุ intent
+
+{_intent_rules()}"""
+
+    # Text fallback prompt — schema spelled out for parse_intent_json
+    intent_prompt = f"""{prompt_header}
+
+ส่งคืน JSON ที่มีโครงสร้างตามนี้เท่านั้น ห้ามมี text อื่นนอก JSON:
 
 ```json
 {{
@@ -892,14 +949,7 @@ async def extract_intent(
   ]
 }}
 ```
-
-**กฎสำคัญ:**
-1. ตรวจสอบ semantic mappings ใน system prompt ก่อน -- ถ้ามี keyword ที่ตรง ให้ใส่ใน matched_mappings พร้อม sql_condition ที่คัดลอกมาจาก mapping
-2. ถ้า User ระบุปี พ.ศ. ให้แปลงเป็น ค.ศ. (พ.ศ. - 543) ใส่ใน time_range.year
-3. ถ้าไม่แน่ใจค่า filter ให้ใช้ LIKE operator
-5. **Follow-up context**: ถ้ามีประวัติสนทนาก่อนหน้า ให้ใช้เป็นบริบท เช่น ถ้าถามก่อนหน้าเรื่อง "ค่าล่วงเวลา" แล้วถาม "ค่าเฉลี่ยเท่าไหร่" → ต้อง inherit filter "ค่าล่วงเวลา" จากคำถามก่อนหน้าด้วย
-4. ห้ามสร้าง SQL -- ระบุเฉพาะ intent เท่านั้น
-5. ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่น"""
+ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่น"""
 
     try:
         import time
@@ -912,14 +962,25 @@ async def extract_intent(
             set_provider_model(service, cheap_model)
             logger.info("Two-Pass: Intent using cheap model '%s' (default: '%s')", cheap_model, original_model)
 
-        try:
+        async def _extract_once() -> tuple[Optional[Dict], str]:
+            # Structured output first — provider enforces the schema
+            structured = await service.provider.generate_structured(
+                prompt_header, INTENT_SCHEMA, system_prompt, schema_name="intent"
+            )
+            if structured is not None:
+                return structured, "structured"
+            # Fallback: text generation + regex/JSON parse (original path)
             response_text = await service.provider.generate_content(intent_prompt, system_prompt)
+            return service.parse_intent_json(response_text), "fallback_text"
+
+        try:
+            intent_json, intent_source = await _extract_once()
         except RECOVERABLE_FLOW_EXCEPTIONS as cheap_err:
             if original_model:
                 logger.warning("Cheap model '%s' failed for intent: %s. Retrying with default model '%s'...", cheap_model, cheap_err, original_model)
                 set_provider_model(service, original_model)
                 original_model = None
-                response_text = await service.provider.generate_content(intent_prompt, system_prompt)
+                intent_json, intent_source = await _extract_once()
             else:
                 raise
         finally:
@@ -929,14 +990,14 @@ async def extract_intent(
         t_intent = time.perf_counter() - t0
         if trace is not None:
             trace.stages["intent"] = round(t_intent, 4)
+            trace.stages["intent_source"] = intent_source
             record_usage(trace, "intent", service.provider)
-        intent_json = service.parse_intent_json(response_text)
 
         if intent_json:
-            logger.info("Two-Pass: Pass 1 complete (%.2fs). Intent: %s", t_intent, json.dumps(intent_json, ensure_ascii=False)[:500])
+            logger.info("Two-Pass: Pass 1 complete (%.2fs, %s). Intent: %s", t_intent, intent_source, json.dumps(intent_json, ensure_ascii=False)[:500])
             return intent_json
 
-        logger.warning("Two-Pass: Failed to parse intent JSON (%.2fs).", t_intent)
+        logger.warning("Two-Pass: Failed to parse intent JSON (%.2fs, %s).", t_intent, intent_source)
         return None
 
     except RECOVERABLE_FLOW_EXCEPTIONS as exc:

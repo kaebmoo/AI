@@ -397,6 +397,33 @@ class AIService:
 ]
 ```"""
 
+            # Structured output first (F8.3) — fallback to text parse below
+            suggestions_schema = {
+                "type": "object",
+                "properties": {
+                    "suggestions": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "col": {"type": "string"},
+                                "alias": {"type": "string"},
+                                "reason": {"type": "string"},
+                            },
+                            "required": ["col", "alias"],
+                        },
+                    }
+                },
+                "required": ["suggestions"],
+            }
+            structured = await self.provider.generate_structured(
+                prompt, suggestions_schema,
+                system_prompt="คุณเป็น AI ที่ช่วยตั้งชื่อคอลัมน์ภาษาไทยให้เหมาะสม",
+                schema_name="suggestions",
+            )
+            if structured and isinstance(structured.get("suggestions"), list):
+                return structured["suggestions"]
+
             result = await self.provider.generate_content(prompt, system_prompt="คุณเป็น AI ที่ช่วยตั้งชื่อคอลัมน์ภาษาไทยให้เหมาะสม")
 
             json_match = re.search(r'```json\s*(\[.*?\])\s*```', result, re.DOTALL)

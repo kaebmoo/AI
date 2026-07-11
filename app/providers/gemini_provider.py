@@ -211,6 +211,35 @@ class GeminiProvider(AIProvider):
         )
         return parsed_result
 
+    async def generate_structured(self, prompt: str, schema: Dict[str, Any], system_prompt: Optional[str] = None, schema_name: str = "result") -> Optional[Dict]:
+        """Structured output via response_mime_type=application/json.
+
+        Decision: schema goes into the prompt rather than response_schema —
+        converting arbitrary JSON Schema to google-genai's Schema type is
+        version-fragile; JSON mime + prompt schema is reliable across versions.
+        """
+        import json as _json
+
+        def call_api():
+            from google.genai import types
+            config = types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                temperature=0,
+                response_mime_type="application/json",
+            )
+            schema_prompt = f"{prompt}\n\nReturn ONLY a JSON object matching this schema:\n{_json.dumps(schema, ensure_ascii=False)}"
+            return self.client.models.generate_content(model=self.model, contents=schema_prompt, config=config)
+
+        self.last_usage = None
+        try:
+            response = await self._run_async(call_api)
+            self._record_usage(response)
+            text = response.text if response and hasattr(response, "text") else ""
+            return self._validate_required(_json.loads(text), schema)
+        except Exception as e:
+            logger.warning(f"GeminiProvider.generate_structured failed: {e}")
+            return None
+
     @ai_retry
     async def generate_content(self, prompt: str, system_prompt: Optional[str] = None, history: Optional[List[Dict]] = None) -> str:
         """Generate content using Gemini API with optional native multi-turn history."""
