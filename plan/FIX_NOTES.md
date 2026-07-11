@@ -11,3 +11,9 @@
 - **datetime migration:** ทั้ง repo ใช้ `app.core.time_utils.utcnow()` (naive UTC — semantics เดิมของ `datetime.utcnow()`) เพราะ DB columns เก็บ naive datetime — **migration ไป timezone-aware ทั้งระบบเป็นงานอนาคต** (ต้องทำพร้อม DB migration)
 - **`AdminConfigService()` ที่ยังสร้าง per-call โดยไม่ close:** `app/api/v1/admin/config.py`, `providers.py`, `analytics.py`, `vanna_docs.py`, `_shared.py`, `app/services/admin_agent.py` — อยู่นอกขอบเขต F2.1 (B4 ระบุเฉพาะ `deps.get_ai_service` + `QueryEngine.__init__`) แต่เป็น pattern เดียวกัน ควรย้ายมาใช้ `deps.get_admin_config_service` ในรอบถัดไป
 - **`tests/unit/test_db_separation.py`** มี assertion เกี่ยวกับ session — ผ่านอยู่ ไม่แตะ
+
+## จาก F4 (2026-07-11)
+
+- **⚠️ ต้องถามเจ้าของโปรเจกต์:** `app/services/schema/view_manager.py:57-60` **เขียนลง business DB** (CREATE/DROP VIEW ผ่าน `business_engine`) — เป็น admin feature (view manager) ที่ตั้งใจ ดังนั้น F4.1 จึง**ไม่ได้**ทำ `business_engine` ฝั่ง app เป็น read-only (ทำเฉพาะ MCP servers ซึ่งเป็น reader ล้วน) — ถ้าต้องการ RO ฝั่ง app ด้วย ต้องแยก engine สำหรับ view_manager ก่อน
+- **`app/services/database_adapter.py` และ `app/services/business_db.py` ไม่มี production caller** (business_db มีแค่ test import) — เป็น dead module ควรพิจารณาลบในรอบ cleanup
+- validate_sql delegation: import `app.services.validation_service` จาก MCP process ใช้เวลา ~0.07s — ไม่มีปัญหา startup

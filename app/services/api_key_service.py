@@ -18,6 +18,9 @@ from app.core.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
 
+# One-time warning flag when Redis is down and per-minute limit is disabled
+_minute_limit_warned = False
+
 KEY_PREFIX = "ntai_"
 KEY_LENGTH = 32  # 32 random bytes → 64 hex chars
 
@@ -168,7 +171,7 @@ class APIKeyService:
         return query.order_by(APIKey.created_at.desc()).all()
 
     def _check_rate_limits(self, api_key: APIKey) -> bool:
-        """Check if API key is within rate limits."""
+        """Check if API key is within rate limits (daily via DB, per-minute via Redis)."""
         today = date.today().isoformat()
 
         # Daily limit
@@ -180,10 +183,32 @@ class APIKeyService:
         if usage and usage.request_count >= api_key.rate_limit_per_day:
             return False
 
-        # Per-minute limit (approximate: check last minute of usage)
-        # For simplicity, we only enforce daily limit in the service.
-        # Per-minute rate limiting should be handled by middleware (e.g., SlowAPI).
+        return self._check_minute_limit(api_key)
 
+    def _check_minute_limit(self, api_key: APIKey) -> bool:
+        """Redis fixed-window per-minute limit.
+
+        Fixed windows allow up to 2x burst across a minute boundary — acceptable
+        for this internal use case. Fail-open when Redis is unavailable
+        (availability first for an internal system) with a one-time warning.
+        """
+        if not api_key.rate_limit_per_minute:
+            return True
+        try:
+            import time as _time
+            from app.services.cache_service import CacheService
+            redis_client = CacheService().redis
+            key = f"ratelimit:apikey:{api_key.id}:{int(_time.time() // 60)}"
+            count = redis_client.incr(key)
+            if count == 1:
+                redis_client.expire(key, 120)
+            if count > api_key.rate_limit_per_minute:
+                return False
+        except Exception as e:
+            global _minute_limit_warned
+            if not _minute_limit_warned:
+                logger.warning(f"Per-minute rate limit disabled — Redis unavailable: {e}")
+                _minute_limit_warned = True
         return True
 
     @staticmethod

@@ -94,11 +94,15 @@ class MCPDatabaseAdapter:
         self.engine = config.engine
 
     def _get_sqlite_connection(self):
-        """Get SQLite connection"""
+        """Get SQLite connection (read-only at the connection level)"""
         import sqlite3
+        from pathlib import Path
         # Extract path from URL
         path = self.config.connection_string.replace("sqlite:///", "").replace("sqlite://", "")
-        conn = sqlite3.connect(path)
+        resolved = Path(path).resolve()
+        if not resolved.exists():
+            raise FileNotFoundError(f"Business DB not found at {resolved} (from METADATA_DB_URL)")
+        conn = sqlite3.connect(f"{resolved.as_uri()}?mode=ro", uri=True)
         conn.row_factory = sqlite3.Row
         return conn
 

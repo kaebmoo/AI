@@ -61,11 +61,21 @@ class QueryDatabaseAdapter:
         self.engine = config.engine
 
     def _get_connection(self):
-        """Get database connection based on engine"""
+        """Get database connection based on engine.
+
+        SQLite opens read-only at the connection level (defense in depth —
+        regex validation is the first layer, mode=ro is the enforcement layer).
+        """
         if self.engine == "sqlite":
             import sqlite3
+            from pathlib import Path
             path = self.config.connection_string.replace("sqlite:///", "").replace("sqlite://", "")
-            conn = sqlite3.connect(path)
+            resolved = Path(path).resolve()
+            if not resolved.exists():
+                # mode=ro would fail anyway — fail loud with a readable message
+                raise FileNotFoundError(f"Business DB not found at {resolved} (from METADATA_DB_URL)")
+            # as_uri() handles spaces/special chars; no immutable=1 — ETL updates the file while running
+            conn = sqlite3.connect(f"{resolved.as_uri()}?mode=ro", uri=True)
             conn.row_factory = sqlite3.Row
             return conn
 
@@ -86,53 +96,45 @@ class QueryDatabaseAdapter:
 
         raise ValueError(f"Unsupported engine: {self.engine}")
 
-    def execute_query(self, sql: str, params: tuple = None) -> List[Dict]:
-        """Execute query and return results as list of dicts"""
+    def execute_query(self, sql: str, params: tuple = None, max_rows: int = None) -> List[Dict]:
+        """Execute query and return results as list of dicts.
+
+        max_rows: client-side row cap via fetchmany — engine-agnostic (works on
+        MSSQL where appending LIMIT would be a syntax error).
+        """
+        # PostgreSQL only: psycopg2's default cursor loads the FULL result set
+        # into the client on execute() (fetchmany doesn't help) — wrap in a
+        # subquery to cap server-side. Do NOT do this for MSSQL (T-SQL rejects
+        # CTEs inside a FROM-subquery); pyodbc streams batches so fetchmany suffices.
+        if self.engine == "postgresql" and max_rows:
+            sql = f"SELECT * FROM ({sql.rstrip().rstrip(';')}) AS _lim LIMIT {int(max_rows)}"
+
         conn = self._get_connection()
 
         try:
-            if self.engine == "sqlite":
-                cursor = conn.cursor()
-                if params:
-                    cursor.execute(sql, params)
-                else:
-                    cursor.execute(sql)
-
-                if cursor.description:
-                    columns = [col[0] for col in cursor.description]
-                    rows = cursor.fetchall()
-                    return [dict(zip(columns, row)) for row in rows]
-                return []
-
-            elif self.engine == "postgresql":
+            if self.engine == "postgresql":
                 import psycopg2.extras
                 cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-                if params:
-                    cursor.execute(sql, params)
-                else:
-                    cursor.execute(sql)
-
-                if cursor.description:
-                    return [dict(row) for row in cursor.fetchall()]
-                return []
-
-            elif self.engine == "mssql":
+            else:
                 cursor = conn.cursor()
-                if params:
-                    cursor.execute(sql, params)
-                else:
-                    cursor.execute(sql)
 
-                if cursor.description:
-                    columns = [col[0] for col in cursor.description]
-                    rows = cursor.fetchall()
-                    return [dict(zip(columns, row)) for row in rows]
+            if params:
+                cursor.execute(sql, params)
+            else:
+                cursor.execute(sql)
+
+            if not cursor.description:
                 return []
+
+            rows = cursor.fetchmany(max_rows) if max_rows else cursor.fetchall()
+
+            if self.engine == "postgresql":
+                return [dict(row) for row in rows]
+            columns = [col[0] for col in cursor.description]
+            return [dict(zip(columns, row)) for row in rows]
 
         finally:
             conn.close()
-
-        return []
 
     def get_placeholder(self) -> str:
         """Get parameter placeholder for the database engine"""
@@ -164,6 +166,9 @@ def get_db() -> QueryDatabaseAdapter:
         config = DatabaseConfig.from_env()
         _db_adapter = QueryDatabaseAdapter(config)
         logger.info(f"Connected to {config.engine} database")
+        if config.engine == "mssql":
+            # Read-only enforcement for MSSQL happens at the credential level
+            logger.warning("MSSQL: ensure the login used here is read-only (SELECT/db_datareader only)")
     return _db_adapter
 
 
@@ -220,29 +225,15 @@ def safe_column(db: QueryDatabaseAdapter, table_name: str, column_name: str) -> 
 
 
 # =========================================================
-# Constants
-# =========================================================
-
-# Dangerous SQL patterns - never allow these
-DANGEROUS_PATTERNS = [
-    'DROP', 'DELETE', 'TRUNCATE', 'ALTER', 'INSERT',
-    'UPDATE', 'CREATE', 'GRANT', 'REVOKE', 'EXEC',
-    'EXECUTE', 'xp_', 'sp_'
-]
-
-# SQL injection patterns
-INJECTION_PATTERNS = [
-    r';\s*--',                          # Comment after semicolon
-    r';\s*DROP',                        # Drop after semicolon
-    r"'\s*UNION\s+SELECT",              # Union injection (after string literal only)
-    r'OR\s+1\s*=\s*1',                  # Always true condition
-    r"OR\s+'[^']*'\s*=\s*'[^']*'",     # String comparison injection
-]
-
-
-# =========================================================
 # MCP Tools
 # =========================================================
+
+# Single source of truth for SQL validation — app/services/validation_service.py
+# (top-level imports there are stdlib-only, so no app.config chain is dragged in)
+from app.services.validation_service import ValidationService
+
+_validator = ValidationService(db=None)
+
 
 @mcp.tool()
 def validate_sql(sql: str) -> Dict[str, Any]:
@@ -264,86 +255,7 @@ def validate_sql(sql: str) -> Dict[str, Any]:
         validate_sql("SELECT * FROM revenue_search WHERE year = 2025")
         → {"valid": True, "issues": [], "warnings": ["Consider adding LIMIT..."], "sql_type": "SELECT"}
     """
-    issues = []
-    warnings = []
-    sql_type = None
-
-    if not sql or not sql.strip():
-        return {
-            "valid": False,
-            "issues": ["SQL is empty"],
-            "warnings": [],
-            "sql_type": None
-        }
-
-    sql_clean = sql.strip()
-    sql_upper = sql_clean.upper()
-
-    # Determine SQL type
-    if sql_upper.startswith('SELECT'):
-        sql_type = "SELECT"
-    elif sql_upper.startswith('WITH'):
-        sql_type = "WITH"  # CTE
-    else:
-        sql_type = sql_upper.split()[0] if sql_upper.split() else "UNKNOWN"
-
-    # Check: Must be SELECT or WITH (CTE)
-    if sql_type not in ('SELECT', 'WITH'):
-        issues.append(f"Only SELECT queries (or CTEs starting with WITH) are allowed. Found: {sql_type}")
-
-    # Check: Dangerous patterns
-    for pattern in DANGEROUS_PATTERNS:
-        # Use word boundary to avoid false positives
-        if re.search(rf'\b{pattern}\b', sql_upper):
-            issues.append(f"Dangerous operation detected: {pattern}")
-
-    # Check: SQL injection patterns
-    for pattern in INJECTION_PATTERNS:
-        if re.search(pattern, sql_upper):
-            issues.append(f"Potential SQL injection pattern detected")
-            break
-
-    # Check: Multiple statements (semicolon not at end)
-    semicolon_count = sql_clean.count(';')
-    if semicolon_count > 1 or (semicolon_count == 1 and not sql_clean.rstrip().endswith(';')):
-        issues.append("Multiple SQL statements are not allowed")
-
-    # Warnings
-    if 'SELECT *' in sql_upper:
-        warnings.append("Using SELECT * may return unnecessary columns. Consider selecting specific columns.")
-
-    if 'WHERE' not in sql_upper and 'FROM' in sql_upper:
-        warnings.append("Query has no WHERE clause - may return large dataset")
-
-    if 'LIMIT' not in sql_upper and 'TOP' not in sql_upper:
-        warnings.append("Consider adding LIMIT to prevent large result sets")
-
-    # Check for Thai column names without quotes
-    thai_pattern = r'(?<!["\'])[ก-๙]+(?!["\'])'
-    if re.search(thai_pattern, sql):
-        # Check if it's not inside quotes
-        potential_thai = re.findall(thai_pattern, sql)
-        if potential_thai:
-            warnings.append(f"Thai column names should be quoted with double quotes: {potential_thai[:3]}")
-
-    # Check aggregate without GROUP BY
-    aggregate_funcs = ['SUM(', 'COUNT(', 'AVG(', 'MAX(', 'MIN(']
-    has_aggregate = any(func in sql_upper for func in aggregate_funcs)
-    if has_aggregate and 'GROUP BY' not in sql_upper:
-        # Check if there are non-aggregated columns
-        select_match = re.search(r'SELECT\s+(.*?)\s+FROM', sql, re.IGNORECASE | re.DOTALL)
-        if select_match:
-            select_clause = select_match.group(1)
-            # Simple heuristic: if there's a comma and aggregate, might need GROUP BY
-            if ',' in select_clause:
-                warnings.append("Query has aggregate function with multiple columns but no GROUP BY")
-
-    return {
-        "valid": len(issues) == 0,
-        "issues": issues,
-        "warnings": warnings,
-        "sql_type": sql_type
-    }
+    return _validator.validate_sql(sql)
 
 
 @mcp.tool()
@@ -393,14 +305,11 @@ def execute_query(
     try:
         db = get_db()
 
-        # Add LIMIT if not present (SQLite/PostgreSQL)
-        sql_upper = sql.upper()
-        if 'LIMIT' not in sql_upper and 'TOP' not in sql_upper:
-            sql = f"{sql.rstrip(';')} LIMIT {limit + 1}"  # +1 to detect truncation
+        # Row cap via fetchmany (engine-agnostic — no LIMIT string appending,
+        # which breaks on MSSQL and misfires on subqueries containing LIMIT).
+        # +1 row to detect truncation; `truncated` flag semantics unchanged.
+        rows = db.execute_query(sql, max_rows=limit + 1)
 
-        rows = db.execute_query(sql)
-
-        # Check if truncated
         truncated = len(rows) > limit
         if truncated:
             rows = rows[:limit]

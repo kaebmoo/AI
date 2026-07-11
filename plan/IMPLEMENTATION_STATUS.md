@@ -275,6 +275,10 @@ Phase นี้อยู่ในสภาพใช้งานจริงแ�
 - **Dedup ปล่อย key เมื่อ request error** — retry ทันทีไม่โดนบล็อก 5 วิ (F2.3)
 - **`datetime.utcnow()` → `app.core.time_utils.utcnow()`** ทั้ง repo (F2.7)
 - **mcp mode + Claude ใช้งานได้** — message ordering ถูกต้อง, ไม่ส่ง temperature+top_p พร้อมกัน (F2.6)
+- **Business DB เปิด read-only ที่ระดับ connection ใน MCP servers** (SQLite mode=ro; MSSQL = credential + startup warning) (F4.1)
+- **Row cap ใช้ fetchmany แทน append LIMIT** — ทำงานทุก engine รวม MSSQL, subquery LIMIT ไม่หลุด cap (F4.2)
+- **validate_sql เหลือแหล่งเดียว** — `validation_service.py` (MCP delegate) (F4.3)
+- **API key per-minute limit enforce แล้ว** — Redis fixed-window, fail-open เมื่อ Redis ล่ม (F4.4) — ดู `docs/DEPLOYMENT_SECURITY.md`
 
 ### ยังขาด
 
