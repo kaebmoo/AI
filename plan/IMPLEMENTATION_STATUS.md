@@ -262,6 +262,14 @@ Phase นี้อยู่ในสภาพใช้งานจริงแ�
 - unit tests
 - integration tests
 - dedicated tests สำหรับ admin agent, api key, scheduler, onboarding, telegram, validation
+- GitHub Actions CI (`.github/workflows/ci.yml`) — ruff critical errors + pytest ทุก push/PR (F3-A, 2026-07-11)
+
+### Behavior changes จาก PLAN_FIX (2026-07-11)
+
+- **Query result cache เป็น first-turn only** — request ที่มี conversation history จะไม่อ่าน/เขียน cache (F1.1 กัน follow-up ปนข้าม conversation)
+- **คำเตือน truncate 1,000 แถวถึง user ใน hybrid mode แล้ว** — อ่าน flag `truncated` จาก payload ของ execute_query (F1.2)
+- **`ChatRequest.provider` default = None** — ไม่ระบุ provider = ใช้ `default_ai_provider` จาก admin config (F1.3 เดิม hardcode "gemini")
+- **System prompt rebuild รายวัน** — cache key มีวันที่ปัจจุบัน กันวันที่ใน prompt stale (F1.4)
 
 ### ยังขาด
 

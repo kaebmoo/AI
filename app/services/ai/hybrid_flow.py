@@ -146,7 +146,11 @@ async def execute_sql_attempt(service: "AIService", sql_query: str) -> tuple[Opt
 
         exec_data = json.loads(exec_result) if isinstance(exec_result, str) else exec_result
 
-        if isinstance(exec_data, list) and len(exec_data) >= 1000:
+        # nt_query_mcp returns a dict with a "truncated" flag; legacy payloads may be a bare list
+        if isinstance(exec_data, dict) and exec_data.get("truncated"):
+            logger.warning("Query result truncated by row limit.")
+            service.set_pending_limit_warning(LIMIT_WARNING_MESSAGE)
+        elif isinstance(exec_data, list) and len(exec_data) >= 1000:
             logger.warning("Query hit the 1000 row limit.")
             service.set_pending_limit_warning(LIMIT_WARNING_MESSAGE)
 
@@ -614,6 +618,15 @@ async def run_hybrid_attempt(
             schema_metadata,
         )
 
+    # Surface the row-limit warning to the user (hybrid mode reader — mcp mode reads it in retry_loop)
+    pending = service.get_pending_limit_warning()
+    if pending:
+        if isinstance(explanation, dict):
+            explanation["explanation"] = (explanation.get("explanation") or "") + pending
+        else:
+            explanation = (explanation or "") + pending
+        service.set_pending_limit_warning("")
+
     confidence_result = await build_confidence_result(
         service,
         sql_query,
@@ -658,6 +671,9 @@ async def query_hybrid(
 
     import time
 
+    # Clear stale warning state from instance reuse
+    service.set_pending_limit_warning("")
+
     start_request = time.perf_counter()
     sql_query = None
     total_tokens = 0
@@ -686,6 +702,8 @@ async def query_hybrid(
     logger.info("Hybrid Mode: MCP connected to %s", list(service.mcp_client.servers.keys()))
 
     for attempt in range(max_retries + 1):
+        # Don't carry a truncation warning from a failed attempt into the next one
+        service.set_pending_limit_warning("")
         if on_status:
             on_status(RetryStatus(attempt, max_retries, "generating", f"Generating SQL (attempt {attempt + 1})"))
 

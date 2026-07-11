@@ -231,7 +231,9 @@ def build_system_prompt(
 ) -> str:
     import time as _time
 
-    cache_key = f"prompt|{ai_provider}|{context_name}|{language}|{include_samples}|{rag_enabled}"
+    # Date in cache key → prompt rebuilt daily (its Current Date section must not go stale)
+    today = datetime.now().strftime('%Y-%m-%d')
+    cache_key = f"prompt|{ai_provider}|{context_name}|{language}|{include_samples}|{rag_enabled}|{today}"
     cached = service.get_cached_value(cache_key)
     if cached and (_time.time() - cached.get("_ts", 0)) < 21600:
         logger.debug("System prompt cache HIT: %s", cache_key)

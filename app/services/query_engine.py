@@ -368,15 +368,20 @@ class QueryEngine:
         ai_config = self.admin_config.get_ai_config() if self.admin_config else {}
         feature_flags = self.admin_config.get_feature_flags() if self.admin_config else {}
 
-        # --- Query Result Cache: check for identical recent query ---
+        # --- Query Result Cache: first-turn questions only ---
+        # SQL depends on conversation history (follow-up filter inheritance),
+        # so caching with history would leak results across conversations.
+        use_cache = not history
         selected_provider_name = provider or ai_config.get("default_provider", settings.AI_PROVIDER)
         context_name_for_cache = context or "auto"
         qcache_key = _cache_key(question, selected_provider_name, context_name_for_cache)
-        cached = _cache_get(qcache_key)
-        if cached is not None:
-            logger.info(f"QueryEngine: Cache HIT for question (key={qcache_key[:12]}…)")
-            cached.execution_time_ms = (time.time() - start_time) * 1000
-            return cached
+        if use_cache:
+            cached = _cache_get(qcache_key)
+            if cached is not None:
+                from dataclasses import replace
+                logger.info(f"QueryEngine: Cache HIT for question (key={qcache_key[:12]}…)")
+                # replace() = shallow copy — don't mutate the shared cached object
+                return replace(cached, execution_time_ms=(time.time() - start_time) * 1000)
 
         # --- Request dedup: block identical requests within N seconds ---
         if _dedup_check(question, selected_provider_name, user_id):
@@ -494,7 +499,7 @@ class QueryEngine:
         )
 
         # --- Query Result Cache: store successful result ---
-        if result.data and not result.error:
+        if use_cache and result.data and not result.error:
             _cache_set(qcache_key, engine_result)
             logger.info(f"QueryEngine: Cached result (key={qcache_key[:12]}…, rows={len(result.data)})")
 
