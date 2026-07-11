@@ -395,6 +395,8 @@ async def build_first_attempt_prompt(
     attempt: int,
     max_retries: int,
     trace=None,
+    conversation_id: Optional[str] = None,
+    intent_state_enabled: bool = False,
 ) -> tuple[str, bool]:
     async def _rag_task() -> str:
         try:
@@ -440,6 +442,10 @@ async def build_first_attempt_prompt(
             on_status(RetryStatus(attempt, max_retries, "analyzing", "Analyzing question (Pass 1)"))
 
         history_context = build_history_context(history)
+        previous_intent = None
+        if intent_state_enabled and history:
+            from app.services.ai import intent_state
+            previous_intent = intent_state.get_intent(conversation_id)
         intent_json = await extract_intent(
             service=service,
             question=question,
@@ -451,7 +457,11 @@ async def build_first_attempt_prompt(
             rag_context=rag_context,
             cheap_model=cheap_model,
             trace=trace,
+            previous_intent=previous_intent,
         )
+        if intent_state_enabled and intent_json:
+            from app.services.ai import intent_state
+            intent_state.set_intent(conversation_id, intent_json)
 
         if intent_json:
             logger.info("Two-Pass Mode: Pass 1 success. Building Pass 2 prompt.")
@@ -528,8 +538,17 @@ async def run_hybrid_attempt(
     prepare_data_for_explanation: Callable[[List[Dict]], List[Dict]],
     start_request: float,
     trace=None,
+    template_answers_enabled: bool = False,
 ) -> tuple[Optional[QueryResult], int, Optional[str]]:
     logger.info("Hybrid Mode: Generating SQL (attempt %s)", attempt + 1)
+
+    # F9-B: metadata for the explanation stage only depends on context (not on
+    # the SQL result) — load it in parallel with generation/validation/execution.
+    # Early-return paths leave the task to finish on its own (read-only, no side effects).
+    metadata_task = asyncio.create_task(
+        asyncio.to_thread(load_execution_metadata, temp_schema, context_table, context_name)
+    )
+    metadata_task.add_done_callback(lambda t: t.exception())  # never let it warn "never retrieved"
 
     response_text, tokens_used, generation_error = await generate_sql_attempt(
         service,
@@ -621,27 +640,34 @@ async def run_hybrid_attempt(
     data = exec_data.get("data", [])
     logger.info("Hybrid Mode: Success! Got %s rows", len(data))
 
-    dim_families, schema_metadata, hierarchy_info = load_execution_metadata(
-        temp_schema,
-        context_table,
-        context_name,
-    )
+    dim_families, schema_metadata, hierarchy_info = await metadata_task
 
     if not data:
         explanation = f"ไม่พบข้อมูลที่ตรงกับเงื่อนไข\n\nSQL ที่ใช้:\n```sql\n{sql_query}\n```\n\nอาจเป็นเพราะ:\n- ไม่มีข้อมูลที่ตรงกับคำค้นหา\n- ชื่อคอลัมน์หรือค่าที่ใช้ค้นหาอาจไม่ถูกต้อง"
     else:
-        explanation = await build_explanation(
-            service,
-            question,
-            sql_query,
-            data,
-            cheap_model,
-            prepare_data_for_explanation,
-            dim_families,
-            hierarchy_info,
-            schema_metadata,
-            trace=trace,
-        )
+        explanation = None
+        if template_answers_enabled:
+            from app.services.ai.template_answer import build_template_answer
+            explanation = build_template_answer(question, sql_query, data)
+            if explanation is not None:
+                logger.info("Hybrid Mode: explanation from template (no LLM call)")
+                if trace is not None:
+                    trace.stages["explain_mode"] = "template"
+        if explanation is None:
+            if trace is not None:
+                trace.stages["explain_mode"] = "llm"
+            explanation = await build_explanation(
+                service,
+                question,
+                sql_query,
+                data,
+                cheap_model,
+                prepare_data_for_explanation,
+                dim_families,
+                hierarchy_info,
+                schema_metadata,
+                trace=trace,
+            )
 
     # Surface the row-limit warning to the user (hybrid mode reader — mcp mode reads it in retry_loop)
     pending = service.get_pending_limit_warning()
@@ -697,6 +723,12 @@ async def query_hybrid(
     cheap_model: Optional[str] = None,
     schema_service=None,
     trace=None,
+    template_answers_enabled: bool = False,
+    conversation_id: Optional[str] = None,
+    intent_state_enabled: bool = False,
+    escalation_ladder_enabled: bool = False,
+    escalation_tool_loop_enabled: bool = False,
+    latency_budget_s: float = 45.0,
     **kwargs,
 ) -> QueryResult:
     del value_lookup_enabled, kwargs
@@ -765,7 +797,23 @@ async def query_hybrid(
             error=str(exc),
         )
 
+    budget_exceeded = False
     for attempt in range(max_retries + 1):
+        # F9-D: latency budget — don't start another attempt past the budget
+        if attempt > 0 and (time.perf_counter() - start_request) > latency_budget_s:
+            logger.warning("Hybrid Mode: latency budget %.0fs exceeded — stopping retries", latency_budget_s)
+            budget_exceeded = True
+            break
+
+        # F9-D: attempt 2+ escalates to the strong tier of the same provider
+        if escalation_ladder_enabled and attempt == 1:
+            strong_model = service.provider.get_model("strong")
+            if strong_model and strong_model != get_provider_model(service):
+                logger.info("Hybrid Mode: escalating to strong model '%s'", strong_model)
+                set_provider_model(service, strong_model)
+                if trace is not None:
+                    trace.stages["escalated_to"] = strong_model
+
         # Don't carry a truncation warning from a failed attempt into the next one
         service.set_pending_limit_warning("")
         if on_status:
@@ -795,6 +843,8 @@ async def query_hybrid(
                 attempt=attempt,
                 max_retries=max_retries,
                 trace=trace,
+                conversation_id=conversation_id,
+                intent_state_enabled=intent_state_enabled,
             )
         else:
             user_prompt = build_retry_user_prompt(
@@ -819,6 +869,7 @@ async def query_hybrid(
                 cheap_model=cheap_model,
                 user_prompt=user_prompt,
                 temp_schema=temp_schema,
+                template_answers_enabled=template_answers_enabled,
                 retry_history=retry_history,
                 total_tokens=total_tokens,
                 extract_sql=extract_sql,
@@ -836,16 +887,38 @@ async def query_hybrid(
             logger.error("Hybrid Mode error: %s", exc)
             retry_history.append({"sql": sql_query or "", "error": str(exc)})
 
+    # F9-D attempt 3: rescue via read-only tool loop (mcp mode) — same tools,
+    # same read-only permissions; only when explicitly enabled and within budget
+    if (
+        escalation_tool_loop_enabled
+        and not budget_exceeded
+        and (time.perf_counter() - start_request) <= latency_budget_s
+    ):
+        logger.info("Hybrid Mode: escalating to tool loop (mcp mode rescue)")
+        if trace is not None:
+            trace.stages["escalated_to"] = "tool_loop"
+        try:
+            from app.services.ai.retry_loop import query_with_retry
+            return await query_with_retry(service, question, history=history, on_status=on_status)
+        except RECOVERABLE_FLOW_EXCEPTIONS as exc:
+            logger.error("Hybrid Mode: tool loop rescue failed: %s", exc)
+
     if trace.usage:
         total_tokens = sum(u["input_tokens"] + u["output_tokens"] for u in trace.usage)
+
+    if budget_exceeded:
+        error_msg = f"เกินเวลาที่กำหนด ({latency_budget_s:.0f} วินาที) — กรุณาลองใหม่หรือปรับคำถามให้เฉพาะเจาะจงขึ้น"
+    else:
+        error_msg = f"ไม่สามารถสร้าง SQL ที่ถูกต้องได้หลังจากลอง {max_retries + 1} ครั้ง"
+
     return QueryResult(
         question=question,
         sql_query=sql_query or "",
         data=[],
-        explanation=f"ไม่สามารถสร้าง SQL ที่ถูกต้องได้หลังจากลอง {max_retries + 1} ครั้ง",
+        explanation=error_msg,
         tokens_used=total_tokens,
         provider=service.provider_name,
-        error="Max retries exceeded",
+        error="Latency budget exceeded" if budget_exceeded else "Max retries exceeded",
         retry_count=max_retries + 1,
         retry_history=retry_history,
         usage_breakdown=trace.usage or None,
@@ -913,10 +986,26 @@ async def extract_intent(
     rag_context: str,
     cheap_model: Optional[str] = None,
     trace=None,
+    previous_intent: Optional[Dict] = None,
 ) -> Optional[Dict]:
     del context_name
 
-    prompt_header = f"""คำถาม: {question}
+    if previous_intent is not None:
+        # F9-C: follow-up — update the stored intent instead of re-deriving
+        # from raw history (much shorter prompt, deterministic inheritance)
+        prompt_header = f"""Intent เดิมของบทสนทนานี้:
+{json.dumps(previous_intent, ensure_ascii=False)}
+
+คำถามใหม่ (follow-up): {question}
+
+**บริบท:** ข้อมูล{context_thai} (ใช้ตาราง {context_table})
+
+---
+**Task:** อัปเดต intent เดิมตามคำถามใหม่ — คงค่า filter/dimension ที่ไม่ถูกกล่าวถึงไว้ตามเดิม (inherit) และเปลี่ยนเฉพาะส่วนที่คำถามใหม่ระบุ
+
+{_intent_rules()}"""
+    else:
+        prompt_header = f"""คำถาม: {question}
 
 **บริบท:** ข้อมูล{context_thai} (ใช้ตาราง {context_table}){history_context}
 

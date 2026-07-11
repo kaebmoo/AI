@@ -444,6 +444,7 @@ async def chat(
         mode=request.mode or "hybrid",
         history=history,
         max_retries=request.max_retries,
+        conversation_id=conversation_id,
         user_id=current_user.id,
     )
 
@@ -539,6 +540,7 @@ async def chat_stream(
                 mode=request.mode or "hybrid",
                 history=history,
                 max_retries=request.max_retries,
+                conversation_id=conversation_id,
                 on_status=on_status,
                 user_id=current_user.id,
             ))

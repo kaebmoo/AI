@@ -433,6 +433,7 @@ class QueryEngine:
                 use_cache=use_cache,
                 qcache_key=qcache_key,
                 start_time=start_time,
+                conversation_id=conversation_id,
             )
         except BaseException:
             _dedup_release(dedup_key)  # failed — allow immediate retry
@@ -457,6 +458,7 @@ class QueryEngine:
         use_cache: bool,
         qcache_key: str,
         start_time: float,
+        conversation_id: Optional[str] = None,
     ) -> QueryEngineResult:
         """Query pipeline after cache/dedup gates (split out so dedup can wrap it)."""
         # 1. Resolve provider
@@ -535,6 +537,12 @@ class QueryEngine:
                 cheap_model=cheap_model,
                 schema_service=self.schema_service,
                 trace=trace,
+                template_answers_enabled=feature_flags.get("template_answers_enabled", False),
+                conversation_id=conversation_id,
+                intent_state_enabled=feature_flags.get("intent_state_enabled", False),
+                escalation_ladder_enabled=feature_flags.get("escalation_ladder_enabled", False),
+                escalation_tool_loop_enabled=feature_flags.get("escalation_tool_loop_enabled", False),
+                latency_budget_s=float(feature_flags.get("query_latency_budget_s", 45) or 45),
             )
         else:
             result = await ai_service.query_with_retry(

@@ -207,3 +207,8 @@ nt_fi_report.sqlite.backup.20260321_213726
 # Redis / Celery / RQ runtime state
 *.rdb
 dump.rdb
+
+# Eval run outputs (baseline is force-added)
+eval_results/*
+!eval_results/BASELINE.json
+!eval_results/BASELINE.md
