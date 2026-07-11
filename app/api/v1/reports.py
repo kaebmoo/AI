@@ -14,7 +14,6 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api import deps
-from app.core.rate_limiter import limiter
 from app.core.time_utils import utcnow
 from app.models.report_export import ReportExport
 from app.models.user import User
@@ -67,14 +66,27 @@ def _get_owned(export_id: str, user: User, db: Session) -> ReportExport:
     return export
 
 
+EXPORTS_PER_HOUR = 10
+
+
 @router.post("/", response_model=ExportStatus)
-@limiter.limit("10/hour")
 async def create_export(
     request: Request,
     body: CreateExportRequest,
     current_user: User = Depends(deps.get_current_user),
     db: Session = Depends(deps.get_db),
 ):
+    # Per-USER hourly limit via DB count — slowapi's limiter keys by remote IP,
+    # which shares quota across NAT users and is trivially bypassed by IP rotation
+    from datetime import timedelta
+    hour_ago = utcnow() - timedelta(hours=1)
+    recent = db.query(ReportExport).filter(
+        ReportExport.user_id == current_user.id,
+        ReportExport.created_at >= hour_ago,
+    ).count()
+    if recent >= EXPORTS_PER_HOUR:
+        raise HTTPException(status_code=429, detail=f"เกินจำนวน export ที่กำหนด ({EXPORTS_PER_HOUR} ครั้ง/ชั่วโมง)")
+
     try:
         export = report_service.create_export(db, current_user, body.chat_history_id)
     except ExportError as e:

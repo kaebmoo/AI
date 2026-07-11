@@ -98,3 +98,17 @@ class TestReportsFlow:
     def test_requires_auth(self, client):
         resp = client.post("/api/v1/reports/", json={"chat_history_id": 1})
         assert resp.status_code == 401
+
+    def test_per_user_hourly_rate_limit(self, reports_client, chat_entry, db_session, test_user):
+        """P2 review fix: limit is per USER (DB count), not per IP."""
+        from app.core.time_utils import utcnow
+        from app.models.report_export import ReportExport
+        import app.api.v1.reports as reports_module
+
+        for _ in range(reports_module.EXPORTS_PER_HOUR):
+            db_session.add(ReportExport(user_id=test_user.id, question="x", sql_text="SELECT 1",
+                                        status="done", created_at=utcnow()))
+        db_session.commit()
+
+        resp = reports_client.post("/api/v1/reports/", json={"chat_history_id": chat_entry.id})
+        assert resp.status_code == 429

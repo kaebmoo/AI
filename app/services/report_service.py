@@ -89,9 +89,12 @@ def _run_export_sql(sql: str, max_rows: int):
     SQLite: mode=ro at connection level (same enforcement as MCP servers, F4.1).
     Non-SQLite (MSSQL prod): read-only is credential-level — use business_engine.
     """
-    bp = (settings.BUSINESS_DB_PATH or "").replace("sqlite:///", "")
-    if bp.endswith((".sqlite", ".db")):
-        resolved = Path(bp).resolve()
+    # SQLite = a sqlite:// URL or a bare file path (no URL scheme) — never guess
+    # from the filename extension (.sqlite3 / extensionless files are valid SQLite)
+    bp = settings.BUSINESS_DB_PATH or ""
+    is_sqlite = bp.startswith("sqlite") or (bp and "://" not in bp)
+    if is_sqlite:
+        resolved = Path(bp.replace("sqlite:///", "").replace("sqlite://", "")).resolve()
         conn = sqlite3.connect(f"{resolved.as_uri()}?mode=ro", uri=True)
         conn.row_factory = sqlite3.Row
         try:
@@ -147,8 +150,13 @@ def run_export(export_id: str, db: Session = None) -> None:
                 {"field": "requested_by_user_id", "value": export.user_id},
             ])
 
-            # Write to temp then rename — never leave a half-written file
-            fd, tmp_path = tempfile.mkstemp(suffix=".xlsx", dir=EXPORT_DIR)
+            # Write to temp then rename — never leave a half-written file.
+            # Temp lives in .tmp/ subdir so the cleanup job's EXPORT_DIR/*.xlsx
+            # orphan sweep can never delete a file that is still being written
+            # (pandas requires the .xlsx extension, so a .tmp suffix won't work)
+            tmp_dir = EXPORT_DIR / ".tmp"
+            tmp_dir.mkdir(parents=True, exist_ok=True)
+            fd, tmp_path = tempfile.mkstemp(suffix=".xlsx", dir=tmp_dir)
             os.close(fd)
             try:
                 with pd.ExcelWriter(tmp_path, engine="openpyxl") as writer:

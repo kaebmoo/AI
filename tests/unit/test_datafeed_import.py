@@ -140,6 +140,17 @@ class TestDataFeedImport:
         conn = sqlite3.connect(db)
         assert conn.execute("SELECT old_col FROM feed_rev_fact_bu").fetchone()[0] == "keep"
 
+    def test_missing_rowcount_entry_rolls_back(self, tmp_path):
+        """A dataset absent from manifest.row_counts must fail the gate, not skip it."""
+        source = _write_bundle(tmp_path)
+        manifest_path = source / "rev" / "latest" / "manifest.json"
+        m = json.loads(manifest_path.read_text())
+        del m["row_counts"]["fact_bu"]
+        manifest_path.write_text(json.dumps(m))
+
+        with pytest.raises(SystemExit, match="missing entry"):
+            _run_import(source, tmp_path / "biz.sqlite")
+
     def test_bad_control_total_rolls_back(self, tmp_path):
         source = _write_bundle(tmp_path, bad_control=True)
         db = tmp_path / "biz.sqlite"

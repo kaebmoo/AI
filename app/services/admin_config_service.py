@@ -665,7 +665,23 @@ class AdminConfigService:
                 "value_verification_enabled",
                 "true" if settings.VALUE_VERIFICATION_ENABLED else "false"
             ) == "true",
+            # F9 flags (all default OFF — enabling requires measurements, see plan/RESULT_F9.md)
+            "template_answers_enabled": self.get_config("template_answers_enabled", "false") == "true",
+            "intent_state_enabled": self.get_config("intent_state_enabled", "false") == "true",
+            "escalation_ladder_enabled": self.get_config("escalation_ladder_enabled", "false") == "true",
+            "escalation_tool_loop_enabled": self.get_config("escalation_tool_loop_enabled", "false") == "true",
+            "query_latency_budget_s": self._get_float_config("query_latency_budget_s", 45.0),
         }
+
+    def _get_float_config(self, key: str, default: float) -> float:
+        """Numeric config with validation — bad values fall back to default."""
+        raw = self.get_config(key, str(default))
+        try:
+            value = float(raw)
+            return value if value > 0 else default
+        except (TypeError, ValueError):
+            logger.warning(f"Config {key}={raw!r} is not a valid positive number — using {default}")
+            return default
 
     def toggle_feature(self, feature_name: str, enabled: bool, updated_by: Optional[str] = None) -> bool:
         """

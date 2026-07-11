@@ -289,11 +289,33 @@ class TestRefreshCache:
 
 class TestListContexts:
 
-    async def test_list_contexts(self, mock_db_session):
-        """List contexts returns available contexts."""
+    async def test_list_contexts(self, mock_db_session, tmp_path):
+        """List contexts returns available contexts (self-contained — no local config.db)."""
+        import sqlite3
+        from unittest.mock import patch
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+
+        db_path = tmp_path / "config.sqlite"
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "CREATE TABLE schema_contexts (id INTEGER PRIMARY KEY, name TEXT, display_name TEXT, "
+            "description TEXT, main_view TEXT, is_active INTEGER)"
+        )
+        conn.executemany(
+            "INSERT INTO schema_contexts (name, display_name, description, main_view, is_active) VALUES (?, ?, ?, ?, 1)",
+            [("revenue", "รายได้", "", "revenue_search"), ("expense", "ค่าใช้จ่าย", "", "v_expense_mart")],
+        )
+        conn.commit()
+        conn.close()
+
+        engine = create_engine(f"sqlite:///{db_path}")
+        session_factory = sessionmaker(bind=engine)
+
         from app.tools.admin.system_tools import ListContextsTool
         tool = ListContextsTool()
-        result = await tool.execute({}, mock_db_session)
+        with patch("app.db.session.ConfigSessionLocal", session_factory):
+            result = await tool.execute({}, mock_db_session)
         assert result["success"] is True
         assert result["total"] >= 2
         names = [c["name"] for c in result["data"]]

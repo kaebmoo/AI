@@ -102,6 +102,19 @@ async def handle_context(update, context) -> None:
         db.close()
 
 
+async def handle_admin(update, context) -> None:
+    """/admin command -- explicit admin operations (F5.3)."""
+    if _check_rate_limit(update, context):
+        await update.message.reply_text("คุณส่งข้อความเร็วเกินไป กรุณารอสักครู่")
+        return
+
+    db = _get_db_session(context)
+    try:
+        await _get_dispatcher().dispatch(update, context, db)
+    finally:
+        db.close()
+
+
 async def handle_message(update, context) -> None:
     """Free-text message -- query or OTP verification."""
     if _check_rate_limit(update, context):

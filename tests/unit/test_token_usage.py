@@ -34,6 +34,16 @@ class TestMatchaUsage:
         p._record_usage({})
         assert p.last_usage.total == 0
 
+    def test_null_usage_does_not_crash(self):
+        p = self._provider()
+        p._record_usage({"usage": None})  # gateway sent usage: null
+        assert p.last_usage.total == 0
+
+    def test_only_total_tokens_still_counted(self):
+        p = self._provider()
+        p._record_usage({"usage": {"total_tokens": 321}})
+        assert p.last_usage.total == 321
+
 
 class TestClaudeUsage:
     def test_record_usage_with_cache_fields(self):

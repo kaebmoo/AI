@@ -102,6 +102,7 @@ class NTAIBot:
             handle_start,
             handle_help,
             handle_context,
+            handle_admin,
             handle_message,
             handle_callback,
         )
@@ -118,6 +119,7 @@ class NTAIBot:
         app.add_handler(CommandHandler("start", handle_start))
         app.add_handler(CommandHandler("help", handle_help))
         app.add_handler(CommandHandler("context", handle_context))
+        app.add_handler(CommandHandler("admin", handle_admin))
         app.add_handler(CallbackQueryHandler(handle_callback))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 

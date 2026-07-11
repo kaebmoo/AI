@@ -46,12 +46,10 @@ def _rows_to_multiset(rows):
     return sorted(tuples, key=lambda t: tuple(str(x) for x in t))
 
 
-def rows_match(expected, actual):
+def _values_match(expected, actual) -> bool:
     """Multiset compare of value-tuples; column count must match."""
     if not expected and not actual:
         return True
-    exp_cols = len(expected[0]) if expected else 0
-    act_cols = len(actual[0]) if actual else 0
     if expected and actual and len(expected[0].keys()) != len(actual[0].keys()):
         return False
     exp_t, act_t = _rows_to_multiset(expected), _rows_to_multiset(actual)
@@ -67,6 +65,27 @@ def rows_match(expected, actual):
             elif x != y:
                 return False
     return True
+
+
+def _columns_match(expected, actual) -> bool:
+    """Case-insensitive comparison of sorted column names."""
+    if not expected or not actual:
+        return True  # empty-vs-empty already handled; nothing to compare
+    exp = sorted(c.lower() for c in expected[0].keys())
+    act = sorted(c.lower() for c in actual[0].keys())
+    return exp == act
+
+
+def match_status(expected, actual) -> str:
+    """exact_match = values AND column names match; value_match = values only.
+
+    value_match is reported separately — a same-values result under different
+    column names may still be a wrong projection (e.g. SUM(x) aliased as the
+    wrong measure), so it must not silently inflate the headline accuracy.
+    """
+    if not _values_match(expected, actual):
+        return "mismatch"
+    return "exact_match" if _columns_match(expected, actual) else "value_match"
 
 
 # ── Golden examples + expected execution ──────────────────
@@ -165,9 +184,11 @@ async def run_eval(provider=None, context_filter=None, limit=None):
                         record["detail"] = qr.error
                     else:
                         actual_rows = qr.data or []
-                        record["status"] = "exact_match" if rows_match(expected_rows, actual_rows) else "mismatch"
+                        record["status"] = match_status(expected_rows, actual_rows)
                         if record["status"] == "mismatch":
                             record["detail"] = f"expected {len(expected_rows)} rows, got {len(actual_rows)}"
+                        elif record["status"] == "value_match":
+                            record["detail"] = "values match but column names differ"
                 except Exception as e:
                     record["latency_s"] = round(time.time() - t0, 2)
                     record["status"] = "execution_failed"
@@ -185,6 +206,7 @@ async def run_eval(provider=None, context_filter=None, limit=None):
 def summarize(records, provider):
     scored = [r for r in records if r["status"] != "golden_broken"]
     matched = [r for r in scored if r["status"] == "exact_match"]
+    value_matched = [r for r in scored if r["status"] == "value_match"]
     per_context = {}
     for r in scored:
         c = r["category"] or "(auto)"
@@ -197,7 +219,11 @@ def summarize(records, provider):
         "total": len(records),
         "scored": len(scored),
         "exact_match": len(matched),
+        "value_match": len(value_matched),
         "accuracy": round(len(matched) / len(scored), 4) if scored else None,
+        "accuracy_incl_value_match": (
+            round((len(matched) + len(value_matched)) / len(scored), 4) if scored else None
+        ),
         "golden_broken": sum(1 for r in records if r["status"] == "golden_broken"),
         "per_context": {c: {"match": m, "total": t} for c, (m, t) in sorted(per_context.items())},
     }
@@ -212,15 +238,20 @@ def write_reports(records, summary, provider):
 
     lines = [
         f"# Eval Report — {stamp} (provider: {provider or 'default'})", "",
-        f"**Accuracy: {summary['exact_match']}/{summary['scored']}"
+        f"**Accuracy (strict): {summary['exact_match']}/{summary['scored']}"
         f" = {summary['accuracy'] if summary['accuracy'] is not None else 'n/a'}**"
-        f" (golden_broken: {summary['golden_broken']} — excluded)", "",
+        f" | incl. value_match: {summary['accuracy_incl_value_match']}"
+        f" (value_match: {summary['value_match']}, golden_broken: {summary['golden_broken']} — excluded)", "",
         "## Per-context", "",
         "| Context | Match | Total |", "|---|---|---|",
     ]
     for c, s in summary["per_context"].items():
         lines.append(f"| {c} | {s['match']} | {s['total']} |")
-    fails = [r for r in records if r["status"] not in ("exact_match", "golden_broken")]
+    value_matches = [r for r in records if r["status"] == "value_match"]
+    if value_matches:
+        lines += ["", "## Value match (ค่าตรงแต่ชื่อคอลัมน์ต่าง — ตรวจ projection ด้วยตา)", ""]
+        lines += [f"- [{r['id']}] {r['question'][:70]}" for r in value_matches]
+    fails = [r for r in records if r["status"] not in ("exact_match", "value_match", "golden_broken")]
     if fails:
         lines += ["", "## Failures", ""]
         for r in fails:

@@ -113,7 +113,10 @@ def import_datasets(conn, latest: Path, domain: str, contract: dict, manifest: d
             inserted += len(rows)
 
         expected = manifest["row_counts"].get(name)
-        if expected is not None and inserted != expected:
+        if expected is None:
+            # Every table must pass the gate — a missing manifest entry is a failure, not a skip
+            raise SystemExit(f"ROLLBACK: manifest.row_counts missing entry for '{name}'")
+        if inserted != expected:
             raise SystemExit(f"ROLLBACK: row count mismatch {table}: {inserted} != {expected}")
 
         for key in dataset.get("keys", []):

@@ -45,16 +45,21 @@ class MatchaProvider(AIProvider):
         return bool(self.api_key and self.api_url)
 
     def _record_usage(self, result: Dict) -> None:
-        """Populate last_usage from an OpenAI-compatible response (usage may be absent)."""
+        """Populate last_usage from an OpenAI-compatible response (usage may be null/absent)."""
         usage = result.get("usage") or {}
         if not usage:
             global _no_usage_logged
             if not _no_usage_logged:
                 logger.debug("Matcha gateway returned no usage field — token counts will be 0")
                 _no_usage_logged = True
+        input_tokens = usage.get("prompt_tokens", 0) or 0
+        output_tokens = usage.get("completion_tokens", 0) or 0
+        if not (input_tokens or output_tokens) and usage.get("total_tokens"):
+            # Gateway sent only total_tokens — keep the total honest (booked as input)
+            input_tokens = usage["total_tokens"]
         self.last_usage = TokenUsage(
-            input_tokens=usage.get("prompt_tokens", 0) or 0,
-            output_tokens=usage.get("completion_tokens", 0) or 0,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
             model=self.model,
         )
 
@@ -106,7 +111,9 @@ class MatchaProvider(AIProvider):
         self._record_usage(result)
         return {
             "response": result,
-            "tokens_used": result.get('usage', {}).get('total_tokens', 0)
+            # From normalized usage — result["usage"] may be null (crashes .get)
+            # or lack total_tokens even when prompt/completion counts exist
+            "tokens_used": self.last_usage.total if self.last_usage else 0,
         }
 
     async def explain_result(self, question: str, sql: str, data: List[Dict], system_prompt: str, dimension_families: Optional[Dict[str, List[str]]] = None, hierarchy_info: Optional[list] = None, schema_metadata: Optional[list] = None) -> Dict[str, Any]:

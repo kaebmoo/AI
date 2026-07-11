@@ -11,6 +11,10 @@ jobs:
     env:
       SECRET_KEY: ci-test-secret-key-not-for-prod
       ENVIRONMENT: development
+      # app/celery.py requires a Redis URL at import time (test_phase_completion imports it);
+      # no Redis server is needed — the URL is never connected to during tests
+      REDIS_URL: redis://localhost:6379/0
+      ALLOWED_EMAIL_DOMAINS: '["nt.th"]'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
