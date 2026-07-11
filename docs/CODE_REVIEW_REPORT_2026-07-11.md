@@ -120,3 +120,23 @@
 - `plan/RESULT_F10.md`, `plan/RESULT_F9.md` — ผลวัด
 - `plan/IMPLEMENTATION_STATUS.md` — behavior changes ทั้งหมด
 - `docs/DEPLOYMENT_SECURITY.md`, `docs/API_REPORTS.md`, `docs/PORTAL_INTEGRATION.md`
+
+---
+
+## Review Fixes (รอบสอง — หลัง code review, commit `f70302e`)
+
+ผลตรวจจาก reviewer: **Fix-then-ship** — แก้ P1×5 + P2×4 ครบแล้ว
+
+| Finding | การแก้ | พิสูจน์ |
+|---------|--------|---------|
+| P1 CI clean checkout ล้ม | เพิ่ม `REDIS_URL` + `ALLOWED_EMAIL_DOMAINS` ใน ci.yml; `test_list_contexts` เลิกพึ่ง config.db local (self-contained) | รัน suite ใน git worktree สะอาด (ไม่มี .env/DB files) → 517 passed |
+| P1 `/admin` ไม่ถูก register | `handle_admin` + `CommandHandler("admin")` ใน bot.py | test ระดับ Application (fake telegram.ext) assert wiring |
+| P1 F9 flags เปิดไม่ได้จริง | เพิ่ม 5 keys ใน `get_feature_flags()` + `_get_float_config` validate budget | wiring test: ค่าจาก admin config → `query_hybrid` kwargs |
+| P1 eval ผ่านทั้งที่ column ผิด | `exact_match` ต้อง column names ตรง (case-insensitive); ค่าตรง-ชื่อต่าง = `value_match` แยก metric (`accuracy_incl_value_match`) | `test_eval_match.py`; **BASELINE ถูก regenerate ด้วยเกณฑ์ใหม่** |
+| P1 row-count gate bypass ได้ | dataset ที่ไม่มีใน `manifest.row_counts` = abort | test เพิ่ม; ตรวจ manifest จริงครอบ 15 datasets — re-import ไม่พัง |
+| P2 rate limit per-IP | เปลี่ยนเป็น DB count ต่อ user (10/hr) → 429 | integration test 429 |
+| P2 matcha tokens ไม่ robust | คืน `last_usage.total` หลัง normalize; รองรับ usage null / total-only | tests 2 กรณีใหม่ |
+| P2 RO ตัดสินจาก extension | ตัดสินจาก URL scheme (sqlite/bare path = sqlite) | — |
+| P2 cleanup ลบไฟล์กลางเขียน | temp อยู่ `exports/.tmp/` — orphan sweep กวาดเฉพาะ `exports/*.xlsx` | — |
+
+**ผลรวมหลังแก้: 534 tests ผ่าน (เพิ่ม 18)** — clean-worktree CI simulation ผ่าน
