@@ -21,7 +21,7 @@
 | 4 | F6 Reports/Export | `c74002f` | `/api/v1/reports` + xlsx + Celery + cleanup |
 | 4 | F8 Structured Output | `8489503` | generate_structured 3 providers + intent schema |
 | 5 | F9 Latency A-D | `546c15d` | template answers, parallel prep, intent state, escalation |
-| 5 | F10 DataFeed | `2150fd8` | import 255k แถว + docs + golden + baseline 92.9% |
+| 5 | F10 DataFeed | `2150fd8` | import 255k แถว + docs + golden + baseline (values 14/14, ดู round 2) |
 | 6 | F11 Dashboard Embed | `2150fd8` (AI) + NT-Report `c340d70` | portal fields + PB hook + viewer panel |
 
 ---
@@ -66,7 +66,7 @@
 
 ### F3-B — Eval Harness
 - `scripts/eval/run_eval.py` — execution-match (เทียบ multiset ของ value-tuples, float tolerance 1e-6, ปิด query cache ต่อข้อ, สถานะ `golden_broken` แยก), CLI `--provider/--context/--limit/--compare`, timeout 180s/ข้อ (เพิ่มหลังพบ hang จริง)
-- **Baseline (committed `eval_results/BASELINE.json`):** ทั้งชุด 19/51 = 37.3% exact-match (golden เก่า 12 ข้อ `golden_broken` — data drift, ไม่นับเป็นความผิดโมเดล; admin ควร review); subset ใหม่ `feed_revenue` = 13/14 = 92.9% — ช่องว่างนี้คือ baseline ที่ BGE-M3/prompt work จะถูกวัดเทียบ
+- **Baseline (รอบแรก — value-based เกณฑ์หลวม):** ทั้งชุด 19/51 = 37.3% (golden เก่า 12 ข้อ `golden_broken` — data drift; admin ควร review); subset ใหม่ `feed_revenue` = 13/14 = 92.9% — **ตัวเลขนี้ถูกแทนที่ด้วยเกณฑ์ strict หลัง review P1-4 (ดู round 2)**; committed `BASELINE.json` เป็นเวอร์ชัน strict แล้ว
 - **บทเรียนจากการรันจริง:** full run แรก hang ที่ข้อ 22 (LLM call ค้าง >30 นาที ไม่ตาย) → เพิ่ม `asyncio.wait_for` ต่อข้อ
 
 ### F7 — Token/Observability (`ee158b8`)
@@ -94,7 +94,7 @@
 
 ### F10 — DataFeed (`2150fd8`) — รันกับข้อมูลจริงแล้ว
 - 3 scripts domain-agnostic ใน `scripts/datafeed/`: import (4 integrity gates — ผิดชั้นเดียว rollback หมด), gen_docs (idempotent — รันซ้ำพิสูจน์แล้ว), gen_golden (deterministic periods)
-- ผลจริง: 255,404 แถว/3.4s ผ่านทุก gate; **baseline 13/14 = 92.9%**; YTD questions ใช้ `revenue_ytd` ทั้งคู่ (business rule เข้า knowledge จริง) — `plan/RESULT_F10.md`
+- ผลจริง: 255,404 แถว/3.4s ผ่านทุก gate; **ค่าถูก 14/14 (value-based); strict exact-match 0/14 เพราะ alias ไม่ตรง golden**; YTD questions ใช้ `revenue_ytd` ทั้งคู่ (business rule เข้า knowledge จริง) — `plan/RESULT_F10.md`
 - Reviewer: `import_datafeed.py::check_control_totals` คือการยืด reconcile gate ของ feed เข้ามาถึง DB ปลายทาง
 
 ### F11 — Dashboard Embed (AI `2150fd8` + NT-Report `c340d70`)

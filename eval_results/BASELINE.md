@@ -1,4 +1,4 @@
-# Eval Report — 20260711_2149 (provider: default)
+# Eval Report — BASELINE (provider: default)
 
 **Accuracy (strict): 3/51 = 0.0588** | incl. value_match: 0.3529 (value_match: 15, golden_broken: 12 — excluded)
 
@@ -50,18 +50,18 @@
 ```sql
 -- expected
 SELECT 'มากสุด' as category, department, total FROM (
-    SELECT department, SUM(revenue) as total 
-    FROM revenue_search 
-    GROUP BY department 
-    ORDER BY total DESC 
+    SELECT department, SUM(revenue) as total
+    FROM revenue_search
+    GROUP BY department
+    ORDER BY total DESC
     LIMIT 5
 )
 UNION ALL
 SELECT 'น้อยสุด' as category, department, total FROM (
-    SELECT department, SUM(revenue) as total 
-    FROM revenue_search 
-    GROUP BY department 
-    ORDER BY total ASC 
+    SELECT department, SUM(revenue) as total
+    FROM revenue_search
+    GROUP BY department
+    ORDER BY total ASC
     LIMIT 5
 )
 -- generated
@@ -107,20 +107,20 @@ FROM (
 ```sql
 -- expected
 SELECT 'มากสุด' as category, department, total FROM (
-    SELECT department, SUM(revenue) as total 
-    FROM revenue_search 
+    SELECT department, SUM(revenue) as total
+    FROM revenue_search
     WHERE SERVICE_GROUP = 'กลุ่มบริการพัฒนาสินทรัพย์'
-    GROUP BY department 
-    ORDER BY total DESC 
+    GROUP BY department
+    ORDER BY total DESC
     LIMIT 5
 )
 UNION ALL
 SELECT 'น้อยสุด' as category, department, total FROM (
-    SELECT department, SUM(revenue) as total 
-    FROM revenue_search 
+    SELECT department, SUM(revenue) as total
+    FROM revenue_search
     WHERE SERVICE_GROUP = 'กลุ่มบริการพัฒนาสินทรัพย์'
-    GROUP BY department 
-    ORDER BY total ASC 
+    GROUP BY department
+    ORDER BY total ASC
     LIMIT 5
 )
 -- generated
@@ -165,7 +165,7 @@ SELECT 'น้อยที่สุด 5 อันดับแรก' AS "ปร
 -- expected
 WITH ServiceSummary AS (
     -- ขั้นตอนที่ 1: สรุปรายได้แยกตามกลุ่มบริการในพื้นที่น่าน
-    SELECT 
+    SELECT
         SERVICE_GROUP,
         SUM(revenue) AS total_revenue
     FROM revenue_search
@@ -175,15 +175,15 @@ WITH ServiceSummary AS (
 ),
 RankedService AS (
     -- ขั้นตอนที่ 2: ใช้ NTILE เพื่อแบ่งกลุ่มบริการออกเป็น 3 ระดับเท่าๆ กันตามรายได้
-    SELECT 
+    SELECT
         SERVICE_GROUP,
         total_revenue,
         NTILE(3) OVER (ORDER BY total_revenue DESC) as rank_group
     FROM ServiceSummary
 )
 -- ขั้นตอนที่ 3: แสดงผลลัพธ์พร้อมระบุระดับ มาก ปานกลาง น้อย
-SELECT 
-    CASE 
+SELECT
+    CASE
         WHEN rank_group = 1 THEN 'มาก'
         WHEN rank_group = 2 THEN 'ปานกลาง'
         ELSE 'น้อย'
@@ -230,9 +230,9 @@ ORDER BY
 - detail: expected 71 rows, got 71
 ```sql
 -- expected
-SELECT 
-    owner_division AS สายงานผู้ให้บริการ, 
-    user_division AS สายงานผู้รับบริการ, 
+SELECT
+    owner_division AS สายงานผู้ให้บริการ,
+    user_division AS สายงานผู้รับบริการ,
     SUM(total_price_value) / 1000000.0 AS total_price_million_baht
 FROM v_transfer_price
 WHERE owner_division != user_division
@@ -259,10 +259,10 @@ ORDER BY
 - detail: expected 317 rows, got 317
 ```sql
 -- expected
-SELECT 
-  year, 
-  CAST(month AS INTEGER) AS month, 
-  SERVICE_GROUP, 
+SELECT
+  year,
+  CAST(month AS INTEGER) AS month,
+  SERVICE_GROUP,
   SUM(revenue) AS revenue_baht
 FROM revenue_search
 WHERE BUSINESS_GROUP != 'รายได้อื่น'
@@ -355,19 +355,19 @@ LIMIT 20;
 - detail: expected 14 rows, got 14
 ```sql
 -- expected
-SELECT 
+SELECT
     main_group,
-    ROUND(SUM(CASE WHEN UPPER(business_unit) LIKE '%HARD INFRASTRUCTURE%' 
+    ROUND(SUM(CASE WHEN UPPER(business_unit) LIKE '%HARD INFRASTRUCTURE%'
           THEN amount_value ELSE 0 END) / 1e6, 2) AS hard_infra_mb,
-    ROUND(SUM(CASE WHEN UPPER(business_unit) LIKE '%INTERNATIONAL%' 
+    ROUND(SUM(CASE WHEN UPPER(business_unit) LIKE '%INTERNATIONAL%'
           THEN amount_value ELSE 0 END) / 1e6, 2) AS intl_mb,
-    ROUND(SUM(CASE WHEN UPPER(business_unit) LIKE '%MOBILE%' 
+    ROUND(SUM(CASE WHEN UPPER(business_unit) LIKE '%MOBILE%'
           THEN amount_value ELSE 0 END) / 1e6, 2) AS mobile_mb,
-    ROUND(SUM(CASE WHEN UPPER(business_unit) LIKE '%FIXED LINE%' 
+    ROUND(SUM(CASE WHEN UPPER(business_unit) LIKE '%FIXED LINE%'
           THEN amount_value ELSE 0 END) / 1e6, 2) AS fixed_bb_mb,
-    ROUND(SUM(CASE WHEN UPPER(business_unit) LIKE '%DIGITAL%' 
+    ROUND(SUM(CASE WHEN UPPER(business_unit) LIKE '%DIGITAL%'
           THEN amount_value ELSE 0 END) / 1e6, 2) AS digital_mb,
-    ROUND(SUM(CASE WHEN UPPER(business_unit) LIKE '%ICT SOLUTION%' 
+    ROUND(SUM(CASE WHEN UPPER(business_unit) LIKE '%ICT SOLUTION%'
           THEN amount_value ELSE 0 END) / 1e6, 2) AS ict_sol_mb,
     ROUND(SUM(amount_value) / 1e6, 2) AS total_mb
 FROM v_pl_costtype_nt_mth_clean
@@ -441,8 +441,8 @@ ORDER BY
 - detail: expected 8 rows, got 14
 ```sql
 -- expected
-SELECT 
-    CASE 
+SELECT
+    CASE
         WHEN UPPER(business_unit) LIKE '%HARD INFRASTRUCTURE%' THEN 'Hard Infrastructure'
         WHEN UPPER(business_unit) LIKE '%INTERNATIONAL%'       THEN 'International'
         WHEN UPPER(business_unit) LIKE '%MOBILE%'              THEN 'Mobile'
@@ -542,8 +542,8 @@ ORDER BY
 - detail: expected 8 rows, got 1
 ```sql
 -- expected
-SELECT 
-    CASE 
+SELECT
+    CASE
         WHEN UPPER(business_unit) LIKE '%HARD INFRASTRUCTURE%' THEN 'Hard Infrastructure'
         WHEN UPPER(business_unit) LIKE '%INTERNATIONAL%'       THEN 'International'
         WHEN UPPER(business_unit) LIKE '%MOBILE%'              THEN 'Mobile'
@@ -558,7 +558,7 @@ SELECT
     -- รายได้
     ROUND(SUM(CASE WHEN main_group LIKE '01.%' AND report_year = 2024 THEN amount_value ELSE 0 END) / 1e6, 2) AS revenue_2567,
     ROUND(SUM(CASE WHEN main_group LIKE '01.%' AND report_year = 2025 THEN amount_value ELSE 0 END) / 1e6, 2) AS revenue_2568,
-    ROUND((SUM(CASE WHEN main_group LIKE '01.%' AND report_year = 2025 THEN amount_value ELSE 0 END) 
+    ROUND((SUM(CASE WHEN main_group LIKE '01.%' AND report_year = 2025 THEN amount_value ELSE 0 END)
          - SUM(CASE WHEN main_group LIKE '01.%' AND report_year = 2024 THEN amount_value ELSE 0 END)) / 1e6, 2) AS revenue_diff,
     -- ค่าใช้จ่ายรวม (02+04+06)
     ROUND((SUM(CASE WHEN main_group LIKE '02.%' AND report_year = 2024 THEN amount_value ELSE 0 END)
@@ -608,7 +608,7 @@ ORDER BY
 - detail: expected 15 rows, got 10
 ```sql
 -- expected
-SELECT 
+SELECT
     product_name,
     ROUND(SUM(CASE WHEN main_group LIKE '01.%' THEN amount_value ELSE 0 END) / 1e6, 2) AS revenue_mb,
     ROUND(SUM(CASE WHEN main_group LIKE '02.%' THEN amount_value ELSE 0 END) / 1e6, 2) AS cost_of_service_mb,
@@ -641,7 +641,7 @@ LIMIT 10;
 - detail: Max retries exceeded
 ```sql
 -- expected
-SELECT 
+SELECT
     product_name,
     ROUND(SUM(CASE WHEN main_group LIKE '01.%' THEN amount_value ELSE 0 END) / 1e6, 2) AS revenue_mb,
     ROUND(SUM(CASE WHEN main_group LIKE '02.%' THEN amount_value ELSE 0 END) / 1e6, 2) AS cost_of_service_mb,
@@ -679,7 +679,7 @@ LIMIT 10;
 - detail: expected 10 rows, got 1
 ```sql
 -- expected
-SELECT 
+SELECT
     service_group,
     ROUND(SUM(CASE WHEN main_group LIKE '01.%' THEN amount_value ELSE 0 END) / 1e6, 2) AS revenue_mb,
     ROUND(SUM(CASE WHEN main_group LIKE '03.%' THEN amount_value ELSE 0 END) / 1e6, 2) AS gross_profit_mb,
@@ -710,13 +710,13 @@ LIMIT 1;
 - detail: expected 10 rows, got 2
 ```sql
 -- expected
-SELECT 
-    main_group, 
+SELECT
+    main_group,
     ROUND(SUM(amount_value) / 1000000.0, 2) AS value_million_baht
 FROM v_pl_costtype_nt_mth_clean
-WHERE 
-    report_year = 2025 
-    AND main_group != '' 
+WHERE
+    report_year = 2025
+    AND main_group != ''
     AND UPPER(product_name) LIKE '%NT HOME PHONE%'
 GROUP BY main_group
 ORDER BY main_group;
@@ -1060,8 +1060,8 @@ ORDER BY
 - detail: expected 4 rows, got 6
 ```sql
 -- expected
-SELECT 
-    account_group_name AS "หมวดบัญชี", 
+SELECT
+    account_group_name AS "หมวดบัญชี",
     SUM(expense) AS "ยอดค่าใช้จ่าย_บาท"
 FROM v_expense_mart
 WHERE section_abbr LIKE '%ตบชง.%'
@@ -1405,7 +1405,7 @@ WITH normalized_data AS (
   SELECT
     report_year,
     CAST(report_month AS INTEGER) AS report_month,
-    CASE 
+    CASE
       WHEN UPPER(business_unit) LIKE '%HARD INFRASTRUCTURE%' THEN 'Hard Infrastructure'
       WHEN UPPER(business_unit) LIKE '%INTERNATIONAL%' THEN 'International'
       WHEN UPPER(business_unit) LIKE '%MOBILE%' THEN 'Mobile'

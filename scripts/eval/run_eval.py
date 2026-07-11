@@ -264,7 +264,9 @@ def write_reports(records, summary, provider):
     if broken:
         lines += ["", "## Golden broken (admin action needed)", ""]
         lines += [f"- [{r['id']}] {r['question']} — {r['detail']}" for r in broken]
-    (base.with_suffix(".md")).write_text("\n".join(lines))
+    # Strip trailing whitespace per physical line (embedded SQL carries its own)
+    md = "\n".join(ln.rstrip() for ln in "\n".join(lines).split("\n"))
+    (base.with_suffix(".md")).write_text(md)
     print(f"\nWrote {base}.json / .md")
     return base.with_suffix(".json")
 

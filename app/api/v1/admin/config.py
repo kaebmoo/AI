@@ -121,8 +121,11 @@ def toggle_feature_flag(
     }
 
 
-# Numeric tuning values settable from the UI — allowlisted, not arbitrary config writes
-_NUMERIC_CONFIG_KEYS = {"query_latency_budget_s"}
+# Numeric tuning values settable from the UI — allowlist maps key → (min, max).
+# The range is the contract; keep it in sync with the Admin UI input bounds.
+_NUMERIC_CONFIG_RANGES = {
+    "query_latency_budget_s": (5.0, 300.0),
+}
 
 
 @router.put("/config/settings/{key}", response_model=dict)
@@ -132,11 +135,13 @@ def set_numeric_config(
     current_user: User = Depends(deps.require_admin),
     _db: Session = Depends(deps.get_config_db),
 ):
-    """Set an allowlisted numeric config value. Admin only."""
-    if key not in _NUMERIC_CONFIG_KEYS:
+    """Set an allowlisted numeric config value within its permitted range. Admin only."""
+    bounds = _NUMERIC_CONFIG_RANGES.get(key)
+    if bounds is None:
         raise HTTPException(status_code=400, detail=f"Key '{key}' is not settable via this endpoint")
-    if value <= 0:
-        raise HTTPException(status_code=400, detail="Value must be positive")
+    lo, hi = bounds
+    if not (lo <= value <= hi):
+        raise HTTPException(status_code=400, detail=f"Value for '{key}' must be between {lo} and {hi}")
 
     config_service = AdminConfigService()
     success = config_service.set_config(key, str(value), updated_by=str(current_user.email))

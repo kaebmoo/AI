@@ -255,7 +255,7 @@ ConfigSessionLocal = sessionmaker(bind=config_engine)
 
 F3-A CI, F1 Correctness, F2 Hygiene/Leaks, F4 SQL Hardening, F5 Telegram, F3-B Eval Harness,
 F7 Token/Observability, F6 Reports/Export, F8 Structured Output, F9 A-D (flags OFF),
-F10 DataFeed pilot (baseline 92.9%), F11 Dashboard Embed (AI + NT-Report)
+F10 DataFeed pilot (values correct 14/14 value-based; strict 0/14 alias-mismatch), F11 Dashboard Embed (AI + NT-Report)
 
 รายละเอียด: `docs/CODE_REVIEW_REPORT_2026-07-11.md` | ค้าง/decision: `plan/FIX_NOTES.md`
 PENDING_BGE_M3: มี baseline แล้ว — พร้อมให้เจ้าของตัดสินใจ (ห้าม execute จนกว่าอนุมัติ)

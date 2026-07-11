@@ -44,7 +44,7 @@
 
 ## จาก F10 (2026-07-11)
 
-- Import จริงผ่านครบ 4 gates — ดู `plan/RESULT_F10.md` (accuracy 92.9%, YTD rule พิสูจน์แล้ว)
+- Import จริงผ่านครบ 4 gates — ดู `plan/RESULT_F10.md` (ค่าถูก 14/14 value-based; strict exact-match 0/14 เพราะ alias ไม่ตรง golden; YTD rule พิสูจน์แล้ว)
 - ข้อ eval ที่ตก 1 ข้อ: โมเดลใส่คอลัมน์ `bu` เกิน → column-count mismatch (ค่าน่าจะถูก) — พิจารณาผ่อนเกณฑ์เทียบ (ignore constant label columns) ในรอบปรับปรุง eval
 - `vanna_documentation` มีจริง + `mark_brain_dirty()` มีจริง — ใช้เส้นทาง DB-driven docs ตามแผน (ไม่มีของค้าง migrate)
 - Acceptance "ถามผ่าน UI 5 คำถาม" ค้าง manual (ต้องเปิด frontend)
