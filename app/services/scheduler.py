@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 # Job intervals (seconds)
 AUTO_ANALYZE_INTERVAL = 6 * 3600   # 6 hours
 CONFIG_GC_INTERVAL = 24 * 3600     # 24 hours
+EXPORT_CLEANUP_INTERVAL = 24 * 3600  # daily
 
 
 class BackgroundScheduler:
@@ -41,6 +42,9 @@ class BackgroundScheduler:
         ))
         self._tasks.append(asyncio.create_task(
             self._run_periodic("config_gc", CONFIG_GC_INTERVAL, self._job_config_gc)
+        ))
+        self._tasks.append(asyncio.create_task(
+            self._run_periodic("export_cleanup", EXPORT_CLEANUP_INTERVAL, self._job_export_cleanup)
         ))
 
         logger.info("Background scheduler started with %d jobs", len(self._tasks))
@@ -122,6 +126,17 @@ class BackgroundScheduler:
                     logger.info("[AutoApply] Applied %s: %s", fix.fix_type, fix.params)
             except Exception as e:
                 logger.warning("[AutoApply] Failed to apply %s: %s", fix.fix_type, e)
+
+    async def _job_export_cleanup(self):
+        """Delete expired report exports (records + files + orphan files)."""
+        db = self._db_factory()
+        try:
+            from app.services.report_service import cleanup_expired
+            removed = cleanup_expired(db)
+            if removed:
+                logger.info("[ExportCleanup] Removed %s expired exports/files", removed)
+        finally:
+            db.close()
 
     async def _job_config_gc(self):
         """Scan for unused/conflicting config entries."""

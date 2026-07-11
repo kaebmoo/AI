@@ -152,6 +152,7 @@ from app.api.v1.schema_analyzer import router as analyzer_router
 from app.api.v1.conversations import router as conversations_router
 from app.api.v1.admin_agent import router as admin_agent_router
 from app.api.v1.query import router as query_router
+from app.api.v1.reports import router as reports_router
 
 app.include_router(auth_router, prefix=f"{settings.API_V1_STR}/auth", tags=["auth"])
 app.include_router(chat_router, prefix=f"{settings.API_V1_STR}/chat", tags=["chat"])
@@ -162,3 +163,4 @@ app.include_router(analyzer_router, prefix=f"{settings.API_V1_STR}/admin/analyze
 app.include_router(conversations_router, prefix=f"{settings.API_V1_STR}/conversations", tags=["conversations"])
 app.include_router(admin_agent_router, prefix=f"{settings.API_V1_STR}/admin", tags=["admin-agent"])
 app.include_router(query_router, prefix=f"{settings.API_V1_STR}/query", tags=["query"])
+app.include_router(reports_router, prefix=f"{settings.API_V1_STR}/reports", tags=["reports"])

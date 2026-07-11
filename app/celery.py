@@ -9,7 +9,7 @@ celery_app = Celery(
 )
 
 celery_app.conf.task_routes = {
-    # "app.workers.report_worker.*": "reports-queue",
+    "app.workers.report_worker.*": "reports-queue",
     "app.workers.email_worker.*": "email-queue",
 }
 
@@ -20,7 +20,7 @@ celery_app.conf.update(
     timezone="Asia/Bangkok",
     enable_utc=True,
     # Ensure imports happen at startup
-    include=["app.workers.email_worker"],
+    include=["app.workers.email_worker", "app.workers.report_worker"],
     broker_connection_retry_on_startup=True
 )
 

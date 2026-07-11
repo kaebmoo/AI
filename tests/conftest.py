@@ -24,6 +24,7 @@ from app.models.session import UserSession
 from app.models.otp import OTPRequest
 from app.models.chat import ChatHistory
 from app.models.feedback_models import UserFeedback, GoldenExample
+from app.models.report_export import ReportExport  # noqa: F401 — registers table for create_all
 from app.models.conversation import Conversation  # Required for FK resolution
 from app.models.schema_models import SchemaMetadata, SchemaSemanticMapping, SchemaBusinessRule  # Config models
 from app.config import settings

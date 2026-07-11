@@ -21,7 +21,7 @@
 | User Frontend (Expo) | 75% | login/verify, main chat app, conversation service, chart/table components |
 | Telegram Interface | 85% | bot, dispatcher, handlers, chart renderer, webhook/polling support |
 | Testing | 65% | pytest fixtures, 25 unit modules, 9 integration modules |
-| Reports / Export | 10% | ยังไม่เห็น report service/endpoints จริงใน backend |
+| Reports / Export | 80% | F6 (2026-07-11): `/api/v1/reports` CRUD+download, xlsx re-run จาก generated_sql, Celery/inline, cleanup job — เหลือปุ่มฝั่ง frontend |
 | Deployment / Hardening | 55% | docker-compose.prod.yml มี, env examples มี, dev CORS hardening ดีขึ้น แต่ CI/CD และ infra hardening ยังไม่ครบ |
 
 **สรุป:** โปรเจกต์อยู่ในช่วง late-build / hardening มากกว่าช่วง initial implementation
@@ -247,12 +247,13 @@ Phase นี้อยู่ในสภาพใช้งานจริงแ�
 ### ยังไม่เห็น implementation หลัก
 
 - ไม่พบ `report_service.py`
-- ไม่พบ `app/api/v1/reports.py`
-- ไม่พบ report worker แยกจริง
+### สถานะ (อัปเดต 2026-07-11 — F6)
 
-### สถานะ
-
-ยังเป็นช่องว่างหลักของระบบ
+- `app/api/v1/reports.py` — POST (สร้าง export, rate limit 10/hr), GET status/list, GET download (ownership + expiry)
+- `app/services/report_service.py` — รัน `generated_sql` ใหม่ผ่าน read-only connection, cap 100k แถว (config), xlsx 2 sheets (Data + Info), temp-then-rename
+- `app/workers/report_worker.py` — Celery task (fallback inline เมื่อไม่มี Redis)
+- Cleanup job รายวันใน BackgroundScheduler (retention 7 วัน, ลบ orphan files)
+- Contract: `docs/API_REPORTS.md` — เหลืองาน frontend (ปุ่ม export + polling)
 
 ## Phase 7: Testing & Quality
 
