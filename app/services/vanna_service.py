@@ -16,8 +16,12 @@ except Exception:
         pass
     _VANNA_AVAILABLE = False
 
+import logging
+
 from app.services.schema_service import SchemaService
 from sqlalchemy import text
+
+logger = logging.getLogger(__name__)
 
 class VannaService(ChromaDB_VectorStore, VannaBase):
     def __init__(self, config: Dict[str, Any] = None):
@@ -55,7 +59,7 @@ class VannaService(ChromaDB_VectorStore, VannaBase):
         Synchronize the Vanna 'Brain' (Vector DB) with the current Database state.
         This wipes and re-trains to ensure consistency.
         """
-        print("🧠 Starting Vanna Brain Sync...")
+        logger.info("Starting Vanna Brain Sync...")
 
         # Clear existing collections to avoid duplicates
         try:
@@ -66,17 +70,17 @@ class VannaService(ChromaDB_VectorStore, VannaBase):
                 except Exception:
                     # Collection doesn't exist yet
                     pass
-            print("   ✅ Cleared all existing vectors")
+            logger.info("Cleared all existing vectors")
 
             # Re-initialize collections after deletion
             # This is crucial because the self.*_collection attributes still point to the deleted objects
             self.ddl_collection = self.chroma_client.get_or_create_collection(name="ddl")
             self.documentation_collection = self.chroma_client.get_or_create_collection(name="documentation")
             self.sql_collection = self.chroma_client.get_or_create_collection(name="sql")
-            print("   ✅ Re-initialized collections")
+            logger.info("Re-initialized collections")
 
         except Exception as e:
-            print(f"   ⚠️  Could not clear collections: {e}")
+            logger.warning(f"Could not clear collections: {e}")
 
         # Suppress verbose per-item "Adding documentation...." from Vanna base
         # by redirecting stdout during training, then printing a clean summary
@@ -100,11 +104,11 @@ class VannaService(ChromaDB_VectorStore, VannaBase):
         # Print non-"Adding" lines (our own summary prints) + a count summary
         for line in lines:
             if 'Adding' not in line and line.strip():
-                print(line)
+                logger.info(line)
         if adding_count > 0:
-            print(f"   - Trained {adding_count} total vector entries")
+            logger.info(f"Trained {adding_count} total vector entries")
 
-        print("✅ Vanna Brain Sync Complete.")
+        logger.info("Vanna Brain Sync Complete.")
 
     def _sync_ddl(self, service: SchemaService):
         """Train DDL from Schema Metadata"""
@@ -124,12 +128,12 @@ class VannaService(ChromaDB_VectorStore, VannaBase):
                     if row:
                         ddl = row[0]
             except Exception as e:
-                print(f"Error getting DDL for {table}: {e}")
+                logger.warning(f"Error getting DDL for {table}: {e}")
             
             if ddl:
                 # Add metadata context to DDL training
                 self.train(ddl=ddl)
-                print(f"   - Trained DDL: {table}")
+                logger.info(f"Trained DDL: {table}")
 
     def _sync_documentation(self, service: SchemaService):
         """Train Documentation — DB-driven, no static files."""
@@ -159,15 +163,15 @@ class VannaService(ChromaDB_VectorStore, VannaBase):
                 )).mappings().all()
                 for doc in docs:
                     self.train(documentation=f"## {doc['title']}\n{doc['content']}")
-            print(f"   - Trained {len(docs)} documentation entries from DB")
+            logger.info(f"Trained {len(docs)} documentation entries from DB")
         except Exception as e:
-            print(f"   ! Could not load vanna_documentation: {e}")
+            logger.warning(f"Could not load vanna_documentation: {e}")
 
     def _sync_context_summaries(self, service: SchemaService):
         """Auto-generate and train one documentation chunk per active context."""
         contexts = service.get_all_contexts()
         if not contexts:
-            print("   - No active contexts found for summary generation")
+            logger.info("No active contexts found for summary generation")
             return
 
         trained = 0
@@ -205,9 +209,9 @@ class VannaService(ChromaDB_VectorStore, VannaBase):
                 self.train(documentation=summary)
                 trained += 1
             except Exception as e:
-                print(f"   ! Could not generate summary for context '{ctx.get('name')}': {e}")
+                logger.warning("Could not generate summary for context '%s': %s", ctx.get('name'), e)
 
-        print(f"   - Generated {trained} context summaries")
+        logger.info(f"Generated {trained} context summaries")
 
     def _sync_golden_examples(self, service: SchemaService):
         """Train SQL from Golden Examples"""
@@ -216,7 +220,7 @@ class VannaService(ChromaDB_VectorStore, VannaBase):
             for ex in examples:
                 self.train(question=ex['question_pattern'], sql=ex['expected_sql'])
                 
-        print(f"   - Trained {len(examples)} Golden Examples")
+        logger.info(f"Trained {len(examples)} Golden Examples")
 
     def _get_chroma_results(self, collection, question: str, n_results: int = 10, threshold: float = None) -> List[str]:
         """Helper to query ChromaDB with distance filtering"""
@@ -242,7 +246,7 @@ class VannaService(ChromaDB_VectorStore, VannaBase):
                  
             return filtered_docs
         except Exception as e:
-            print(f"Error querying Chroma: {e}")
+            logger.warning(f"Error querying Chroma: {e}")
             return []
 
     def get_rag_context(self, question: str, distance_threshold: float = None) -> Dict[str, List[str]]:
@@ -254,8 +258,6 @@ class VannaService(ChromaDB_VectorStore, VannaBase):
             distance_threshold = self.distance_threshold
 
         import time
-        import logging
-        logger = logging.getLogger(__name__)
 
         start_total = time.perf_counter()
         

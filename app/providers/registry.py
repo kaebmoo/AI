@@ -21,7 +21,6 @@ class ProviderRegistry:
 
     def __init__(self):
         self.providers: Dict[str, type] = {}  # name -> class
-        self._instances: Dict[str, AIProvider] = {}  # name -> instance (cache)
 
     def discover(self):
         """Scan app/providers/ directory for classes that inherit AIProvider"""
@@ -64,6 +63,9 @@ class ProviderRegistry:
         Create a provider instance with the given configuration.
         Uses __init__ introspection to pass only valid kwargs.
         Returns None if provider not found or creation fails.
+
+        Note: a NEW instance is created on every call (no caching) — callers
+        may safely mutate instance state such as `.model` (tier logic does).
         """
         cls = self.providers.get(name)
         if not cls:

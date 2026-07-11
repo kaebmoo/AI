@@ -12,6 +12,7 @@ from typing import List
 
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
+from app.core.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,7 @@ class ConfigGC:
             from app.models.schema_models import SchemaSemanticMapping
             from app.models.chat import ChatHistory
 
-            since = datetime.utcnow() - timedelta(days=days)
+            since = utcnow() - timedelta(days=days)
 
             mappings = self.config_db.query(SchemaSemanticMapping).filter(
                 SchemaSemanticMapping.is_active == True
@@ -128,7 +129,7 @@ class ConfigGC:
         try:
             from app.models.feedback_models import GoldenExample
 
-            cutoff = datetime.utcnow() - timedelta(days=days)
+            cutoff = utcnow() - timedelta(days=days)
 
             old_unused = self.config_db.query(GoldenExample).filter(
                 GoldenExample.is_active == True,

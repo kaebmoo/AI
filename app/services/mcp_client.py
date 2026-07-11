@@ -175,7 +175,7 @@ class MCPClientService:
                      if any(t.name == tool_name for t in tools.tools):
                          target_server = name
                          break
-                 except:
+                 except Exception:  # not bare — must not swallow asyncio.CancelledError
                      continue
         
         if not target_server:

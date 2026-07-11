@@ -191,9 +191,10 @@ class TelegramDispatcher:
         """Show available data contexts as inline buttons."""
         try:
             from app.services.schema_service import SchemaService
-            from app.db.session import config_engine
+            from app.db.session import business_engine, config_engine
 
-            from app.db.session import business_engine
+            # ponytail: per-call SchemaService is fine here — /context is a rare
+            # manual command, not the query hot path (F2.5 targets the retry loop)
             schema_service = SchemaService(db_engine=config_engine, business_engine=business_engine)
             contexts = schema_service.get_all_contexts()
         except Exception as e:
@@ -252,22 +253,27 @@ class TelegramDispatcher:
             selected_context = context.user_data.get("context")
             shared_mcp_client = context.bot_data.get("mcp_client")
 
-            if shared_mcp_client:
-                engine = QueryEngine(mcp_client=shared_mcp_client, db_session=db)
-                result = await engine.query(
-                    question=text,
-                    context=selected_context,
-                    history=context.user_data.get("history", []),
-                )
-            else:
-                mcp_client = MCPClientService()
-                async with mcp_client.connected():
-                    engine = QueryEngine(mcp_client=mcp_client, db_session=db)
+            engine = None
+            try:
+                if shared_mcp_client:
+                    engine = QueryEngine(mcp_client=shared_mcp_client, db_session=db)
                     result = await engine.query(
                         question=text,
                         context=selected_context,
                         history=context.user_data.get("history", []),
                     )
+                else:
+                    mcp_client = MCPClientService()
+                    async with mcp_client.connected():
+                        engine = QueryEngine(mcp_client=mcp_client, db_session=db)
+                        result = await engine.query(
+                            question=text,
+                            context=selected_context,
+                            history=context.user_data.get("history", []),
+                        )
+            finally:
+                if engine is not None:
+                    engine.close()  # release self-created config-DB session
 
             qr = result.query_result
 

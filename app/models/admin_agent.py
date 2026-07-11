@@ -7,6 +7,7 @@ SQLAlchemy models for admin agent conversation storage.
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Index
 from app.db.base_class import Base
+from app.core.time_utils import utcnow
 
 
 class AdminAgentConversation(Base):
@@ -15,8 +16,8 @@ class AdminAgentConversation(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, nullable=True)  # References users.id (no FK constraint — may be in different DB)
     title = Column(String(200), default="")
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
 
 class AdminAgentMessage(Base):
@@ -29,7 +30,7 @@ class AdminAgentMessage(Base):
     tool_name = Column(String(100), nullable=True)
     tool_args = Column(Text, nullable=True)  # JSON string
     tool_result = Column(Text, nullable=True)  # JSON string
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     __table_args__ = (
         Index("ix_admin_agent_messages_conversation", "conversation_id"),

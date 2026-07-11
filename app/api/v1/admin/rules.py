@@ -19,6 +19,7 @@ from app.services.query_engine import clear_query_cache
 from app.services.schema_service import SchemaService
 
 from ._shared import mark_brain_dirty
+from app.core.time_utils import utcnow
 
 router = APIRouter()
 
@@ -99,7 +100,7 @@ def update_business_rule(
     for key, value in update_data.items():
         setattr(rule, key, value)
 
-    rule.updated_at = datetime.utcnow()
+    rule.updated_at = utcnow()
     db.commit()
     db.refresh(rule)
 
@@ -143,7 +144,7 @@ def toggle_business_rule(
         raise HTTPException(status_code=404, detail="Business rule not found")
 
     rule.is_active = not rule.is_active
-    rule.updated_at = datetime.utcnow()
+    rule.updated_at = utcnow()
     db.commit()
     db.refresh(rule)
 

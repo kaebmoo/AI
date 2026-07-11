@@ -4,6 +4,7 @@ from datetime import datetime
 import uuid
 
 from app.db.base_class import Base
+from app.core.time_utils import utcnow
 
 
 def generate_conversation_id():
@@ -20,8 +21,8 @@ class Conversation(Base):
     id = Column(String(36), primary_key=True, default=generate_conversation_id)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     title = Column(String(255), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
     is_archived = Column(Boolean, default=False)
     message_count = Column(Integer, default=0)
 

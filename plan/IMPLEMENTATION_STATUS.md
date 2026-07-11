@@ -270,6 +270,11 @@ Phase นี้อยู่ในสภาพใช้งานจริงแ�
 - **คำเตือน truncate 1,000 แถวถึง user ใน hybrid mode แล้ว** — อ่าน flag `truncated` จาก payload ของ execute_query (F1.2)
 - **`ChatRequest.provider` default = None** — ไม่ระบุ provider = ใช้ `default_ai_provider` จาก admin config (F1.3 เดิม hardcode "gemini")
 - **System prompt rebuild รายวัน** — cache key มีวันที่ปัจจุบัน กันวันที่ใน prompt stale (F1.4)
+- **Config DB session ไม่รั่วแล้ว** — `deps.get_admin_config_service` + `QueryEngine.close()` (F2.1)
+- **SSE cancel query task เมื่อ client หลุด** + drain event ค้าง (F2.4)
+- **Dedup ปล่อย key เมื่อ request error** — retry ทันทีไม่โดนบล็อก 5 วิ (F2.3)
+- **`datetime.utcnow()` → `app.core.time_utils.utcnow()`** ทั้ง repo (F2.7)
+- **mcp mode + Claude ใช้งานได้** — message ordering ถูกต้อง, ไม่ส่ง temperature+top_p พร้อมกัน (F2.6)
 
 ### ยังขาด
 

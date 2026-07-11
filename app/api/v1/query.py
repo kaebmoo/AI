@@ -57,6 +57,7 @@ async def simple_query(
     http_request: Request,
     current_user: User = Depends(deps.get_current_user),
     db: Session = Depends(deps.get_db),
+    admin_config = Depends(deps.get_admin_config_service),
 ):
     """Execute a simple query — no conversation, no chart. Returns answer + optional SQL/data."""
     start_time = time.time()
@@ -67,7 +68,7 @@ async def simple_query(
         # Get MCP client from app state (same as chat endpoint)
         mcp_client = getattr(http_request.app.state, "mcp_client", None)
         if mcp_client:
-            engine = QueryEngine(mcp_client=mcp_client, db_session=db)
+            engine = QueryEngine(mcp_client=mcp_client, db_session=db, admin_config=admin_config)
             result = await engine.query(
                 question=request_body.question,
                 context=request_body.context,
@@ -77,7 +78,7 @@ async def simple_query(
             from app.services.mcp_client import MCPClientService
             mcp_client = MCPClientService()
             async with mcp_client.connected():
-                engine = QueryEngine(mcp_client=mcp_client, db_session=db)
+                engine = QueryEngine(mcp_client=mcp_client, db_session=db, admin_config=admin_config)
                 result = await engine.query(
                     question=request_body.question,
                     context=request_body.context,

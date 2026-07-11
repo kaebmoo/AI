@@ -101,12 +101,15 @@ Error: {last_error.get('error', '')}
 **คำอธิบาย:** <คำอธิบายภาษาไทย>"""
 
 
-def resolve_context_info(context_name: str):
-    from app.db.session import business_engine as _biz_eng
-    from app.db.session import config_engine
-    from app.services.schema_service import SchemaService
+def resolve_context_info(context_name: str, schema_service=None):
+    if schema_service is not None:
+        temp_schema = schema_service
+    else:
+        from app.db.session import business_engine as _biz_eng
+        from app.db.session import config_engine
+        from app.services.schema_service import SchemaService
 
-    temp_schema = SchemaService(db_engine=config_engine, business_engine=_biz_eng)
+        temp_schema = SchemaService(db_engine=config_engine, business_engine=_biz_eng)
     context_info = temp_schema.get_context_info(context_name)
     if not context_info:
         return temp_schema, None, None
@@ -665,6 +668,7 @@ async def query_hybrid(
     value_lookup_enabled: bool = False,
     value_verification_enabled: bool = True,
     cheap_model: Optional[str] = None,
+    schema_service=None,
     **kwargs,
 ) -> QueryResult:
     del value_lookup_enabled, kwargs
@@ -701,38 +705,39 @@ async def query_hybrid(
 
     logger.info("Hybrid Mode: MCP connected to %s", list(service.mcp_client.servers.keys()))
 
+    # Context does not change across retries — resolve once, outside the loop
+    try:
+        temp_schema, context_table, context_thai = resolve_context_info(context_name, schema_service=schema_service)
+        if context_table and context_thai:
+            logger.info("Hybrid Mode: Using context '%s' -> table '%s', display '%s'", context_name, context_table, context_thai)
+        else:
+            logger.error("Hybrid Mode: Context '%s' not found in schema_contexts table", context_name)
+            return QueryResult(
+                question=question,
+                sql_query="",
+                data=[],
+                explanation=f"ไม่พบการตั้งค่า context '{context_name}' ในระบบ กรุณาตั้งค่าผ่าน Admin UI",
+                tokens_used=0,
+                provider=service.provider_name,
+                error=f"Context '{context_name}' not configured",
+            )
+    except RECOVERABLE_FLOW_EXCEPTIONS as exc:
+        logger.error("Failed to get context info: %s", exc)
+        return QueryResult(
+            question=question,
+            sql_query="",
+            data=[],
+            explanation=f"เกิดข้อผิดพลาดในการโหลดข้อมูล context: {exc}",
+            tokens_used=0,
+            provider=service.provider_name,
+            error=str(exc),
+        )
+
     for attempt in range(max_retries + 1):
         # Don't carry a truncation warning from a failed attempt into the next one
         service.set_pending_limit_warning("")
         if on_status:
             on_status(RetryStatus(attempt, max_retries, "generating", f"Generating SQL (attempt {attempt + 1})"))
-
-        try:
-            temp_schema, context_table, context_thai = resolve_context_info(context_name)
-            if context_table and context_thai:
-                logger.info("Hybrid Mode: Using context '%s' -> table '%s', display '%s'", context_name, context_table, context_thai)
-            else:
-                logger.error("Hybrid Mode: Context '%s' not found in schema_contexts table", context_name)
-                return QueryResult(
-                    question=question,
-                    sql_query="",
-                    data=[],
-                    explanation=f"ไม่พบการตั้งค่า context '{context_name}' ในระบบ กรุณาตั้งค่าผ่าน Admin UI",
-                    tokens_used=0,
-                    provider=service.provider_name,
-                    error=f"Context '{context_name}' not configured",
-                )
-        except RECOVERABLE_FLOW_EXCEPTIONS as exc:
-            logger.error("Failed to get context info: %s", exc)
-            return QueryResult(
-                question=question,
-                sql_query="",
-                data=[],
-                explanation=f"เกิดข้อผิดพลาดในการโหลดข้อมูล context: {exc}",
-                tokens_used=0,
-                provider=service.provider_name,
-                error=str(exc),
-            )
 
         if history:
             logger.info("Hybrid Mode: Using native conversation history (%s messages)", len(history))

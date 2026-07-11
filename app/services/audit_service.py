@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+from app.core.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ class AuditService:
                 "new_value": json.dumps(new_value, ensure_ascii=False, default=str) if new_value else None,
                 "source": source,
                 "user_id": user_id,
-                "created_at": datetime.utcnow().isoformat(),
+                "created_at": utcnow().isoformat(),
             })
             self.db.commit()
         except Exception as e:

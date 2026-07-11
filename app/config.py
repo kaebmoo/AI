@@ -1,7 +1,7 @@
 import secrets
 from typing import List, Optional, Union, Any
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import AnyHttpUrl, PostgresDsn, field_validator, validator
+from pydantic import field_validator
 
 class Settings(BaseSettings):
     """
@@ -28,18 +28,6 @@ class Settings(BaseSettings):
     # If not set, will be auto-detected from DATABASE_URL
     DB_ENGINE: Optional[str] = None
     
-    @validator("DATABASE_URL", pre=True)
-    def assemble_db_connection(cls, v: Optional[str], values: dict[str, Any]) -> Any:
-        if isinstance(v, str):
-            return v
-        return PostgresDsn.build(
-            scheme="postgresql",
-            user=values.get("POSTGRES_USER"),
-            password=values.get("POSTGRES_PASSWORD"),
-            host=values.get("POSTGRES_SERVER"),
-            path=f"/{values.get('POSTGRES_DB') or ''}",
-        )
-
     # Redis
     REDIS_URL: Optional[str] = None
 

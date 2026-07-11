@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from app.models.chat import ChatHistory
 from app.models.feedback_models import TrendingQuery
 from app.core.logging import logging
+from app.core.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -21,14 +22,14 @@ class TrendingService:
         Calculate and update trending queries for today.
         Should be run periodically (e.g. daily cron).
         """
-        today = datetime.utcnow().date()
+        today = utcnow().date()
         date_start = datetime.combine(today, datetime.min.time())
         
         # 1. Clear existing for this timeframe to allow re-run
         self.db.query(TrendingQuery).filter(TrendingQuery.date >= date_start).delete()
         
         # 2. Top queries from ChatHistory (Last 7 days for better trend)
-        since = datetime.utcnow() - timedelta(days=7)
+        since = utcnow() - timedelta(days=7)
         
         raw_trends = self.db.query(
             ChatHistory.question,
@@ -63,7 +64,7 @@ class TrendingService:
         Fallback to direct aggregation if table is empty.
         """
         # Try fetching from TrendingQuery first (snapshot of today)
-        today = datetime.utcnow().date()
+        today = utcnow().date()
         date_start = datetime.combine(today, datetime.min.time())
         
         trending = self.db.query(TrendingQuery).filter(
@@ -83,7 +84,7 @@ class TrendingService:
 
     def _get_top_questions_direct(self, limit: int = 10, days: int = 7) -> List[Dict[str, Any]]:
         """Direct aggregation (fallback)"""
-        start_date = datetime.utcnow() - timedelta(days=days)
+        start_date = utcnow() - timedelta(days=days)
         
         results = self.db.query(
             ChatHistory.question,

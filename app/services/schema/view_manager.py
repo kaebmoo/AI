@@ -6,6 +6,7 @@ from sqlalchemy import inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.services.schema.sql_identifiers import assert_safe_identifier, quote_identifier
+from app.core.time_utils import utcnow
 
 if TYPE_CHECKING:
     from app.services.schema.service import SchemaService
@@ -228,7 +229,7 @@ def propagate_metadata_to_view(service: "SchemaService", view_name: str) -> Dict
                             "special_notes": source_meta.get("special_notes"),
                             "conversion_sql": source_meta.get("conversion_sql"),
                             "dimension_group": source_meta.get("dimension_group"),
-                            "updated_at": datetime.utcnow(),
+                            "updated_at": utcnow(),
                             "vn": view_name,
                             "vc": view_column,
                         })

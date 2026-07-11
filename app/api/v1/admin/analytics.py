@@ -24,6 +24,7 @@ from app.services.feedback_service import FeedbackService
 from app.services.query_engine import clear_query_cache
 from app.services.schema_service import SchemaService
 from app.services.vanna_service import VannaService
+from app.core.time_utils import utcnow
 
 router = APIRouter()
 
@@ -70,7 +71,7 @@ def get_dashboard_overview(
     feedback_service = FeedbackService(app_db)
     config_service = AdminConfigService(config_db)
 
-    now = datetime.utcnow()
+    now = utcnow()
     since_7d = now - timedelta(days=7)
 
     total_queries_7d = app_db.query(ChatHistory).filter(ChatHistory.created_at >= since_7d).count()
@@ -224,7 +225,7 @@ def sync_brain_knowledge(
             try:
                 config_svc.set_config(
                     'last_brain_sync_at',
-                    datetime.utcnow().isoformat(),
+                    utcnow().isoformat(),
                     config_type='system',
                     category='system',
                 )
@@ -375,7 +376,7 @@ def get_query_analytics(
     from app.models.feedback_models import FeedbackRating, UserFeedback
 
     days = {"7d": 7, "30d": 30, "90d": 90}.get(period, 7)
-    since = datetime.utcnow() - timedelta(days=days)
+    since = utcnow() - timedelta(days=days)
 
     total = db.query(ChatHistory).filter(ChatHistory.created_at >= since).count()
     errors = db.query(ChatHistory).filter(

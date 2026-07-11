@@ -60,7 +60,10 @@ class ClaudeProvider(AIProvider):
             if msg.get("role") and msg.get("content"):
                 messages.append({"role": msg.get("role"), "content": msg.get("content")})
 
-        messages.append({"role": "user", "content": question})
+        # In tool-use turns the question is already in history — an empty user
+        # message would be rejected by the Anthropic API
+        if question:
+            messages.append({"role": "user", "content": question})
 
         # Sanitize tools for Anthropic format
         sanitized_tools = []
@@ -90,8 +93,7 @@ class ClaudeProvider(AIProvider):
             system=system_with_cache,
             tools=sanitized_tools,
             messages=messages,
-            temperature=0,  # Deterministic SQL generation
-            top_p=0.05,     # Narrow probability space for consistency
+            temperature=0,  # Deterministic SQL generation (Claude 4.5+ rejects temperature+top_p together)
         )
 
         # Log prompt caching metrics

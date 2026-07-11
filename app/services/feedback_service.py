@@ -4,6 +4,7 @@ from datetime import datetime
 
 from app.models.feedback_models import UserFeedback, FeedbackRating, FeedbackCategory, GoldenExample
 from app.models.chat import ChatHistory
+from app.core.time_utils import utcnow
 
 class FeedbackService:
     def __init__(self, db: Session):
@@ -23,7 +24,7 @@ class FeedbackService:
             rating=rating,
             feedback_category=category,
             feedback_text=feedback_text,
-            created_at=datetime.utcnow()
+            created_at=utcnow()
         )
         
         self.db.add(feedback)
@@ -46,7 +47,7 @@ class FeedbackService:
         """Get feedback statistics"""
         from datetime import timedelta
         
-        since = datetime.utcnow() - timedelta(days=days)
+        since = utcnow() - timedelta(days=days)
         
         # Base query for time range
         base_query = self.db.query(UserFeedback).filter(UserFeedback.created_at >= since)
@@ -104,7 +105,7 @@ class FeedbackService:
             raise ValueError("Feedback not found")
             
         feedback.reviewed_by = reviewer_id
-        feedback.reviewed_at = datetime.utcnow()
+        feedback.reviewed_at = utcnow()
         feedback.review_notes = notes
         feedback.is_golden_example = is_golden_example
         
@@ -139,7 +140,7 @@ class FeedbackService:
         from datetime import timedelta
         from sqlalchemy import func
         
-        since = datetime.utcnow() - timedelta(days=days)
+        since = utcnow() - timedelta(days=days)
         
         # Aggregate by question text
         # Note: In production, might want to normalize text (trim, lower, remove punctuation)

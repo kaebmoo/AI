@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from app.tools.admin.registry import admin_tool_registry
+from app.core.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -465,7 +466,7 @@ class AdminAgent:
                 AdminAgentConversation.id == conversation_id
             ).first()
             if conv:
-                conv.updated_at = datetime.utcnow()
+                conv.updated_at = utcnow()
                 self.db.commit()
                 return conv.id
 
@@ -473,8 +474,8 @@ class AdminAgent:
         conv = AdminAgentConversation(
             user_id=user_id,
             title=message[:100],
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
+            created_at=utcnow(),
+            updated_at=utcnow(),
         )
         self.db.add(conv)
         self.db.commit()
@@ -495,7 +496,7 @@ class AdminAgent:
             tool_name=tool_name,
             tool_args=tool_args,
             tool_result=tool_result,
-            created_at=datetime.utcnow(),
+            created_at=utcnow(),
         )
         self.db.add(msg)
         self.db.commit()

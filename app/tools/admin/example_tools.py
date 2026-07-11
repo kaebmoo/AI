@@ -5,6 +5,7 @@ Example Tools — Search & Add golden examples
 from typing import Any, Dict
 
 from app.tools.admin.base import AdminTool
+from app.core.time_utils import utcnow
 
 
 class SearchExamplesTool(AdminTool):
@@ -124,7 +125,7 @@ class AddExampleTool(AdminTool):
             expected_sql=params["sql"],
             category=params.get("context_name", ""),
             is_active=True,
-            created_at=datetime.utcnow(),
+            created_at=utcnow(),
         )
         db.add(example)
         db.commit()

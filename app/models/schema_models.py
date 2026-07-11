@@ -9,6 +9,7 @@ from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, Index, 
 from sqlalchemy.dialects.sqlite import JSON
 from datetime import datetime
 from app.db.base_class import ConfigBase
+from app.core.time_utils import utcnow
 
 
 class SchemaMetadata(ConfigBase):
@@ -34,8 +35,8 @@ class SchemaMetadata(ConfigBase):
     special_notes = Column(Text, nullable=True)  # Special notes for AI
     conversion_sql = Column(Text, nullable=True)  # SQL for value conversion
     dimension_group = Column(String(100), nullable=True)  # Family group for related columns
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
     __table_args__ = (
         Index('ix_schema_metadata_table_column', 'table_name', 'column_name', unique=True),
@@ -83,8 +84,8 @@ class SchemaSemanticMapping(ConfigBase):
     is_active = Column(Boolean, default=True)
     # NULL = global (all contexts), value = scoped to specific context e.g. 'transfer price'
     context_name = Column(String(100), nullable=True, default=None)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
     __table_args__ = (
         Index('ix_semantic_mapping_type', 'keyword_type'),
@@ -130,8 +131,8 @@ class ViewColumnMapping(ConfigBase):
     source_column = Column(String(100), nullable=False)
     mapping_type = Column(String(20), default='alias')  # alias | expression | passthrough
     expression_sql = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
     __table_args__ = (
         UniqueConstraint('view_name', 'view_column', name='uq_view_column_mapping'),
@@ -168,8 +169,8 @@ class SchemaBusinessRule(ConfigBase):
     example_wrong = Column(Text, nullable=True)
     severity = Column(String(20), default='warning')  # 'error', 'warning', 'info'
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
     __table_args__ = (
         Index('ix_business_rules_active', 'is_active'),
@@ -209,8 +210,8 @@ class DataWarningModel(ConfigBase):
     severity = Column(String(20), default='warning')
     context_name = Column(String(100), nullable=True)    # NULL = all contexts
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
     __table_args__ = (
         Index('ix_data_warnings_active', 'is_active'),
@@ -244,7 +245,7 @@ class QueryComplexityPattern(ConfigBase):
     pattern = Column(Text, nullable=False)
     description = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     __table_args__ = (
         UniqueConstraint('tier', 'pattern', name='uq_tier_pattern'),
@@ -267,8 +268,8 @@ class VannaDocumentation(ConfigBase):
     category = Column(String(50), default='guide')
     context_name = Column(String(100), nullable=True)
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
     __table_args__ = (
         Index('ix_vanna_doc_active', 'is_active'),

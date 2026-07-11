@@ -2,6 +2,7 @@ from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, BigInteger
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.db.base_class import Base
+from app.core.time_utils import utcnow
 
 class UserSession(Base):
     """
@@ -14,9 +15,9 @@ class UserSession(Base):
     session_token = Column(String, unique=True, index=True)
     platform = Column(String) # web, telegram
     telegram_chat_id = Column(BigInteger, nullable=True) 
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     expires_at = Column(DateTime)
-    last_activity = Column(DateTime, default=datetime.utcnow)
+    last_activity = Column(DateTime, default=utcnow)
     ip_address = Column(String, nullable=True)
     user_agent = Column(String, nullable=True)
 

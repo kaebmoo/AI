@@ -5,6 +5,7 @@ Rule Tools — Search & Add business rules
 from typing import Any, Dict
 
 from app.tools.admin.base import AdminTool
+from app.core.time_utils import utcnow
 
 
 class SearchRulesTool(AdminTool):
@@ -162,8 +163,8 @@ class AddRuleTool(AdminTool):
             table_name=params.get("table_name"),
             severity=params.get("severity", "warning"),
             is_active=True,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
+            created_at=utcnow(),
+            updated_at=utcnow(),
         )
         db.add(rule)
         db.commit()

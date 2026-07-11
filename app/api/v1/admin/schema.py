@@ -35,6 +35,7 @@ from app.services.query_engine import clear_query_cache
 from app.services.schema_service import SchemaService
 
 from ._shared import ensure_metadata_rows, mark_brain_dirty
+from app.core.time_utils import utcnow
 
 router = APIRouter()
 
@@ -116,7 +117,7 @@ def update_schema_column(
     for key, value in update_data.items():
         setattr(column, key, value)
 
-    column.updated_at = datetime.utcnow()
+    column.updated_at = utcnow()
     db.commit()
     db.refresh(column)
 

@@ -14,6 +14,7 @@ from app.models.user import User
 from app.models.session import UserSession
 from app.services.otp_service import OTPService
 from app.services.email_service import EmailService
+from app.core.time_utils import utcnow
 from app.core.exceptions import (
     InvalidDomainError,
     OTPExpiredError,
@@ -217,8 +218,8 @@ class TelegramAuth:
             session_token=secrets.token_hex(32),
             platform="telegram",
             telegram_chat_id=chat_id,
-            created_at=datetime.utcnow(),
-            last_activity=datetime.utcnow(),
+            created_at=utcnow(),
+            last_activity=utcnow(),
         )
         db.add(new_session)
         db.commit()

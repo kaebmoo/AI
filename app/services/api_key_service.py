@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from app.models.api_key import APIKey, APIKeyUsage
+from app.core.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +57,8 @@ class APIKeyService:
             rate_limit_per_day=rate_limit_per_day,
             is_active=True,
             expires_at=expires_at,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
+            created_at=utcnow(),
+            updated_at=utcnow(),
         )
         self.db.add(api_key)
         self.db.commit()
@@ -86,7 +87,7 @@ class APIKeyService:
             return None
 
         # Check expiry
-        if api_key.expires_at and api_key.expires_at < datetime.utcnow():
+        if api_key.expires_at and api_key.expires_at < utcnow():
             logger.warning(f"API key {api_key.key_prefix} expired")
             return None
 
@@ -96,7 +97,7 @@ class APIKeyService:
             return None
 
         # Update last_used_at
-        api_key.last_used_at = datetime.utcnow()
+        api_key.last_used_at = utcnow()
         self.db.commit()
 
         return api_key
@@ -112,7 +113,7 @@ class APIKeyService:
             return False
 
         api_key.is_active = False
-        api_key.updated_at = datetime.utcnow()
+        api_key.updated_at = utcnow()
         self.db.commit()
 
         logger.info(f"API key revoked: {api_key.key_prefix}")

@@ -18,6 +18,7 @@ from app.schemas.admin_schemas import (
 from app.services.query_engine import clear_query_cache
 from app.services.schema_service import SchemaService
 from ._shared import mark_brain_dirty
+from app.core.time_utils import utcnow
 
 router = APIRouter()
 
@@ -112,7 +113,7 @@ def update_semantic_mapping(
     for key, value in update_data.items():
         setattr(mapping, key, value)
 
-    mapping.updated_at = datetime.utcnow()
+    mapping.updated_at = utcnow()
     db.commit()
     db.refresh(mapping)
 

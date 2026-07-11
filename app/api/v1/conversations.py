@@ -10,6 +10,7 @@ from app.api import deps
 from app.models.user import User
 from app.models.chat import ChatHistory
 from app.models.conversation import Conversation
+from app.core.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -221,7 +222,7 @@ def update_conversation(
     if body.is_archived is not None:
         conv.is_archived = body.is_archived
 
-    conv.updated_at = datetime.utcnow()
+    conv.updated_at = utcnow()
     db.commit()
     db.refresh(conv)
 
@@ -250,7 +251,7 @@ def delete_conversation(
         raise HTTPException(status_code=403, detail="Not authorized")
 
     conv.is_archived = True
-    conv.updated_at = datetime.utcnow()
+    conv.updated_at = utcnow()
     db.commit()
 
     return {"success": True}

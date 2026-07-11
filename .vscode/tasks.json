@@ -4,35 +4,122 @@
         {
             "label": "Start All Services",
             "dependsOn": [
-                "Backend",
-                "Worker",
-                "User-Frontend",
-                "Admin-UI"
+                "Backend (FastAPI)",
+                "Worker (Celery)",
+                "User Frontend (Expo Web)",
+                "Admin UI (Vite)"
             ],
             "group": {
                 "kind": "build",
                 "isDefault": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Backend (FastAPI)",
+            "type": "shell",
+            "command": "source venv/bin/activate && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000",
+            "isBackground": true,
+            "problemMatcher": {
+                "pattern": [
+                    {
+                        "regexp": ".",
+                        "file": 1,
+                        "location": 2,
+                        "message": 3
+                    }
+                ],
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": ".*",
+                    "endsPattern": "Uvicorn running on.*"
+                }
+            },
+            "presentation": {
+                "group": "nt-ai-assistant",
+                "panel": "shared"
             }
         },
         {
-            "label": "Backend",
+            "label": "Worker (Celery)",
             "type": "shell",
-            "command": "source venv/bin/activate && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000"
+            "command": "source venv/bin/activate && celery -A app.celery worker -Q email-queue,celery --loglevel=info",
+            "isBackground": true,
+            "problemMatcher": {
+                "pattern": [
+                    {
+                        "regexp": ".",
+                        "file": 1,
+                        "location": 2,
+                        "message": 3
+                    }
+                ],
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": ".*",
+                    "endsPattern": "celery@.*ready.*"
+                }
+            },
+            "presentation": {
+                "group": "nt-ai-assistant",
+                "panel": "shared"
+            }
         },
         {
-            "label": "Worker",
+            "label": "User Frontend (Expo Web)",
             "type": "shell",
-            "command": "source venv/bin/activate && celery -A app.celery worker -Q email-queue,celery --loglevel=info"
+            "command": "npm run web",
+            "options": {
+                "cwd": "${workspaceFolder}/frontend"
+            },
+            "isBackground": true,
+            "problemMatcher": {
+                "pattern": [
+                    {
+                        "regexp": ".",
+                        "file": 1,
+                        "location": 2,
+                        "message": 3
+                    }
+                ],
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": ".*",
+                    "endsPattern": ".*Web is waiting on.*"
+                }
+            },
+            "presentation": {
+                "group": "nt-ai-assistant",
+                "panel": "shared"
+            }
         },
         {
-            "label": "User-Frontend",
+            "label": "Admin UI (Vite)",
             "type": "shell",
-            "command": "cd frontend && npm run web"
-        },
-        {
-            "label": "Admin-UI",
-            "type": "shell",
-            "command": "cd frontend-admin && npm run dev"
+            "command": "npm run dev",
+            "options": {
+                "cwd": "${workspaceFolder}/frontend-admin"
+            },
+            "isBackground": true,
+            "problemMatcher": {
+                "pattern": [
+                    {
+                        "regexp": ".",
+                        "file": 1,
+                        "location": 2,
+                        "message": 3
+                    }
+                ],
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": ".*",
+                    "endsPattern": ".*Local:.*"
+                }
+            },
+            "presentation": {
+                "group": "nt-ai-assistant",
+                "panel": "shared"
+            }
         }
     ]
 }

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.models.user import User
 from app.models.session import UserSession
 from app.config import settings
+from app.core.time_utils import utcnow
 
 
 class AuthService:
@@ -52,8 +53,8 @@ class AuthService:
             telegram_chat_id=telegram_chat_id,
             ip_address=ip_address,
             user_agent=user_agent,
-            expires_at=datetime.utcnow() + timedelta(hours=settings.SESSION_EXPIRY_HOURS),
-            last_activity=datetime.utcnow()
+            expires_at=utcnow() + timedelta(hours=settings.SESSION_EXPIRY_HOURS),
+            last_activity=utcnow()
         )
         self.db.add(session)
         self.db.commit()
@@ -64,7 +65,7 @@ class AuthService:
         """Validate and refresh session"""
         session = self.db.query(UserSession).filter(
             UserSession.session_token == session_token,
-            UserSession.expires_at > datetime.utcnow()
+            UserSession.expires_at > utcnow()
         ).first()
         
         if session:
@@ -73,12 +74,12 @@ class AuthService:
                 return None
 
             # Update last activity
-            session.last_activity = datetime.utcnow()
+            session.last_activity = utcnow()
             
             # Refresh token if close to expiry
-            hours_until_expiry = (session.expires_at - datetime.utcnow()).total_seconds() / 3600
+            hours_until_expiry = (session.expires_at - utcnow()).total_seconds() / 3600
             if hours_until_expiry < settings.SESSION_REFRESH_THRESHOLD_HOURS:
-                session.expires_at = datetime.utcnow() + timedelta(hours=settings.SESSION_EXPIRY_HOURS)
+                session.expires_at = utcnow() + timedelta(hours=settings.SESSION_EXPIRY_HOURS)
             
             self.db.commit()
         
@@ -89,7 +90,7 @@ class AuthService:
         return self.db.query(UserSession).filter(
             UserSession.telegram_chat_id == chat_id,
             UserSession.platform == "telegram",
-            UserSession.expires_at > datetime.utcnow()
+            UserSession.expires_at > utcnow()
         ).first()
     
     def logout(self, session_token: str):
@@ -99,7 +100,7 @@ class AuthService:
         ).first()
         
         if session:
-            session.expires_at = datetime.utcnow()
+            session.expires_at = utcnow()
             self.db.commit()
 
     def verify_password(self, plain_password: str, hashed_password: str) -> bool:

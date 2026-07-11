@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
+from app.core.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ class AutoAnalyzer:
         from app.models.chat import ChatHistory
         from app.models.feedback_models import UserFeedback, FeedbackRating
 
-        since = datetime.utcnow() - timedelta(hours=period_hours)
+        since = utcnow() - timedelta(hours=period_hours)
 
         # Fetch failed queries (no SQL generated or thumbs down)
         failed_chats = self.db.query(ChatHistory).outerjoin(

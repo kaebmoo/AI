@@ -2,6 +2,7 @@ from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, T
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.db.base_class import Base
+from app.core.time_utils import utcnow
 
 class ChatHistory(Base):
     """
@@ -19,7 +20,7 @@ class ChatHistory(Base):
     ai_response = Column(Text)
     tokens_used = Column(Integer, default=0)
     execution_time_ms = Column(Float, default=0.0)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     context_name = Column(String, nullable=True)  # data context: revenue, expense, etc.
     is_bookmarked = Column(Boolean, default=False)
     feedback_rating = Column(Integer, nullable=True) # 1-5

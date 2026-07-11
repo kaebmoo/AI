@@ -15,6 +15,7 @@ from app.core.exceptions import (
 )
 from app.core.logging import logging
 from app.workers.email_worker import send_otp_email
+from app.core.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ class OTPService:
         # Check cooldown
         recent_request = self.db.query(OTPRequest).filter(
             OTPRequest.email == email,
-            OTPRequest.created_at > datetime.utcnow() - timedelta(minutes=settings.OTP_COOLDOWN_MINUTES)
+            OTPRequest.created_at > utcnow() - timedelta(minutes=settings.OTP_COOLDOWN_MINUTES)
         ).first()
         
         if recent_request:
@@ -80,8 +81,8 @@ class OTPService:
             platform=platform,
             telegram_chat_id=telegram_chat_id,
             ip_address=ip_address,
-            expires_at=datetime.utcnow() + timedelta(minutes=settings.OTP_EXPIRY_MINUTES),
-            created_at=datetime.utcnow(),
+            expires_at=utcnow() + timedelta(minutes=settings.OTP_EXPIRY_MINUTES),
+            created_at=utcnow(),
             attempts=0
         )
         self.db.add(otp_request)
@@ -130,7 +131,7 @@ class OTPService:
             return False, "No OTP request found. Please request a new OTP."
         
         # Check expiry
-        if datetime.utcnow() > otp_request.expires_at:
+        if utcnow() > otp_request.expires_at:
             raise OTPExpiredError("OTP has expired. Please request a new one.")
         
         # Check attempts
@@ -145,7 +146,7 @@ class OTPService:
             return False, f"Invalid OTP. {remaining} attempts remaining."
         
         # Mark as verified
-        otp_request.verified_at = datetime.utcnow()
+        otp_request.verified_at = utcnow()
         self.db.commit()
         
         return True, "OTP verified successfully"

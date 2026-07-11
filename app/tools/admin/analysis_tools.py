@@ -5,6 +5,7 @@ Analysis Tools — Query logs & feedback analysis
 from typing import Any, Dict
 
 from app.tools.admin.base import AdminTool
+from app.core.time_utils import utcnow
 
 
 class AnalyzeQueryLogsTool(AdminTool):
@@ -42,7 +43,7 @@ class AnalyzeQueryLogsTool(AdminTool):
         from datetime import datetime, timedelta
 
         days = params.get("days", 7)
-        since = datetime.utcnow() - timedelta(days=days)
+        since = utcnow() - timedelta(days=days)
 
         query = db.query(ChatHistory).filter(ChatHistory.created_at >= since)
 
@@ -124,7 +125,7 @@ class ReviewFeedbackTool(AdminTool):
 
         days = params.get("days", 7)
         limit = params.get("limit", 20)
-        since = datetime.utcnow() - timedelta(days=days)
+        since = utcnow() - timedelta(days=days)
 
         query = db.query(UserFeedback, ChatHistory).join(
             ChatHistory, UserFeedback.chat_id == ChatHistory.id

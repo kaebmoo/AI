@@ -179,8 +179,8 @@ def clear_query_cache() -> int:
 _dedup_store: Dict[str, float] = {}
 
 
-def _dedup_check(user_question: str, provider: str, user_id: Optional[int] = None) -> bool:
-    """Return True if this is a duplicate request within DEDUP_TTL_SECONDS.
+def _dedup_mark(user_question: str, provider: str, user_id: Optional[int] = None) -> Optional[str]:
+    """Mark this request in the dedup store. Returns the key, or None if duplicate.
 
     Scoped per-user so two users asking the same question don't block each other.
     """
@@ -193,9 +193,14 @@ def _dedup_check(user_question: str, provider: str, user_id: Optional[int] = Non
     for k in expired:
         del _dedup_store[k]
     if key in _dedup_store:
-        return True
+        return None
     _dedup_store[key] = now
-    return False
+    return key
+
+
+def _dedup_release(key: str) -> None:
+    """Release a dedup mark early (request failed — allow immediate retry)."""
+    _dedup_store.pop(key, None)
 
 
 @dataclass
@@ -322,8 +327,16 @@ class QueryEngine:
     ):
         self.mcp_client = mcp_client
         self.db = db_session
+        # Track ownership: a self-created AdminConfigService owns a config-DB
+        # session that must be closed via close() (endpoints inject one instead)
+        self._owns_admin_config = admin_config is None
         self.admin_config = admin_config or AdminConfigService()  # Uses config DB session
         self._schema_service = None
+
+    def close(self) -> None:
+        """Release the self-created config-DB session (no-op when injected)."""
+        if self._owns_admin_config and self.admin_config:
+            self.admin_config.close()
 
     @property
     def schema_service(self) -> SchemaService:
@@ -384,7 +397,8 @@ class QueryEngine:
                 return replace(cached, execution_time_ms=(time.time() - start_time) * 1000)
 
         # --- Request dedup: block identical requests within N seconds ---
-        if _dedup_check(question, selected_provider_name, user_id):
+        dedup_key = _dedup_mark(question, selected_provider_name, user_id)
+        if dedup_key is None:
             logger.warning(f"QueryEngine: Dedup — duplicate request blocked: {question[:50]}…")
             return QueryEngineResult(
                 query_result=QueryResult(
@@ -397,6 +411,47 @@ class QueryEngine:
                 provider_used=selected_provider_name,
             )
 
+        try:
+            engine_result = await self._execute_query(
+                question=question,
+                provider=provider,
+                context=context,
+                mode=mode,
+                history=history,
+                max_retries=max_retries,
+                provider_kwargs=provider_kwargs,
+                on_status=on_status,
+                ai_config=ai_config,
+                feature_flags=feature_flags,
+                use_cache=use_cache,
+                qcache_key=qcache_key,
+                start_time=start_time,
+            )
+        except BaseException:
+            _dedup_release(dedup_key)  # failed — allow immediate retry
+            raise
+
+        if engine_result.query_result.error:
+            _dedup_release(dedup_key)
+        return engine_result
+
+    async def _execute_query(
+        self,
+        question: str,
+        provider: Optional[str],
+        context: Optional[str],
+        mode: str,
+        history: Optional[List[Dict]],
+        max_retries: int,
+        provider_kwargs: Dict,
+        on_status: Optional[Callable],
+        ai_config: dict,
+        feature_flags: dict,
+        use_cache: bool,
+        qcache_key: str,
+        start_time: float,
+    ) -> QueryEngineResult:
+        """Query pipeline after cache/dedup gates (split out so dedup can wrap it)."""
         # 1. Resolve provider
         selected_provider = provider or ai_config.get("default_provider", settings.AI_PROVIDER)
 
@@ -466,6 +521,7 @@ class QueryEngine:
                 value_lookup_enabled=feature_flags.get("value_lookup_enabled", False),
                 value_verification_enabled=feature_flags.get("value_verification_enabled", True),
                 cheap_model=cheap_model,
+                schema_service=self.schema_service,
             )
         else:
             result = await ai_service.query_with_retry(

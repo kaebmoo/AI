@@ -7,6 +7,7 @@ SQLAlchemy models for API key authentication.
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, Index
 from app.db.base_class import Base
+from app.core.time_utils import utcnow
 
 
 class APIKey(Base):
@@ -23,8 +24,8 @@ class APIKey(Base):
     is_active = Column(Boolean, default=True)
     expires_at = Column(DateTime, nullable=True)
     last_used_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
 
 class APIKeyUsage(Base):
@@ -35,7 +36,7 @@ class APIKeyUsage(Base):
     date = Column(String(10), nullable=False)  # YYYY-MM-DD
     request_count = Column(Integer, default=0)
     token_count = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     __table_args__ = (
         Index("ix_api_key_usage_date", "api_key_id", "date", unique=True),

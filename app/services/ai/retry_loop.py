@@ -100,6 +100,8 @@ async def query_with_retry(
                 explanation = msg.get("content", "")
                 break
 
+        claude_results: Dict[str, str] = {}
+
         for call in tool_calls:
             if on_status:
                 on_status(RetryStatus(turn, max_turns, "executing", f"Calling tool: {call['name']}"))
@@ -121,12 +123,9 @@ async def query_with_retry(
                 logger.error("Tool execution error: %s", tool_result)
 
             if service.provider_name == "claude":
-                current_history.append({"role": "assistant", "content": [
-                    {"type": "tool_use", "id": call["id"], "name": call["name"], "input": call["args"]}
-                ]})
-                current_history.append({"role": "user", "content": [
-                    {"type": "tool_result", "tool_use_id": call["id"], "content": str(tool_result)}
-                ]})
+                # Collect first — parallel tool_use blocks must land in ONE
+                # assistant message, with all tool_results in ONE user message
+                claude_results[call["id"]] = str(tool_result)
 
             elif service.provider_name == "gemini":
                 if turn == 0 and working_question:
@@ -192,6 +191,21 @@ async def query_with_retry(
                     "tool_call_id": call["id"],
                     "content": str(tool_result),
                 })
+
+        if service.provider_name == "claude" and tool_calls:
+            # Message list must start with the user question (Anthropic rejects
+            # a history that opens with an assistant message)
+            if working_question:
+                current_history.append({"role": "user", "content": working_question})
+                working_question = None
+            current_history.append({"role": "assistant", "content": [
+                {"type": "tool_use", "id": c["id"], "name": c["name"], "input": c["args"]}
+                for c in tool_calls
+            ]})
+            current_history.append({"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": c["id"], "content": claude_results[c["id"]]}
+                for c in tool_calls
+            ]})
 
     if not explanation and total_tokens > 0:
         explanation = "I apologize, but I was unable to complete the analysis within the allowed number of steps. The request required exploring too much schema information."

@@ -2,6 +2,7 @@ from sqlalchemy import Column, Integer, String, Boolean, DateTime
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.db.base_class import Base
+from app.core.time_utils import utcnow
 
 class User(Base):
     """
@@ -25,8 +26,8 @@ class User(Base):
     hashed_password = Column(String, nullable=True)
     force_password_change = Column(Boolean, default=False)
     
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
     # Relationships
     sessions = relationship("UserSession", back_populates="user")

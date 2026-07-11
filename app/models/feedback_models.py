@@ -3,6 +3,7 @@ from sqlalchemy.orm import relationship, backref
 from datetime import datetime
 from app.db.base_class import Base, ConfigBase
 import enum
+from app.core.time_utils import utcnow
 
 class GoldenExample(ConfigBase):  # Config DB table
     __tablename__ = "golden_examples"
@@ -15,7 +16,7 @@ class GoldenExample(ConfigBase):  # Config DB table
     is_active = Column(Boolean, default=True)
     added_by = Column(Integer, nullable=True)  # References users.id (no FK — cross-DB)
     usage_count = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
 class FeedbackRating(str, enum.Enum):
     THUMBS_UP = "thumbs_up"
@@ -38,7 +39,7 @@ class UserFeedback(Base):
     rating = Column(Enum(FeedbackRating), nullable=False)
     feedback_category = Column(Enum(FeedbackCategory), nullable=True)
     feedback_text = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     
     # Review fields
     reviewed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
@@ -56,5 +57,5 @@ class TrendingQuery(Base):
     id = Column(Integer, primary_key=True, index=True)
     question = Column(String, index=True, nullable=False)
     count = Column(Integer, default=1)
-    date = Column(DateTime, default=datetime.utcnow) # Represents the day/period
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    date = Column(DateTime, default=utcnow) # Represents the day/period
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)

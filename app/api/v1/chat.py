@@ -22,6 +22,7 @@ from app.services.intent_classifier import classify_intent
 from app.providers.chart_postprocessor import enrich_chart_config
 from app.models.chat_session import ChatSessionData
 from app.config import settings
+from app.core.time_utils import utcnow
 
 
 router = APIRouter()
@@ -121,7 +122,7 @@ def _update_conversation_meta(
         conv.title = title
 
     conv.message_count = (conv.message_count or 0) + 1
-    conv.updated_at = datetime.utcnow()
+    conv.updated_at = utcnow()
     db.commit()
 
 
@@ -327,7 +328,7 @@ def _save_session_data(db: Session, conversation_id: str, data: list, columns: l
         existing.last_columns = cols_json
         existing.last_chart_config = cfg_json
         existing.row_count = len(data)
-        existing.updated_at = datetime.utcnow()
+        existing.updated_at = utcnow()
     else:
         db.add(ChatSessionData(
             conversation_id=conversation_id,
@@ -409,6 +410,7 @@ async def chat(
     current_user: User = Depends(deps.get_current_user),
     schema_service: SchemaService = Depends(deps.get_schema_service),
     db: Session = Depends(deps.get_db),
+    admin_config = Depends(deps.get_admin_config_service),
 ):
     """
     Process a natural language question about revenue/sales.
@@ -434,7 +436,7 @@ async def chat(
 
     # 5. Execute query via QueryEngine
     mcp_client = deps.get_mcp_client(current_request)
-    engine = QueryEngine(mcp_client=mcp_client, db_session=db)
+    engine = QueryEngine(mcp_client=mcp_client, db_session=db, admin_config=admin_config)
     engine_result = await engine.query(
         question=request.question,
         provider=request.provider,
@@ -476,6 +478,7 @@ async def chat_stream(
     current_user: User = Depends(deps.get_current_user),
     schema_service: SchemaService = Depends(deps.get_schema_service),
     db: Session = Depends(deps.get_db),
+    admin_config = Depends(deps.get_admin_config_service),
 ):
     """
     Stream chat responses via Server-Sent Events (SSE).
@@ -512,6 +515,7 @@ async def chat_stream(
 
     async def generate_events():
         """SSE event generator."""
+        query_task = None
         try:
             # Chart-only: skip QueryEngine, return session data directly
             if intent["is_chart_request"] and intent["confidence"] == "high":
@@ -525,7 +529,7 @@ async def chat_stream(
 
             # Run query in background task
             mcp_client = deps.get_mcp_client(current_request)
-            engine = QueryEngine(mcp_client=mcp_client, db_session=db)
+            engine = QueryEngine(mcp_client=mcp_client, db_session=db, admin_config=admin_config)
 
             # Start query as a task
             query_task = asyncio.create_task(engine.query(
@@ -547,6 +551,11 @@ async def chat_stream(
                 except asyncio.TimeoutError:
                     # Send keepalive comment
                     yield ": keepalive\n\n"
+
+            # Drain events pushed just before the task finished
+            while not event_queue.empty():
+                event = event_queue.get_nowait()
+                yield _sse_format(event["event"], event["data"])
 
             # Get result
             engine_result = query_task.result()
@@ -585,6 +594,12 @@ async def chat_stream(
         except Exception as e:
             logger.error(f"SSE stream error: {e}")
             yield _sse_format("error", {"message": str(e)})
+        finally:
+            # Client disconnect closes this generator (GeneratorExit/cancel) —
+            # stop the in-flight LLM query instead of burning tokens
+            if query_task is not None and not query_task.done():
+                query_task.cancel()
+                logger.info("SSE client disconnected — query task cancelled")
 
     return StreamingResponse(
         generate_events(),
@@ -666,7 +681,7 @@ async def train_model(
         if existing:
             existing.expected_sql = request.sql
             existing.is_active = is_admin
-            existing.updated_at = datetime.utcnow()
+            existing.updated_at = utcnow()
             if is_admin:
                 existing.added_by = current_user.id
             db_item = existing

@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
+from app.core.time_utils import utcnow
 
 if TYPE_CHECKING:
     from app.services.schema.service import SchemaService
@@ -117,7 +118,7 @@ def update_context(service: "SchemaService", context_id: int, data: Dict) -> Opt
                 params["keywords"] = json.dumps(value, ensure_ascii=False)
             set_parts.append(f"{key} = :{key}")
 
-        params["updated_at"] = datetime.utcnow()
+        params["updated_at"] = utcnow()
         set_parts.append("updated_at = :updated_at")
 
         sql = f"UPDATE schema_contexts SET {', '.join(set_parts)} WHERE id = :id"

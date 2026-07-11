@@ -16,6 +16,7 @@ from app.schemas.admin_schemas import (
     DataWarningUpdate,
 )
 from app.services.warning_detector import clear_warnings_cache
+from app.core.time_utils import utcnow
 
 router = APIRouter()
 
@@ -93,7 +94,7 @@ def update_data_warning(
     for key, value in update_data.items():
         setattr(warning, key, value)
 
-    warning.updated_at = datetime.utcnow()
+    warning.updated_at = utcnow()
     db.commit()
     db.refresh(warning)
 

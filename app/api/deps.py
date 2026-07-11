@@ -102,15 +102,23 @@ def get_mcp_client(request: Request) -> MCPClientService:
 
 from app.services.admin_config_service import AdminConfigService
 
+def get_admin_config_service() -> Generator:
+    """AdminConfigService with its own config-DB session, closed after the request."""
+    svc = AdminConfigService()
+    try:
+        yield svc
+    finally:
+        svc.close()
+
 def get_ai_service(
-    mcp_client: MCPClientService = Depends(get_mcp_client)
+    mcp_client: MCPClientService = Depends(get_mcp_client),
+    config_service: AdminConfigService = Depends(get_admin_config_service),
 ) -> AIService:
     """
     Dependency to get initialized AIService based on config.
     Prioritizes DB config > Env var > Default.
     Uses provider_registry for auto-discovery and fallback.
     """
-    config_service = AdminConfigService()  # Uses config DB (admin_config table)
     ai_config = config_service.get_ai_config()
     default_provider = ai_config.get("default_provider", "matcha")
 
