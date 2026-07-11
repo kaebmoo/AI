@@ -8,7 +8,7 @@ import json
 import logging
 from typing import Dict, List, Optional, Any, Union
 
-from app.providers.base import AIProvider
+from app.providers.base import AIProvider, TokenUsage
 from app.providers.retry_config import ai_retry
 from app.providers.chart_postprocessor import (
     parse_explanation_response,
@@ -50,6 +50,17 @@ class ClaudeProvider(AIProvider):
             self._client = anthropic.AsyncAnthropic(api_key=self.api_key)
         return self._client
 
+    def _record_usage(self, response) -> None:
+        """Populate last_usage from an Anthropic response."""
+        usage = getattr(response, "usage", None)
+        self.last_usage = TokenUsage(
+            input_tokens=getattr(usage, "input_tokens", 0) or 0,
+            output_tokens=getattr(usage, "output_tokens", 0) or 0,
+            cache_read_input_tokens=getattr(usage, "cache_read_input_tokens", 0) or 0,
+            cache_creation_input_tokens=getattr(usage, "cache_creation_input_tokens", 0) or 0,
+            model=self.model,
+        )
+
     @ai_retry
     async def generate_sql(self, question: str, system_prompt: str, tools: List[Dict], history: List[Dict] = []) -> Dict[str, Any]:
 
@@ -87,6 +98,7 @@ class ClaudeProvider(AIProvider):
         if sanitized_tools:
             sanitized_tools[-1]["cache_control"] = {"type": "ephemeral"}
 
+        self.last_usage = None
         response = await self.client.messages.create(
             model=self.model,
             max_tokens=2048,
@@ -95,6 +107,7 @@ class ClaudeProvider(AIProvider):
             messages=messages,
             temperature=0,  # Deterministic SQL generation (Claude 4.5+ rejects temperature+top_p together)
         )
+        self._record_usage(response)
 
         # Log prompt caching metrics
         tokens_used = response.usage.input_tokens + response.usage.output_tokens
@@ -128,6 +141,7 @@ class ClaudeProvider(AIProvider):
             }
         ]
 
+        self.last_usage = None
         response = await self.client.messages.create(
             model=self.model,
             max_tokens=2000,
@@ -135,6 +149,7 @@ class ClaudeProvider(AIProvider):
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3  # Slightly varied but stable explanations
         )
+        self._record_usage(response)
 
         # Log prompt caching metrics
         cache_created = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
@@ -205,7 +220,9 @@ class ClaudeProvider(AIProvider):
             if self.extended_thinking and not model_supports_thinking:
                 logger.warning(f"ClaudeProvider: Extended Thinking requested but model={self.model} does not support it, using standard mode")
 
+        self.last_usage = None
         response = await self.client.messages.create(**kwargs)
+        self._record_usage(response)
 
         # Extract text blocks only (skip thinking blocks)
         for block in response.content:

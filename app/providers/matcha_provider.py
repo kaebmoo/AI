@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Any, Union
 
 import httpx
 
-from app.providers.base import AIProvider
+from app.providers.base import AIProvider, TokenUsage
 from app.providers.retry_config import ai_retry
 from app.providers.chart_postprocessor import (
     parse_explanation_response,
@@ -24,6 +24,9 @@ from app.providers.chart_postprocessor import (
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+# One-time debug log when the gateway omits the usage field
+_no_usage_logged = False
 
 
 class MatchaProvider(AIProvider):
@@ -38,6 +41,20 @@ class MatchaProvider(AIProvider):
 
     def is_configured(self) -> bool:
         return bool(self.api_key and self.api_url)
+
+    def _record_usage(self, result: Dict) -> None:
+        """Populate last_usage from an OpenAI-compatible response (usage may be absent)."""
+        usage = result.get("usage") or {}
+        if not usage:
+            global _no_usage_logged
+            if not _no_usage_logged:
+                logger.debug("Matcha gateway returned no usage field — token counts will be 0")
+                _no_usage_logged = True
+        self.last_usage = TokenUsage(
+            input_tokens=usage.get("prompt_tokens", 0) or 0,
+            output_tokens=usage.get("completion_tokens", 0) or 0,
+            model=self.model,
+        )
 
     @ai_retry
     async def generate_sql(self, question: Optional[str], system_prompt: str, tools: List[Dict], history: List[Dict] = []) -> Dict[str, Any]:
@@ -78,11 +95,13 @@ class MatchaProvider(AIProvider):
         if openai_tools:
             payload['tools'] = openai_tools
 
+        self.last_usage = None
         async with httpx.AsyncClient(verify=settings.MATCHA_SSL_VERIFY, timeout=settings.MATCHA_TIMEOUT) as client:
             resp = await client.post(self.api_url, headers=headers, json=payload)
             resp.raise_for_status()
             result = resp.json()
 
+        self._record_usage(result)
         return {
             "response": result,
             "tokens_used": result.get('usage', {}).get('total_tokens', 0)
@@ -146,12 +165,14 @@ class MatchaProvider(AIProvider):
             'temperature': 0.3  # Stable intent extraction / explanations
         }
 
+        self.last_usage = None
         try:
             async with httpx.AsyncClient(verify=settings.MATCHA_SSL_VERIFY, timeout=settings.MATCHA_TIMEOUT) as client:
                 resp = await client.post(self.api_url, headers=headers, json=payload)
                 resp.raise_for_status()
                 result = resp.json()
 
+            self._record_usage(result)
             content = result['choices'][0]['message']['content']
             return content
 

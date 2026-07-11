@@ -78,6 +78,20 @@ class ConfidenceResult:
 
 
 @dataclass
+class TokenUsage:
+    """Real token usage from one provider API call."""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_input_tokens: int = 0
+    cache_creation_input_tokens: int = 0
+    model: str = ""
+
+    @property
+    def total(self) -> int:
+        return self.input_tokens + self.output_tokens
+
+
+@dataclass
 class QueryResult:
     """Result from AI query"""
     question: str
@@ -91,6 +105,7 @@ class QueryResult:
     retry_count: int = 0
     retry_history: Optional[List[Dict]] = None
     confidence: Optional[ConfidenceResult] = None
+    usage_breakdown: Optional[List[Dict]] = None  # per-stage TokenUsage dicts (F7.2)
 
 
 @dataclass
@@ -105,9 +120,17 @@ class RetryStatus:
 
 
 class AIProvider(ABC):
-    """Abstract base class for AI providers"""
+    """Abstract base class for AI providers.
+
+    ``last_usage`` holds the TokenUsage of the most recent API call. Callers
+    read it immediately after the call. This is safe ONLY because provider
+    instances are created fresh per request (see registry.create_provider)
+    and calls within a request are sequential — do NOT share a provider
+    instance across concurrent requests.
+    """
 
     name: str = ""
+    last_usage: Optional[TokenUsage] = None
 
     def is_configured(self) -> bool:
         """Check if provider has required credentials. Override in subclass."""

@@ -22,3 +22,9 @@
 
 - **Manual webhook end-to-end ยังไม่ได้ทดสอบ** — ต้องใช้ bot token จริง + tunnel (ngrok/cloudflared) ซึ่งไม่มีใน environment นี้ — โค้ด initialize/set_webhook/delete_webhook เขียนตาม PTB 22 docs และ unit tests ผ่าน แต่ acceptance ข้อ "Manual webhook end-to-end" ค้างไว้ให้เจ้าของโปรเจกต์รัน (ขั้นตอนอยู่ใน PLAN_F5 หัวข้อการทดสอบ)
 - python-telegram-bot ติดตั้งเฉพาะ system python3.10 (ไม่อยู่ใน venv) — venv ที่ใช้รัน pytest ไม่มี PTB แต่ tests mock หมดจึงผ่าน
+
+## จาก F7 (2026-07-11)
+
+- **`app/services/cost_service.py` ไม่มี caller เลย** (dead module เหมือน database_adapter/business_db) — F7.2 ข้อ 5 จึงไม่มีอะไรต้อง wire; ถ้าจะใช้จริงต้องเรียก `calculate_cost` จาก usage_breakdown ที่มีแล้ว (input/output แยกให้แล้ว) — พิจารณาลบหรือ wire ในรอบถัดไป
+- trace ถูกสร้าง/emit ที่ระดับ **QueryEngine** (ไม่ใช่ hybrid_flow) เพื่อให้ cache hit ถูก trace ด้วย — hybrid_flow เติม stages/usage ผ่าน parameter
+- mcp mode (`query_with_retry`) ยังไม่ผูก trace/stage breakdown — tokens จาก generate_sql ของ provider ถูกรวมอยู่แล้ว (ไม่ hardcode) แต่ไม่มี per-stage breakdown — ยอมรับได้เพราะ hybrid คือ default

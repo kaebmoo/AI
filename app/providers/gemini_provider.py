@@ -9,7 +9,7 @@ import asyncio
 import logging
 from typing import Dict, List, Optional, Any, Union
 
-from app.providers.base import AIProvider
+from app.providers.base import AIProvider, TokenUsage
 from app.providers.retry_config import ai_retry
 from app.providers.chart_postprocessor import (
     parse_explanation_response,
@@ -44,6 +44,16 @@ class GeminiProvider(AIProvider):
 
     async def _run_async(self, func, *args, **kwargs):
         return await asyncio.to_thread(func, *args, **kwargs)
+
+    def _record_usage(self, response) -> None:
+        """Populate last_usage from google-genai response.usage_metadata."""
+        meta = getattr(response, "usage_metadata", None)
+        self.last_usage = TokenUsage(
+            input_tokens=getattr(meta, "prompt_token_count", 0) or 0,
+            output_tokens=getattr(meta, "candidates_token_count", 0) or 0,
+            cache_read_input_tokens=getattr(meta, "cached_content_token_count", 0) or 0,
+            model=self.model,
+        )
 
     @ai_retry
     async def generate_sql(self, question: str, system_prompt: str, tools: List[Dict], history: List[Dict] = []) -> Dict[str, Any]:
@@ -153,11 +163,13 @@ class GeminiProvider(AIProvider):
                 config=types.GenerateContentConfig(**config_kwargs)
             )
 
+        self.last_usage = None
         response = await self._run_async(call_api)
+        self._record_usage(response)
 
         tokens = 0
         if response.usage_metadata:
-            tokens = response.usage_metadata.prompt_token_count + response.usage_metadata.candidates_token_count
+            tokens = (response.usage_metadata.prompt_token_count or 0) + (response.usage_metadata.candidates_token_count or 0)
 
         return {
             "response": response,
@@ -180,7 +192,9 @@ class GeminiProvider(AIProvider):
                 config={"system_instruction": system_prompt, "temperature": 0.3}
             )
 
+        self.last_usage = None
         response = await self._run_async(call_api)
+        self._record_usage(response)
         text = response.text
 
         # Use shared post-processor
@@ -239,8 +253,10 @@ class GeminiProvider(AIProvider):
                 logger.error(f"GeminiProvider: API call failed: {type(e).__name__}: {e}")
                 raise
 
+        self.last_usage = None
         try:
             response = await self._run_async(call_api)
+            self._record_usage(response)
             text = response.text if response and hasattr(response, 'text') else ""
             return text
         except Exception as e:

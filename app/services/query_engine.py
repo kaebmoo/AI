@@ -392,7 +392,14 @@ class QueryEngine:
             cached = _cache_get(qcache_key)
             if cached is not None:
                 from dataclasses import replace
+                from app.services.ai.trace import emit, new_trace
                 logger.info(f"QueryEngine: Cache HIT for question (key={qcache_key[:12]}…)")
+                trace = new_trace(question)
+                trace.cache_hit = True
+                trace.provider = selected_provider_name
+                trace.context = cached.context_name
+                trace.total_s = round(time.time() - start_time, 4)
+                emit(trace)
                 # replace() = shallow copy — don't mutate the shared cached object
                 return replace(cached, execution_time_ms=(time.time() - start_time) * 1000)
 
@@ -506,6 +513,11 @@ class QueryEngine:
 
         # 4. Execute query
 
+        from app.services.ai.trace import emit, new_trace
+        trace = new_trace(question)
+        trace.provider = selected_provider
+        trace.context = context_name
+
         if mode == "hybrid":
             result = await ai_service.query_hybrid(
                 question=question,
@@ -522,6 +534,7 @@ class QueryEngine:
                 value_verification_enabled=feature_flags.get("value_verification_enabled", True),
                 cheap_model=cheap_model,
                 schema_service=self.schema_service,
+                trace=trace,
             )
         else:
             result = await ai_service.query_with_retry(
@@ -544,6 +557,10 @@ class QueryEngine:
         )
 
         execution_time = (time.time() - start_time) * 1000
+
+        trace.error = result.error or ""
+        trace.total_s = round(execution_time / 1000, 4)
+        emit(trace)
 
         # 6. Return combined result
         engine_result = QueryEngineResult(

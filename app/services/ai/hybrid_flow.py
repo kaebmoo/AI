@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, cast
 
 from app.providers.base import ConfidenceResult, QueryResult, RetryStatus
 from app.services.ai.hierarchy_context import get_column_hierarchies
+from app.services.ai.trace import new_trace, record_usage
 
 if TYPE_CHECKING:
     from app.services.ai.service import AIService
@@ -208,6 +209,7 @@ async def build_explanation(
     dim_families: Optional[Dict],
     hierarchy_info: Optional[List[Dict]],
     schema_metadata: Optional[List[Dict]],
+    trace=None,
 ) -> Any:
     if not data:
         return f"ไม่พบข้อมูลที่ตรงกับเงื่อนไข\n\nSQL ที่ใช้:\n```sql\n{sql_query}\n```\n\nอาจเป็นเพราะ:\n- ไม่มีข้อมูลที่ตรงกับคำค้นหา\n- ชื่อคอลัมน์หรือค่าที่ใช้ค้นหาอาจไม่ถูกต้อง"
@@ -257,7 +259,10 @@ async def build_explanation(
                 set_provider_model(service, original_model)
 
         t_explain = time.perf_counter() - t0
-        logger.info("Hybrid Mode: Explanation Generation took %.4fs", t_explain)
+        logger.debug("Hybrid Mode: Explanation Generation took %.4fs", t_explain)
+        if trace is not None:
+            trace.stages["explain"] = round(t_explain, 4)
+            record_usage(trace, "explain", service.provider)
         return explanation
     except RECOVERABLE_FLOW_EXCEPTIONS as explain_error:
         logger.warning("Could not get explanation: %s", explain_error)
@@ -311,6 +316,7 @@ async def generate_sql_attempt(
     system_prompt: str,
     history: Optional[List[Dict]],
     attempt: int,
+    trace=None,
 ) -> tuple[Optional[str], int, Optional[str]]:
     try:
         import time
@@ -320,8 +326,15 @@ async def generate_sql_attempt(
         response_text_raw = await service.provider.generate_content(user_prompt, system_prompt, history=native_history)
         response_text = response_text_raw if isinstance(response_text_raw, str) else str(response_text_raw)
         t_gen = time.perf_counter() - t0
-        logger.info("Hybrid Mode: SQL Generation took %.4fs", t_gen)
-        return response_text, 500, None
+        logger.debug("Hybrid Mode: SQL Generation took %.4fs", t_gen)
+
+        # Real token usage from the provider (was hardcoded 500 — B9)
+        usage = getattr(service.provider, "last_usage", None)
+        tokens_used = usage.total if usage else 0
+        if trace is not None:
+            trace.stages[f"sql_gen_a{attempt}"] = round(t_gen, 4)
+            record_usage(trace, "sql_gen", service.provider, attempt)
+        return response_text, tokens_used, None
     except RECOVERABLE_FLOW_EXCEPTIONS as gen_error:
         logger.error("Hybrid Mode: generate_content raised exception: %s: %s", type(gen_error).__name__, gen_error)
         return None, 0, f"generate_content error: {str(gen_error)}"
@@ -381,6 +394,7 @@ async def build_first_attempt_prompt(
     on_status: Optional[Callable[[RetryStatus], None]],
     attempt: int,
     max_retries: int,
+    trace=None,
 ) -> tuple[str, bool]:
     async def _rag_task() -> str:
         try:
@@ -389,8 +403,10 @@ async def build_first_attempt_prompt(
             t0 = time.perf_counter()
             ctx = await asyncio.to_thread(get_vanna_context_string, question)
             t_rag = time.perf_counter() - t0
+            if trace is not None:
+                trace.stages["rag"] = round(t_rag, 4)
             if ctx:
-                logger.info("Hybrid Mode: Injected RAG Context (%s chars) took %.4fs", len(ctx), t_rag)
+                logger.debug("Hybrid Mode: Injected RAG Context (%s chars) took %.4fs", len(ctx), t_rag)
             return ctx
         except RECOVERABLE_FLOW_EXCEPTIONS as exc:
             logger.warning("Failed to get RAG context: %s", exc)
@@ -434,6 +450,7 @@ async def build_first_attempt_prompt(
             history_context=history_context,
             rag_context=rag_context,
             cheap_model=cheap_model,
+            trace=trace,
         )
 
         if intent_json:
@@ -510,6 +527,7 @@ async def run_hybrid_attempt(
     log_value_corrections: Callable,
     prepare_data_for_explanation: Callable[[List[Dict]], List[Dict]],
     start_request: float,
+    trace=None,
 ) -> tuple[Optional[QueryResult], int, Optional[str]]:
     logger.info("Hybrid Mode: Generating SQL (attempt %s)", attempt + 1)
 
@@ -519,6 +537,7 @@ async def run_hybrid_attempt(
         system_prompt,
         history,
         attempt,
+        trace=trace,
     )
     if generation_error:
         retry_history.append({"sql": "", "error": generation_error})
@@ -580,7 +599,9 @@ async def run_hybrid_attempt(
         t0 = time.perf_counter()
         exec_data, execution_error = await execute_sql_attempt(service, sql_query)
         t_exec = time.perf_counter() - t0
-        logger.info("Hybrid Mode: SQL Execution in DB took %.4fs", t_exec)
+        if trace is not None:
+            trace.stages[f"exec_a{attempt}"] = round(t_exec, 4)
+        logger.debug("Hybrid Mode: SQL Execution in DB took %.4fs", t_exec)
         if execution_error:
             retry_history.append({"sql": sql_query, "error": execution_error})
             return None, total_tokens, sql_query
@@ -619,6 +640,7 @@ async def run_hybrid_attempt(
             dim_families,
             hierarchy_info,
             schema_metadata,
+            trace=trace,
         )
 
     # Surface the row-limit warning to the user (hybrid mode reader — mcp mode reads it in retry_loop)
@@ -641,7 +663,11 @@ async def run_hybrid_attempt(
     import time
 
     t_total = time.perf_counter() - start_request
-    logger.info("Hybrid Mode: Total Request Time: %.4fs", t_total)
+    logger.debug("Hybrid Mode: Total Request Time: %.4fs", t_total)
+
+    # Real total across all stages (intent + sql_gen attempts + explain)
+    if trace is not None and trace.usage:
+        total_tokens = sum(u["input_tokens"] + u["output_tokens"] for u in trace.usage)
 
     return QueryResult(
         question=question,
@@ -653,6 +679,7 @@ async def run_hybrid_attempt(
         retry_count=attempt,
         retry_history=retry_history if retry_history else None,
         confidence=confidence_result,
+        usage_breakdown=trace.usage if trace is not None and trace.usage else None,
     ), total_tokens, sql_query
 
 
@@ -669,9 +696,14 @@ async def query_hybrid(
     value_verification_enabled: bool = True,
     cheap_model: Optional[str] = None,
     schema_service=None,
+    trace=None,
     **kwargs,
 ) -> QueryResult:
     del value_lookup_enabled, kwargs
+
+    # Trace is normally created by QueryEngine (which also emits it);
+    # standalone callers get a local one so stage recording never crashes
+    trace = trace or new_trace(question)
 
     import time
 
@@ -762,6 +794,7 @@ async def query_hybrid(
                 on_status=on_status,
                 attempt=attempt,
                 max_retries=max_retries,
+                trace=trace,
             )
         else:
             user_prompt = build_retry_user_prompt(
@@ -793,7 +826,9 @@ async def query_hybrid(
                 log_value_corrections=log_value_corrections,
                 prepare_data_for_explanation=prepare_data_for_explanation,
                 start_request=start_request,
+                trace=trace,
             )
+            trace.attempts = attempt + 1
             if attempt_result:
                 return attempt_result
 
@@ -801,6 +836,8 @@ async def query_hybrid(
             logger.error("Hybrid Mode error: %s", exc)
             retry_history.append({"sql": sql_query or "", "error": str(exc)})
 
+    if trace.usage:
+        total_tokens = sum(u["input_tokens"] + u["output_tokens"] for u in trace.usage)
     return QueryResult(
         question=question,
         sql_query=sql_query or "",
@@ -811,6 +848,7 @@ async def query_hybrid(
         error="Max retries exceeded",
         retry_count=max_retries + 1,
         retry_history=retry_history,
+        usage_breakdown=trace.usage or None,
     )
 
 
@@ -824,6 +862,7 @@ async def extract_intent(
     history_context: str,
     rag_context: str,
     cheap_model: Optional[str] = None,
+    trace=None,
 ) -> Optional[Dict]:
     del context_name
 
@@ -888,6 +927,9 @@ async def extract_intent(
                 set_provider_model(service, original_model)
 
         t_intent = time.perf_counter() - t0
+        if trace is not None:
+            trace.stages["intent"] = round(t_intent, 4)
+            record_usage(trace, "intent", service.provider)
         intent_json = service.parse_intent_json(response_text)
 
         if intent_json:

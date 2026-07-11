@@ -282,6 +282,8 @@ Phase นี้อยู่ในสภาพใช้งานจริงแ�
 - **Telegram webhook mode: PTB application ถูก initialize/start + setWebhook จาก main lifespan** (sub-app startup ไม่เคยรัน — B5); polling ลบ webhook ค้างก่อน getUpdates + เก็บ task ref (F5.1-2) — *manual webhook E2E ยังค้าง (ดู FIX_NOTES)*
 - **Admin routing ผ่าน `/admin` explicit** — เลิก regex hijack ที่จับ "เพิ่มขึ้น/ติดลบ" ผิด (B6, F5.3)
 - **Telegram chart type เคารพ visualization จาก AI** — อ่านจาก explanation dict (F5.4)
+- **Token accounting เป็นค่าจริงจาก provider usage** — `TokenUsage`/`last_usage` ทุก provider, `QueryResult.usage_breakdown` per-stage, เลิก hardcode 500 (B9, F7.1-2)
+- **Request trace หนึ่งบรรทัด JSON ต่อ query** — `query_trace {...}` จาก QueryEngine (รวม cache hit), stage timings ย่อยลด noise เป็น debug (F7.3)
 
 ### ยังขาด
 
