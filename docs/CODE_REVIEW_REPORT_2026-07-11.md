@@ -140,3 +140,19 @@
 | P2 cleanup ลบไฟล์กลางเขียน | temp อยู่ `exports/.tmp/` — orphan sweep กวาดเฉพาะ `exports/*.xlsx` | — |
 
 **ผลรวมหลังแก้: 534 tests ผ่าน (เพิ่ม 18)** — clean-worktree CI simulation ผ่าน
+
+---
+
+## Review Round 2 (commit `54945b2`)
+
+Reviewer ยืนยัน P1/P2 ทั้ง 9 ข้อแก้แล้ว (clean env 537 passed) — residual ที่แจ้งเพิ่มแก้ครบ:
+
+| Finding | การแก้ |
+|---------|--------|
+| [P2] export quota race (count→insert ไม่ atomic) | insert-then-verify: ทุก request นับใหม่หลัง insert ของตัวเอง เกิน cap = ลบ reservation + 429 — over-run เป็นไปไม่ได้ (over-reject ที่ขอบยอมรับได้) |
+| [P3] `enabled_features` นับ budget (float) เป็น feature | filter เฉพาะ `isinstance(bool)` |
+| F9 flags ไม่มีใน Admin UI | เพิ่ม 4 switches + Latency Budget (InputNumber) ใน Settings.tsx, ขยาย `FeatureFlags` type, endpoint ใหม่ `PUT /admin/config/settings/{key}` (allowlist + validate บวก) — `tsc --noEmit` ผ่าน |
+
+**Baseline ใหม่ (เกณฑ์ strict หลัง P1-4):** exact 3/51 = 5.9% / รวม value_match 18/51 = 35.3% — feed_revenue ค่าถูก 14/14 แต่ alias ไม่ตรง golden เลย (รายละเอียด `plan/RESULT_F10.md`) — ตัวเลขนี้คือ baseline ที่ซื่อสัตย์กว่าเดิมสำหรับตัดสินใจ F8/F9/BGE-M3
+
+หมายเหตุ: ไฟล์ uncommitted ใน worktree (`.vscode/tasks.json`, `app/services/otp_service.py`, `frontend/app/(auth)/login.tsx`, `verify.tsx`) เป็น WIP ฝั่งเจ้าของโปรเจกต์ — ไม่ถูกแตะ/รวมใน commits ชุดนี้
