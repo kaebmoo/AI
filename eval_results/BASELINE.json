@@ -1,0 +1,779 @@
+{
+  "summary": {
+    "provider": null,
+    "total": 63,
+    "scored": 51,
+    "exact_match": 19,
+    "accuracy": 0.3725,
+    "golden_broken": 12,
+    "per_context": {
+      "Expense Optimization": {
+        "match": 0,
+        "total": 1
+      },
+      "Monthly Trends": {
+        "match": 0,
+        "total": 1
+      },
+      "Revenue": {
+        "match": 1,
+        "total": 1
+      },
+      "Top-N with Breakdown": {
+        "match": 0,
+        "total": 4
+      },
+      "comparison": {
+        "match": 0,
+        "total": 2
+      },
+      "expense": {
+        "match": 3,
+        "total": 8
+      },
+      "feed_revenue": {
+        "match": 13,
+        "total": 14
+      },
+      "pl_half_year_pivot": {
+        "match": 0,
+        "total": 1
+      },
+      "pl_monthly_by_bu": {
+        "match": 0,
+        "total": 1
+      },
+      "pl_operating_results": {
+        "match": 0,
+        "total": 1
+      },
+      "pl_product_performance": {
+        "match": 0,
+        "total": 2
+      },
+      "pl_service_group_performance": {
+        "match": 0,
+        "total": 1
+      },
+      "pl_yoy_comparison": {
+        "match": 0,
+        "total": 1
+      },
+      "product performance ": {
+        "match": 0,
+        "total": 1
+      },
+      "profit and loss": {
+        "match": 0,
+        "total": 2
+      },
+      "revenue": {
+        "match": 2,
+        "total": 7
+      },
+      "semantic_mapping_example": {
+        "match": 0,
+        "total": 2
+      },
+      "transfer price": {
+        "match": 0,
+        "total": 1
+      }
+    }
+  },
+  "records": [
+    {
+      "id": 1,
+      "question": "หน่วยงานไหนมีรายได้มากที่สุด 5 อันดับแรก และน้อยที่สุด 5 อันดับแรก",
+      "category": "comparison",
+      "expected_sql": "SELECT 'มากสุด' as category, department, total FROM (\n    SELECT department, SUM(revenue) as total \n    FROM revenue_search \n    GROUP BY department \n    ORDER BY total DESC \n    LIMIT 5\n)\nUNION ALL\nSELECT 'น้อยสุด' as category, department, total FROM (\n    SELECT department, SUM(revenue) as total \n    FROM revenue_search \n    GROUP BY department \n    ORDER BY total ASC \n    LIMIT 5\n)",
+      "generated_sql": "SELECT\n  'Top 5' AS category,\n  department,\n  \"รายได้รวม\"\nFROM (\n  SELECT\n    department,\n    SUM(COALESCE(revenue, 0)) AS \"รายได้รวม\"\n  FROM revenue_search\n  WHERE\n    BUSINESS_GROUP != 'รายได้อื่น' AND year = 2025\n  GROUP BY\n    department\n  ORDER BY\n    \"รายได้รวม\" DESC\n  LIMIT 5\n) AS top_departments\nUNION ALL\nSELECT\n  'Bottom 5' AS category,\n  department,\n  \"รายได้รวม\"\nFROM (\n  SELECT\n    department,\n    SUM(COALESCE(revenue, 0)) AS \"รายได้รวม\"\n  FROM revenue_search\n  WHERE\n    BUSINESS_GROUP != 'รายได้อื่น' AND year = 2025\n  GROUP BY\n    department\n  ORDER BY\n    \"รายได้รวม\" ASC\n  LIMIT 5\n) AS bottom_departments;",
+      "status": "mismatch",
+      "latency_s": 37.64,
+      "tokens": 42671,
+      "detail": "expected 10 rows, got 10"
+    },
+    {
+      "id": 2,
+      "question": "ฝ่ายไหนมีรายได้จากอสังหาริมทรัพย์มากที่สุด 5 อันดับแรก และน้อยที่สุด 5 อันดับแรก",
+      "category": "comparison",
+      "expected_sql": "SELECT 'มากสุด' as category, department, total FROM (\n    SELECT department, SUM(revenue) as total \n    FROM revenue_search \n    WHERE SERVICE_GROUP = 'กลุ่มบริการพัฒนาสินทรัพย์'\n    GROUP BY department \n    ORDER BY total DESC \n    LIMIT 5\n)\nUNION ALL\nSELECT 'น้อยสุด' as category, department, total FROM (\n    SELECT department, SUM(revenue) as total \n    FROM revenue_search \n    WHERE SERVICE_GROUP = 'กลุ่มบริการพัฒนาสินทรัพย์'\n    GROUP BY department \n    ORDER BY total ASC \n    LIMIT 5\n)",
+      "generated_sql": "SELECT 'Top 5' AS category, department, \"รายได้รวม\"\nFROM (\n    SELECT\n        department,\n        SUM(COALESCE(revenue, 0)) AS \"รายได้รวม\"\n    FROM\n        revenue_search\n    WHERE\n        service_group LIKE '%กลุ่มบริการพัฒนาสินทรัพย์%'\n        AND BUSINESS_GROUP != 'รายได้อื่น'\n        AND year = 2025\n    GROUP BY\n        department\n    ORDER BY\n        \"รายได้รวม\" DESC\n    LIMIT 5\n)\nUNION ALL\nSELECT 'Bottom 5' AS category, department, \"รายได้รวม\"\nFROM (\n    SELECT\n        department,\n        SUM(COALESCE(revenue, 0)) AS \"รายได้รวม\"\n    FROM\n        revenue_search\n    WHERE\n        service_group LIKE '%กลุ่มบริการพัฒนาสินทรัพย์%'\n        AND BUSINESS_GROUP != 'รายได้อื่น'\n        AND year = 2025\n    GROUP BY\n        department\n    ORDER BY\n        \"รายได้รวม\" ASC\n    LIMIT 5\n);",
+      "status": "mismatch",
+      "latency_s": 21.83,
+      "tokens": 29213,
+      "detail": "expected 10 rows, got 10"
+    },
+    {
+      "id": 3,
+      "question": "แบ่งกลุ่มรายได้ของ น่าน ให้ด้วย เป็น สามระดับ มาก ปานกลาง น้อย ว่ามาจากบริการอะไรบ้าง",
+      "category": "revenue",
+      "expected_sql": "WITH ServiceSummary AS (\n    -- ขั้นตอนที่ 1: สรุปรายได้แยกตามกลุ่มบริการในพื้นที่น่าน\n    SELECT \n        SERVICE_GROUP,\n        SUM(revenue) AS total_revenue\n    FROM revenue_search\n    WHERE section LIKE '%น่าน%'\n      AND BUSINESS_GROUP != 'รายได้อื่น'\n    GROUP BY SERVICE_GROUP\n),\nRankedService AS (\n    -- ขั้นตอนที่ 2: ใช้ NTILE เพื่อแบ่งกลุ่มบริการออกเป็น 3 ระดับเท่าๆ กันตามรายได้\n    SELECT \n        SERVICE_GROUP,\n        total_revenue,\n        NTILE(3) OVER (ORDER BY total_revenue DESC) as rank_group\n    FROM ServiceSummary\n)\n-- ขั้นตอนที่ 3: แสดงผลลัพธ์พร้อมระบุระดับ มาก ปานกลาง น้อย\nSELECT \n    CASE \n        WHEN rank_group = 1 THEN 'มาก'\n        WHEN rank_group = 2 THEN 'ปานกลาง'\n        ELSE 'น้อย'\n    END AS ระดับรายได้,\n    SERVICE_GROUP AS กลุ่มบริการ,\n    total_revenue AS รายได้_บาท\nFROM RankedService\nORDER BY rank_group, total_revenue DESC;",
+      "generated_sql": "SELECT\n  PRODUCT_NAME,\n  SUM(COALESCE(revenue, 0)) AS \"รายได้รวม\"\nFROM revenue_search\nWHERE\n  section LIKE '%น่าน%' AND CAST(year AS INTEGER) = 2025 AND BUSINESS_GROUP != 'รายได้อื่น'\nGROUP BY\n  PRODUCT_NAME\nORDER BY\n  \"รายได้รวม\" DESC;",
+      "status": "mismatch",
+      "latency_s": 33.83,
+      "tokens": 30289,
+      "detail": "expected 15 rows, got 38"
+    },
+    {
+      "id": 4,
+      "question": "ถ้าไม่นับการโอนเองในสายงาน ช่วยสรุป การโอนกันระหว่างสายงานให้ด้วย",
+      "category": "transfer price",
+      "expected_sql": "SELECT \n    owner_division AS สายงานผู้ให้บริการ, \n    user_division AS สายงานผู้รับบริการ, \n    SUM(total_price_value) / 1000000.0 AS total_price_million_baht\nFROM v_transfer_price\nWHERE owner_division != user_division\nAND year = 2025\nGROUP BY owner_division, user_division\nORDER BY total_price_million_baht DESC;",
+      "generated_sql": "SELECT\n  owner_division AS \"สายงานผู้ให้บริการ\",\n  user_division AS \"สายงานผู้ใช้บริการ\",\n  SUM(total_price_value) AS \"มูลค่าการโอนรวม\"\nFROM v_transfer_price\nWHERE\n  owner_division != user_division AND year = 2025\nGROUP BY\n  owner_division,\n  user_division\nORDER BY\n  \"มูลค่าการโอนรวม\" DESC;",
+      "status": "mismatch",
+      "latency_s": 21.09,
+      "tokens": 30282,
+      "detail": "expected 71 rows, got 71"
+    },
+    {
+      "id": 5,
+      "question": "ขอรายได้รายกลุ่มบริการ แบบรายเดือน",
+      "category": "Monthly Trends",
+      "expected_sql": "SELECT \n  year, \n  CAST(month AS INTEGER) AS month, \n  SERVICE_GROUP, \n  SUM(revenue) AS revenue_baht\nFROM revenue_search\nWHERE BUSINESS_GROUP != 'รายได้อื่น'\nGROUP BY year, CAST(month AS INTEGER), SERVICE_GROUP\nORDER BY year, CAST(month AS INTEGER), SERVICE_GROUP",
+      "generated_sql": "SELECT\n  SERVICE_GROUP,\n  year,\n  CAST(month AS INTEGER) AS month,\n  SUM(COALESCE(revenue, 0)) AS \"รายได้รวม\"\nFROM revenue_search\nWHERE\n  BUSINESS_GROUP != 'รายได้อื่น' AND year = 2025\nGROUP BY\n  SERVICE_GROUP,\n  year,\n  CAST(month AS INTEGER)\nORDER BY\n  year,\n  CAST(month AS INTEGER),\n  SERVICE_GROUP;",
+      "status": "mismatch",
+      "latency_s": 33.54,
+      "tokens": 29528,
+      "detail": "expected 317 rows, got 317"
+    },
+    {
+      "id": 6,
+      "question": "ถ้าตัดค่าใช้จ่ายที่สูงเกิน 75 percentile ออก ค่าใช้จ่าย 20 อันดับแรกเป็น GL อะไร แยกตามฝ่าย",
+      "category": "Expense Optimization",
+      "expected_sql": "WITH expense_ranked AS (\n      SELECT\n          expense,\n          ROW_NUMBER() OVER (ORDER BY expense) AS rn,\n          COUNT(*) OVER () AS total_count\n      FROM v_expense_mart\n  ),\n  percentile_75 AS (\n      SELECT\n          expense AS p75_expense\n      FROM expense_ranked\n      WHERE rn = CAST(total_count * 0.75 AS INTEGER)\n  ),\n  filtered_expense AS (\n      SELECT *\n      FROM v_expense_mart\n      WHERE expense <= (SELECT p75_expense FROM percentile_75)\n  )\n  SELECT\n      department,\n      gl_code || ': ' || account_name AS gl_account,\n      SUM(expense) AS total_expense\n  FROM filtered_expense\n  GROUP BY department, gl_code, account_name\n  ORDER BY total_expense DESC\n  LIMIT 20",
+      "generated_sql": "WITH PercentileCalc AS (\n    SELECT\n        expense\n    FROM\n        v_expense_mart\n    WHERE\n        year = 2025 -- ใช้ปี 2025 เป็นค่าเริ่มต้น เนื่องจากเป็นช่วงข้อมูลที่มี\n    ORDER BY\n        expense\n    LIMIT 1\n    OFFSET (SELECT CAST(COUNT(*) * 0.75 AS INTEGER) FROM v_expense_mart WHERE year = 2025)\n),\nFilteredExpenses AS (\n    SELECT\n        account_name,\n        gl_code,\n        department,\n        expense\n    FROM\n        v_expense_mart\n    WHERE\n        year = 2025 AND -- ใช้ปี 2025 เป็นค่าเริ่มต้น เนื่องจากเป็นช่วงข้อมูลที่มี\n        expense <= (SELECT expense FROM PercentileCalc)\n)\nSELECT\n    account_name AS \"ชื่อบัญชีแยกประเภท\",\n    gl_code AS \"รหัสบัญชีแยกประเภท\",\n    department AS \"ฝ่าย\",\n    SUM(COALESCE(expense, 0)) AS \"ค่าใช้จ่ายรวม\"\nFROM\n    FilteredExpenses\nGROUP BY\n    account_name,\n    gl_code,\n    department\nORDER BY\n    \"ค่าใช้จ่ายรวม\" DESC\nLIMIT 20;",
+      "status": "mismatch",
+      "latency_s": 36.5,
+      "tokens": 28493,
+      "detail": "expected 20 rows, got 20"
+    },
+    {
+      "id": 7,
+      "question": "ขอข้อมูลผลดำเนินงานกลุ่มธุรกิจ ปี 2568",
+      "category": "profit and loss",
+      "expected_sql": "SELECT \n    main_group,\n    ROUND(SUM(CASE WHEN UPPER(business_unit) LIKE '%HARD INFRASTRUCTURE%' \n          THEN amount_value ELSE 0 END) / 1e6, 2) AS hard_infra_mb,\n    ROUND(SUM(CASE WHEN UPPER(business_unit) LIKE '%INTERNATIONAL%' \n          THEN amount_value ELSE 0 END) / 1e6, 2) AS intl_mb,\n    ROUND(SUM(CASE WHEN UPPER(business_unit) LIKE '%MOBILE%' \n          THEN amount_value ELSE 0 END) / 1e6, 2) AS mobile_mb,\n    ROUND(SUM(CASE WHEN UPPER(business_unit) LIKE '%FIXED LINE%' \n          THEN amount_value ELSE 0 END) / 1e6, 2) AS fixed_bb_mb,\n    ROUND(SUM(CASE WHEN UPPER(business_unit) LIKE '%DIGITAL%' \n          THEN amount_value ELSE 0 END) / 1e6, 2) AS digital_mb,\n    ROUND(SUM(CASE WHEN UPPER(business_unit) LIKE '%ICT SOLUTION%' \n          THEN amount_value ELSE 0 END) / 1e6, 2) AS ict_sol_mb,\n    ROUND(SUM(amount_value) / 1e6, 2) AS total_mb\nFROM v_pl_costtype_nt_mth_clean\nWHERE report_year = 2025\n  AND main_group != ''\n  AND business_unit != ''\nGROUP BY main_group\nORDER BY main_group;",
+      "generated_sql": "WITH normalized_data AS (\n  SELECT\n    report_year,\n    report_month,\n    CASE\n      WHEN UPPER(business_unit) LIKE '%HARD INFRASTRUCTURE%' THEN 'Hard Infrastructure'\n      WHEN UPPER(business_unit) LIKE '%INTERNATIONAL%' THEN 'International'\n      WHEN UPPER(business_unit) LIKE '%MOBILE%' THEN 'Mobile'\n      WHEN UPPER(business_unit) LIKE '%FIXED LINE%' THEN 'Fixed Line & Broadband'\n      WHEN UPPER(business_unit) LIKE '%DIGITAL%' THEN 'Digital'\n      WHEN UPPER(business_unit) LIKE '%ICT SOLUTION%' THEN 'ICT Solution'\n      WHEN UPPER(business_unit) LIKE '%ไม่ใช่โทรคมนาคม%' THEN 'บริการอื่นไม่ใช่โทรคมนาคม'\n      WHEN UPPER(business_unit) LIKE '%รายได้อื่น%' THEN 'รายได้อื่น/ค่าใช้จ่ายอื่น'\n      WHEN UPPER(business_unit) LIKE '%นโยบายภาครัฐ%' THEN 'บริการตามนโยบายภาครัฐ'\n      ELSE business_unit\n    END AS business_unit_name,\n    main_group,\n    amount_value\n  FROM v_pl_costtype_nt_mth_clean\n  WHERE main_group != '' AND business_unit != '' AND report_year = 2025\n),\nbu_total_revenue AS (\n  SELECT\n    business_unit_name,\n    SUM(CASE WHEN main_group LIKE '01.%' THEN amount_value ELSE 0 END) AS total_revenue\n  FROM normalized_data\n  WHERE report_year = 2025\n  GROUP BY business_unit_name\n)\nSELECT\n  nd.business_unit_name AS \"กลุ่มธุรกิจ\",\n  nd.main_group AS \"รายการ\",\n  ROUND(SUM(nd.amount_value) / 1000000.0, 2) AS \"มูลค่า (ล้านบาท)\"\nFROM normalized_data nd\nJOIN bu_total_revenue btr ON nd.business_unit_name = btr.business_unit_name\nWHERE nd.report_year = 2025\n  AND nd.main_group IN (\n    '01.รายได้',\n    '02.ต้นทุนบริการและต้นทุนขาย :',\n    '03.กำไรขั้นต้น',\n    '08.กำไรก่อนต้นทุนจัดหาเงินฯ',\n    '12.กำไรก่อนภาษี',\n    '14.กำไรสุทธิ'\n  )\nGROUP BY\n  nd.business_unit_name,\n  nd.main_group\nORDER BY\n  btr.total_revenue DESC,\n  nd.main_group ASC;",
+      "status": "mismatch",
+      "latency_s": 36.1,
+      "tokens": 37157,
+      "detail": "expected 14 rows, got 14"
+    },
+    {
+      "id": 8,
+      "question": "ขอข้อมูลผลดำเนินงานกลุ่มธุรกิจ ปี 2568",
+      "category": "pl_operating_results",
+      "expected_sql": "SELECT \n    CASE \n        WHEN UPPER(business_unit) LIKE '%HARD INFRASTRUCTURE%' THEN 'Hard Infrastructure'\n        WHEN UPPER(business_unit) LIKE '%INTERNATIONAL%'       THEN 'International'\n        WHEN UPPER(business_unit) LIKE '%MOBILE%'              THEN 'Mobile'\n        WHEN UPPER(business_unit) LIKE '%FIXED LINE%'          THEN 'Fixed Line & Broadband'\n        WHEN UPPER(business_unit) LIKE '%DIGITAL%'             THEN 'Digital'\n        WHEN UPPER(business_unit) LIKE '%ICT SOLUTION%'        THEN 'ICT Solution'\n        WHEN UPPER(business_unit) LIKE '%ไม่ใช่โทรคมนาคม%'     THEN 'บริการอื่นไม่ใช่โทรคมนาคม'\n        WHEN UPPER(business_unit) LIKE '%รายได้อื่น%'           THEN 'รายได้อื่น/ค่าใช้จ่ายอื่น'\n        WHEN UPPER(business_unit) LIKE '%นโยบายภาครัฐ%'        THEN 'บริการตามนโยบายภาครัฐ'\n        ELSE business_unit\n    END AS business_unit_name,\n    ROUND(SUM(CASE WHEN main_group LIKE '01.%' THEN amount_value ELSE 0 END) / 1e6, 2) AS revenue_mb,\n    ROUND(SUM(CASE WHEN main_group LIKE '02.%' THEN amount_value ELSE 0 END) / 1e6, 2) AS cost_of_service_mb,\n    ROUND(SUM(CASE WHEN main_group LIKE '03.%' THEN amount_value ELSE 0 END) / 1e6, 2) AS gross_profit_mb,\n    ROUND(SUM(CASE WHEN main_group LIKE '04.%' THEN amount_value ELSE 0 END) / 1e6, 2) AS selling_expense_mb,\n    ROUND(SUM(CASE WHEN main_group LIKE '06.%' THEN amount_value ELSE 0 END) / 1e6, 2) AS admin_expense_mb,\n    ROUND(SUM(CASE WHEN main_group LIKE '08.%' THEN amount_value ELSE 0 END) / 1e6, 2) AS operating_profit_mb\nFROM v_pl_costtype_nt_mth_clean\nWHERE report_year = 2025\n  AND business_unit != ''\n  AND main_group != ''\nGROUP BY business_unit_name\nORDER BY revenue_mb DESC",
+      "generated_sql": null,
+      "status": "execution_failed",
+      "latency_s": 14.14,
+      "tokens": null,
+      "detail": "502 Bad Gateway. {'message': '<!DOCTYPE html>\\n<html lang=en>\\n  <meta charset=utf-8>\\n  <meta name=viewport content=\"initial-scale=1, minimum-scale=1, width=device-width\">\\n  <title>Error 502 (Server Error)!!1</title>\\n  <style>\\n    *{margin:0;padding:0}html,code{font:15px/22px arial,sans-serif}html{background:#fff;color:#222;padding:15px}body{margin:7% auto 0;max-width:390px;min-height:180px;padding:30px 0 15px}* > body{background:url(//www.google.com/images/errors/robot.png) 100% 5px no-repeat;padding-right:205px}p{margin:11px 0 22px;overflow:hidden}ins{color:#777;text-decoration:none}a img{border:0}@media screen and (max-width:772px){body{background:none;margin-top:0;max-width:none;padding-right:0}}#logo{background:url(//www.google.com/images/branding/googlelogo/1x/googlelogo_color_150x54dp.png) no-repeat;margin-left:-5px}@media only screen and (min-resolution:192dpi){#logo{background:url(//www.google.com/images/branding/googlelogo/2x/googlelogo_color_150x54dp.png) no-repeat 0% 0%/100% 100%;-moz-border-image:url(//www.google.com/images/branding/googlelogo/2x/googlelogo_color_150x54dp.png) 0}}@media only screen and (-webkit-min-device-pixel-ratio:2){#logo{background:url(//www.google.com/images/branding/googlelogo/2x/googlelogo_color_150x54dp.png) no-repeat;-webkit-background-size:100% 100%}}#logo{display:inline-block;height:54px;width:150px}\\n  </style>\\n  <a href=//www.google.com/><span id=logo aria-label=Google></span></a>\\n  <p><b>502.</b> <ins>That’s an error.</ins>\\n  <p>The server encountered a temporary error and could not complete your request.<p>Please try again in 30 seconds.  <ins>That’s all we know.</ins>\\n', 'status': 'Bad Gateway'}"
+    },
+    {
+      "id": 9,
+      "question": "เทียบผลดำเนินงานกลุ่มธุรกิจของปี 2567 และ 2568 ขอผลต่างด้วย ทั้งกำไร รายได้ ค่าใช้จ่าย",
+      "category": "pl_yoy_comparison",
+      "expected_sql": "SELECT \n    CASE \n        WHEN UPPER(business_unit) LIKE '%HARD INFRASTRUCTURE%' THEN 'Hard Infrastructure'\n        WHEN UPPER(business_unit) LIKE '%INTERNATIONAL%'       THEN 'International'\n        WHEN UPPER(business_unit) LIKE '%MOBILE%'              THEN 'Mobile'\n        WHEN UPPER(business_unit) LIKE '%FIXED LINE%'          THEN 'Fixed Line & Broadband'\n        WHEN UPPER(business_unit) LIKE '%DIGITAL%'             THEN 'Digital'\n        WHEN UPPER(business_unit) LIKE '%ICT SOLUTION%'        THEN 'ICT Solution'\n        WHEN UPPER(business_unit) LIKE '%ไม่ใช่โทรคมนาคม%'     THEN 'บริการอื่นไม่ใช่โทรคมนาคม'\n        WHEN UPPER(business_unit) LIKE '%รายได้อื่น%'           THEN 'รายได้อื่น/ค่าใช้จ่ายอื่น'\n        WHEN UPPER(business_unit) LIKE '%นโยบายภาครัฐ%'        THEN 'บริการตามนโยบายภาครัฐ'\n        ELSE business_unit\n    END AS business_unit_name,\n    -- รายได้\n    ROUND(SUM(CASE WHEN main_group LIKE '01.%' AND report_year = 2024 THEN amount_value ELSE 0 END) / 1e6, 2) AS revenue_2567,\n    ROUND(SUM(CASE WHEN main_group LIKE '01.%' AND report_year = 2025 THEN amount_value ELSE 0 END) / 1e6, 2) AS revenue_2568,\n    ROUND((SUM(CASE WHEN main_group LIKE '01.%' AND report_year = 2025 THEN amount_value ELSE 0 END) \n         - SUM(CASE WHEN main_group LIKE '01.%' AND report_year = 2024 THEN amount_value ELSE 0 END)) / 1e6, 2) AS revenue_diff,\n    -- ค่าใช้จ่ายรวม (02+04+06)\n    ROUND((SUM(CASE WHEN main_group LIKE '02.%' AND report_year = 2024 THEN amount_value ELSE 0 END)\n         + SUM(CASE WHEN main_group LIKE '04.%' AND report_year = 2024 THEN amount_value ELSE 0 END)\n         + SUM(CASE WHEN main_group LIKE '06.%' AND report_year = 2024 THEN amount_value ELSE 0 END)) / 1e6, 2) AS expense_2567,\n    ROUND((SUM(CASE WHEN main_group LIKE '02.%' AND report_year = 2025 THEN amount_value ELSE 0 END)\n         + SUM(CASE WHEN main_group LIKE '04.%' AND report_year = 2025 THEN amount_value ELSE 0 END)\n         + SUM(CASE WHEN main_group LIKE '06.%' AND report_year = 2025 THEN amount_value ELSE 0 END)) / 1e6, 2) AS expense_2568,\n    ROUND(((SUM(CASE WHEN main_group LIKE '02.%' AND report_year = 2025 THEN amount_value ELSE 0 END)\n          + SUM(CASE WHEN main_group LIKE '04.%' AND report_year = 2025 THEN amount_value ELSE 0 END)\n          + SUM(CASE WHEN main_group LIKE '06.%' AND report_year = 2025 THEN amount_value ELSE 0 END))\n         -(SUM(CASE WHEN main_group LIKE '02.%' AND report_year = 2024 THEN amount_value ELSE 0 END)\n          + SUM(CASE WHEN main_group LIKE '04.%' AND report_year = 2024 THEN amount_value ELSE 0 END)\n          + SUM(CASE WHEN main_group LIKE '06.%' AND report_year = 2024 THEN amount_value ELSE 0 END))) / 1e6, 2) AS expense_diff,\n    -- กำไรสุทธิ\n    ROUND(SUM(CASE WHEN main_group LIKE '14.%' AND report_year = 2024 THEN amount_value ELSE 0 END) / 1e6, 2) AS net_profit_2567,\n    ROUND(SUM(CASE WHEN main_group LIKE '14.%' AND report_year = 2025 THEN amount_value ELSE 0 END) / 1e6, 2) AS net_profit_2568,\n    ROUND((SUM(CASE WHEN main_group LIKE '14.%' AND report_year = 2025 THEN amount_value ELSE 0 END)\n         - SUM(CASE WHEN main_group LIKE '14.%' AND report_year = 2024 THEN amount_value ELSE 0 END)) / 1e6, 2) AS net_profit_diff\nFROM v_pl_costtype_nt_mth_clean\nWHERE main_group != ''\n  AND business_unit != ''\n  AND report_year IN (2024, 2025)\nGROUP BY business_unit_name\nORDER BY revenue_2568 DESC",
+      "generated_sql": "SELECT\n  e2025.business_group,\n  COALESCE(e2024.total_expense, 0) AS \"ค่าใช้จ่ายรวมปี 2567\",\n  COALESCE(e2025.total_expense, 0) AS \"ค่าใช้จ่ายรวมปี 2568\",\n  (COALESCE(e2025.total_expense, 0) - COALESCE(e2024.total_expense, 0)) AS \"ผลต่างค่าใช้จ่าย (2568-2567)\"\nFROM (\n  SELECT\n    business_group,\n    SUM(COALESCE(expense, 0)) AS total_expense\n  FROM v_expense_mart\n  WHERE year = 2025\n  GROUP BY business_group\n) AS e2025\nLEFT JOIN (\n  SELECT\n    business_group,\n    SUM(COALESCE(expense, 0)) AS total_expense\n  FROM v_expense_mart\n  WHERE year = 2024\n  GROUP BY business_group\n) AS e2024\nON e2025.business_group = e2024.business_group\nORDER BY e2025.business_group;",
+      "status": "mismatch",
+      "latency_s": 39.75,
+      "tokens": 26586,
+      "detail": "expected 8 rows, got 1"
+    },
+    {
+      "id": 10,
+      "question": "บริการใดที่มีผลประกอบการดี",
+      "category": "profit and loss",
+      "expected_sql": "SELECT \n    product_name,\n    SUM(revenue) as total_revenue,\n    SUM(total_cost) as total_cost,\n    SUM(gross_profit) as total_gross_profit,\n    ROUND(AVG(gross_margin_pct), 2) as avg_gross_margin_pct,\n    ROUND(SUM(gross_profit) * 100.0 / NULLIF(SUM(revenue), 0), 2) as overall_margin_pct\nFROM v_pl_costtype_nt_mth_clean\nWHERE year = 2024\nGROUP BY product_name\nHAVING SUM(revenue) > 0\nORDER BY total_gross_profit DESC\nLIMIT 10;",
+      "generated_sql": null,
+      "status": "golden_broken",
+      "latency_s": null,
+      "tokens": null,
+      "detail": "no such column: revenue"
+    },
+    {
+      "id": 11,
+      "question": "บริการใดที่มีผลประกอบการดี",
+      "category": "pl_product_performance",
+      "expected_sql": "SELECT \n    product_name,\n    ROUND(SUM(CASE WHEN main_group LIKE '01.%' THEN amount_value ELSE 0 END) / 1e6, 2) AS revenue_mb,\n    ROUND(SUM(CASE WHEN main_group LIKE '02.%' THEN amount_value ELSE 0 END) / 1e6, 2) AS cost_of_service_mb,\n    ROUND(SUM(CASE WHEN main_group LIKE '03.%' THEN amount_value ELSE 0 END) / 1e6, 2) AS gross_profit_mb,\n    ROUND(SUM(CASE WHEN main_group LIKE '03.%' THEN amount_value ELSE 0 END) * 100.0 /\n          NULLIF(SUM(CASE WHEN main_group LIKE '01.%' THEN amount_value ELSE 0 END), 0), 1) AS gross_margin_pct\nFROM v_pl_costtype_nt_mth_clean\nWHERE report_year = 2025\n  AND main_group != ''\n  AND product_name != ''\nGROUP BY product_name\nHAVING SUM(CASE WHEN main_group LIKE '01.%' THEN amount_value ELSE 0 END) > 0\nORDER BY gross_profit_mb DESC\nLIMIT 15",
+      "generated_sql": "SELECT\n  PRODUCT_NAME,\n  SUM(COALESCE(revenue, 0)) AS \"รายได้รวม\"\nFROM revenue_search\nWHERE\n  BUSINESS_GROUP != 'รายได้อื่น' AND year = 2025\nGROUP BY\n  PRODUCT_NAME\nORDER BY\n  \"รายได้รวม\" DESC\nLIMIT 10;",
+      "status": "mismatch",
+      "latency_s": 15.25,
+      "tokens": 28691,
+      "detail": "expected 15 rows, got 10"
+    },
+    {
+      "id": 12,
+      "question": "บริการใดที่ขาดทุน",
+      "category": "pl_product_performance",
+      "expected_sql": "SELECT \n    product_name,\n    ROUND(SUM(CASE WHEN main_group LIKE '01.%' THEN amount_value ELSE 0 END) / 1e6, 2) AS revenue_mb,\n    ROUND(SUM(CASE WHEN main_group LIKE '02.%' THEN amount_value ELSE 0 END) / 1e6, 2) AS cost_of_service_mb,\n    ROUND(SUM(CASE WHEN main_group LIKE '03.%' THEN amount_value ELSE 0 END) / 1e6, 2) AS gross_profit_mb,\n    ROUND(SUM(CASE WHEN main_group LIKE '03.%' THEN amount_value ELSE 0 END) * 100.0 /\n          NULLIF(SUM(CASE WHEN main_group LIKE '01.%' THEN amount_value ELSE 0 END), 0), 1) AS gross_margin_pct\nFROM v_pl_costtype_nt_mth_clean\nWHERE report_year = 2025\n  AND main_group != ''\n  AND product_name != ''\nGROUP BY product_name\nHAVING SUM(CASE WHEN main_group LIKE '03.%' THEN amount_value ELSE 0 END) < 0\nORDER BY gross_profit_mb ASC",
+      "generated_sql": "SELECT\n  product_name AS \"บริการ\",\n  ROUND(SUM(amount_value) / 1000000.0, 2) AS \"ขาดทุนสุทธิ (ล้านบาท)\"\nFROM v_pl_costtype_nt_mth_clean\nWHERE\n  report_year = 2025 AND\n  main_group LIKE '14.%' AND -- กำไรสุทธิ\n  main_group != '' AND\n  product_name != ''\nGROUP BY\n  product_name\nHAVING\n  SUM(amount_value) < 0\nORDER BY\n  \"ขาดทุนสุทธิ (ล้านบาท)\" ASC\nLIMIT 10;",
+      "status": "mismatch",
+      "latency_s": 18.82,
+      "tokens": 35646,
+      "detail": "expected 82 rows, got 10"
+    },
+    {
+      "id": 13,
+      "question": "กลุ่มบริการใดมีรายได้สูงสุด",
+      "category": "pl_service_group_performance",
+      "expected_sql": "SELECT \n    service_group,\n    ROUND(SUM(CASE WHEN main_group LIKE '01.%' THEN amount_value ELSE 0 END) / 1e6, 2) AS revenue_mb,\n    ROUND(SUM(CASE WHEN main_group LIKE '03.%' THEN amount_value ELSE 0 END) / 1e6, 2) AS gross_profit_mb,\n    ROUND(SUM(CASE WHEN main_group LIKE '03.%' THEN amount_value ELSE 0 END) * 100.0 /\n          NULLIF(SUM(CASE WHEN main_group LIKE '01.%' THEN amount_value ELSE 0 END), 0), 1) AS gross_margin_pct\nFROM v_pl_costtype_nt_mth\nWHERE report_year = 2025\n  AND main_group != ''\n  AND service_group != ''\nGROUP BY service_group\nORDER BY revenue_mb DESC\nLIMIT 10",
+      "generated_sql": "SELECT\n  SERVICE_GROUP,\n  SUM(COALESCE(revenue, 0)) AS \"รายได้รวม\"\nFROM revenue_search\nWHERE\n  BUSINESS_GROUP != 'รายได้อื่น' AND year = 2025\nGROUP BY\n  SERVICE_GROUP\nORDER BY\n  \"รายได้รวม\" DESC\nLIMIT 1;",
+      "status": "mismatch",
+      "latency_s": 13.5,
+      "tokens": 27923,
+      "detail": "expected 10 rows, got 1"
+    },
+    {
+      "id": 14,
+      "question": "ผลดำเนินงานของ บริการ NT HOME PHONE",
+      "category": "product performance ",
+      "expected_sql": "SELECT \n    main_group, \n    ROUND(SUM(amount_value) / 1000000.0, 2) AS value_million_baht\nFROM v_pl_costtype_nt_mth_clean\nWHERE \n    report_year = 2025 \n    AND main_group != '' \n    AND UPPER(product_name) LIKE '%NT HOME PHONE%'\nGROUP BY main_group\nORDER BY main_group;",
+      "generated_sql": "SELECT\n  product_name AS \"ชื่อผลิตภัณฑ์\",\n  main_group AS \"รายการ\",\n  ROUND(SUM(amount_value) / 1000000.0, 2) AS \"มูลค่า (ล้านบาท)\"\nFROM v_pl_costtype_nt_mth_clean\nWHERE\n  report_year = 2025\n  AND product_name LIKE '%NT HOME PHONE%'\n  AND main_group IN ('01.รายได้', '02.ต้นทุนบริการและต้นทุนขาย :', '03.กำไรขั้นต้น', '08.กำไรก่อนต้นทุนจัดหาเงินฯ', '14.กำไรสุทธิ')\n  AND main_group != ''\n  AND business_unit != ''\nGROUP BY\n  product_name,\n  main_group\nORDER BY\n  product_name,\n  main_group;",
+      "status": "mismatch",
+      "latency_s": 39.06,
+      "tokens": 52339,
+      "detail": "expected 10 rows, got 2"
+    },
+    {
+      "id": 15,
+      "question": "ผลดำเนินงาน 6 เดือนแรกของปี แยกกลุ่มธุรกิจและกลุ่มบริการ",
+      "category": "pl_half_year_pivot",
+      "expected_sql": "SELECT\n    CASE\n        WHEN UPPER(business_unit) LIKE '%HARD INFRASTRUCTURE%' THEN 'Hard Infrastructure'\n        WHEN UPPER(business_unit) LIKE '%INTERNATIONAL%' THEN 'International'\n        WHEN UPPER(business_unit) LIKE '%MOBILE%' THEN 'Mobile'\n        WHEN UPPER(business_unit) LIKE '%FIXED LINE%' THEN 'Fixed Line & Broadband'\n        WHEN UPPER(business_unit) LIKE '%DIGITAL%' THEN 'Digital'\n        WHEN UPPER(business_unit) LIKE '%ICT SOLUTION%' THEN 'ICT Solution'\n        ELSE business_unit\n    END AS business_unit_name,\n    service_group,\n    ROUND(SUM(CASE WHEN report_month = 1 THEN CASE WHEN main_group LIKE '01.%' THEN amount_value ELSE 0 END ELSE 0 END)/1e6, 2) AS \"ม.ค._revenue\",\n    ROUND(SUM(CASE WHEN report_month = 2 THEN CASE WHEN main_group LIKE '01.%' THEN amount_value ELSE 0 END ELSE 0 END)/1e6, 2) AS \"ก.พ._revenue\",\n    ROUND(SUM(CASE WHEN report_month = 3 THEN CASE WHEN main_group LIKE '01.%' THEN amount_value ELSE 0 END ELSE 0 END)/1e6, 2) AS \"มี.ค._revenue\",\n    ROUND(SUM(CASE WHEN report_month = 4 THEN CASE WHEN main_group LIKE '01.%' THEN amount_value ELSE 0 END ELSE 0 END)/1e6, 2) AS \"เม.ย._revenue\",\n    ROUND(SUM(CASE WHEN report_month = 5 THEN CASE WHEN main_group LIKE '01.%' THEN amount_value ELSE 0 END ELSE 0 END)/1e6, 2) AS \"พ.ค._revenue\",\n    ROUND(SUM(CASE WHEN report_month = 6 THEN CASE WHEN main_group LIKE '01.%' THEN amount_value ELSE 0 END ELSE 0 END)/1e6, 2) AS \"มิ.ย._revenue\",\n    ROUND(SUM(CASE WHEN main_group LIKE '01.%' THEN amount_value ELSE 0 END)/1e6, 2) AS \"รวม_revenue\",\n    ROUND(SUM(CASE WHEN main_group LIKE '03.%' THEN amount_value ELSE 0 END)/1e6, 2) AS \"รวม_gross_profit\"\nFROM v_pl_costtype_nt_mth_clean\nWHERE report_year = 2024\n  AND report_month BETWEEN 1 AND 6\n  AND main_group != ''\n  AND business_unit != ''\nGROUP BY business_unit_name, service_group\nORDER BY \"รวม_revenue\" DESC",
+      "generated_sql": "WITH RankedBusinessUnits AS (\n    SELECT\n        CASE\n            WHEN UPPER(business_unit) LIKE '%HARD INFRASTRUCTURE%' THEN 'Hard Infrastructure'\n            WHEN UPPER(business_unit) LIKE '%INTERNATIONAL%' THEN 'International'\n            WHEN UPPER(business_unit) LIKE '%MOBILE%' THEN 'Mobile'\n            WHEN UPPER(business_unit) LIKE '%FIXED LINE%' THEN 'Fixed Line & Broadband'\n            WHEN UPPER(business_unit) LIKE '%DIGITAL%' THEN 'Digital'\n            WHEN UPPER(business_unit) LIKE '%ICT SOLUTION%' THEN 'ICT Solution'\n            WHEN UPPER(business_unit) LIKE '%ไม่ใช่โทรคมนาคม%' THEN 'บริการอื่นไม่ใช่โทรคมนาคม'\n            WHEN UPPER(business_unit) LIKE '%รายได้อื่น%' THEN 'รายได้อื่น/ค่าใช้จ่ายอื่น'\n            WHEN UPPER(business_unit) LIKE '%นโยบายภาครัฐ%' THEN 'บริการตามนโยบายภาครัฐ'\n            ELSE business_unit\n        END AS business_unit_name,\n        service_group AS service_group_name,\n        SUM(CASE WHEN main_group LIKE '01.%' THEN amount_value ELSE 0 END) AS total_revenue_bu_sg\n    FROM v_pl_costtype_nt_mth_clean\n    WHERE\n        report_year = 2025\n        AND CAST(report_month AS INTEGER) BETWEEN 1 AND 6\n        AND main_group != ''\n        AND business_unit != ''\n        AND service_group != ''\n    GROUP BY\n        business_unit_name,\n        service_group_name\n)\nSELECT\n  CASE\n    WHEN UPPER(T1.business_unit) LIKE '%HARD INFRASTRUCTURE%' THEN 'Hard Infrastructure'\n    WHEN UPPER(T1.business_unit) LIKE '%INTERNATIONAL%' THEN 'International'\n    WHEN UPPER(T1.business_unit) LIKE '%MOBILE%' THEN 'Mobile'\n    WHEN UPPER(T1.business_unit) LIKE '%FIXED LINE%' THEN 'Fixed Line & Broadband'\n    WHEN UPPER(T1.business_unit) LIKE '%DIGITAL%' THEN 'Digital'\n    WHEN UPPER(T1.business_unit) LIKE '%ICT SOLUTION%' THEN 'ICT Solution'\n    WHEN UPPER(T1.business_unit) LIKE '%ไม่ใช่โทรคมนาคม%' THEN 'บริการอื่นไม่ใช่โทรคมนาคม'\n    WHEN UPPER(T1.business_unit) LIKE '%รายได้อื่น%' THEN 'รายได้อื่น/ค่าใช้จ่ายอื่น'\n    WHEN UPPER(T1.business_unit) LIKE '%นโยบายภาครัฐ%' THEN 'บริการตามนโยบายภาครัฐ'\n    ELSE T1.business_unit\n  END AS \"กลุ่มธุรกิจ\",\n  T1.service_group AS \"กลุ่มบริการ\",\n  T1.main_group AS \"รายการ\",\n  ROUND(SUM(T1.amount_value) / 1000000.0, 2) AS \"ยอดรวม 6 เดือนแรก (ล้านบาท)\"\nFROM v_pl_costtype_nt_mth_clean AS T1\nJOIN RankedBusinessUnits AS RBU\n  ON (CASE\n        WHEN UPPER(T1.business_unit) LIKE '%HARD INFRASTRUCTURE%' THEN 'Hard Infrastructure'\n        WHEN UPPER(T1.business_unit) LIKE '%INTERNATIONAL%' THEN 'International'\n        WHEN UPPER(T1.business_unit) LIKE '%MOBILE%' THEN 'Mobile'\n        WHEN UPPER(T1.business_unit) LIKE '%FIXED LINE%' THEN 'Fixed Line & Broadband'\n        WHEN UPPER(T1.business_unit) LIKE '%DIGITAL%' THEN 'Digital'\n        WHEN UPPER(T1.business_unit) LIKE '%ICT SOLUTION%' THEN 'ICT Solution'\n        WHEN UPPER(T1.business_unit) LIKE '%ไม่ใช่โทรคมนาคม%' THEN 'บริการอื่นไม่ใช่โทรคมนาคม'\n        WHEN UPPER(T1.business_unit) LIKE '%รายได้อื่น%' THEN 'รายได้อื่น/ค่าใช้จ่ายอื่น'\n        WHEN UPPER(T1.business_unit) LIKE '%นโยบายภาครัฐ%' THEN 'บริการตามนโยบายภาครัฐ'\n        ELSE T1.business_unit\n      END) = RBU.business_unit_name\n  AND T1.service_group = RBU.service_group_name\nWHERE\n  T1.report_year = 2025\n  AND CAST(T1.report_month AS INTEGER) BETWEEN 1 AND 6\n  AND T1.main_group IN (\n    '01.รายได้',\n    '02.ต้นทุนบริการและต้นทุนขาย :',\n    '03.กำไรขั้นต้น',\n    '08.กำไรก่อนต้นทุนจัดหาเงินฯ',\n    '12.กำไรก่อนภาษี',\n    '14.กำไรสุทธิ'\n  )\n  AND T1.main_group != ''\n  AND T1.business_unit != ''\n  AND T1.service_group != ''\nGROUP BY\n  \"กลุ่มธุรกิจ\",\n  \"กลุ่มบริการ\",\n  \"รายการ\"\nORDER BY\n  RBU.total_revenue_bu_sg DESC,\n  \"กลุ่มธุรกิจ\",\n  \"กลุ่มบริการ\",\n  \"รายการ\";",
+      "status": "mismatch",
+      "latency_s": 74.45,
+      "tokens": 42348,
+      "detail": "expected 30 rows, got 52"
+    },
+    {
+      "id": 16,
+      "question": "รายได้ trunk radio ปี 2568",
+      "category": "semantic_mapping_example",
+      "expected_sql": "SELECT report_year, SUM(amount_value) / 1000000.0 AS revenue_million_baht FROM v_pl_costtype_nt_mth_clean WHERE (UPPER(product_name) LIKE '%TRUNK%' OR UPPER(product_name) LIKE '%TRUNKED%' OR product_name LIKE '%วิทยุเฉพาะกิจ%') AND report_year = 2025 GROUP BY report_year",
+      "generated_sql": "SELECT\n  SUM(COALESCE(revenue, 0)) AS \"รายได้รวม\"\nFROM revenue_search\nWHERE\n  (\n    UPPER(product_name) LIKE '%TRUNK%' OR UPPER(product_name) LIKE '%TRUNKED%' OR product_name LIKE '%วิทยุเฉพาะกิจ%'\n  ) AND year = 2025 AND BUSINESS_GROUP != 'รายได้อื่น';",
+      "status": "mismatch",
+      "latency_s": 13.01,
+      "tokens": 28462,
+      "detail": "expected 1 rows, got 1"
+    },
+    {
+      "id": 17,
+      "question": "ค่าใช้จ่าย trunk radio ปี 2568",
+      "category": "semantic_mapping_example",
+      "expected_sql": "SELECT sub_group, ROUND(SUM(amount_value) / 1000000.0, 2) AS expense_million_baht FROM v_pl_costtype_nt_mth_clean WHERE (UPPER(product_name) LIKE '%TRUNK%' OR UPPER(product_name) LIKE '%TRUNKED%' OR product_name LIKE '%วิทยุเฉพาะกิจ%') AND report_year = 2025 GROUP BY sub_group ORDER BY expense_million_baht DESC",
+      "generated_sql": "SELECT\n  SUM(COALESCE(expense, 0)) AS \"ค่าใช้จ่ายรวม\"\nFROM v_expense_mart\nWHERE\n  year = 2025 AND (\n    account_name LIKE '%TRUNK%' OR account_name LIKE '%TRUNKED%' OR account_name LIKE '%วิทยุเฉพาะกิจ%'\n  );",
+      "status": "mismatch",
+      "latency_s": 46.4,
+      "tokens": 62029,
+      "detail": "expected 24 rows, got 1"
+    },
+    {
+      "id": 18,
+      "question": "รายได้ mobile ปี 2568",
+      "category": "semantic_mapping_example",
+      "expected_sql": "SELECT SUM(REVENUE_VALUE) / 1000000.0 AS mobile_revenue_million FROM revenue_search WHERE (UPPER(BUSINESS_GROUP) = 'MOBILE' OR BUSINESS_GROUP = 'Mobile') AND YEAR = 2025",
+      "generated_sql": null,
+      "status": "golden_broken",
+      "latency_s": null,
+      "tokens": null,
+      "detail": "no such column: REVENUE_VALUE"
+    },
+    {
+      "id": 19,
+      "question": "20 อันดับแรก ฝ่ายที่มีรายได้สูงสุด รายไตรมาส",
+      "category": "Top-N with Breakdown",
+      "expected_sql": "SELECT department as \"ฝ่าย\", CASE WHEN CAST(month AS INTEGER) IN (1,2,3) THEN 'Q1' WHEN CAST(month AS INTEGER) IN (4,5,6) THEN 'Q2' WHEN CAST(month AS INTEGER) IN (7,8,9) THEN 'Q3' ELSE 'Q4' END AS quarter, SUM(revenue) AS \"รายได้รวม\"\nFROM revenue_search\nWHERE year = 2025 AND BUSINESS_GROUP != 'รายได้อื่น'\n  AND department IN (\n    SELECT department FROM revenue_search\n    WHERE year = 2025 AND BUSINESS_GROUP != 'รายได้อื่น'\n    GROUP BY department ORDER BY SUM(revenue) DESC LIMIT 20\n  )\nGROUP BY department, quarter\nORDER BY SUM(revenue) DESC, quarter ASC",
+      "generated_sql": "SELECT\n  T1.department AS \"ฝ่าย\",\n  CASE\n    WHEN CAST(T1.month AS INTEGER) IN (1, 2, 3) THEN 'Q1'\n    WHEN CAST(T1.month AS INTEGER) IN (4, 5, 6) THEN 'Q2'\n    WHEN CAST(T1.month AS INTEGER) IN (7, 8, 9) THEN 'Q3'\n    ELSE 'Q4'\n  END AS \"ไตรมาส\",\n  SUM(COALESCE(T1.revenue, 0)) AS \"รายได้รวม\"\nFROM revenue_search AS T1\nWHERE\n  T1.year = 2025 AND T1.BUSINESS_GROUP != 'รายได้อื่น' AND T1.department IN (\n    SELECT\n      department\n    FROM revenue_search\n    WHERE\n      year = 2025 AND BUSINESS_GROUP != 'รายได้อื่น'\n    GROUP BY\n      department\n    ORDER BY\n      SUM(COALESCE(revenue, 0)) DESC\n    LIMIT 20\n  )\nGROUP BY\n  T1.department,\n  \"ไตรมาส\"\nORDER BY\n  \"รายได้รวม\" DESC;",
+      "status": "mismatch",
+      "latency_s": 33.41,
+      "tokens": 32748,
+      "detail": "expected 80 rows, got 80"
+    },
+    {
+      "id": 20,
+      "question": "10 อันดับแรก กลุ่มบริการที่มีรายได้สูงสุด แยกรายเดือน",
+      "category": "Top-N with Breakdown",
+      "expected_sql": "SELECT SERVICE_GROUP, CAST(month AS INTEGER) AS month, SUM(revenue) AS total_revenue\nFROM revenue_search\nWHERE year = 2025 AND BUSINESS_GROUP != 'รายได้อื่น'\n  AND SERVICE_GROUP IN (\n    SELECT SERVICE_GROUP FROM revenue_search\n    WHERE year = 2025 AND BUSINESS_GROUP != 'รายได้อื่น'\n    GROUP BY SERVICE_GROUP ORDER BY SUM(revenue) DESC LIMIT 10\n  )\nGROUP BY SERVICE_GROUP, month\nORDER BY SERVICE_GROUP, month",
+      "generated_sql": "SELECT\n  t1.SERVICE_GROUP,\n  CAST(t1.month AS INTEGER) AS month,\n  SUM(COALESCE(t1.revenue, 0)) AS \"รายได้รวม\"\nFROM revenue_search AS t1\nJOIN (\n  SELECT\n    SERVICE_GROUP,\n    SUM(COALESCE(revenue, 0)) AS total_annual_revenue\n  FROM revenue_search\n  WHERE\n    year = 2026 AND BUSINESS_GROUP != 'รายได้อื่น'\n  GROUP BY\n    SERVICE_GROUP\n  ORDER BY\n    total_annual_revenue DESC\n  LIMIT 10\n) AS top_service_groups\n  ON t1.SERVICE_GROUP = top_service_groups.SERVICE_GROUP\nWHERE\n  t1.year = 2026 AND t1.BUSINESS_GROUP != 'รายได้อื่น'\nGROUP BY\n  t1.SERVICE_GROUP,\n  CAST(t1.month AS INTEGER)\nORDER BY\n  top_service_groups.total_annual_revenue DESC,\n  CAST(t1.month AS INTEGER) ASC;",
+      "status": "mismatch",
+      "latency_s": 12.57,
+      "tokens": 26383,
+      "detail": "expected 120 rows, got 0"
+    },
+    {
+      "id": 21,
+      "question": "5 อันดับแรก บริการที่มีค่าใช้จ่ายสูงสุด แยกรายไตรมาส",
+      "category": "Top-N with Breakdown",
+      "expected_sql": "SELECT account_name as \"ชื่อบัญชี\", CASE WHEN CAST(month AS INTEGER) IN (1,2,3) THEN 'Q1' WHEN CAST(month AS INTEGER) IN (4,5,6) THEN 'Q2' WHEN CAST(month AS INTEGER) IN (7,8,9) THEN 'Q3' ELSE 'Q4' END AS quarter, SUM(expense) AS \"ค่าใช้จ่ายรวม\"\nFROM v_expense_mart\nWHERE year = 2025\n  AND account_name IN (\n    SELECT account_name FROM v_expense_mart\n    WHERE year = 2025\n    GROUP BY account_name ORDER BY SUM(expense) DESC LIMIT 5\n  )\nGROUP BY account_name, quarter\nORDER BY SUM(expense) DESC, quarter ASC",
+      "generated_sql": "SELECT\n  T1.account_name AS \"ชื่อบัญชีแยกประเภท\",\n  CASE\n    WHEN CAST(T1.month AS INTEGER) IN (1, 2, 3) THEN 'Q1'\n    WHEN CAST(T1.month AS INTEGER) IN (4, 5, 6) THEN 'Q2'\n    WHEN CAST(T1.month AS INTEGER) IN (7, 8, 9) THEN 'Q3'\n    ELSE 'Q4'\n  END AS \"ไตรมาส\",\n  SUM(COALESCE(T1.expense, 0)) AS \"ค่าใช้จ่ายรวม\"\nFROM v_expense_mart AS T1\nWHERE\n  T1.year = 2025\n  AND T1.type = 'ค่าใช้จ่าย'\n  AND T1.account_name IN (\n    SELECT\n      account_name\n    FROM v_expense_mart\n    WHERE\n      year = 2025\n      AND type = 'ค่าใช้จ่าย'\n    GROUP BY\n      account_name\n    ORDER BY\n      SUM(COALESCE(expense, 0)) DESC\n    LIMIT 5\n  )\nGROUP BY\n  T1.account_name,\n  \"ไตรมาส\"\nORDER BY\n  \"ค่าใช้จ่ายรวม\" DESC,\n  \"ชื่อบัญชีแยกประเภท\",\n  \"ไตรมาส\";",
+      "status": "mismatch",
+      "latency_s": 30.99,
+      "tokens": 27981,
+      "detail": "expected 19 rows, got 19"
+    },
+    {
+      "id": 22,
+      "question": "20 อันดับแรก ฝ่ายที่มีรายได้สูงสุด ไม่รวม wholesale ไร้สาย รายไตรมาส",
+      "category": "Top-N with Breakdown",
+      "expected_sql": "SELECT department, (CAST(month AS INTEGER) + 2) / 3 AS quarter, SUM(revenue) AS total_revenue\nFROM revenue_search\nWHERE year = 2025 AND BUSINESS_GROUP != 'รายได้อื่น'\n  AND PRODUCT_NAME NOT LIKE '%Wholesale%'\n  AND SERVICE_GROUP NOT LIKE '%ไร้สาย%'\n  AND department IN (\n    SELECT department FROM revenue_search\n    WHERE year = 2025 AND BUSINESS_GROUP != 'รายได้อื่น'\n      AND PRODUCT_NAME NOT LIKE '%Wholesale%'\n      AND SERVICE_GROUP NOT LIKE '%ไร้สาย%'\n    GROUP BY department ORDER BY SUM(revenue) DESC LIMIT 20\n  )\nGROUP BY department, quarter\nORDER BY SUM(revenue) DESC, quarter ASC",
+      "generated_sql": "SELECT\n  T1.department,\n  CASE\n    WHEN CAST(T1.month AS INTEGER) IN (1, 2, 3) THEN 'Q1'\n    WHEN CAST(T1.month AS INTEGER) IN (4, 5, 6) THEN 'Q2'\n    WHEN CAST(T1.month AS INTEGER) IN (7, 8, 9) THEN 'Q3'\n    ELSE 'Q4'\n  END AS quarter,\n  SUM(COALESCE(T1.revenue, 0)) AS \"รายได้รวม\"\nFROM\n  revenue_search AS T1\nWHERE\n  T1.year = 2025\n  AND T1.SERVICE_GROUP != 'บริการโทรคมนาคมสื่อสารไร้สาย - กลุ่มค้าส่ง (Wholesale)'\n  AND T1.BUSINESS_GROUP != 'รายได้อื่น'\n  AND T1.department IN (\n    SELECT\n      department\n    FROM\n      revenue_search\n    WHERE\n      year = 2025\n      AND SERVICE_GROUP != 'บริการโทรคมนาคมสื่อสารไร้สาย - กลุ่มค้าส่ง (Wholesale)'\n      AND BUSINESS_GROUP != 'รายได้อื่น'\n    GROUP BY\n      department\n    ORDER BY\n      SUM(COALESCE(revenue, 0)) DESC\n    LIMIT 20\n  )\nGROUP BY\n  T1.department,\n  quarter\nORDER BY\n  \"รายได้รวม\" DESC;",
+      "status": "mismatch",
+      "latency_s": 33.35,
+      "tokens": 33247,
+      "detail": "expected 80 rows, got 80"
+    },
+    {
+      "id": 23,
+      "question": "ค่าใช้จ่าย ตบชง. รายหมวดบัญชี",
+      "category": "expense",
+      "expected_sql": "SELECT \n    account_group_name AS \"หมวดบัญชี\", \n    SUM(expense) AS \"ยอดค่าใช้จ่าย_บาท\"\nFROM v_expense_mart\nWHERE section_abbr LIKE '%ตบชง.%'\n  AND year = 2025\nGROUP BY account_group_name\nORDER BY \"ยอดค่าใช้จ่าย_บาท\" DESC",
+      "generated_sql": "SELECT\n  account_group_name AS \"หมวดบัญชี\",\n  SUM(COALESCE(expense, 0)) AS \"ค่าใช้จ่ายรวม\"\nFROM v_expense_mart\nWHERE\n  department_abbr = 'บชง.' AND year = 2025\nGROUP BY\n  account_group_name\nORDER BY\n  \"ค่าใช้จ่ายรวม\" DESC;",
+      "status": "mismatch",
+      "latency_s": 24.08,
+      "tokens": 49783,
+      "detail": "expected 4 rows, got 6"
+    },
+    {
+      "id": 24,
+      "question": "ค่าใช้จ่ายรายหมวดบัญชี รายไตรมาส",
+      "category": "expense",
+      "expected_sql": "SELECT account_group_name as \"หมวดบัญชี\", CASE WHEN CAST(month AS INTEGER) IN (1,2,3) THEN 'Q1' WHEN CAST(month AS INTEGER) IN (4,5,6) THEN 'Q2' WHEN CAST(month AS INTEGER) IN (7,8,9) THEN 'Q3' ELSE 'Q4' END AS quarter, SUM(expense) AS \"ค่าใช้จ่ายรวม\"\nFROM v_expense_mart\nWHERE year = 2025\nGROUP BY account_group_name, quarter\nORDER BY quarter ASC, \"ค่าใช้จ่ายรวม\" DESC",
+      "generated_sql": "SELECT\n  account_group_name AS \"หมวดบัญชี\",\n  CASE\n    WHEN CAST(month AS INTEGER) IN (1, 2, 3) THEN 'Q1'\n    WHEN CAST(month AS INTEGER) IN (4, 5, 6) THEN 'Q2'\n    WHEN CAST(month AS INTEGER) IN (7, 8, 9) THEN 'Q3'\n    ELSE 'Q4'\n  END AS \"ไตรมาส\",\n  SUM(COALESCE(expense, 0)) AS \"ค่าใช้จ่ายรวม\"\nFROM v_expense_mart\nWHERE\n  TYPE = 'ค่าใช้จ่าย' AND year = 2025\nGROUP BY\n  account_group_name,\n  \"ไตรมาส\"\nORDER BY\n  account_group_name,\n  \"ไตรมาส\";",
+      "status": "mismatch",
+      "latency_s": 37.5,
+      "tokens": 29900,
+      "detail": "expected 73 rows, got 73"
+    },
+    {
+      "id": 25,
+      "question": "รายได้รายสายงาน",
+      "category": "revenue",
+      "expected_sql": "SELECT DIVISION as \"สายงาน\", SUM(revenue) as \"รายได้รวม\" FROM revenue_search WHERE year = 2025 AND BUSINESS_GROUP != 'รายได้อื่น' GROUP BY DIVISION ORDER BY \"รายได้รวม\" DESC",
+      "generated_sql": "SELECT\n  division,\n  SUM(COALESCE(revenue, 0)) AS \"รายได้รวม\"\nFROM revenue_search\nWHERE\n  BUSINESS_GROUP != 'รายได้อื่น' AND year = 2026\nGROUP BY\n  division\nORDER BY\n  \"รายได้รวม\" DESC;",
+      "status": "mismatch",
+      "latency_s": 7.69,
+      "tokens": 26056,
+      "detail": "expected 11 rows, got 0"
+    },
+    {
+      "id": 26,
+      "question": "ค่าใช้จ่ายรายสายงาน",
+      "category": "expense",
+      "expected_sql": "SELECT division as \"สายงาน\", SUM(expense) as \"ค่าใช้จ่ายรวม\" FROM v_expense_mart WHERE year = 2025 GROUP BY division ORDER BY \"ค่าใช้จ่ายรวม\" DESC",
+      "generated_sql": "SELECT\n  division AS \"สายงาน\",\n  SUM(COALESCE(expense, 0)) AS \"ค่าใช้จ่ายรวม\"\nFROM v_expense_mart\nWHERE\n  type = 'ค่าใช้จ่าย' AND year = 2025\nGROUP BY\n  division;",
+      "status": "exact_match",
+      "latency_s": 24.48,
+      "tokens": 50137,
+      "detail": null
+    },
+    {
+      "id": 27,
+      "question": "รายได้รายไตรมาส",
+      "category": "revenue",
+      "expected_sql": "SELECT CASE WHEN CAST(month AS INTEGER) IN (1,2,3) THEN 'Q1' WHEN CAST(month AS INTEGER) IN (4,5,6) THEN 'Q2' WHEN CAST(month AS INTEGER) IN (7,8,9) THEN 'Q3' ELSE 'Q4' END AS quarter, SUM(revenue) as \"รายได้รวม\" FROM revenue_search WHERE year = 2025 AND BUSINESS_GROUP != 'รายได้อื่น' GROUP BY quarter ORDER BY quarter",
+      "generated_sql": "SELECT\n  CASE\n    WHEN CAST(month AS INTEGER) IN (1, 2, 3)\n    THEN 'Q1'\n    WHEN CAST(month AS INTEGER) IN (4, 5, 6)\n    THEN 'Q2'\n    WHEN CAST(month AS INTEGER) IN (7, 8, 9)\n    THEN 'Q3'\n    ELSE 'Q4'\n  END AS \"ไตรมาส\",\n  SUM(COALESCE(revenue, 0)) AS \"รายได้รวม\"\nFROM\n  revenue_search\nWHERE\n  year = 2025 AND BUSINESS_GROUP != 'รายได้อื่น'\nGROUP BY\n  \"ไตรมาส\"\nORDER BY\n  \"ไตรมาส\";",
+      "status": "mismatch",
+      "latency_s": 17.86,
+      "tokens": 28472,
+      "detail": "expected 4 rows, got 4"
+    },
+    {
+      "id": 28,
+      "question": "ค่าใช้จ่ายรายไตรมาส",
+      "category": "expense",
+      "expected_sql": "SELECT CASE WHEN CAST(month AS INTEGER) IN (1,2,3) THEN 'Q1' WHEN CAST(month AS INTEGER) IN (4,5,6) THEN 'Q2' WHEN CAST(month AS INTEGER) IN (7,8,9) THEN 'Q3' ELSE 'Q4' END AS quarter, SUM(expense) as \"ค่าใช้จ่ายรวม\" FROM v_expense_mart WHERE year = 2025 GROUP BY quarter ORDER BY quarter",
+      "generated_sql": "SELECT\n  CASE\n    WHEN CAST(month AS INTEGER) IN (1, 2, 3) THEN 'Q1'\n    WHEN CAST(month AS INTEGER) IN (4, 5, 6) THEN 'Q2'\n    WHEN CAST(month AS INTEGER) IN (7, 8, 9) THEN 'Q3'\n    ELSE 'Q4'\n  END AS \"ไตรมาส\",\n  SUM(COALESCE(expense, 0)) AS \"ค่าใช้จ่ายรวม\"\nFROM v_expense_mart\nWHERE\n  year = 2025\nGROUP BY\n  \"ไตรมาส\"\nORDER BY\n  \"ไตรมาส\";",
+      "status": "mismatch",
+      "latency_s": 19.94,
+      "tokens": 38238,
+      "detail": "expected 4 rows, got 4"
+    },
+    {
+      "id": 29,
+      "question": "หน่วยงานที่ใช้ค่าใช้จ่ายมากสุด 10 อันดับแรก",
+      "category": "expense",
+      "expected_sql": "SELECT department as \"หน่วยงาน\", SUM(expense) as \"ค่าใช้จ่ายรวม\" FROM v_expense_mart WHERE year = 2025 GROUP BY department ORDER BY \"ค่าใช้จ่ายรวม\" DESC LIMIT 10",
+      "generated_sql": "SELECT\n  department AS \"หน่วยงาน\",\n  SUM(COALESCE(expense, 0)) AS \"ค่าใช้จ่ายรวม\"\nFROM v_expense_mart\nWHERE\n  year = 2025\nGROUP BY\n  department\nORDER BY\n  \"ค่าใช้จ่ายรวม\" DESC\nLIMIT 10;",
+      "status": "exact_match",
+      "latency_s": 17.49,
+      "tokens": 38190,
+      "detail": null
+    },
+    {
+      "id": 30,
+      "question": "รายได้รายเดือน ปี 2568",
+      "category": "revenue",
+      "expected_sql": "SELECT CAST(month AS INTEGER) AS \"เดือน\", SUM(COALESCE(revenue, 0)) AS \"รายได้รวม\" FROM revenue_search WHERE year = 2025 AND BUSINESS_GROUP != 'รายได้อื่น' GROUP BY CAST(month AS INTEGER) ORDER BY CAST(month AS INTEGER)",
+      "generated_sql": "SELECT\n  CAST(month AS INTEGER) AS \"เดือน\",\n  SUM(COALESCE(revenue, 0)) AS \"รายได้รวม\"\nFROM revenue_search\nWHERE\n  year = 2025 AND BUSINESS_GROUP != 'รายได้อื่น'\nGROUP BY\n  CAST(month AS INTEGER)\nORDER BY\n  CAST(month AS INTEGER) ASC;",
+      "status": "exact_match",
+      "latency_s": 18.52,
+      "tokens": 29046,
+      "detail": null
+    },
+    {
+      "id": 31,
+      "question": "สัดส่วนรายได้แต่ละกลุ่มธุรกิจ ปี 2568",
+      "category": "revenue",
+      "expected_sql": "SELECT BUSINESS_GROUP AS \"กลุ่มธุรกิจ\", SUM(COALESCE(revenue, 0)) AS \"รายได้รวม\", ROUND(SUM(COALESCE(revenue, 0)) * 100.0 / NULLIF((SELECT SUM(COALESCE(revenue, 0)) FROM revenue_search WHERE year = 2025 AND BUSINESS_GROUP != 'รายได้อื่น'), 0), 2) AS \"สัดส่วน_pct\" FROM revenue_search WHERE year = 2025 AND BUSINESS_GROUP != 'รายได้อื่น' GROUP BY BUSINESS_GROUP ORDER BY \"รายได้รวม\" DESC",
+      "generated_sql": "WITH GroupRevenue AS (\n    SELECT\n        BUSINESS_GROUP,\n        SUM(COALESCE(revenue, 0)) AS group_total_revenue\n    FROM\n        revenue_search\n    WHERE\n        year = 2025\n        AND BUSINESS_GROUP != 'รายได้อื่น'\n    GROUP BY\n        BUSINESS_GROUP\n),\nTotalRevenue AS (\n    SELECT\n        SUM(COALESCE(revenue, 0)) AS overall_total_revenue\n    FROM\n        revenue_search\n    WHERE\n        year = 2025\n        AND BUSINESS_GROUP != 'รายได้อื่น'\n)\nSELECT\n    gr.BUSINESS_GROUP AS \"กลุ่มธุรกิจ\",\n    gr.group_total_revenue AS \"รายได้รวม\",\n    (gr.group_total_revenue * 100.0 / NULLIF(tr.overall_total_revenue, 0)) AS \"สัดส่วนรายได้ (%)\"\nFROM\n    GroupRevenue gr, TotalRevenue tr\nORDER BY\n    \"สัดส่วนรายได้ (%)\" DESC;",
+      "status": "mismatch",
+      "latency_s": 20.49,
+      "tokens": 29272,
+      "detail": "expected 7 rows, got 7"
+    },
+    {
+      "id": 32,
+      "question": "ค่าใช้จ่ายรายฝ่าย ปี 2568",
+      "category": "expense",
+      "expected_sql": "SELECT department AS \"ฝ่าย\", SUM(COALESCE(expense, 0)) AS \"ค่าใช้จ่ายรวม\" FROM v_expense_mart WHERE year = 2025 GROUP BY department ORDER BY \"ค่าใช้จ่ายรวม\" DESC",
+      "generated_sql": "SELECT\n  department AS \"ฝ่าย\",\n  SUM(COALESCE(expense, 0)) AS \"ค่าใช้จ่ายรวม\"\nFROM v_expense_mart\nWHERE\n  year = 2025 AND type = 'ค่าใช้จ่าย'\nGROUP BY\n  department\nORDER BY\n  \"ค่าใช้จ่ายรวม\" DESC;",
+      "status": "exact_match",
+      "latency_s": 22.02,
+      "tokens": 53411,
+      "detail": null
+    },
+    {
+      "id": 33,
+      "question": "รายได้แยกตามกลุ่มธุรกิจ รายไตรมาส ปี 2568",
+      "category": "revenue",
+      "expected_sql": "SELECT BUSINESS_GROUP AS \"กลุ่มธุรกิจ\", CASE WHEN CAST(month AS INTEGER) IN (1,2,3) THEN 'Q1' WHEN CAST(month AS INTEGER) IN (4,5,6) THEN 'Q2' WHEN CAST(month AS INTEGER) IN (7,8,9) THEN 'Q3' ELSE 'Q4' END AS quarter, SUM(COALESCE(revenue, 0)) AS \"รายได้รวม\" FROM revenue_search WHERE year = 2025 AND BUSINESS_GROUP != 'รายได้อื่น' GROUP BY BUSINESS_GROUP, quarter ORDER BY BUSINESS_GROUP, quarter",
+      "generated_sql": "SELECT\n  BUSINESS_GROUP,\n  CASE\n    WHEN CAST(month AS INTEGER) IN (1, 2, 3) THEN 'Q1'\n    WHEN CAST(month AS INTEGER) IN (4, 5, 6) THEN 'Q2'\n    WHEN CAST(month AS INTEGER) IN (7, 8, 9) THEN 'Q3'\n    ELSE 'Q4'\n  END AS quarter,\n  SUM(COALESCE(revenue, 0)) AS \"รายได้รวม\"\nFROM\n  revenue_search\nWHERE\n  year = 2025 AND BUSINESS_GROUP != 'รายได้อื่น'\nGROUP BY\n  BUSINESS_GROUP,\n  quarter\nORDER BY\n  BUSINESS_GROUP,\n  quarter;",
+      "status": "mismatch",
+      "latency_s": 21.71,
+      "tokens": 30024,
+      "detail": "expected 28 rows, got 28"
+    },
+    {
+      "id": 34,
+      "question": "ค่าใช้จ่ายรายหมวดบัญชี รายไตรมาส ปี 2568 แบบ COALESCE",
+      "category": "expense",
+      "expected_sql": "SELECT account_group_name AS \"หมวดบัญชี\", CASE WHEN CAST(month AS INTEGER) IN (1,2,3) THEN 'Q1' WHEN CAST(month AS INTEGER) IN (4,5,6) THEN 'Q2' WHEN CAST(month AS INTEGER) IN (7,8,9) THEN 'Q3' ELSE 'Q4' END AS quarter, SUM(COALESCE(expense, 0)) AS \"ค่าใช้จ่ายรวม\" FROM v_expense_mart WHERE year = 2025 GROUP BY account_group_name, quarter ORDER BY quarter ASC, \"ค่าใช้จ่ายรวม\" DESC",
+      "generated_sql": "SELECT\n  account_group_name AS \"หมวดบัญชี\",\n  CASE\n    WHEN CAST(month AS INTEGER) BETWEEN 1 AND 3 THEN 'Q1'\n    WHEN CAST(month AS INTEGER) BETWEEN 4 AND 6 THEN 'Q2'\n    WHEN CAST(month AS INTEGER) BETWEEN 7 AND 9 THEN 'Q3'\n    ELSE 'Q4'\n  END AS \"ไตรมาส\",\n  SUM(COALESCE(expense, 0)) AS \"ค่าใช้จ่ายรวม\"\nFROM v_expense_mart\nWHERE\n  year = 2025 AND type = 'ค่าใช้จ่าย'\nGROUP BY\n  account_group_name,\n  \"ไตรมาส\"\nORDER BY\n  account_group_name,\n  \"ไตรมาส\";",
+      "status": "mismatch",
+      "latency_s": 34.21,
+      "tokens": 42417,
+      "detail": "expected 73 rows, got 73"
+    },
+    {
+      "id": 35,
+      "question": "รายได้แยกตามกลุ่มบริการ ปี 2568",
+      "category": "revenue",
+      "expected_sql": "SELECT SERVICE_GROUP AS \"กลุ่มบริการ\", SUM(COALESCE(revenue, 0)) AS \"รายได้รวม\" FROM revenue_search WHERE year = 2025 AND BUSINESS_GROUP != 'รายได้อื่น' GROUP BY SERVICE_GROUP ORDER BY \"รายได้รวม\" DESC",
+      "generated_sql": "SELECT\n  SERVICE_GROUP,\n  SUM(COALESCE(revenue, 0)) AS \"รายได้รวม\"\nFROM revenue_search\nWHERE\n  year = 2025 AND BUSINESS_GROUP != 'รายได้อื่น'\nGROUP BY\n  SERVICE_GROUP\nORDER BY\n  \"รายได้รวม\" DESC;",
+      "status": "exact_match",
+      "latency_s": 12.99,
+      "tokens": 29257,
+      "detail": null
+    },
+    {
+      "id": 36,
+      "question": "GL ที่มีค่าใช้จ่ายสูงสุด 10 อันดับ ปี 2568",
+      "category": "expense",
+      "expected_sql": "SELECT gl_code || ': ' || account_name AS \"รหัสบัญชี\", SUM(COALESCE(expense, 0)) AS \"ค่าใช้จ่ายรวม\" FROM v_expense_mart WHERE year = 2025 GROUP BY gl_code, account_name ORDER BY \"ค่าใช้จ่ายรวม\" DESC LIMIT 10",
+      "generated_sql": "SELECT\n  gl_code,\n  account_name,\n  SUM(COALESCE(expense, 0)) AS \"ค่าใช้จ่ายรวม\"\nFROM v_expense_mart\nWHERE\n  year = 2025\nGROUP BY\n  gl_code,\n  account_name\nORDER BY\n  \"ค่าใช้จ่ายรวม\" DESC\nLIMIT 10;",
+      "status": "mismatch",
+      "latency_s": 17.71,
+      "tokens": 38542,
+      "detail": "expected 10 rows, got 10"
+    },
+    {
+      "id": 37,
+      "question": "รายได้และค่าใช้จ่ายแยกตามกลุ่มธุรกิจ ปี 2568",
+      "category": "profit and loss",
+      "expected_sql": "SELECT business_unit AS \"กลุ่มธุรกิจ\", ROUND(SUM(CASE WHEN main_group LIKE '01.%' THEN amount_value ELSE 0 END) / 1e6, 2) AS \"รายได้_ลบ\", ROUND(SUM(CASE WHEN main_group LIKE '02.%' THEN amount_value ELSE 0 END) / 1e6, 2) AS \"ต้นทุน_ลบ\", ROUND(SUM(CASE WHEN main_group LIKE '03.%' THEN amount_value ELSE 0 END) / 1e6, 2) AS \"กำไรขั้นต้น_ลบ\" FROM v_pl_costtype_nt_mth_clean WHERE report_year = 2025 AND main_group != '' AND business_unit != '' GROUP BY business_unit ORDER BY \"รายได้_ลบ\" DESC",
+      "generated_sql": "SELECT\n  business_group AS \"กลุ่มธุรกิจ\",\n  SUM(COALESCE(expense, 0)) AS \"ค่าใช้จ่ายรวม\"\nFROM v_expense_mart\nWHERE\n  year = 2025\nGROUP BY\n  business_group;",
+      "status": "mismatch",
+      "latency_s": 21.27,
+      "tokens": 25607,
+      "detail": "expected 8 rows, got 1"
+    },
+    {
+      "id": 38,
+      "question": "รายได้กลุ่มธุรกิจ และ กลุ่มบริการ",
+      "category": "Revenue",
+      "expected_sql": "SELECT BUSINESS_GROUP , SERVICE_GROUP, SUM(revenue) as total_revenue \nFROM revenue_search \nWHERE year = 2025 AND BUSINESS_GROUP != 'รายได้อื่น'\nGROUP BY BUSINESS_GROUP, SERVICE_GROUP \nORDER BY total_revenue DESC\n",
+      "generated_sql": "SELECT\n  BUSINESS_GROUP,\n  SERVICE_GROUP,\n  SUM(COALESCE(revenue, 0)) AS \"รายได้รวม\"\nFROM revenue_search\nWHERE\n  BUSINESS_GROUP != 'รายได้อื่น' AND year = 2025\nGROUP BY\n  BUSINESS_GROUP,\n  SERVICE_GROUP\nORDER BY\n  BUSINESS_GROUP,\n  \"รายได้รวม\" DESC;",
+      "status": "exact_match",
+      "latency_s": 29.39,
+      "tokens": 42779,
+      "detail": null
+    },
+    {
+      "id": 39,
+      "question": "ผลดำเนินงานปี 2569 กลุ่มธุรกิจ รายเดือน",
+      "category": "pl_monthly_by_bu",
+      "expected_sql": "WITH bu_revenue AS (\n    SELECT\n        CASE\n            WHEN UPPER(business_unit) LIKE '%HARD INFRASTRUCTURE%' THEN 'Hard Infrastructure'\n            WHEN UPPER(business_unit) LIKE '%INTERNATIONAL%' THEN 'International'\n            WHEN UPPER(business_unit) LIKE '%MOBILE%' THEN 'Mobile'\n            WHEN UPPER(business_unit) LIKE '%FIXED LINE%' THEN 'Fixed Line & Broadband'\n            WHEN UPPER(business_unit) LIKE '%DIGITAL%' THEN 'Digital'\n            WHEN UPPER(business_unit) LIKE '%ICT SOLUTION%' THEN 'ICT Solution'\n            WHEN UPPER(business_unit) LIKE '%ไม่ใช่โทรคมนาคม%' THEN 'บริการอื่นไม่ใช่โทรคมนาคม'\n            WHEN UPPER(business_unit) LIKE '%รายได้อื่น%' THEN 'รายได้อื่น/ค่าใช้จ่ายอื่น'\n            WHEN UPPER(business_unit) LIKE '%นโยบายภาครัฐ%' THEN 'บริการตามนโยบายภาครัฐ'\n            ELSE business_unit\n        END AS business_unit_name,\n        ROUND(SUM(CASE WHEN main_group LIKE '01.%' THEN amount_value ELSE 0 END) / 1e6, 2) AS total_rev\n    FROM v_pl_costtype_nt_mth_clean\n    WHERE report_year = 2026\n      AND main_group != '' AND business_unit != ''\n    GROUP BY business_unit_name\n)\nSELECT\n    d.business_unit_name AS \"กลุ่มธุรกิจ\",\n    d.pl_item AS \"รายการ\",\n    d.\"ม.ค.\", d.\"ก.พ.\", d.\"มี.ค.\", d.\"เม.ย.\", d.\"พ.ค.\", d.\"มิ.ย.\",\n    d.\"ก.ค.\", d.\"ส.ค.\", d.\"ก.ย.\", d.\"ต.ค.\", d.\"พ.ย.\", d.\"ธ.ค.\",\n    d.\"รวมทั้งปี (ล้านบาท)\"\nFROM (\n    SELECT\n        CASE\n            WHEN UPPER(business_unit) LIKE '%HARD INFRASTRUCTURE%' THEN 'Hard Infrastructure'\n            WHEN UPPER(business_unit) LIKE '%INTERNATIONAL%' THEN 'International'\n            WHEN UPPER(business_unit) LIKE '%MOBILE%' THEN 'Mobile'\n            WHEN UPPER(business_unit) LIKE '%FIXED LINE%' THEN 'Fixed Line & Broadband'\n            WHEN UPPER(business_unit) LIKE '%DIGITAL%' THEN 'Digital'\n            WHEN UPPER(business_unit) LIKE '%ICT SOLUTION%' THEN 'ICT Solution'\n            WHEN UPPER(business_unit) LIKE '%ไม่ใช่โทรคมนาคม%' THEN 'บริการอื่นไม่ใช่โทรคมนาคม'\n            WHEN UPPER(business_unit) LIKE '%รายได้อื่น%' THEN 'รายได้อื่น/ค่าใช้จ่ายอื่น'\n            WHEN UPPER(business_unit) LIKE '%นโยบายภาครัฐ%' THEN 'บริการตามนโยบายภาครัฐ'\n            ELSE business_unit\n        END AS business_unit_name,\n        CASE\n            WHEN main_group LIKE '01.%' THEN '01.รายได้'\n            WHEN main_group LIKE '02.%' THEN '02.ต้นทุน'\n            WHEN main_group LIKE '03.%' THEN '03.กำไรขั้นต้น'\n            WHEN main_group LIKE '08.%' THEN '08.กำไรดำเนินงาน'\n            WHEN main_group LIKE '12.%' THEN '12.EBT'\n            WHEN main_group LIKE '14.%' THEN '14.กำไรสุทธิ'\n        END AS pl_item,\n        ROUND(SUM(CASE WHEN report_month = 1 THEN amount_value ELSE 0 END) / 1e6, 2) AS \"ม.ค.\",\n        ROUND(SUM(CASE WHEN report_month = 2 THEN amount_value ELSE 0 END) / 1e6, 2) AS \"ก.พ.\",\n        ROUND(SUM(CASE WHEN report_month = 3 THEN amount_value ELSE 0 END) / 1e6, 2) AS \"มี.ค.\",\n        ROUND(SUM(CASE WHEN report_month = 4 THEN amount_value ELSE 0 END) / 1e6, 2) AS \"เม.ย.\",\n        ROUND(SUM(CASE WHEN report_month = 5 THEN amount_value ELSE 0 END) / 1e6, 2) AS \"พ.ค.\",\n        ROUND(SUM(CASE WHEN report_month = 6 THEN amount_value ELSE 0 END) / 1e6, 2) AS \"มิ.ย.\",\n        ROUND(SUM(CASE WHEN report_month = 7 THEN amount_value ELSE 0 END) / 1e6, 2) AS \"ก.ค.\",\n        ROUND(SUM(CASE WHEN report_month = 8 THEN amount_value ELSE 0 END) / 1e6, 2) AS \"ส.ค.\",\n        ROUND(SUM(CASE WHEN report_month = 9 THEN amount_value ELSE 0 END) / 1e6, 2) AS \"ก.ย.\",\n        ROUND(SUM(CASE WHEN report_month = 10 THEN amount_value ELSE 0 END) / 1e6, 2) AS \"ต.ค.\",\n        ROUND(SUM(CASE WHEN report_month = 11 THEN amount_value ELSE 0 END) / 1e6, 2) AS \"พ.ย.\",\n        ROUND(SUM(CASE WHEN report_month = 12 THEN amount_value ELSE 0 END) / 1e6, 2) AS \"ธ.ค.\",\n        ROUND(SUM(amount_value) / 1e6, 2) AS \"รวมทั้งปี (ล้านบาท)\"\n    FROM v_pl_costtype_nt_mth_clean\n    WHERE report_year = 2026\n      AND main_group != '' AND business_unit != ''\n      AND (main_group LIKE '01.%' OR main_group LIKE '02.%' OR main_group LIKE '03.%'\n           OR main_group LIKE '08.%' OR main_group LIKE '12.%' OR main_group LIKE '14.%')\n    GROUP BY business_unit_name, pl_item\n) d\nJOIN bu_revenue r ON d.business_unit_name = r.business_unit_name\nORDER BY r.total_rev DESC, d.pl_item",
+      "generated_sql": "WITH NormalizedData AS (\n  SELECT\n    report_year,\n    report_month,\n    CASE\n      WHEN UPPER(business_unit) LIKE '%HARD INFRASTRUCTURE%' THEN 'Hard Infrastructure'\n      WHEN UPPER(business_unit) LIKE '%INTERNATIONAL%' THEN 'International'\n      WHEN UPPER(business_unit) LIKE '%MOBILE%' THEN 'Mobile'\n      WHEN UPPER(business_unit) LIKE '%FIXED LINE%' THEN 'Fixed Line & Broadband'\n      WHEN UPPER(business_unit) LIKE '%DIGITAL%' THEN 'Digital'\n      WHEN UPPER(business_unit) LIKE '%ICT SOLUTION%' THEN 'ICT Solution'\n      WHEN UPPER(business_unit) LIKE '%ไม่ใช่โทรคมนาคม%' THEN 'บริการอื่นไม่ใช่โทรคมนาคม'\n      WHEN UPPER(business_unit) LIKE '%รายได้อื่น%' THEN 'รายได้อื่น/ค่าใช้จ่ายอื่น'\n      WHEN UPPER(business_unit) LIKE '%นโยบายภาครัฐ%' THEN 'บริการตามนโยบายภาครัฐ'\n      ELSE business_unit\n    END AS business_unit_name,\n    main_group,\n    amount_value\n  FROM v_pl_costtype_nt_mth_clean\n  WHERE\n    report_year = 2026 AND\n    main_group IN (\n      '01.รายได้',\n      '02.ต้นทุนบริการและต้นทุนขาย :',\n      '03.กำไรขั้นต้น',\n      '08.กำไรก่อนต้นทุนจัดหาเงินฯ',\n      '12.กำไรก่อนภาษี',\n      '14.กำไรสุทธิ'\n    ) AND\n    main_group != '' AND\n    business_unit != ''\n),\nBusinessUnitRevenue AS (\n  SELECT\n    business_unit_name,\n    SUM(CASE WHEN main_group LIKE '01.%' THEN amount_value ELSE 0 END) AS total_revenue_bu\n  FROM NormalizedData\n  GROUP BY business_unit_name\n)\nSELECT\n  nd.business_unit_name AS \"กลุ่มธุรกิจ\",\n  nd.main_group AS \"รายการ\",\n  ROUND(SUM(CASE WHEN nd.report_month = 1 THEN nd.amount_value ELSE 0 END) / 1000000.0, 2) AS \"ม.ค.\",\n  ROUND(SUM(CASE WHEN nd.report_month = 2 THEN nd.amount_value ELSE 0 END) / 1000000.0, 2) AS \"ก.พ.\",\n  ROUND(SUM(CASE WHEN nd.report_month = 3 THEN nd.amount_value ELSE 0 END) / 1000000.0, 2) AS \"มี.ค.\",\n  ROUND(SUM(CASE WHEN nd.report_month = 4 THEN nd.amount_value ELSE 0 END) / 1000000.0, 2) AS \"เม.ย.\",\n  ROUND(SUM(CASE WHEN nd.report_month = 5 THEN nd.amount_value ELSE 0 END) / 1000000.0, 2) AS \"พ.ค.\",\n  ROUND(SUM(CASE WHEN nd.report_month = 6 THEN nd.amount_value ELSE 0 END) / 1000000.0, 2) AS \"มิ.ย.\",\n  ROUND(SUM(CASE WHEN nd.report_month = 7 THEN nd.amount_value ELSE 0 END) / 1000000.0, 2) AS \"ก.ค.\",\n  ROUND(SUM(CASE WHEN nd.report_month = 8 THEN nd.amount_value ELSE 0 END) / 1000000.0, 2) AS \"ส.ค.\",\n  ROUND(SUM(CASE WHEN nd.report_month = 9 THEN nd.amount_value ELSE 0 END) / 1000000.0, 2) AS \"ก.ย.\",\n  ROUND(SUM(CASE WHEN nd.report_month = 10 THEN nd.amount_value ELSE 0 END) / 1000000.0, 2) AS \"ต.ค.\",\n  ROUND(SUM(CASE WHEN nd.report_month = 11 THEN nd.amount_value ELSE 0 END) / 1000000.0, 2) AS \"พ.ย.\",\n  ROUND(SUM(CASE WHEN nd.report_month = 12 THEN nd.amount_value ELSE 0 END) / 1000000.0, 2) AS \"ธ.ค.\",\n  ROUND(SUM(nd.amount_value) / 1000000.0, 2) AS \"รวมทั้งปี (ล้านบาท)\"\nFROM NormalizedData nd\nJOIN BusinessUnitRevenue bur ON nd.business_unit_name = bur.business_unit_name\nGROUP BY\n  nd.business_unit_name,\n  nd.main_group\nORDER BY\n  bur.total_revenue_bu DESC,\n  nd.main_group;",
+      "status": "mismatch",
+      "latency_s": 31.27,
+      "tokens": 40473,
+      "detail": "expected 42 rows, got 14"
+    },
+    {
+      "id": 41,
+      "question": "รายได้รวม",
+      "category": "test",
+      "expected_sql": "SELECT SUM(revenue_value) FROM test_revenue",
+      "generated_sql": null,
+      "status": "golden_broken",
+      "latency_s": null,
+      "tokens": null,
+      "detail": "no such table: test_revenue"
+    },
+    {
+      "id": 42,
+      "question": "รายได้รวม",
+      "category": "test",
+      "expected_sql": "SELECT SUM(revenue_value) FROM test_revenue",
+      "generated_sql": null,
+      "status": "golden_broken",
+      "latency_s": null,
+      "tokens": null,
+      "detail": "no such table: test_revenue"
+    },
+    {
+      "id": 43,
+      "question": "รายได้รวม",
+      "category": "test",
+      "expected_sql": "SELECT SUM(revenue_value) FROM test_revenue",
+      "generated_sql": null,
+      "status": "golden_broken",
+      "latency_s": null,
+      "tokens": null,
+      "detail": "no such table: test_revenue"
+    },
+    {
+      "id": 44,
+      "question": "รายได้รวม",
+      "category": "test",
+      "expected_sql": "SELECT SUM(revenue_value) FROM test_revenue",
+      "generated_sql": null,
+      "status": "golden_broken",
+      "latency_s": null,
+      "tokens": null,
+      "detail": "no such table: test_revenue"
+    },
+    {
+      "id": 45,
+      "question": "รายได้รวม",
+      "category": "test",
+      "expected_sql": "SELECT SUM(revenue_value) FROM test_revenue",
+      "generated_sql": null,
+      "status": "golden_broken",
+      "latency_s": null,
+      "tokens": null,
+      "detail": "no such table: test_revenue"
+    },
+    {
+      "id": 46,
+      "question": "รายได้รวม",
+      "category": "test",
+      "expected_sql": "SELECT SUM(revenue_value) FROM test_revenue",
+      "generated_sql": null,
+      "status": "golden_broken",
+      "latency_s": null,
+      "tokens": null,
+      "detail": "no such table: test_revenue"
+    },
+    {
+      "id": 47,
+      "question": "รายได้รวม",
+      "category": "test",
+      "expected_sql": "SELECT SUM(revenue_value) FROM test_revenue",
+      "generated_sql": null,
+      "status": "golden_broken",
+      "latency_s": null,
+      "tokens": null,
+      "detail": "no such table: test_revenue"
+    },
+    {
+      "id": 48,
+      "question": "รายได้รวม",
+      "category": "test",
+      "expected_sql": "SELECT SUM(revenue_value) FROM test_revenue",
+      "generated_sql": null,
+      "status": "golden_broken",
+      "latency_s": null,
+      "tokens": null,
+      "detail": "no such table: test_revenue"
+    },
+    {
+      "id": 49,
+      "question": "รายได้รวม",
+      "category": "test",
+      "expected_sql": "SELECT SUM(revenue_value) FROM test_revenue",
+      "generated_sql": null,
+      "status": "golden_broken",
+      "latency_s": null,
+      "tokens": null,
+      "detail": "no such table: test_revenue"
+    },
+    {
+      "id": 50,
+      "question": "รายได้รวม",
+      "category": "test",
+      "expected_sql": "SELECT SUM(revenue_value) FROM test_revenue",
+      "generated_sql": null,
+      "status": "golden_broken",
+      "latency_s": null,
+      "tokens": null,
+      "detail": "no such table: test_revenue"
+    },
+    {
+      "id": 51,
+      "question": "รายได้รวมทั้งบริษัทเดือนมกราคม 2567 เท่าไร",
+      "category": "feed_revenue",
+      "expected_sql": "SELECT revenue FROM feed_revenue_fact_total_monthly WHERE year_month = 202401",
+      "generated_sql": "SELECT\n  SUM(revenue) AS \"รายได้รวม\"\nFROM feed_revenue_fact_bu_monthly\nWHERE\n  year = 2024 AND CAST(month AS INTEGER) = 1;",
+      "status": "exact_match",
+      "latency_s": 15.49,
+      "tokens": 35638,
+      "detail": null
+    },
+    {
+      "id": 52,
+      "question": "รายได้ของกลุ่มธุรกิจ 1.Hard Infrastructure เดือนมกราคม 2567 เท่าไร",
+      "category": "feed_revenue",
+      "expected_sql": "SELECT revenue FROM feed_revenue_fact_bu_monthly WHERE bu = '1.Hard Infrastructure' AND year_month = 202401",
+      "generated_sql": "SELECT\n  SUM(revenue) AS \"รายได้รวม\"\nFROM feed_revenue_fact_bu_monthly\nWHERE\n  bu LIKE '%HARD INFRASTRUCTURE%' AND year = 2024 AND CAST(month AS INTEGER) = 1;",
+      "status": "exact_match",
+      "latency_s": 9.45,
+      "tokens": 24453,
+      "detail": null
+    },
+    {
+      "id": 53,
+      "question": "รายได้ของกลุ่มธุรกิจ 7.กลุ่มบริการอื่นไม่ใช่โทรคมนาคม เดือนมกราคม 2567 เท่าไร",
+      "category": "feed_revenue",
+      "expected_sql": "SELECT revenue FROM feed_revenue_fact_bu_monthly WHERE bu = '7.กลุ่มบริการอื่นไม่ใช่โทรคมนาคม' AND year_month = 202401",
+      "generated_sql": "SELECT\n  bu AS \"กลุ่มธุรกิจ\",\n  SUM(revenue) AS \"รายได้รวม\"\nFROM feed_revenue_fact_bu_monthly\nWHERE\n  bu LIKE '%7.กลุ่มบริการอื่นไม่ใช่โทรคมนาคม%' AND year = 2024 AND CAST(month AS INTEGER) = 1\nGROUP BY\n  bu;",
+      "status": "mismatch",
+      "latency_s": 17.89,
+      "tokens": 35703,
+      "detail": "expected 1 rows, got 1"
+    },
+    {
+      "id": 54,
+      "question": "รายได้รวมทั้งบริษัทเดือนสิงหาคม 2567 เท่าไร",
+      "category": "feed_revenue",
+      "expected_sql": "SELECT revenue FROM feed_revenue_fact_total_monthly WHERE year_month = 202408",
+      "generated_sql": "SELECT\n  SUM(revenue) AS \"รายได้รวม\"\nFROM\n  feed_revenue_fact_bu_monthly\nWHERE\n  year = 2024 AND CAST(month AS INTEGER) = 8;",
+      "status": "exact_match",
+      "latency_s": 10.3,
+      "tokens": 24370,
+      "detail": null
+    },
+    {
+      "id": 55,
+      "question": "รายได้ของกลุ่มธุรกิจ 1.Hard Infrastructure เดือนสิงหาคม 2567 เท่าไร",
+      "category": "feed_revenue",
+      "expected_sql": "SELECT revenue FROM feed_revenue_fact_bu_monthly WHERE bu = '1.Hard Infrastructure' AND year_month = 202408",
+      "generated_sql": "SELECT\n  SUM(revenue) AS \"รายได้รวม\"\nFROM\n  feed_revenue_fact_bu_monthly\nWHERE\n  bu LIKE '%1.Hard Infrastructure%' AND year = 2024 AND CAST(month AS INTEGER) = 8;",
+      "status": "exact_match",
+      "latency_s": 11.53,
+      "tokens": 24371,
+      "detail": null
+    },
+    {
+      "id": 56,
+      "question": "รายได้ของกลุ่มธุรกิจ 7.กลุ่มบริการอื่นไม่ใช่โทรคมนาคม เดือนสิงหาคม 2567 เท่าไร",
+      "category": "feed_revenue",
+      "expected_sql": "SELECT revenue FROM feed_revenue_fact_bu_monthly WHERE bu = '7.กลุ่มบริการอื่นไม่ใช่โทรคมนาคม' AND year_month = 202408",
+      "generated_sql": "SELECT\n  SUM(revenue) AS \"รายได้รวม\"\nFROM feed_revenue_fact_bu_monthly\nWHERE\n  bu LIKE '%7.กลุ่มบริการอื่นไม่ใช่โทรคมนาคม%' AND year = 2024 AND CAST(month AS INTEGER) = 8;",
+      "status": "exact_match",
+      "latency_s": 12.54,
+      "tokens": 35601,
+      "detail": null
+    },
+    {
+      "id": 57,
+      "question": "รายได้รวมทั้งบริษัทเดือนมีนาคม 2568 เท่าไร",
+      "category": "feed_revenue",
+      "expected_sql": "SELECT revenue FROM feed_revenue_fact_total_monthly WHERE year_month = 202503",
+      "generated_sql": "SELECT\n  SUM(revenue) AS \"รายได้รวม\"\nFROM feed_revenue_fact_bu_monthly\nWHERE\n  year = 2025 AND CAST(month AS INTEGER) = 3;",
+      "status": "exact_match",
+      "latency_s": 8.67,
+      "tokens": 24194,
+      "detail": null
+    },
+    {
+      "id": 58,
+      "question": "รายได้ของกลุ่มธุรกิจ 1.Hard Infrastructure เดือนมีนาคม 2568 เท่าไร",
+      "category": "feed_revenue",
+      "expected_sql": "SELECT revenue FROM feed_revenue_fact_bu_monthly WHERE bu = '1.Hard Infrastructure' AND year_month = 202503",
+      "generated_sql": "SELECT\n  SUM(revenue) AS \"รายได้รวม\"\nFROM feed_revenue_fact_bu_monthly\nWHERE\n  bu LIKE '%1.Hard Infrastructure%' AND year = 2025 AND CAST(month AS INTEGER) = 3;",
+      "status": "exact_match",
+      "latency_s": 11.81,
+      "tokens": 24417,
+      "detail": null
+    },
+    {
+      "id": 59,
+      "question": "รายได้ของกลุ่มธุรกิจ 7.กลุ่มบริการอื่นไม่ใช่โทรคมนาคม เดือนมีนาคม 2568 เท่าไร",
+      "category": "feed_revenue",
+      "expected_sql": "SELECT revenue FROM feed_revenue_fact_bu_monthly WHERE bu = '7.กลุ่มบริการอื่นไม่ใช่โทรคมนาคม' AND year_month = 202503",
+      "generated_sql": "SELECT\n  SUM(revenue) AS \"รายได้รวม\"\nFROM feed_revenue_fact_bu_monthly\nWHERE\n  bu LIKE '%7.กลุ่มบริการอื่นไม่ใช่โทรคมนาคม%' AND year = 2025 AND CAST(month AS INTEGER) = 3;",
+      "status": "exact_match",
+      "latency_s": 10.74,
+      "tokens": 24384,
+      "detail": null
+    },
+    {
+      "id": 60,
+      "question": "รายได้รวมทั้งบริษัทเดือนพฤษภาคม 2569 เท่าไร",
+      "category": "feed_revenue",
+      "expected_sql": "SELECT revenue FROM feed_revenue_fact_total_monthly WHERE year_month = 202605",
+      "generated_sql": "SELECT\n  SUM(revenue) AS \"รายได้รวม\"\nFROM feed_revenue_fact_bu_monthly\nWHERE\n  year = 2026 AND CAST(month AS INTEGER) = 5;",
+      "status": "exact_match",
+      "latency_s": 8.81,
+      "tokens": 24214,
+      "detail": null
+    },
+    {
+      "id": 61,
+      "question": "รายได้ของกลุ่มธุรกิจ 1.Hard Infrastructure เดือนพฤษภาคม 2569 เท่าไร",
+      "category": "feed_revenue",
+      "expected_sql": "SELECT revenue FROM feed_revenue_fact_bu_monthly WHERE bu = '1.Hard Infrastructure' AND year_month = 202605",
+      "generated_sql": "SELECT\n  SUM(revenue) AS \"รายได้รวม\"\nFROM feed_revenue_fact_bu_monthly\nWHERE\n  BU LIKE '%HARD INFRASTRUCTURE%' AND year = 2026 AND CAST(month AS INTEGER) = 5;",
+      "status": "exact_match",
+      "latency_s": 10.84,
+      "tokens": 24371,
+      "detail": null
+    },
+    {
+      "id": 62,
+      "question": "รายได้ของกลุ่มธุรกิจ 7.กลุ่มบริการอื่นไม่ใช่โทรคมนาคม เดือนพฤษภาคม 2569 เท่าไร",
+      "category": "feed_revenue",
+      "expected_sql": "SELECT revenue FROM feed_revenue_fact_bu_monthly WHERE bu = '7.กลุ่มบริการอื่นไม่ใช่โทรคมนาคม' AND year_month = 202605",
+      "generated_sql": "SELECT\n  SUM(revenue) AS \"รายได้รวม\"\nFROM feed_revenue_fact_bu_monthly\nWHERE\n  bu LIKE '%7.กลุ่มบริการอื่นไม่ใช่โทรคมนาคม%' AND year = 2026 AND CAST(month AS INTEGER) = 5;",
+      "status": "exact_match",
+      "latency_s": 11.9,
+      "tokens": 24458,
+      "detail": null
+    },
+    {
+      "id": 63,
+      "question": "รายได้สะสม (YTD) ของกลุ่มธุรกิจ 8.รายได้อื่น ณ เดือนพฤษภาคม 2569 เท่าไร",
+      "category": "feed_revenue",
+      "expected_sql": "SELECT revenue_ytd FROM feed_revenue_fact_bu_monthly WHERE bu = '8.รายได้อื่น' AND year_month = 202605",
+      "generated_sql": "SELECT\n  SUM(revenue_ytd) AS \"รายได้สะสม (YTD)\"\nFROM feed_revenue_fact_bu_monthly\nWHERE\n  bu LIKE '%8.รายได้อื่น%' AND year = 2026 AND CAST(month AS INTEGER) = 5;",
+      "status": "exact_match",
+      "latency_s": 17.7,
+      "tokens": 24679,
+      "detail": null
+    },
+    {
+      "id": 64,
+      "question": "รายได้สะสมทั้งบริษัทตั้งแต่ต้นปีถึงเดือนพฤษภาคม 2569 เท่าไร",
+      "category": "feed_revenue",
+      "expected_sql": "SELECT revenue_ytd FROM feed_revenue_fact_total_monthly WHERE year_month = 202605",
+      "generated_sql": "SELECT\n  SUM(revenue_ytd) AS \"รายได้สะสม\"\nFROM feed_revenue_fact_bu_monthly\nWHERE\n  year = 2026 AND CAST(month AS INTEGER) = 5;",
+      "status": "exact_match",
+      "latency_s": 11.22,
+      "tokens": 24350,
+      "detail": null
+    }
+  ]
+}

@@ -66,7 +66,7 @@
 
 ### F3-B — Eval Harness
 - `scripts/eval/run_eval.py` — execution-match (เทียบ multiset ของ value-tuples, float tolerance 1e-6, ปิด query cache ต่อข้อ, สถานะ `golden_broken` แยก), CLI `--provider/--context/--limit/--compare`, timeout 180s/ข้อ (เพิ่มหลังพบ hang จริง)
-- Baseline: ดู `eval_results/BASELINE.json` + `plan/RESULT_F10.md`
+- **Baseline (committed `eval_results/BASELINE.json`):** ทั้งชุด 19/51 = 37.3% exact-match (golden เก่า 12 ข้อ `golden_broken` — data drift, ไม่นับเป็นความผิดโมเดล; admin ควร review); subset ใหม่ `feed_revenue` = 13/14 = 92.9% — ช่องว่างนี้คือ baseline ที่ BGE-M3/prompt work จะถูกวัดเทียบ
 - **บทเรียนจากการรันจริง:** full run แรก hang ที่ข้อ 22 (LLM call ค้าง >30 นาที ไม่ตาย) → เพิ่ม `asyncio.wait_for` ต่อข้อ
 
 ### F7 — Token/Observability (`ee158b8`)
