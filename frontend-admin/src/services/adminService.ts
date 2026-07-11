@@ -36,6 +36,12 @@ export interface FeatureFlags {
     collect_feedback: boolean;
     two_pass_enabled: boolean;
     value_lookup_enabled: boolean;
+    // F9 — agentic latency (default OFF; enable only with measurements, see plan/RESULT_F9.md)
+    template_answers_enabled: boolean;
+    intent_state_enabled: boolean;
+    escalation_ladder_enabled: boolean;
+    escalation_tool_loop_enabled: boolean;
+    query_latency_budget_s: number;
 }
 
 export interface DashboardAlert {
@@ -187,6 +193,15 @@ export const adminService = {
     toggleFeature: async (featureName: string, enabled: boolean) => {
         const response = await axios.post(
             `${API_URL}/admin/config/features/${featureName}/toggle?enabled=${enabled}`,
+            {},
+            { headers: getAuthHeader() }
+        );
+        return response.data;
+    },
+
+    setNumericConfig: async (key: string, value: number) => {
+        const response = await axios.put(
+            `${API_URL}/admin/config/settings/${key}?value=${value}`,
             {},
             { headers: getAuthHeader() }
         );

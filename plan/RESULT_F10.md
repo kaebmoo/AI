@@ -20,14 +20,15 @@
 
 ## Baseline eval (Phase D)
 
-| Metric | ค่า |
-|--------|-----|
-| **Execution-match accuracy** | **13/14 = 92.9%** |
-| Latency P50 | 10.5s |
-| Latency P95 | 17.4s |
-| golden_broken | 0 |
+| Metric | รอบแรก (value-based) | รอบสอง (strict — หลัง review P1-4) |
+|--------|------|------|
+| **exact_match (ค่า+ชื่อคอลัมน์)** | 13/14 = 92.9% | 0/14 (alias ที่โมเดลตั้งไม่ตรง golden) |
+| **value_match (ค่าตรง ชื่อคอลัมน์ต่าง)** | — | 14/14 |
+| **รวมค่าถูกต้อง (accuracy_incl_value_match)** | 92.9% | **100%** |
+| Latency P50 / P95 | 10.5s / 17.4s | — |
+| golden_broken | 0 | 0 |
 
-**ข้อที่ตก (1):** "รายได้ของกลุ่มธุรกิจ 7.กลุ่มบริการอื่นไม่ใช่โทรคมนาคม เดือนมกราคม 2567" — โมเดลคืนคอลัมน์ `bu` เกินมา (2 คอลัมน์ vs golden 1 คอลัมน์) → column-count mismatch; ค่าตัวเลขน่าจะถูก แต่เกณฑ์เทียบเข้มงวดเรื่องจำนวนคอลัมน์
+**การตีความหลังเปลี่ยนเกณฑ์ (review P1-4):** ค่าตัวเลขถูกทุกข้อ แต่ชื่อคอลัมน์ (alias) ที่โมเดลตั้งไม่เคยตรงกับ golden ("revenue" vs "รายได้รวม" ฯลฯ) — `value_match` แสดงแยกให้ตรวจ projection ด้วยตาได้ ไม่ปนกับ headline accuracy
 
 **Business rule ผ่านการพิสูจน์:** คำถาม YTD ทั้ง 2 ข้อ → SQL ใช้ `revenue_ytd` (ไม่ sum revenue รายเดือน) — กฎจาก contract เข้า knowledge จริง
 

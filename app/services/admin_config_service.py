@@ -512,7 +512,12 @@ class AdminConfigService:
                         None,
                     )
 
-        enabled_features = [name for name, enabled in feature_flags.items() if enabled]
+        # Boolean flags only — numeric config values (e.g. query_latency_budget_s)
+        # would otherwise be counted as "enabled features" by truthiness
+        enabled_features = [
+            name for name, enabled in feature_flags.items()
+            if isinstance(enabled, bool) and enabled
+        ]
 
         return {
             "default_provider": {

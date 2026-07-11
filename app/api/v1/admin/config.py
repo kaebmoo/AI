@@ -121,6 +121,30 @@ def toggle_feature_flag(
     }
 
 
+# Numeric tuning values settable from the UI — allowlisted, not arbitrary config writes
+_NUMERIC_CONFIG_KEYS = {"query_latency_budget_s"}
+
+
+@router.put("/config/settings/{key}", response_model=dict)
+def set_numeric_config(
+    key: str,
+    value: float,
+    current_user: User = Depends(deps.require_admin),
+    _db: Session = Depends(deps.get_config_db),
+):
+    """Set an allowlisted numeric config value. Admin only."""
+    if key not in _NUMERIC_CONFIG_KEYS:
+        raise HTTPException(status_code=400, detail=f"Key '{key}' is not settable via this endpoint")
+    if value <= 0:
+        raise HTTPException(status_code=400, detail="Value must be positive")
+
+    config_service = AdminConfigService()
+    success = config_service.set_config(key, str(value), updated_by=str(current_user.email))
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to set config")
+    return {"status": "success", "key": key, "value": value}
+
+
 @router.post("/config/cache/clear", response_model=dict)
 def clear_config_cache(
     _current_user: User = Depends(deps.require_admin),

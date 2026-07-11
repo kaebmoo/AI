@@ -110,6 +110,19 @@ const Settings: React.FC = () => {
         }
     };
 
+    const handleSetBudget = async (value: number | null) => {
+        if (!value || value <= 0) return;
+        try {
+            setError(null);
+            await adminService.setNumericConfig('query_latency_budget_s', value);
+            setFeatureFlags(prev => prev ? { ...prev, query_latency_budget_s: value } : null);
+            message.success(`Latency budget set to ${value}s`);
+        } catch (err: any) {
+            setError(err.message || 'Failed to set latency budget');
+            message.error('Failed to set latency budget');
+        }
+    };
+
     const handleClearCache = async () => {
         try {
             setError(null);
@@ -502,6 +515,125 @@ const Settings: React.FC = () => {
                                         <Switch
                                             checked={featureFlags.value_lookup_enabled}
                                             onChange={(checked) => handleToggleFeature('value_lookup_enabled', checked)}
+                                        />
+                                    </Col>
+                                </Row>
+                            </Card>
+                        </Col>
+
+                        {/* F9 — Agentic Latency (เปิดต่อเมื่อมีผลวัดใน plan/RESULT_F9.md) */}
+                        <Col span={24}>
+                            <Card type="inner">
+                                <Row justify="space-between" align="middle">
+                                    <Col>
+                                        <Space>
+                                            <Text strong>Template Answers (F9-A)</Text>
+                                            <Tooltip title="ผลลัพธ์เล็ก (1 แถว / ≤5×2) ใช้คำอธิบายจาก template แทน LLM — เร็วขึ้นและตัวเลขไม่ถูกแต่ง เปิดต่อเมื่อวัดผลตาม RESULT_F9 แล้ว">
+                                                <InfoCircleOutlined style={{ color: '#8c8c8c' }} />
+                                            </Tooltip>
+                                        </Space>
+                                        <br />
+                                        <Text type="secondary">ข้ามการเรียก LLM อธิบายผลสำหรับผลลัพธ์ขนาดเล็ก</Text>
+                                    </Col>
+                                    <Col>
+                                        <Switch
+                                            checked={featureFlags.template_answers_enabled}
+                                            onChange={(checked) => handleToggleFeature('template_answers_enabled', checked)}
+                                        />
+                                    </Col>
+                                </Row>
+                            </Card>
+                        </Col>
+
+                        <Col span={24}>
+                            <Card type="inner">
+                                <Row justify="space-between" align="middle">
+                                    <Col>
+                                        <Space>
+                                            <Text strong>Intent State (F9-C)</Text>
+                                            <Tooltip title="เก็บ intent ล่าสุดของบทสนทนา — follow-up ใช้วิธี 'อัปเดต intent เดิม' แทน re-derive จาก history (มีผลเมื่อ Two-Pass เปิดเท่านั้น)">
+                                                <InfoCircleOutlined style={{ color: '#8c8c8c' }} />
+                                            </Tooltip>
+                                        </Space>
+                                        <br />
+                                        <Text type="secondary">Follow-up เร็วขึ้นด้วย structured intent state (ต้องเปิด Two-Pass)</Text>
+                                    </Col>
+                                    <Col>
+                                        <Switch
+                                            checked={featureFlags.intent_state_enabled}
+                                            onChange={(checked) => handleToggleFeature('intent_state_enabled', checked)}
+                                        />
+                                    </Col>
+                                </Row>
+                            </Card>
+                        </Col>
+
+                        <Col span={24}>
+                            <Card type="inner">
+                                <Row justify="space-between" align="middle">
+                                    <Col>
+                                        <Space>
+                                            <Text strong>Escalation Ladder (F9-D)</Text>
+                                            <Tooltip title="Retry ครั้งที่ 2 ยกระดับเป็น strong tier model ของ provider เดิมอัตโนมัติ (ตั้ง tier ได้ในหน้า Models)">
+                                                <InfoCircleOutlined style={{ color: '#8c8c8c' }} />
+                                            </Tooltip>
+                                        </Space>
+                                        <br />
+                                        <Text type="secondary">Retry แบบไต่ระดับ model แทนลองซ้ำแบบเดิม</Text>
+                                    </Col>
+                                    <Col>
+                                        <Switch
+                                            checked={featureFlags.escalation_ladder_enabled}
+                                            onChange={(checked) => handleToggleFeature('escalation_ladder_enabled', checked)}
+                                        />
+                                    </Col>
+                                </Row>
+                            </Card>
+                        </Col>
+
+                        <Col span={24}>
+                            <Card type="inner">
+                                <Row justify="space-between" align="middle">
+                                    <Col>
+                                        <Space>
+                                            <Text strong>Tool-Loop Rescue (F9-D attempt 3)</Text>
+                                            <Tooltip title="เมื่อ retry หมดแล้วยังไม่สำเร็จ ส่งเข้า tool loop (mcp mode, read-only เท่าเดิม) เป็นความพยายามสุดท้าย — ช้าแต่กู้เคสยากได้">
+                                                <InfoCircleOutlined style={{ color: '#8c8c8c' }} />
+                                            </Tooltip>
+                                        </Space>
+                                        <br />
+                                        <Text type="secondary">Attempt สุดท้ายผ่าน MCP tool loop</Text>
+                                    </Col>
+                                    <Col>
+                                        <Switch
+                                            checked={featureFlags.escalation_tool_loop_enabled}
+                                            onChange={(checked) => handleToggleFeature('escalation_tool_loop_enabled', checked)}
+                                        />
+                                    </Col>
+                                </Row>
+                            </Card>
+                        </Col>
+
+                        <Col span={24}>
+                            <Card type="inner">
+                                <Row justify="space-between" align="middle">
+                                    <Col>
+                                        <Space>
+                                            <Text strong>Query Latency Budget</Text>
+                                            <Tooltip title="เวลารวมสูงสุดต่อคำถาม (วินาที) — เกิน budget จะหยุด retry แล้วตอบ error ตรง ๆ">
+                                                <InfoCircleOutlined style={{ color: '#8c8c8c' }} />
+                                            </Tooltip>
+                                        </Space>
+                                        <br />
+                                        <Text type="secondary">งบเวลาต่อ query สำหรับ escalation ladder (default 45s)</Text>
+                                    </Col>
+                                    <Col>
+                                        <InputNumber
+                                            min={5}
+                                            max={300}
+                                            value={featureFlags.query_latency_budget_s}
+                                            onChange={handleSetBudget}
+                                            addonAfter="s"
                                         />
                                     </Col>
                                 </Row>

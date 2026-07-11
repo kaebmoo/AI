@@ -80,17 +80,30 @@ async def create_export(
     # which shares quota across NAT users and is trivially bypassed by IP rotation
     from datetime import timedelta
     hour_ago = utcnow() - timedelta(hours=1)
-    recent = db.query(ReportExport).filter(
-        ReportExport.user_id == current_user.id,
-        ReportExport.created_at >= hour_ago,
-    ).count()
-    if recent >= EXPORTS_PER_HOUR:
-        raise HTTPException(status_code=429, detail=f"เกินจำนวน export ที่กำหนด ({EXPORTS_PER_HOUR} ครั้ง/ชั่วโมง)")
+
+    def _hour_count() -> int:
+        return db.query(ReportExport).filter(
+            ReportExport.user_id == current_user.id,
+            ReportExport.created_at >= hour_ago,
+        ).count()
+
+    quota_msg = f"เกินจำนวน export ที่กำหนด ({EXPORTS_PER_HOUR} ครั้ง/ชั่วโมง)"
+    if _hour_count() >= EXPORTS_PER_HOUR:  # cheap fast-path reject
+        raise HTTPException(status_code=429, detail=quota_msg)
 
     try:
         export = report_service.create_export(db, current_user, body.chat_history_id)
     except ExportError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+    # Insert-then-verify closes the check/insert race: concurrent requests that all
+    # passed the fast path each re-count AFTER their own insert — any request that
+    # sees the cap breached deletes its reservation. Slight over-rejection at the
+    # boundary is possible; overrun is not.
+    if _hour_count() > EXPORTS_PER_HOUR:
+        db.delete(export)
+        db.commit()
+        raise HTTPException(status_code=429, detail=quota_msg)
 
     if _celery_available:
         try:
