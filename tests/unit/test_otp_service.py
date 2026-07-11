@@ -161,3 +161,45 @@ class TestOTPService:
                 email="test@example.com",
                 platform="web"
             )
+
+
+class TestExposeOtpGuard:
+    """Fail-closed guard: OTP is only ever returned for explicit dev/test envs."""
+
+    @pytest.mark.parametrize("env", ["development", "test", "local", "DEVELOPMENT"])
+    def test_exposed_for_dev_envs(self, env):
+        from app.config import settings
+        with patch.object(settings, "ENVIRONMENT", env):
+            assert settings.expose_otp_in_response() is True
+
+    @pytest.mark.parametrize(
+        "env", ["production", "staging", "qa", "prod", "", "typo", "PRODUCTION"]
+    )
+    def test_hidden_for_everything_else(self, env):
+        from app.config import settings
+        with patch.object(settings, "ENVIRONMENT", env):
+            assert settings.expose_otp_in_response() is False
+
+    def test_request_otp_response_hides_otp_in_production(self, db_session):
+        from app.config import settings
+        email_service = Mock(spec=EmailService)
+        service = OTPService(db_session, email_service)
+        with patch.object(settings, "ENVIRONMENT", "production"), \
+                patch("app.services.otp_service.send_otp_email"):
+            success, message = service.request_otp(
+                email="prod-user@example.com", platform="web"
+            )
+        assert success is True
+        assert "DEV:" not in message
+
+    def test_request_otp_response_shows_otp_in_dev(self, db_session):
+        from app.config import settings
+        email_service = Mock(spec=EmailService)
+        service = OTPService(db_session, email_service)
+        with patch.object(settings, "ENVIRONMENT", "development"), \
+                patch("app.services.otp_service.send_otp_email"):
+            success, message = service.request_otp(
+                email="dev-user@example.com", platform="web"
+            )
+        assert success is True
+        assert "DEV:" in message

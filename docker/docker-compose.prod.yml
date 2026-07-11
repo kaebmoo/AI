@@ -12,6 +12,7 @@ services:
       - ../:/app
       - ./data:/app/data  # Persist SQLite data if using SQLite
     environment:
+      - ENVIRONMENT=${ENVIRONMENT:-production}
       - DATABASE_URL=${DATABASE_URL:-sqlite:///./nt_fi_report.sqlite}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - AI_PROVIDER=${AI_PROVIDER:-gemini}
@@ -32,6 +33,7 @@ services:
       dockerfile: docker/Dockerfile
     restart: always
     environment:
+      - ENVIRONMENT=${ENVIRONMENT:-production}
       - DATABASE_URL=${DATABASE_URL:-sqlite:///./nt_fi_report.sqlite}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - EMAIL_HOST=${EMAIL_HOST}

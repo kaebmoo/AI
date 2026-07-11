@@ -146,6 +146,12 @@ class Settings(BaseSettings):
     def is_production_like(self) -> bool:
         return self.ENVIRONMENT.lower() in {"production", "staging"}
 
+    def expose_otp_in_response(self) -> bool:
+        # Fail-closed: OTP is returned in API responses ONLY for an explicit
+        # dev/test allowlist. Any other value (production, staging, qa, typo,
+        # unset default) keeps the OTP secret.
+        return self.ENVIRONMENT.lower() in {"development", "test", "local"}
+
     def get_redis_url(self) -> str:
         if self.REDIS_URL:
             return self.REDIS_URL

@@ -103,8 +103,9 @@ class OTPService:
             # but for now we proceed as if sent (client might retry).
         
         # ponytail: dev-only shortcut — expose OTP in response when email isn't set up.
-        # Guarded by is_production_like() so it can never leak in prod/staging.
-        if not settings.is_production_like():
+        # Fail-closed guard (see settings.expose_otp_in_response) so it can only
+        # ever leak in an explicit development/test/local environment.
+        if settings.expose_otp_in_response():
             logger.warning(f"[DEV] OTP for {email}: {otp}")
             return True, f"OTP sent to your email (DEV: {otp})"
 
