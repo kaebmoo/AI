@@ -150,6 +150,28 @@ class TestSimpleQueryEndpoint:
         assert len(data["data"]) == 2
 
 
+class TestPortalFields:
+    """F11 Phase A: optional portal fields accepted without breaking the contract."""
+
+    def test_query_with_pinned_filters_and_source(self, query_client):
+        mock_result = _mock_query_engine_result(explanation="ok", data=[{"v": 1}], context="feed_revenue")
+
+        with patch("app.services.query_engine.QueryEngine") as MockEngine:
+            instance = MockEngine.return_value
+            instance.query = AsyncMock(return_value=mock_result)
+            resp = query_client.post("/api/v1/query/", json={
+                "question": "รายได้รวมเดือนพฤษภาคม 2569",
+                "context": "feed_revenue",
+                "source": "portal",
+                "pinned_filters": {"year_month": 202605},
+            })
+
+        assert resp.status_code == 200
+        assert resp.json()["context"] == "feed_revenue"
+        # context forwarded to the engine
+        assert instance.query.call_args.kwargs["context"] == "feed_revenue"
+
+
 class TestQueryContextsEndpoint:
     """GET /query/contexts."""
 

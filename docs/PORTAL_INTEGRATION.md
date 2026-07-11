@@ -1,0 +1,34 @@
+# Portal Integration (F11 Phase A — AI side)
+
+## API สำหรับ NT-Report portal
+
+Endpoint: `POST /api/v1/query/` (stateless) — auth ด้วย `X-API-Key`
+
+Request เพิ่มเติมสำหรับ portal (optional ทั้งคู่ — contract เดิมไม่เปลี่ยน):
+- `pinned_filters` (dict) — filter จาก dashboard เช่น `{"year_month": 202605}` — **v1: log เพื่อ audit เท่านั้น ยังไม่ inject เข้า query**
+- `source` (str) — เช่น `"portal"` สำหรับ audit trail
+
+ตัวอย่าง:
+```json
+{"question": "รายได้รวมเดือนพฤษภาคม 2569", "context": "feed_revenue",
+ "include_sql": true, "include_data": true, "source": "portal",
+ "pinned_filters": {"year_month": 202605}}
+```
+
+## ออก API key ให้ portal
+
+```python
+# python -c จาก project root (ใช้ venv เดียวกับ backend)
+from app.db.session import SessionLocal
+from app.services.api_key_service import APIKeyService
+
+db = SessionLocal()
+raw_key, record = APIKeyService(db).create_key(
+    user_id=<admin_user_id>, name="nt-report-portal",
+    scopes="query", rate_limit_per_minute=20, rate_limit_per_day=2000,
+)
+print(raw_key)  # เก็บใส่ .env ของ pocketbase_0 (ASSISTANT_API_KEY) — แสดงครั้งเดียว
+```
+
+- per-minute limit enforce ผ่าน Redis (F4.4) — Redis ล่ม = fail-open + warning
+- **ไม่เปิด CORS** — portal เรียกผ่าน PB hook proxy (same-origin) เท่านั้น

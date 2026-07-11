@@ -151,7 +151,11 @@ async def run_eval(provider=None, context_filter=None, limit=None):
                 ctx = ex["category"] if ex["category"] in contexts else None
                 t0 = time.time()
                 try:
-                    result = await engine.query(q, provider=provider, context=ctx, user_id=None)
+                    # Hard per-example timeout — a hung gateway call must not stall the whole run
+                    result = await asyncio.wait_for(
+                        engine.query(q, provider=provider, context=ctx, user_id=None),
+                        timeout=180,
+                    )
                     qr = result.query_result
                     record["latency_s"] = round(time.time() - t0, 2)
                     record["generated_sql"] = qr.sql_query

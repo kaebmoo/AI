@@ -31,6 +31,10 @@ class SimpleQueryRequest(BaseModel):
     include_sql: bool = Field(False, description="Include generated SQL in response")
     include_data: bool = Field(False, description="Include raw data rows in response")
     max_rows: int = Field(20, description="Max data rows to return", ge=1, le=1000)
+    # F11: portal integration — both optional so the contract never breaks
+    pinned_filters: Optional[Dict[str, Any]] = Field(
+        None, description="Filters pinned by the caller (e.g. dashboard period). v1: logged only")
+    source: Optional[str] = Field(None, description="Caller identifier for audit (e.g. 'portal')")
 
 
 class SimpleQueryResponse(BaseModel):
@@ -61,6 +65,14 @@ async def simple_query(
 ):
     """Execute a simple query — no conversation, no chart. Returns answer + optional SQL/data."""
     start_time = time.time()
+
+    if request_body.source or request_body.pinned_filters:
+        # ponytail: v1 records provenance only — injecting pinned_filters into the
+        # intent pipeline is deferred (see PLAN_F11 Phase A note in FIX_NOTES)
+        logger.info(
+            f"Query from source={request_body.source or '-'} "
+            f"pinned_filters={request_body.pinned_filters or {}} user={current_user.id}"
+        )
 
     try:
         from app.services.query_engine import QueryEngine
