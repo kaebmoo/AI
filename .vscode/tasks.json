@@ -37,7 +37,7 @@
             },
             "presentation": {
                 "group": "nt-ai-assistant",
-                "panel": "shared"
+                "panel": "dedicated"
             }
         },
         {
@@ -62,7 +62,7 @@
             },
             "presentation": {
                 "group": "nt-ai-assistant",
-                "panel": "shared"
+                "panel": "dedicated"
             }
         },
         {
@@ -90,7 +90,7 @@
             },
             "presentation": {
                 "group": "nt-ai-assistant",
-                "panel": "shared"
+                "panel": "dedicated"
             }
         },
         {
@@ -118,7 +118,7 @@
             },
             "presentation": {
                 "group": "nt-ai-assistant",
-                "panel": "shared"
+                "panel": "dedicated"
             }
         }
     ]

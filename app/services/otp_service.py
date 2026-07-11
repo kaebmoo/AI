@@ -102,6 +102,12 @@ class OTPService:
             # In a real system, you might revert the DB transaction or return an error,
             # but for now we proceed as if sent (client might retry).
         
+        # ponytail: dev-only shortcut — expose OTP in response when email isn't set up.
+        # Guarded by is_production_like() so it can never leak in prod/staging.
+        if not settings.is_production_like():
+            logger.warning(f"[DEV] OTP for {email}: {otp}")
+            return True, f"OTP sent to your email (DEV: {otp})"
+
         return True, "OTP sent to your email"
     
     def verify_otp(

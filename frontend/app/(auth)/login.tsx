@@ -18,8 +18,8 @@ export default function LoginScreen() {
 
         setLoading(true);
         try {
-            await authService.login(email);
-            router.push({ pathname: '/(auth)/verify', params: { email } });
+            const data = await authService.login(email);
+            router.push({ pathname: '/(auth)/verify', params: { email, hint: data?.message ?? '' } });
         } catch (error: any) {
             const msg = error.response?.data?.detail || 'Failed to login';
             // If it's a cooldown, just proceed (for dev convenience or warn user)

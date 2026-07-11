@@ -7,7 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 export default function VerifyScreen() {
-    const { email } = useLocalSearchParams<{ email: string }>();
+    const { email, hint } = useLocalSearchParams<{ email: string; hint?: string }>();
     const [otp, setOtp] = useState('');
     const [loading, setLoading] = useState(false);
     const { signIn } = useAuth();
@@ -72,6 +72,12 @@ export default function VerifyScreen() {
                     <Text className="text-gray-700 dark:text-gray-300 font-medium text-center">
                         {email}
                     </Text>
+                    {/* ponytail: dev-only OTP hint from backend, empty string in production */}
+                    {hint?.includes('DEV:') && (
+                        <Text className="text-orange-500 mt-2 text-center font-medium">
+                            {hint}
+                        </Text>
+                    )}
                 </View>
 
                 <View className="space-y-6">
