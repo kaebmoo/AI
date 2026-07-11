@@ -156,13 +156,9 @@ class NTAIBot:
         webhook_app = FastAPI(title="NT AI Telegram Webhook")
         app = self.application
 
-        @webhook_app.on_event("startup")
-        async def on_startup():
-            await app.initialize()
-
-        @webhook_app.on_event("shutdown")
-        async def on_shutdown():
-            await app.shutdown()
+        # NOTE: no on_event hooks here — Starlette never runs lifespan/startup
+        # of mounted sub-apps. The PTB application lifecycle (initialize/start/
+        # stop/shutdown + set_webhook) is managed by the main app's lifespan.
 
         @webhook_app.post("/webhook")
         async def webhook_handler(request: Request):

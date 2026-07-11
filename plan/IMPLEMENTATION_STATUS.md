@@ -279,6 +279,9 @@ Phase นี้อยู่ในสภาพใช้งานจริงแ�
 - **Row cap ใช้ fetchmany แทน append LIMIT** — ทำงานทุก engine รวม MSSQL, subquery LIMIT ไม่หลุด cap (F4.2)
 - **validate_sql เหลือแหล่งเดียว** — `validation_service.py` (MCP delegate) (F4.3)
 - **API key per-minute limit enforce แล้ว** — Redis fixed-window, fail-open เมื่อ Redis ล่ม (F4.4) — ดู `docs/DEPLOYMENT_SECURITY.md`
+- **Telegram webhook mode: PTB application ถูก initialize/start + setWebhook จาก main lifespan** (sub-app startup ไม่เคยรัน — B5); polling ลบ webhook ค้างก่อน getUpdates + เก็บ task ref (F5.1-2) — *manual webhook E2E ยังค้าง (ดู FIX_NOTES)*
+- **Admin routing ผ่าน `/admin` explicit** — เลิก regex hijack ที่จับ "เพิ่มขึ้น/ติดลบ" ผิด (B6, F5.3)
+- **Telegram chart type เคารพ visualization จาก AI** — อ่านจาก explanation dict (F5.4)
 
 ### ยังขาด
 

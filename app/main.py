@@ -47,10 +47,28 @@ async def lifespan(app: FastAPI):
                 if settings.TELEGRAM_BOT_MODE == "webhook":
                     webhook_app = bot.get_webhook_app()
                     app.mount("/telegram", webhook_app)
+                    # Mounted sub-apps never get their startup events run by
+                    # Starlette — initialize the PTB application here (B5)
+                    await bot.application.initialize()
+                    await bot.application.start()
+                    if settings.TELEGRAM_WEBHOOK_URL:
+                        await bot.application.bot.set_webhook(
+                            url=settings.TELEGRAM_WEBHOOK_URL,
+                            secret_token=settings.TELEGRAM_WEBHOOK_SECRET or None,
+                            drop_pending_updates=True,
+                        )
+                        logger.info(f"Telegram webhook registered: {settings.TELEGRAM_WEBHOOK_URL}")
+                    else:
+                        logger.warning("TELEGRAM_BOT_MODE=webhook แต่ TELEGRAM_WEBHOOK_URL ว่าง — ต้องเรียก setWebhook เอง")
                     logger.info("Telegram bot mounted as webhook at /telegram/webhook")
                 else:
                     import asyncio
-                    asyncio.create_task(_start_telegram_polling(bot))
+                    # Keep a task reference (prevents GC) and log unexpected exits
+                    app.state.telegram_polling_task = asyncio.create_task(_start_telegram_polling(bot))
+                    app.state.telegram_polling_task.add_done_callback(
+                        lambda t: logger.error(f"Telegram polling task ended: {t.exception()}")
+                        if not t.cancelled() and t.exception() else None
+                    )
                     logger.info("Telegram bot starting in polling mode")
             except ImportError:
                 logger.warning("python-telegram-bot not installed — Telegram bot disabled")
@@ -66,14 +84,15 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.warning(f"Scheduler shutdown error: {e}")
 
-        # Shutdown: stop Telegram polling
+        # Shutdown: stop Telegram bot (PTB order: updater.stop → stop → shutdown)
         if hasattr(app.state, 'telegram_bot'):
             try:
                 bot_app = app.state.telegram_bot.application
-                if bot_app._running:
+                if bot_app.updater and bot_app.updater.running:
                     await bot_app.updater.stop()
+                if bot_app.running:
                     await bot_app.stop()
-                    await bot_app.shutdown()
+                await bot_app.shutdown()
             except Exception as e:
                 logger.warning(f"Telegram bot shutdown error: {e}")
 
@@ -85,6 +104,8 @@ async def _start_telegram_polling(bot):
         await asyncio.sleep(2)  # Wait for app to finish startup
         app_instance = bot.application
         await app_instance.initialize()
+        # A leftover webhook makes getUpdates return 409 Conflict
+        await app_instance.bot.delete_webhook(drop_pending_updates=True)
         await app_instance.start()
         await app_instance.updater.start_polling(drop_pending_updates=True)
         logger.info("Telegram bot polling started")

@@ -2,14 +2,13 @@
 NT AI Assistant -- Telegram Dispatcher
 ========================================
 Routes incoming Telegram messages to the correct handler:
-- Commands (/start, /help, /context) go to their respective handlers.
-- Free-text from admin users with admin-like intent goes to AdminAgent.
-- All other free-text goes to QueryEngine.
+- Commands (/start, /help, /context, /admin) go to their respective handlers.
+- All free-text goes to QueryEngine (admin work is explicit via /admin — B6:
+  regex intent detection misfired on normal Thai like "รายได้เพิ่มขึ้น").
 """
 
 import logging
-import re
-from typing import Any, Optional
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -22,12 +21,6 @@ from app.telegram.formatters import (
 from app.telegram.chart_renderer import render_chart_to_png
 
 logger = logging.getLogger(__name__)
-
-# Patterns that indicate an admin-type request (Thai + English)
-_ADMIN_PATTERNS = re.compile(
-    r"(เพิ่ม|ลบ|แก้ไข|อัพเดท|จัดการ|config|mapping|rule|example|onboard)",
-    re.IGNORECASE,
-)
 
 _auth = TelegramAuth()
 
@@ -80,12 +73,7 @@ class TelegramDispatcher:
             )
             return
 
-        # ── Admin routing ─────────────────────────────────────────────
-        if _auth.is_admin(chat_id, db) and _ADMIN_PATTERNS.search(text):
-            await self._handle_admin_query(text, user, update, context, db)
-            return
-
-        # ── Normal query ──────────────────────────────────────────────
+        # ── Normal query (admin work goes through /admin explicitly) ──
         await self._handle_query(text, user, update, context, db)
 
     # ── Command router ────────────────────────────────────────────────────
@@ -102,6 +90,8 @@ class TelegramDispatcher:
             await self._cmd_help(update, context)
         elif cmd == "/context":
             await self._cmd_context(update, context, db)
+        elif cmd == "/admin":
+            await self._cmd_admin(args, update, context, db)
         else:
             await update.message.reply_text("คำสั่งไม่รู้จัก พิมพ์ /help เพื่อดูคำสั่งทั้งหมด")
 
@@ -176,6 +166,7 @@ class TelegramDispatcher:
             "/start <email> - ลงทะเบียนด้วยอีเมลองค์กร\n"
             "/help - แสดงคำสั่งทั้งหมด\n"
             "/context - เลือกชุดข้อมูลที่ต้องการถาม\n"
+            "/admin <คำสั่ง> - จัดการระบบ (สำหรับผู้ดูแลระบบ)\n"
             "\n"
             "วิธีใช้งาน:\n"
             "พิมพ์คำถามเป็นภาษาไทยได้เลย เช่น\n"
@@ -323,6 +314,30 @@ class TelegramDispatcher:
 
     # ── Admin query ───────────────────────────────────────────────────────
 
+    # ── /admin ────────────────────────────────────────────────────────────
+
+    async def _cmd_admin(
+        self, args: str, update: Any, context: Any, db: Session
+    ) -> None:
+        """Explicit admin entry point — /admin <คำสั่ง> routes to AdminAgent."""
+        chat_id = update.message.chat_id
+        if not _auth.is_admin(chat_id, db):
+            await update.message.reply_text("คำสั่งนี้สำหรับผู้ดูแลระบบเท่านั้น")
+            return
+
+        if not args:
+            await update.message.reply_text(
+                "วิธีใช้: /admin <คำสั่ง>\n"
+                "ตัวอย่าง:\n"
+                '  /admin เพิ่ม mapping "มือถือ" → BUSINESS_GROUP = Mobile\n'
+                "  /admin ดู rules ของ context revenue\n"
+                "  /admin เพิ่ม golden example ..."
+            )
+            return
+
+        user = _auth.get_user_by_chat_id(chat_id, db)
+        await self._handle_admin_query(args, user, update, context, db)
+
     async def _handle_admin_query(
         self, text: str, user: Any, update: Any, context: Any, db: Session
     ) -> None:
@@ -358,9 +373,11 @@ def _guess_chart_type(qr: Any) -> str:
     if not qr.data:
         return "bar"
 
-    # If viz_config is provided by the AI, use it
-    if hasattr(qr, "visualization") and qr.visualization:
-        viz = qr.visualization
+    # If the AI recommended a chart type, respect it — QueryResult carries it
+    # inside the explanation dict (there is no qr.visualization attribute)
+    explanation = getattr(qr, "explanation", None)
+    if isinstance(explanation, dict) and explanation.get("visualization"):
+        viz = explanation["visualization"]
         if isinstance(viz, dict):
             return viz.get("type", "bar")
         return str(viz)

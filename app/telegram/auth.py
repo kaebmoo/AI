@@ -141,7 +141,6 @@ class TelegramAuth:
             ``{"success": True/False, "message": "...", "user": User|None}``
         """
         from app.models.otp import OTPRequest
-        from datetime import datetime
 
         # Find the latest unverified OTP request for this chat_id
         otp_request = (

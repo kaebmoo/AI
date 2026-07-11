@@ -98,12 +98,31 @@ class TestDispatchFreeTextQuery:
 
 
 class TestDispatchAdminCommand:
-    """Test admin query routing."""
+    """F5.3: admin work is explicit via /admin — free text never hits AdminAgent."""
 
-    async def test_admin_mapping_request(self, db_session):
-        """Admin sending 'เพิ่ม mapping' → AdminAgent called."""
+    async def test_admin_free_text_goes_to_query_engine(self, db_session):
+        """Admin free text 'รายได้เพิ่มขึ้นเท่าไร' → QueryEngine, NOT AdminAgent (B6)."""
         dispatcher = TelegramDispatcher()
-        update = _make_update(chat_id=11111, text="เพิ่ม mapping datacom ไป service_group")
+        update = _make_update(chat_id=11111, text="รายได้เพิ่มขึ้นเท่าไร")
+        context = _make_context()
+
+        mock_user = MagicMock()
+        mock_user.id = 1
+
+        with patch("app.telegram.dispatcher._auth") as mock_auth:
+            mock_auth.get_user_by_chat_id.return_value = mock_user
+            mock_auth.is_admin.return_value = True
+
+            with patch.object(dispatcher, "_handle_query", new_callable=AsyncMock) as mock_query:
+                with patch.object(dispatcher, "_handle_admin_query", new_callable=AsyncMock) as mock_admin:
+                    await dispatcher.dispatch(update, context, db_session)
+                    mock_query.assert_called_once()
+                    mock_admin.assert_not_called()
+
+    async def test_admin_command_routes_to_admin_agent(self, db_session):
+        """/admin เพิ่ม mapping ... by admin → AdminAgent called with args."""
+        dispatcher = TelegramDispatcher()
+        update = _make_update(chat_id=11111, text="/admin เพิ่ม mapping datacom ไป service_group")
         context = _make_context()
 
         mock_user = MagicMock()
@@ -116,25 +135,37 @@ class TestDispatchAdminCommand:
             with patch.object(dispatcher, "_handle_admin_query", new_callable=AsyncMock) as mock_admin:
                 await dispatcher.dispatch(update, context, db_session)
                 mock_admin.assert_called_once()
+                assert mock_admin.call_args[0][0] == "เพิ่ม mapping datacom ไป service_group"
 
-    async def test_non_admin_blocked_from_admin_commands(self, db_session):
-        """Non-admin sending 'เพิ่ม mapping' → normal query, not admin."""
+    async def test_admin_command_by_non_admin_rejected(self, db_session):
+        """/admin by non-admin → rejection message, AdminAgent not called."""
         dispatcher = TelegramDispatcher()
-        update = _make_update(chat_id=22222, text="เพิ่ม mapping datacom")
+        update = _make_update(chat_id=22222, text="/admin เพิ่ม mapping x")
         context = _make_context()
 
-        mock_user = MagicMock()
-        mock_user.id = 2
-
         with patch("app.telegram.dispatcher._auth") as mock_auth:
-            mock_auth.get_user_by_chat_id.return_value = mock_user
             mock_auth.is_admin.return_value = False
 
-            with patch.object(dispatcher, "_handle_query", new_callable=AsyncMock) as mock_query:
-                with patch.object(dispatcher, "_handle_admin_query", new_callable=AsyncMock) as mock_admin:
-                    await dispatcher.dispatch(update, context, db_session)
-                    mock_query.assert_called_once()
-                    mock_admin.assert_not_called()
+            with patch.object(dispatcher, "_handle_admin_query", new_callable=AsyncMock) as mock_admin:
+                await dispatcher.dispatch(update, context, db_session)
+                mock_admin.assert_not_called()
+                msg = update.message.reply_text.call_args[0][0]
+                assert "ผู้ดูแลระบบ" in msg
+
+    async def test_admin_command_no_args_shows_usage(self, db_session):
+        """/admin with no args by admin → usage help."""
+        dispatcher = TelegramDispatcher()
+        update = _make_update(chat_id=11111, text="/admin")
+        context = _make_context()
+
+        with patch("app.telegram.dispatcher._auth") as mock_auth:
+            mock_auth.is_admin.return_value = True
+
+            with patch.object(dispatcher, "_handle_admin_query", new_callable=AsyncMock) as mock_admin:
+                await dispatcher.dispatch(update, context, db_session)
+                mock_admin.assert_not_called()
+                msg = update.message.reply_text.call_args[0][0]
+                assert "วิธีใช้" in msg
 
 
 class TestDispatchEmptyMessage:
