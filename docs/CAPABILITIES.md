@@ -1,6 +1,6 @@
 # AI Assistant — Capabilities Overview
 
-**Last Updated:** 2026-03-06
+**Last Updated:** 2026-07-12
 
 เอกสารนี้สรุปความสามารถทั้งหมดของระบบ เพื่อให้เห็นภาพรวมว่า "ตอนนี้มีอะไรแล้วบ้าง" และ "อะไรยังไม่มี"
 
@@ -20,6 +20,8 @@
 | Value lookup (search actual DB values) | Done | Feature flag: `value_lookup_enabled` |
 | RAG context injection (Vanna) | Done | Feature flag: `rag_enabled` |
 | Two-pass SQL generation (intent → SQL) | Done | Feature flag: `two_pass_enabled` |
+| Template answers (skip LLM explain for simple results) | Done | Feature flag: `template_answers_enabled` (default OFF) |
+| Intent state for follow-up queries | Done | Feature flag: `intent_state_enabled` (default OFF) |
 | Extended Thinking (Claude Sonnet/Opus) | Done | Admin config |
 
 ---
@@ -29,7 +31,7 @@
 | Provider | Status | Models |
 |----------|--------|--------|
 | Claude (Anthropic) | Done | claude-sonnet-4-6, claude-opus-4-6, claude-haiku-4-5 |
-| Gemini (Google AI) | Done | gemini-3-flash, gemini-2.0-flash-exp |
+| Gemini (Google AI) | Done | gemini-2.5-flash, gemini-3-flash-preview, gemini-2.0-flash-exp |
 | Matcha (Gateway) | Done | gpt-4.1, gpt-4o, gpt-4-turbo |
 | Provider auto-discovery | Done | `registry.py` auto-discovers on import |
 | Provider fallback | Done | If primary fails → try next configured |
@@ -48,6 +50,8 @@
 | Request Dedup | Done | Block spam/double-click | 5 sec window |
 | Tier Classification | Done | Cheap model for simple queries | Rule-based, 0 token cost |
 | Gemini Implicit Caching | Automatic | Google handles internally | No code needed |
+| Real token accounting | Done | Actual usage from provider responses | `app/services/cost_service.py` |
+| Query trace log (single-line JSON) | Done | Per-query latency/token breakdown | `app/services/ai/trace.py` |
 
 ---
 
@@ -132,6 +136,8 @@
 | OTP email login | Done | Configurable allowed domains |
 | Role-based access (user/admin) | Done | Admin-only endpoints |
 | SELECT-only SQL enforcement | Done | MCP validation |
+| Read-only business DB connection | Done | SQLite `mode=ro` (MCP query + report export) |
+| Result row cap | Done | `max_rows` cap in `nt-query` MCP server |
 | CORS configuration | Done | Configurable origins |
 
 ---
@@ -140,11 +146,13 @@
 
 | Capability | Status | Notes |
 |------------|--------|-------|
-| MCP Server architecture | Done | 3 servers: metadata, query, validation |
+| MCP Server architecture | Done | 4 servers: metadata, query, validation, admin |
 | SQLite support | Done | Development & small deployments |
 | PostgreSQL support | Done | Production |
 | MSSQL support | Partial | Via SQLAlchemy, not fully tested |
-| Redis cache service | Available | `cache_service.py` exists but not integrated into query pipeline |
+| Redis cache service | Available | `cache_service.py` — used by API key cache; not in query pipeline |
+| Celery + Redis workers | Done | `app/workers/` (report_worker, email_worker) |
+| CI + Eval harness | Done | `scripts/eval/run_eval.py` → `eval_results/` |
 | Confidence scoring | Done | Via `nt-validation` MCP server |
 | Warning detection | Done | Data quality warnings |
 
@@ -168,7 +176,10 @@ See `memory/architecture.md` § Performance and `docs/planning/MASTER_DATA_PLAN.
 | Web API (FastAPI) | Done | Primary interface |
 | React Native frontend (Expo) | Done | Mobile-ready |
 | Admin frontend (React + Ant Design) | Done | Desktop admin |
-| OpenMiniCrew Telegram bot | Not Done | Phase 4 of refactoring plan |
+| Telegram bot | Done | `app/telegram/` — polling/webhook modes (mounted at `/telegram`) |
+| Excel (xlsx) export API | Done | `POST /api/v1/reports` + Celery `report_worker` |
+| Portal query API (filters/source fields) | Done | `POST /api/v1/query` — see `docs/PORTAL_INTEGRATION.md` |
+| DataFeed importer (feed_* tables) | Done | `scripts/datafeed/import_datafeed.py` |
 
 ---
 
@@ -197,6 +208,7 @@ QueryEngine (orchestrator)
     |       +-- nt-query (execute SQL)
     |       +-- nt-validation (validate SQL)
     |       +-- nt-metadata (schema info)
+    |       +-- nt-admin (admin operations)
     |
     +-- WarningDetector
     +-- QueryClassifier (tier selection)

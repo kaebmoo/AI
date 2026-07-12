@@ -10,10 +10,10 @@ The system uses **Vanna.AI** strategies combined with **ChromaDB** (Vector Datab
 
 ### Core Components
 
-1.  **AIService** ([app/services/ai_service.py](file:///Users/seal/Documents/GitHub/AI/app/services/ai_service.py)):
+1.  **AIService** ([app/services/ai/service.py](file:///Users/seal/Documents/GitHub/AI/app/services/ai/service.py) — `app/services/ai_service.py` is now a thin compatibility shim):
     -   The main orchestrator for AI interactions.
-    -   Initializes [VannaService](file:///Users/seal/Documents/GitHub/AI/app/services/vanna_service.py#9-213).
-    -   Injects retrieved context into prompts during [query_hybrid](file:///Users/seal/Documents/GitHub/AI/app/services/ai_service.py#1210-1581).
+    -   Initializes [VannaService](file:///Users/seal/Documents/GitHub/AI/app/services/vanna_service.py).
+    -   Injects retrieved context into prompts during `query_hybrid` ([app/services/ai/hybrid_flow.py](file:///Users/seal/Documents/GitHub/AI/app/services/ai/hybrid_flow.py)).
 
 2.  **VannaService** ([app/services/vanna_service.py](file:///Users/seal/Documents/GitHub/AI/app/services/vanna_service.py)):
     -   Manages the "Brain" (Knowledge Base).
@@ -31,14 +31,14 @@ The RAG system is trained on three key types of information:
 | :--- | :--- | :--- |
 | **DDL** | Database Schema metadata | Helps AI understand table structures, columns, and types. |
 | **Documentation** | [docs/DATABASE_TABLES_GUIDE.md](file:///Users/seal/Documents/GitHub/AI/docs/DATABASE_TABLES_GUIDE.md), `schema_business_rules`, `schema_semantic_mapping` | Provides business context, column descriptions, and mapping rules. |
-| **SQL** | [golden_examples](file:///Users/seal/Documents/GitHub/AI/app/services/vanna_service.py#139-147) table | "Few-shot" learning examples showing correct SQL for specific questions. |
+| **SQL** | [golden_examples](file:///Users/seal/Documents/GitHub/AI/app/services/vanna_service.py) table | "Few-shot" learning examples showing correct SQL for specific questions. |
 
 ## Process Flow
 
 When a user asks a question in **Hybrid Mode**, the following process occurs:
 
 ### 1. Retrieval (Step 1)
-The [AIService](file:///Users/seal/Documents/GitHub/AI/app/services/ai_service.py#909-1753) calls [_get_vanna_context_string(question)](file:///Users/seal/Documents/GitHub/AI/app/services/ai_service.py#1628-1659), which triggers `VannaService.get_rag_context`:
+The [AIService](file:///Users/seal/Documents/GitHub/AI/app/services/ai/service.py) calls [_get_vanna_context_string(question)](file:///Users/seal/Documents/GitHub/AI/app/services/ai/service.py), which triggers `VannaService.get_rag_context`:
 -   **Embedding**: The user's question is converted into a vector.
 -   **Search**: ChromaDB finds the nearest neighbors in the DDL, Documentation, and SQL collections.
 -   **Filtering**: Results are filtered by `VANNA_DISTANCE_THRESHOLD` to ensure relevance.
@@ -70,6 +70,8 @@ The AI generates SQL based on this augmented, accurate context, which is then va
 
 ## Key Code References
 
--   **Context Injection**: [app/services/ai_service.py](file:///Users/seal/Documents/GitHub/AI/app/services/ai_service.py) (lines 1323-1337 in [query_hybrid](file:///Users/seal/Documents/GitHub/AI/app/services/ai_service.py#1210-1581))
--   **Retrieval Logic**: [app/services/vanna_service.py](file:///Users/seal/Documents/GitHub/AI/app/services/vanna_service.py) ([get_rag_context](file:///Users/seal/Documents/GitHub/AI/app/services/vanna_service.py#175-213))
--   **Context Formatting**: [app/services/ai_service.py](file:///Users/seal/Documents/GitHub/AI/app/services/ai_service.py) ([_get_vanna_context_string](file:///Users/seal/Documents/GitHub/AI/app/services/ai_service.py#1628-1659))
+-   **Context Injection**: [app/services/ai/hybrid_flow.py](file:///Users/seal/Documents/GitHub/AI/app/services/ai/hybrid_flow.py) (`query_hybrid`)
+-   **Retrieval Logic**: [app/services/vanna_service.py](file:///Users/seal/Documents/GitHub/AI/app/services/vanna_service.py) (`get_rag_context`)
+-   **Context Formatting**: [app/services/ai/service.py](file:///Users/seal/Documents/GitHub/AI/app/services/ai/service.py) (`_get_vanna_context_string`)
+
+> Note: `app/services/ai_service.py` เป็น compatibility shim — implementation จริงอยู่ใน package `app/services/ai/`

@@ -5,7 +5,7 @@
 | Item         | Value               |
 | ------------ | ------------------- |
 | Version      | 2.0                 |
-| Last Updated | 2026-03-22          |
+| Last Updated | 2026-07-12          |
 | Database     | nt_fi_report.sqlite |
 
 > This dictionary documents the business data views that AI queries against.
@@ -19,8 +19,9 @@
 |---|---|---|
 | revenue | `revenue_search` | รายได้ แยกตามหน่วยงาน, ผลิตภัณฑ์, บัญชี |
 | expense | `v_expense_mart` | ค่าใช้จ่าย แยกตามหน่วยงาน, บัญชี |
-| pl_costtype | `v_pl_costtype_nt_mth_clean` | กำไรขาดทุนแยกตาม cost type รายเดือน |
 | transfer price | `v_transfer_price` | ราคาโอนภายในระหว่างหน่วยงาน |
+| pl_costtype | `v_pl_costtype_nt_mth_clean` | ผลดำเนินงาน (P&L) แยกตาม cost type รายเดือน |
+| feed_revenue | `feed_revenue_fact_bu_monthly` | รายได้จาก DataFeed (fact/dim tables สำหรับ dashboard) |
 
 ---
 
@@ -29,7 +30,9 @@
 ### Overview
 
 View รายได้ — ใช้เป็น main_view สำหรับ revenue context
-Source table: `revenue` (column names เป็น lowercase ใน view, UPPERCASE ใน raw table)
+Source table: `revenue` — คอลัมน์เวลา/หน่วยงาน/มูลค่า ถูก rename เป็น lowercase ใน view
+(เช่น `YEAR` → `year`, `REVENUE_VALUE` → `revenue`, `"กลุ่มธุรกิจ"` → `business_unit`)
+ส่วนคอลัมน์ product/GL ยังเป็น UPPERCASE ตาม source (เช่น `BUSINESS_GROUP`, `GL_CODE`)
 
 ### Time Columns
 
@@ -60,15 +63,17 @@ Source table: `revenue` (column names เป็น lowercase ใน view, UPPERC
 
 **Product Hierarchy: BUSINESS_GROUP > SERVICE_GROUP > PRODUCT_NAME**
 
-| Column         | Type | Example                        | Description           |
-| -------------- | ---- | ------------------------------ | --------------------- |
-| BUSINESS_GROUP | TEXT | "Fixed Line & Broadband"       | กลุ่มธุรกิจ          |
-| SERVICE_GROUP  | TEXT | "กลุ่มบริการ Cloud"            | กลุ่มบริการ           |
-| PRODUCT_NAME   | TEXT | "Trunk Radio"                  | ชื่อผลิตภัณฑ์        |
-| PRODUCT_KEY    | TEXT | "192020001"                    | รหัสผลิตภัณฑ์        |
-| PRODUCT        | TEXT | "192020001 รายได้อื่น"         | รหัส+ชื่อ            |
-| ITEM           | TEXT | "8"                            | รหัสหมวดธุรกิจ       |
-| SUB_ITEM       | TEXT | "8.2"                          | รหัสหมวดย่อย         |
+| Column           | Type    | Example                        | Description              |
+| ---------------- | ------- | ------------------------------ | ------------------------ |
+| BUSINESS_GROUP   | TEXT    | "Fixed Line & Broadband"       | กลุ่มธุรกิจ             |
+| SERVICE_GROUP    | TEXT    | "กลุ่มบริการ Cloud & BigData"  | กลุ่มบริการ              |
+| PRODUCT_NAME     | TEXT    | "บริการ NT CLOUD"              | ชื่อบริการ/ผลิตภัณฑ์    |
+| PRODUCT_KEY      | INTEGER | 192020001                      | รหัสบริการ               |
+| SUB_PRODUCT_NAME | TEXT    | "รายได้อื่น"                   | ชื่อบริการย่อย           |
+| PRODUCT          | TEXT    | "192020001 รายได้อื่น"         | ชื่อบริการ (Full: รหัส+ชื่อ) |
+| SUB_PRODUCT      | TEXT    | "1 รายได้อื่น"                 | ข้อมูลบริการย่อย (Full)  |
+| ITEM             | TEXT    | "8"                            | รหัสกลุ่มธุรกิจหลัก     |
+| SUB_ITEM         | TEXT    | "8.2"                          | รหัสรายการย่อย           |
 
 **Product Hierarchy Warning:**
 
@@ -76,20 +81,20 @@ Source table: `revenue` (column names เป็น lowercase ใน view, UPPERC
 BUSINESS_GROUP > SERVICE_GROUP > PRODUCT_NAME
 
 ห้ามใช้ OR ข้าม level:
-WHERE BUSINESS_GROUP = 'Fixed Line' OR PRODUCT_NAME = 'Trunk Radio'
-→ ตัวเลขจะพอง! (นับ Fixed Line ทั้งหมด + Trunk Radio ซ้ำ)
+WHERE BUSINESS_GROUP = 'Digital' OR PRODUCT_NAME = 'บริการ NT CLOUD'
+→ ตัวเลขจะพอง! (นับ Digital ทั้งหมด + บริการ NT CLOUD ซ้ำ)
 
 ให้ใช้ AND:
-WHERE BUSINESS_GROUP = 'Fixed Line' AND PRODUCT_NAME = 'Trunk Radio'
+WHERE BUSINESS_GROUP = 'Digital' AND PRODUCT_NAME = 'บริการ NT CLOUD'
 ```
 
 Hierarchy levels ถูกกำหนดใน `master_hierarchy` table — ดู [DATABASE_TABLES_GUIDE.md](DATABASE_TABLES_GUIDE.md) section 7
 
 ### Accounting Columns
 
-| Column   | Type | Example                                          | Description     |
-| -------- | ---- | ------------------------------------------------ | --------------- |
-| GL_CODE  | TEXT | "49901101"                                       | รหัสบัญชี GL   |
+| Column   | Type    | Example                                          | Description     |
+| -------- | ------- | ------------------------------------------------ | --------------- |
+| GL_CODE  | INTEGER | 49901101                                         | รหัสบัญชี GL   |
 | GL_NAME  | TEXT | "ดอกเบี้ยเงินให้กู้ยืม-กองทุนสวัสดิการ"        | ชื่อบัญชี      |
 | GL_GROUP | TEXT | "ผลตอบแทนทางการเงินและรายได้อื่น"               | กลุ่มบัญชี     |
 | TYPE     | TEXT | "รายได้"                                         | ประเภทรายการ   |
@@ -128,11 +133,11 @@ Source table: `expense` (column names เป็น lowercase ใน view)
 | department_abbr         | TEXT    | ชื่อย่อฝ่าย                    | DEPARTMENT_ABBR |
 | section_abbr            | TEXT    | ชื่อย่อส่วน                    | SECTION_ABBR    |
 | business_group          | TEXT    | กลุ่มธุรกิจ                    | กลุ่มธุรกิจ     |
-| gl_code                 | TEXT    | รหัสบัญชี GL                   | GL_CODE         |
+| gl_code                 | INTEGER | รหัสบัญชี GL                   | GL_CODE         |
 | account_name            | TEXT    | ชื่อบัญชี                      | GL_NAME_NT1     |
 | account_group_name      | TEXT    | กลุ่มบัญชี                     | GROUP_NAME      |
 | account_group_code      | TEXT    | รหัสกลุ่มบัญชี                 | CODE_GROUP      |
-| nt                      | TEXT    | บริษัท                         |               |
+| nt                      | TEXT    | บริษัท                         | NT              |
 | type                    | TEXT    | ประเภทรายการ                   | TYPE            |
 | expense                 | REAL    | ยอดค่าใช้จ่าย (**หน่วยบาท**)   | EXPENSE_VALUE   |
 
@@ -149,19 +154,24 @@ Source table chain: `TRN_PL_COSTTYPE_NT_MTH` → `v_pl_costtype_nt_mth` → `v_p
 
 ### Columns
 
-| Column        | Type    | Description           | Source Column  |
-| ------------- | ------- | --------------------- | -------------- |
-| report_date   | INTEGER | วันที่ (Unix ms)      | DATE           |
-| report_year   | INTEGER | ปี ค.ศ.               | YEAR           |
-| report_month  | INTEGER | เดือน (1-12)          | MONTH          |
-| main_group    | TEXT    | กลุ่มหลัก             | GROUP          |
-| sub_group     | TEXT    | กลุ่มย่อย (cleaned)   | SUB_GROUP      |
-| business_unit | TEXT    | หน่วยธุรกิจ           | BU             |
-| service_group | TEXT    | กลุ่มบริการ           | SERVICE_GROUP  |
-| product_id    | TEXT    | รหัสผลิตภัณฑ์         | PRODUCT_KEY    |
-| product_name  | TEXT    | ชื่อผลิตภัณฑ์         | PRODUCT_NAME   |
-| alliance_flag | TEXT    | สถานะ Alliance (Y/N)  | ALLIE          |
-| amount_value  | REAL    | มูลค่า (**หน่วยบาท**) | VALUE          |
+| Column        | Type    | Description                          | Source Column  |
+| ------------- | ------- | ------------------------------------ | -------------- |
+| report_date   | TEXT    | งวดข้อมูล รูปแบบ "YYYYMM" (เช่น "202601") | DATE      |
+| report_year   | INTEGER | ปี ค.ศ.                              | YEAR           |
+| report_month  | INTEGER | เดือน (1-12)                         | MONTH          |
+| main_group    | TEXT    | กลุ่มหลัก (บรรทัด P&L)               | GROUP          |
+| sub_group     | TEXT    | กลุ่มย่อย (cleaned)                  | SUB_GROUP      |
+| business_unit | TEXT    | กลุ่มธุรกิจ (normalized)             | BU             |
+| service_group | TEXT    | กลุ่มบริการ                          | SERVICE_GROUP  |
+| product_id    | INTEGER | รหัสผลิตภัณฑ์                        | PRODUCT_KEY    |
+| product_name  | TEXT    | ชื่อผลิตภัณฑ์                        | PRODUCT_NAME   |
+| alliance_flag | TEXT    | สถานะ Alliance (Y/N)                 | ALLIE          |
+| amount_value  | REAL    | มูลค่า (**หน่วยบาท**)                | VALUE          |
+
+**Value Format Warning:** ค่าใน `main_group` และ `business_unit` มี prefix ตัวเลขนำหน้า เช่น
+`main_group = '01.รายได้'`, `'02.ต้นทุนบริการและต้นทุนขาย :'` และ
+`business_unit = '04.กลุ่มธุรกิจ FIXED LINE & BROADBAND'` —
+การ filter ควรใช้ `LIKE '%FIXED LINE%'` หรือระบุค่าเต็มพร้อม prefix
 
 ---
 
@@ -232,7 +242,7 @@ ORDER BY total DESC;
 -- Level 2: Drill down to Product within a Service Group
 SELECT PRODUCT_NAME, SUM(revenue) as total
 FROM revenue_search
-WHERE year = 2025 AND SERVICE_GROUP = 'กลุ่มบริการ Cloud'
+WHERE year = 2025 AND SERVICE_GROUP = 'กลุ่มบริการ Cloud & BigData'
 GROUP BY PRODUCT_NAME
 ORDER BY total DESC;
 ```
@@ -285,4 +295,4 @@ ORDER BY total DESC;
 | Date       | Version | Changes                                                      |
 | ---------- | ------- | ------------------------------------------------------------ |
 | 2025-01-26 | 1.0     | Initial — revenue table only                                 |
-| 2026-03-22 | 2.0     | Update to views, add expense/P&L/transfer_price, hierarchy   |
+| 2026-07-12 | 2.0     | Update to views, add expense/P&L/transfer_price, hierarchy   |

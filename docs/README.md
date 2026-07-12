@@ -4,6 +4,7 @@ AI Query Assistant สำหรับ NT (National Telecom) — แปลงค�
 ผ่าน Claude / Gemini / Matcha (NT Gateway).
 
 > สำหรับภาพรวมโปรเจกต์และ schema reference ดู [`../CLAUDE.md`](../CLAUDE.md)
+> อัปเดตดัชนีล่าสุด: 2026-07-12
 
 ## Start here
 
@@ -17,10 +18,26 @@ AI Query Assistant สำหรับ NT (National Telecom) — แปลงค�
 
 | Doc | เนื้อหา |
 |-----|---------|
-| [DATA_DICTIONARY.md](DATA_DICTIONARY.md) | พจนานุกรมข้อมูล — column, type, ความหมาย |
-| [DATABASE_TABLES_GUIDE.md](DATABASE_TABLES_GUIDE.md) | คู่มือตารางใน 3-DB architecture |
+| [DATA_DICTIONARY.md](DATA_DICTIONARY.md) | พจนานุกรมข้อมูล — views ต่อ context, column, type, ความหมาย |
+| [DATABASE_TABLES_GUIDE.md](DATABASE_TABLES_GUIDE.md) | คู่มือ config tables ใน 3-DB architecture |
 | [INTERNAL_SCHEMA.md](INTERNAL_SCHEMA.md) | Internal schema reference (config tables) |
 | [SEMANTIC_MAPPING_GUIDE.md](SEMANTIC_MAPPING_GUIDE.md) | Semantic mapping — keyword → column/value |
+| [DATAFEED_INTEGRATION.md](DATAFEED_INTEGRATION.md) | DataFeed integration (F10) — feed_* tables + importer + integrity gates |
+
+## API & Integration
+
+| Doc | เนื้อหา |
+|-----|---------|
+| [API_REPORTS.md](API_REPORTS.md) | Reports/Export API — xlsx export ผ่าน Celery (F6) |
+| [PORTAL_INTEGRATION.md](PORTAL_INTEGRATION.md) | NT-Report portal embed — filters/source fields (F11) |
+| [DEPLOYMENT_SECURITY.md](DEPLOYMENT_SECURITY.md) | Production security checklist (read-only DB, rate limit, OTP guard) |
+
+## Quality & Evaluation
+
+| Doc | เนื้อหา |
+|-----|---------|
+| [EVAL_HARNESS.md](EVAL_HARNESS.md) | NL→SQL eval harness (F3-B) — วิธีรัน, metrics, baseline |
+| [CODE_REVIEW_REPORT_2026-07-11.md](CODE_REVIEW_REPORT_2026-07-11.md) | รายงาน code review รอบ F1-F11 + review fixes |
 
 ## AI Providers
 

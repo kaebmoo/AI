@@ -286,9 +286,9 @@ Phase นี้อยู่ในสภาพใช้งานจริงแ�
 - **Token accounting เป็นค่าจริงจาก provider usage** — `TokenUsage`/`last_usage` ทุก provider, `QueryResult.usage_breakdown` per-stage, เลิก hardcode 500 (B9, F7.1-2)
 - **Request trace หนึ่งบรรทัด JSON ต่อ query** — `query_trace {...}` จาก QueryEngine (รวม cache hit), stage timings ย่อยลด noise เป็น debug (F7.3)
 - **Structured output สำหรับ intent extraction** — `generate_structured` ทั้ง 3 providers (Claude forced tool, Matcha json_schema→json_object, Gemini json mime), extract_intent structured-first + text fallback, suggest_mappings ด้วย (F8) — two_pass flag ยัง default OFF
-- **Eval harness (F3-B)** — `scripts/eval/run_eval.py` execution-match accuracy จาก golden examples, `--compare` แสดง regression; feed_revenue: ค่าถูก 14/14 (value-based) แต่ strict exact-match 0/14 เพราะ alias ไม่ตรง golden (`plan/RESULT_F10.md`)
+- **Eval harness (F3-B)** — `scripts/eval/run_eval.py` execution-match accuracy จาก golden examples, `--compare` แสดง regression; feed_revenue: ค่าถูก 14/14 (value-based) แต่ strict exact-match 0/14 เพราะ alias ไม่ตรง golden (`plan/archive/RESULT_F10.md`)
 - **DataFeed integration (F10 pilot revenue)** — ตาราง `feed_revenue_*` 255k แถว + integrity gates 4 ชั้น, context/docs/golden จาก contract อัตโนมัติ (3 scripts domain-agnostic ใน `scripts/datafeed/`)
-- **Agentic latency (F9 A-D)** — template answers, parallel metadata prep, intent state, escalation ladder — flags ทั้งหมด default OFF รอวัด (`plan/RESULT_F9.md`); Phase E รออนุมัติ
+- **Agentic latency (F9 A-D)** — template answers, parallel metadata prep, intent state, escalation ladder — flags ทั้งหมด default OFF รอวัด (`plan/archive/RESULT_F9.md`); Phase E รออนุมัติ
 - **Dashboard embed (F11)** — API ฝั่ง AI พร้อม (`pinned_filters`/`source`), PB hook + viewer panel commit แล้วใน NT-Report (`c340d70`) — E2E manual ค้าง (FIX_NOTES)
 
 ### ยังขาด

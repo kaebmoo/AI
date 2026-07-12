@@ -1,6 +1,6 @@
 # AI Provider and Model Management
 
-Updated: 2026-03-23
+Updated: 2026-07-12
 
 ## Overview
 
@@ -48,17 +48,17 @@ To reduce drift across admin pages, provider/model CRUD and Settings save now sy
 
 ### API Key Management
 
-**Current Implementation** (As of 2025-02-09):
+**Current Implementation**:
 
-API keys are **NOT stored in the database**. The system uses a 3-tier fallback for API key retrieval:
+Provider API keys are normally supplied via environment variables (`.env`), with the database as an optional override. Resolution order:
 
 ```
 ┌─────────────────────────────────────────────┐
 │ API Key Resolution Order                    │
 ├─────────────────────────────────────────────┤
-│ 1. Database (admin_config table)            │
-│    Status: ❌ Empty (config_value = NULL)   │
-│    Purpose: Reserved for future use         │
+│ 1. ai_providers.api_key_env_var             │
+│    → look up that key name in admin_config  │
+│      (admin may have stored key in DB)      │
 │                                             │
 │ 2. Environment Variables (.env)             │
 │    Status: ✅ ACTIVE (Currently Used)       │
@@ -67,28 +67,23 @@ API keys are **NOT stored in the database**. The system uses a 3-tier fallback f
 │    - GOOGLE_AI_API_KEY                      │
 │    - MATCHA_AI_API_KEY                      │
 │                                             │
-│ 3. Hardcoded Default                        │
-│    Status: ❌ None                          │
+│ 3. settings object (config.py defaults)     │
 └─────────────────────────────────────────────┘
 ```
 
 **Important**: The `api_key_env_var` column in `ai_providers` table stores the **name** of the environment variable (e.g., `"ANTHROPIC_API_KEY"`), **NOT** the actual API key value.
 
-**Code Reference**: `app/services/admin_config_service.py:491-521`
+**Code Reference**: `app/services/admin_config_service.py` — `get_provider_api_key()`
 ```python
 def get_provider_api_key(self, provider: str) -> Optional[str]:
-    # Try database first (currently empty)
-    api_key = self.get_config(f"{provider}_api_key", use_cache=False)
-
-    # Fallback to environment variable
-    if not api_key:
-        api_key = settings.ANTHROPIC_API_KEY  # From .env
-
-    return api_key
+    # Tier 1: ai_providers.api_key_env_var → admin_config (DB override)
+    # Tier 2: os.environ / .env
+    # Tier 3: settings object
+    ...
 ```
 
 **Future Enhancement**:
-See [API Key Management Plan](./API_KEY_MANAGEMENT_PLAN.md) for planned implementation of:
+See [API Key Management Plan](./planning/API_KEY_MANAGEMENT_PLAN.md) for planned implementation of:
 - Encrypted API key storage in database
 - Admin UI for key management
 - Key validation and testing
@@ -123,8 +118,8 @@ CREATE TABLE ai_providers (
 CREATE TABLE ai_models (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     provider_id TEXT NOT NULL,              -- FK to ai_providers.id
-    model_id TEXT NOT NULL,                 -- e.g., 'claude-3-opus-20240229'
-    display_name TEXT,                      -- e.g., 'Claude 3 Opus'
+    model_id TEXT NOT NULL,                 -- e.g., 'claude-sonnet-4-6'
+    display_name TEXT,                      -- e.g., 'Claude Sonnet 4.6'
     is_active BOOLEAN DEFAULT 1,
     is_default BOOLEAN DEFAULT 0,           -- Default model for provider
     context_window INTEGER,                 -- e.g., 200000
@@ -132,6 +127,7 @@ CREATE TABLE ai_models (
     cost_per_1m_tokens REAL,               -- Cost in USD per 1M tokens
     description TEXT,
     priority INTEGER DEFAULT 0,
+    tier TEXT DEFAULT 'default',            -- 'default' / 'cheap' (added in 022_ai_models_tier.sql)
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (provider_id) REFERENCES ai_providers(id) ON DELETE CASCADE,
@@ -303,9 +299,9 @@ Features:
 
 ### Migrating from Hardcoded Configuration
 
-1. **Run Database Migration**:
+1. **Run Database Migration** (provider/model tables live in `config.db`):
    ```bash
-   sqlite3 revenue.sqlite < database/migrations/005_dynamic_providers.sql
+   sqlite3 config.db < database/migrations/005_dynamic_providers.sql
    ```
 
 2. **Verify Default Data**:
@@ -391,7 +387,7 @@ Recommended fix path:
    - **API keys are NOT stored in database** (currently)
    - Use environment variables only (`.env` file)
    - Rotate keys regularly
-   - See [API Key Management Plan](./API_KEY_MANAGEMENT_PLAN.md) for future encrypted database storage
+   - See [API Key Management Plan](./planning/API_KEY_MANAGEMENT_PLAN.md) for future encrypted database storage
 
 6. **Verification**:
    - After any provider/model change, verify Dashboard, Providers, Models, and Settings all agree
@@ -401,7 +397,7 @@ Recommended fix path:
 
 ### Planned Features
 
-- [ ] **API Key Management UI** - See [API_KEY_MANAGEMENT_PLAN.md](./API_KEY_MANAGEMENT_PLAN.md)
+- [ ] **API Key Management UI** - See [API_KEY_MANAGEMENT_PLAN.md](./planning/API_KEY_MANAGEMENT_PLAN.md)
   - Encrypted API key storage in database
   - Admin UI for key management
   - Key validation and testing
@@ -409,7 +405,7 @@ Recommended fix path:
   - No server restart required
 - [ ] Model performance metrics tracking
 - [ ] Automatic model discovery from providers
-- [ ] Cost tracking and budgeting
+- [x] Real token accounting per query — shipped (`app/services/cost_service.py` + query_trace log); budgeting still planned
 - [ ] A/B testing different models
 - [ ] Model fallback chains
 - [ ] Rate limiting per model

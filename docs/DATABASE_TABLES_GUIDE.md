@@ -1,7 +1,7 @@
 # Database Tables Guide
 
 **Version:** 2.0
-**Last Updated:** 2026-03-22
+**Last Updated:** 2026-07-12
 **Database:** config.db (SQLite)
 
 > **Note:** This file is for human reference only. Vanna RAG documentation is now
@@ -32,8 +32,8 @@
 The system supports multiple data contexts (revenue, expense, pl_costtype, etc.) via the `schema_contexts` table. Each context has:
 
 - A `main_view` that AI queries against (e.g., `revenue_search`, `v_expense_mart`)
-- Detection `keywords` for automatic context routing from user questions
-- Custom AI instructions (`default_instruction`, `instruction_th`)
+- Detection `keywords` (JSON array) for automatic context routing from user questions
+- Custom AI instructions (`instruction_th`, `instruction_en`)
 - Context-scoped semantic mappings and business rules
 
 **Context routing flow:**
@@ -81,7 +81,7 @@ WHERE organization_group_abbr = 'นป.' AND year = 2025 AND month = 1
 CREATE TABLE schema_metadata (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     table_name TEXT NOT NULL,           -- ชื่อตาราง/view (เช่น "revenue", "revenue_search")
-    column_name TEXT NOT NULL,          -- ชื่อคอลัมน์ (เช่น "YEAR", "REVENUE_VALUE")
+    column_name TEXT NOT NULL,          -- ชื่อคอลัมน์ (เช่น "year", "revenue", "BUSINESS_GROUP")
     data_type TEXT,                     -- ชนิดข้อมูล (INTEGER, TEXT, REAL)
     display_name_th TEXT,               -- ชื่อแสดงภาษาไทย (เช่น "ปี")
     display_name_en TEXT,               -- ชื่อแสดงภาษาอังกฤษ (เช่น "Year")
@@ -126,24 +126,23 @@ schema_text = service.build_schema_text(table_name="revenue_search")
 #### 3. ตัวอย่างข้อมูล
 
 ```sql
--- Column: YEAR
+-- Column: year (view revenue_search ใช้ชื่อคอลัมน์ lowercase)
 table_name: revenue_search
-column_name: YEAR
+column_name: year
 data_type: INTEGER
 display_name_th: ปี
-display_name_en: Year
 is_summable: 0
 is_groupable: 1
-special_notes: ปี พ.ศ. = YEAR + 543
+special_notes: ใช้สำหรับการกรองข้อมูลรายปี (ปี ค.ศ. — ปี พ.ศ. = year + 543)
 
--- Column: REVENUE_VALUE
+-- Column: revenue
 table_name: revenue_search
-column_name: REVENUE_VALUE
-data_type: REAL
+column_name: revenue
+data_type: DOUBLE
 display_name_th: มูลค่ารายได้
 is_summable: 1
-is_groupable: 0
-special_notes: หน่วยเป็นบาท
+is_groupable: 1
+special_notes: ใช้เป็นตัวเลขหลักในการคำนวณรายได้ (หน่วยเป็นบาท)
 ```
 
 ### ประโยชน์
@@ -167,18 +166,18 @@ special_notes: หน่วยเป็นบาท
 ```sql
 CREATE TABLE schema_business_rules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    rule_code TEXT NOT NULL UNIQUE,     -- รหัสกฎ (เช่น "DATE_CONVERT")
+    rule_code TEXT NOT NULL UNIQUE,     -- รหัสกฎ (เช่น "DATE_CONVERSION")
     rule_name TEXT NOT NULL,            -- ชื่อกฎ (เช่น "แปลง DATE ก่อนใช้")
     rule_description TEXT NOT NULL,     -- คำอธิบายกฎ
     table_name TEXT,                    -- ใช้กับ table/view ไหน (NULL = ทุกตาราง)
     applies_to TEXT,                    -- ใช้กับคอลัมน์ไหนบ้าง (comma-separated)
     example_correct TEXT,               -- ตัวอย่าง SQL ที่ถูกต้อง
     example_wrong TEXT,                 -- ตัวอย่าง SQL ที่ผิด
-    severity TEXT DEFAULT 'warning',    -- ระดับความสำคัญ (error, warning, info)
-    inject_mode TEXT,                   -- ตำแหน่งใน prompt: 'schema_context' หรือ 'instruction'
-    rule_category TEXT,                 -- หมวดหมู่กฎ (context_retention, unit_conversion, etc.)
-    pattern TEXT,                       -- regex pattern สำหรับ validation
-    check_type TEXT DEFAULT 'regex_warning',  -- ประเภทการตรวจ (regex_warning, regex_error, etc.)
+    severity TEXT DEFAULT 'warning',    -- ระดับความสำคัญ (critical, error, warning, info)
+    inject_mode TEXT DEFAULT 'schema_context',  -- ตำแหน่งใน prompt: 'schema_context' หรือ 'instruction'
+    rule_category TEXT DEFAULT 'sql_generation', -- หมวดหมู่กฎ (sql_generation, context_retention, sql_pattern, unit_conversion, response_format, display, data_structure)
+    pattern TEXT,                       -- regex pattern สำหรับ validation (migration 030)
+    check_type TEXT DEFAULT 'regex_warning',  -- ประเภทการตรวจ (regex_warning, regex_error, context_warning, aggregate_check)
     is_active INTEGER DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -191,22 +190,22 @@ CREATE TABLE schema_business_rules (
 
 | inject_mode | ตำแหน่ง | ใช้สำหรับ |
 |---|---|---|
-| `schema_context` | ส่วน schema definition | กฎเกี่ยวกับโครงสร้างข้อมูล (DATE conversion, Thai quoting) |
-| `instruction` | ส่วน instruction | กฎเชิงธุรกิจ (unit conversion, context retention) |
-| `NULL` | ทั้งสอง | กฎทั่วไป |
+| `schema_context` (default) | ส่วน schema definition | กฎเกี่ยวกับโครงสร้างข้อมูล (DATE conversion, Thai quoting) |
+| `instruction` | ส่วน instruction | กฎเชิงธุรกิจ (unit conversion, context retention, SQL patterns) |
+| `NULL` | ทั้งสอง | กฎทั่วไป (ถูกรวมไม่ว่า filter ด้วย inject_mode ใด) |
 
 ### ตัวอย่างกฎสำคัญ
 
-#### กฎ 1: DATE_CONVERT
+#### กฎ 1: DATE_CONVERSION
 
 ```
-rule_code: DATE_CONVERT
+rule_code: DATE_CONVERSION
 severity: warning
-applies_to: DATE
+check_type: regex_warning
 pattern: (?i)SELECT.*\bDATE\b(?!.*/\s*1000)
 
-ถูกต้อง: SELECT date(DATE / 1000, 'unixepoch') FROM revenue_search
-ผิด: SELECT DATE FROM revenue_search  -- จะได้ตัวเลข Unix timestamp
+ถูกต้อง: SELECT date(DATE / 1000, 'unixepoch') FROM v_expense_mart
+ผิด: SELECT DATE FROM v_expense_mart  -- จะได้ตัวเลข Unix timestamp (ms)
 ```
 
 #### กฎ 2: THAI_COLUMN_QUOTES
@@ -214,10 +213,11 @@ pattern: (?i)SELECT.*\bDATE\b(?!.*/\s*1000)
 ```
 rule_code: THAI_COLUMN_QUOTES
 severity: error
-applies_to: กลุ่มธุรกิจ, หมวดบัญชี
+check_type: regex_error
+pattern: (?i)(กลุ่มธุรกิจ|หมวดบัญชี)(?!["'])
 
-ถูกต้อง: SELECT "กลุ่มธุรกิจ" FROM revenue_search
-ผิด: SELECT กลุ่มธุรกิจ FROM revenue_search  -- syntax error
+ถูกต้อง: SELECT "กลุ่มธุรกิจ" FROM revenue
+ผิด: SELECT กลุ่มธุรกิจ FROM revenue  -- syntax error (คอลัมน์ภาษาไทยใน raw table)
 ```
 
 #### กฎ 3: REVENUE_UNIT
@@ -225,9 +225,11 @@ applies_to: กลุ่มธุรกิจ, หมวดบัญชี
 ```
 rule_code: REVENUE_UNIT
 severity: warning
-applies_to: REVENUE_VALUE, AMOUNT
+table_name: revenue_search
+applies_to: revenue
+check_type: context_warning
 
-คำเตือน: REVENUE_VALUE และ AMOUNT มีหน่วยเป็น บาท (ไม่ใช่ล้านบาท)
+คำเตือน: คอลัมน์ revenue มีหน่วยเป็น บาท (ไม่ใช่ล้านบาท)
 ```
 
 ### ประโยชน์
@@ -287,24 +289,28 @@ target_condition: = 'นป.'
 description: กลุ่มขายและปฏิบัติการลูกค้า ภาคเหนือ
 ```
 
-#### B. Business Term (คำศัพท์ธุรกิจ)
+#### B. Business Term (คำศัพท์ธุรกิจ) — ใช้ full_condition สำหรับเงื่อนไขซับซ้อน
 
 ```
 keyword: อสังหาริมทรัพย์
 keyword_type: term
 target_column: SERVICE_GROUP
-target_condition: = 'กลุ่มบริการพัฒนาสินทรัพย์'
+full_condition: service_group LIKE '%กลุ่มบริการพัฒนาสินทรัพย์%'
+description: รายได้จากอสังหาริมทรัพย์
 ```
 
 #### C. Synonym (คำพ้องความหมาย)
 
 ```
 keyword: ทรัพย์สิน
-keyword_type: synonym
+keyword_type: term
 target_column: SERVICE_GROUP
-target_condition: = 'กลุ่มบริการพัฒนาสินทรัพย์'
-description: คำพ้องความหมายกับ อสังหาริมทรัพย์
+full_condition: service_group LIKE '%กลุ่มบริการพัฒนาสินทรัพย์%'
+description: รายได้จากทรัพย์สิน (คำพ้องความหมายกับ อสังหาริมทรัพย์)
 ```
+
+> ถ้า `full_condition` มีค่า ระบบจะใช้ `full_condition` แทน `target_column + target_condition`
+> (ดู `SchemaSemanticMapping.get_sql_condition()` ใน `app/models/schema_models.py`)
 
 ### ตัวอย่างการใช้งาน
 
@@ -313,7 +319,7 @@ description: คำพ้องความหมายกับ อสังห
 AI แปลเป็น: WHERE organization_group_abbr = 'นป.' AND year = 2025
 
 คำถาม: "รายได้อสังหาริมทรัพย์"
-AI แปลเป็น: WHERE SERVICE_GROUP = 'กลุ่มบริการพัฒนาสินทรัพย์'
+AI แปลเป็น: WHERE SERVICE_GROUP LIKE '%กลุ่มบริการพัฒนาสินทรัพย์%'
 ```
 
 ### การใช้งานใน Code
@@ -358,28 +364,34 @@ CREATE TABLE schema_contexts (
     display_name TEXT NOT NULL,         -- ชื่อแสดงใน UI
     description TEXT,                   -- คำอธิบาย context
     main_view TEXT NOT NULL,            -- ชื่อ view/table หลักที่ AI จะ query
-    keywords TEXT,                      -- Comma-separated keywords สำหรับ auto-detection
-    priority INTEGER DEFAULT 0,        -- สูงกว่า = ถูกเลือกก่อนเมื่อ keyword ตรงหลาย context
-    database_url TEXT,                  -- Optional: ถ้าใช้ DB อื่น
-    default_instruction TEXT,           -- Custom AI instruction สำหรับ context นี้
-    instruction_th TEXT,                -- คำเตือนภาษาไทยเพิ่มเติม
-    instruction_en TEXT,                -- คำเตือนภาษาอังกฤษเพิ่มเติม
-    sample_queries TEXT,                -- JSON array ของตัวอย่างคำถาม
-    is_active INTEGER DEFAULT 1,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    created_by TEXT,
-    metadata TEXT                       -- JSON field สำหรับ settings เพิ่มเติม
+    is_active BOOLEAN DEFAULT 1,
+    priority INTEGER DEFAULT 0,         -- สูงกว่า = ถูกเลือกก่อนเมื่อ keyword ตรงหลาย context
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    keywords TEXT,                      -- JSON array ของ keywords สำหรับ auto-detection
+    instruction_th TEXT,                -- Custom AI instruction ภาษาไทยสำหรับ context นี้
+    instruction_en TEXT,                -- Custom AI instruction ภาษาอังกฤษ
+    updated_at TIMESTAMP
 );
 ```
 
-### ตัวอย่าง Contexts
+> **หมายเหตุ:** migration 004 เดิมกำหนดคอลัมน์ `database_url`, `default_instruction`,
+> `sample_queries`, `created_by`, `metadata` ไว้ด้วย แต่ตารางจริงใน config DB ปัจจุบัน
+> ไม่มีคอลัมน์เหล่านั้นแล้ว — code (`app/services/schema/context_store.py`) ใช้เฉพาะ
+> name, display_name, description, main_view, is_active, priority, keywords,
+> instruction_th, instruction_en
+>
+> `keywords` เก็บเป็น **JSON array** (เช่น `["รายได้", "revenue", "sales"]`) —
+> `context_store._normalize_context_row()` จะ parse ด้วย `json.loads`
 
-| name | display_name | main_view | keywords | priority |
+### ตัวอย่าง Contexts (ข้อมูลจริงใน config DB)
+
+| name | display_name | main_view | keywords (ตัวอย่าง) | priority |
 |---|---|---|---|---|
-| revenue | รายได้ (Revenue) | revenue_search | รายได้,revenue,ขาย,sales | 10 |
-| expense | ค่าใช้จ่าย (Expense) | v_expense_mart | ค่าใช้จ่าย,expense,cost | 9 |
-| pl_costtype | P&L by Cost Type | v_pl_costtype_nt_mth | P&L,กำไรขาดทุน,costtype | 8 |
+| revenue | รายได้ | revenue_search | `["รายได้", "revenue", "sales", "ยอดขาย"]` | 10 |
+| expense | ค่าใช้จ่าย | v_expense_mart | `["ค่าใช้จ่าย", "expense", "cost", "ต้นทุน"]` | 9 |
+| transfer price | ราคาโอนระหว่างหน่วยงาน | v_transfer_price | `["ราคาโอน", "transfer price", "segment report"]` | 9 |
+| pl_costtype | ผลดำเนินงาน | v_pl_costtype_nt_mth_clean | `["ผลดำเนินงาน", "profit & loss", "EBT"]` | 5 |
+| feed_revenue | DataFeed revenue | feed_revenue_fact_bu_monthly | `["datafeed", "feed", "dashboard"]` | 0 |
 
 ### Context Routing Flow
 
@@ -475,11 +487,11 @@ CREATE TABLE view_column_mappings (
 
 ### mapping_type
 
-| Type | ความหมาย | ตัวอย่าง |
+| Type | ความหมาย | ตัวอย่างจริง (revenue_search ← revenue) |
 |---|---|---|
-| `alias` | คอลัมน์เปลี่ยนชื่อ | view `revenue` ← source `REVENUE_VALUE` |
-| `expression` | คอลัมน์จาก SQL expression | `readable_date` ← `date(DATE/1000, 'unixepoch')` |
-| `passthrough` | ชื่อเดียวกันทั้ง view และ source | `YEAR` ← `YEAR` |
+| `alias` | คอลัมน์เปลี่ยนชื่อ | view `revenue` ← source `REVENUE_VALUE`, view `business_unit` ← source `"กลุ่มธุรกิจ"` |
+| `expression` | คอลัมน์จาก SQL expression | คอลัมน์ที่คำนวณจาก expression เช่น `date(DATE/1000, 'unixepoch')` |
+| `passthrough` | ชื่อเดียวกันทั้ง view และ source | `BUSINESS_GROUP` ← `BUSINESS_GROUP` |
 
 ### ประโยชน์
 
@@ -500,27 +512,43 @@ CREATE TABLE view_column_mappings (
 ```sql
 CREATE TABLE master_hierarchy (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    context_name TEXT NOT NULL,         -- context ที่ใช้ (เช่น 'revenue')
+    context_name TEXT NOT NULL,         -- hierarchy family (เช่น 'revenue', 'revenue_org', 'revenue_gl')
     level INTEGER NOT NULL,             -- ลำดับชั้น (0 = top, 1, 2, ...)
     level_label_th TEXT NOT NULL,       -- ชื่อระดับภาษาไทย (เช่น "กลุ่มธุรกิจ")
     level_label_en TEXT NOT NULL,       -- ชื่อระดับภาษาอังกฤษ (เช่น "Business Group")
     level_columns TEXT NOT NULL,        -- JSON array: คอลัมน์ที่เกี่ยวข้อง ["BUSINESS_GROUP"]
     detection_keywords TEXT NOT NULL,   -- JSON array: keywords สำหรับ detect level
-    is_active INTEGER DEFAULT 1,
+    is_active BOOLEAN DEFAULT 1,
     source TEXT DEFAULT 'auto',         -- 'auto' (extracted) หรือ 'manual' (admin)
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    parent_column TEXT,                 -- คอลัมน์ของ parent level (NULL สำหรับ top level)
+    source_view TEXT,                   -- view/table ที่ hierarchy นี้อ้างอิง
     UNIQUE(context_name, level)
 );
 ```
 
-### ตัวอย่าง Revenue Product Hierarchy
+### Hierarchy Families
 
-| level | label_th | label_en | level_columns |
-|---|---|---|---|
-| 0 | กลุ่มธุรกิจ | Business Group | `["BUSINESS_GROUP", "BUSINESS"]` |
-| 1 | กลุ่มบริการ | Service Group | `["SERVICE_GROUP", "SERVICE"]` |
-| 2 | ผลิตภัณฑ์ | Product | `["PRODUCT_NAME", "PRODUCT"]` |
+`context_name` ทำหน้าที่เป็นชื่อ **hierarchy family** — หนึ่ง business context อาจมีหลาย family:
+
+| family (context_name) | source_view | โครงสร้าง |
+|---|---|---|
+| `revenue` | revenue_search | กลุ่มธุรกิจ > กลุ่มบริการ > บริการ/ผลิตภัณฑ์ |
+| `revenue_org` | revenue_search | สายงาน > กลุ่มงาน > ฝ่าย > ส่วน |
+| `revenue_gl` | revenue_search | หมวดบัญชี > รหัสบัญชี |
+| `expense` | v_expense_mart | หมวดค่าใช้จ่าย > รายการค่าใช้จ่าย |
+| `expense_org` | v_expense_mart | สายงาน > กลุ่มงาน > ฝ่าย |
+| `pl_costtype` | TRN_PL_COSTTYPE_NT_MTH | กลุ่มธุรกิจ > กลุ่มบริการ > ผลิตภัณฑ์/บริการ |
+| `transfer price` | v_transfer_price | สายงาน (ผู้ให้บริการ) > บริการ |
+
+### ตัวอย่าง Revenue Product Hierarchy (ข้อมูลจริง)
+
+| level | label_th | label_en | level_columns | parent_column |
+|---|---|---|---|---|
+| 0 | กลุ่มธุรกิจ | Business Group | `["BUSINESS_GROUP", "BUSINESS"]` | NULL |
+| 1 | กลุ่มบริการ | Service Group | `["SERVICE_GROUP"]` | BUSINESS_GROUP |
+| 2 | บริการ/ผลิตภัณฑ์ | Product/Service | `["PRODUCT_NAME", "PRODUCT"]` | SERVICE_GROUP |
 
 ### ทำไมต้องมี Hierarchy?
 
@@ -528,11 +556,11 @@ CREATE TABLE master_hierarchy (
 BUSINESS_GROUP > SERVICE_GROUP > PRODUCT_NAME
 
 ถ้า AI ใช้ OR ข้าม level:
-WHERE BUSINESS_GROUP = 'Fixed Line' OR PRODUCT_NAME = 'Trunk Radio'
-→ จะได้รายได้ Fixed Line ทั้งหมด + Trunk Radio ซ้ำ → ตัวเลขพอง!
+WHERE BUSINESS_GROUP = 'Digital' OR PRODUCT_NAME = 'บริการ NT CLOUD'
+→ จะได้รายได้ Digital ทั้งหมด + บริการ NT CLOUD ซ้ำ → ตัวเลขพอง!
 
 ที่ถูกต้อง:
-WHERE BUSINESS_GROUP = 'Fixed Line' AND PRODUCT_NAME = 'Trunk Radio'
+WHERE BUSINESS_GROUP = 'Digital' AND PRODUCT_NAME = 'บริการ NT CLOUD'
 ```
 
 ### ประโยชน์
@@ -555,31 +583,31 @@ WHERE BUSINESS_GROUP = 'Fixed Line' AND PRODUCT_NAME = 'Trunk Radio'
 ```sql
 CREATE TABLE master_hierarchy_values (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    context_name TEXT NOT NULL,         -- context (เช่น 'revenue')
+    context_name TEXT NOT NULL,         -- hierarchy family (เช่น 'revenue')
     level INTEGER NOT NULL,             -- hierarchy level (ตรงกับ master_hierarchy.level)
     value TEXT NOT NULL,                -- ค่าจริง (เช่น "Fixed Line & Broadband")
     parent_value TEXT,                  -- ค่า parent (NULL สำหรับ top level)
-    aliases TEXT,                       -- JSON array: ชื่ออื่นๆ/keywords (เช่น ["fixed line", "บรอดแบนด์"])
+    aliases TEXT,                       -- JSON array: ชื่ออื่นๆ/keywords (เช่น ["digital"])
     source TEXT DEFAULT 'auto',         -- 'auto' หรือ 'manual'
-    is_active INTEGER DEFAULT 1,
+    is_active BOOLEAN DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(context_name, level, value)
 );
 ```
 
-### ตัวอย่างข้อมูล
+### ตัวอย่างข้อมูล (ข้อมูลจริงใน config DB)
 
 | context | level | value | parent_value | aliases |
 |---|---|---|---|---|
-| revenue | 0 | Fixed Line & Broadband | NULL | `["fixed line", "บรอดแบนด์"]` |
-| revenue | 1 | กลุ่มบริการ Cloud | Fixed Line & Broadband | `["cloud", "คลาวด์"]` |
-| revenue | 2 | Trunk Radio | กลุ่มบริการ Cloud | `["trunk", "วิทยุ"]` |
+| revenue | 0 | Digital | NULL | `["digital"]` |
+| revenue | 1 | กลุ่มบริการ Cloud & BigData | Digital | `["cloud & bigdata", "กลุ่มบริการ cloud & bigdata"]` |
+| revenue | 2 | บริการ NT CLOUD | กลุ่มบริการ Cloud & BigData | `["nt cloud", "บริการ nt cloud"]` |
 
 ### ประโยชน์
 
 - Validate ว่าค่าที่ user ถามมีอยู่จริงใน DB
-- Parent chain ใช้ drill-down/roll-up (เช่น "Trunk Radio อยู่ใน Cloud อยู่ใน Fixed Line")
-- `aliases` ช่วย fuzzy matching (user พิมพ์ "cloud" ก็หา "กลุ่มบริการ Cloud" เจอ)
+- Parent chain ใช้ drill-down/roll-up (เช่น "บริการ NT CLOUD อยู่ใน กลุ่มบริการ Cloud & BigData อยู่ใน Digital")
+- `aliases` ช่วย fuzzy matching (user พิมพ์ "nt cloud" ก็หา "บริการ NT CLOUD" เจอ)
 - Auto-extracted จาก data จริง + admin override ได้
 
 ---
@@ -598,8 +626,9 @@ CREATE TABLE keyword_value_index (
     keyword TEXT NOT NULL,              -- keyword (lowercase, stripped prefixes)
     column_name TEXT NOT NULL,          -- คอลัมน์ที่ค่านี้อยู่
     column_value TEXT NOT NULL,         -- ค่าจริงใน DB
-    table_name TEXT NOT NULL,           -- ตาราง/view ที่ค่านี้อยู่
-    context_name TEXT NOT NULL          -- context ที่ค่านี้อยู่
+    table_name TEXT NOT NULL DEFAULT 'revenue_search',  -- ตาราง/view ที่ค่านี้อยู่
+    context_name TEXT NOT NULL DEFAULT 'revenue',       -- context ที่ค่านี้อยู่
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
@@ -609,16 +638,16 @@ CREATE TABLE keyword_value_index (
 
 1. อ่าน searchable columns จาก `schema_metadata` (is_groupable = 1)
 2. Scan DISTINCT values จากทุก searchable column ใน business DB
-3. สร้าง keyword โดยตัด prefix ภาษาไทย (เช่น "กลุ่มบริการ", "สายงาน") และ lowercase
+3. สร้าง keyword โดยตัด prefix ภาษาไทย (เช่น "กลุ่มบริการ", "บริการ", "สายงาน", "ฝ่าย", "รายได้") + แยกคำด้วย space/`-`/`&`/`/` แล้ว lowercase
 4. เก็บลง `keyword_value_index` ใน config DB
 
 ### ตัวอย่างข้อมูล
 
 | keyword | column_name | column_value | table_name | context_name |
 |---|---|---|---|---|
-| cloud connect | PRODUCT_NAME | บริการ Cloud Connect | revenue_search | revenue |
-| trunk radio | PRODUCT_NAME | Trunk Radio | revenue_search | revenue |
-| fixed line | BUSINESS_GROUP | Fixed Line & Broadband | revenue_search | revenue |
+| internet retail | SERVICE_GROUP | กลุ่มบริการ Internet Retail | revenue_search | revenue |
+| รายได้อื่น | SERVICE_GROUP | รายได้อื่น | revenue_search | revenue |
+| กลุ่มบริการ internet retail | SERVICE_GROUP | กลุ่มบริการ Internet Retail | revenue_search | revenue |
 
 ### ใช้ร่วมกับ `get_known_terms()`
 
@@ -631,7 +660,7 @@ Function `get_known_terms()` รวม keywords จาก:
 ### ประโยชน์
 
 - Lookup เร็วโดยไม่ต้อง scan business data ทุกครั้ง
-- Keyword stripping ช่วย fuzzy match (เช่น "cloud" หา "บริการ Cloud Connect" เจอ)
+- Keyword stripping ช่วย fuzzy match (เช่น "internet retail" หา "กลุ่มบริการ Internet Retail" เจอ)
 - รองรับหลาย context (revenue, expense, ฯลฯ)
 
 ---
@@ -674,7 +703,7 @@ service.refresh_cache()
 - `/admin/rules` — จัดการ business rules
 - `/admin/mappings` — จัดการ semantic mappings
 - `/admin/contexts` — จัดการ contexts
-- `/admin/examples` — จัดการ golden examples
+- `/admin/golden-examples` — จัดการ golden examples
 - `/admin/hierarchy` — จัดการ hierarchy
 
 ---
@@ -694,7 +723,7 @@ service.refresh_cache()
 - [`app/services/schema/view_manager.py`](../app/services/schema/view_manager.py) — view_column_mappings
 - [`app/services/schema/context_store.py`](../app/services/schema/context_store.py) — schema_contexts
 - [`app/services/hierarchy_service.py`](../app/services/hierarchy_service.py) — master_hierarchy/values
-- [`app/services/vanna_service.py`](../app/services/vanna_service.py) — RAG consumption of this guide
+- [`app/services/vanna_service.py`](../app/services/vanna_service.py) — Vanna RAG sync (DB-driven: `vanna_documentation`, rules, golden examples)
 
 ### API Endpoints
 

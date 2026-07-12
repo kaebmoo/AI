@@ -49,7 +49,7 @@ Admin Agent เป็นระบบ chat-based สำหรับผู้ด�
 3. ถ้ายืนยัน -> ดำเนินการ + refresh cache อัตโนมัติ
 4. ถ้ายกเลิก -> ไม่มีการเปลี่ยนแปลง
 
-## Tool ทั้งหมด (14 tools)
+## Tool ทั้งหมด (13 tools)
 
 ### Mapping Tools
 
@@ -130,8 +130,9 @@ Thai language summary + mini data table
 | Method | Path | คำอธิบาย |
 |--------|------|----------|
 | POST | `/api/v1/admin/agent/chat` | ส่งข้อความไปยัง agent |
-| POST | `/api/v1/admin/agent/confirm` | ยืนยันการดำเนินการ |
+| POST | `/api/v1/admin/agent/chat/{conversation_id}/confirm` | ยืนยันการดำเนินการ |
 | GET | `/api/v1/admin/agent/conversations` | ดูประวัติการสนทนา |
+| GET | `/api/v1/admin/agent/conversations/{conversation_id}` | ดูรายละเอียดการสนทนา |
 
 ## UI Features
 

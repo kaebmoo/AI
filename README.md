@@ -4,9 +4,10 @@
 
 ## Project Status
 
-**Phase:** 5.0 (Plans 0-5 Complete)
-**Current Version:** 0.5.0
-**Tests:** 366 passing (0 failures)
+**Phase:** Plans 0-5 Complete + Hardening F1-F11 Complete (2026-07-11)
+**Current Version:** 1.0.0
+**Tests:** 363 passed, 3 skipped (verified 2026-07-11) — CI: GitHub Actions (ruff + pytest)
+**Roadmap:** ดู [plan/PLAN_ROADMAP_MASTER.md](plan/PLAN_ROADMAP_MASTER.md)
 
 ## Features Implemented
 
@@ -18,8 +19,8 @@
   - Session Management (Token-based)
 - **Services:**
   - **AI Service (Core):**
-    - Support for **Claude 3.5 Sonnet**, **Gemini 2.0 Flash**, and **Matcha (OpenAI Compatible)**
-    - **Dynamic Provider Management (New):**
+    - Support for **Claude (claude-sonnet-4-6)**, **Gemini (gemini-2.5-flash)**, and **Matcha (OpenAI Compatible, gpt-4.1)**
+    - **Dynamic Provider Management:**
       - **Admin-Controlled Model Selection:** Enable/disable AI providers through Admin UI
       - **Multi-Model Support:** Switch between different models per provider (e.g., claude-sonnet, gpt-4o, gemini-flash)
       - **Fallback Configuration:** 3-tier config system (Database → .env → Hardcoded defaults)
@@ -40,7 +41,7 @@
       - Built with React + Ant Design (TypeScript).
       - Visual management for Users, Schemas, Rules, and Golden Examples.
       - **Context Management:** Create and edit data contexts (Revenue, Expense) and manage routing keywords.
-      - **Settings Panel (New):**
+      - **Settings Panel:**
         - **AI Provider Configuration:** Enable/disable providers (Claude, Gemini, Matcha), select default provider
         - **Model Management:** Choose models for each provider, configure API URLs
         - **Feature Flags:** Toggle RAG, auto-context detection, debug mode, query logging
@@ -50,10 +51,12 @@
     - Built with **React Native (Expo)** for Web, iOS, and Android.
     - **Smart Visualization:** Auto-selects best chart type (Line/Bar/Grouped) based on data shape.
     - **Interactive Reports:** Drill-down tooltips, responsive data tables, and rich markdown support.
-  - **Task Queue:** Celery + Redis for async tasks (Email, Long-running queries)
+  - **Task Queue:** Celery + Redis for async tasks (Email, xlsx Report Export)
 - **Feedback System:**
   - Collect user feedback (Thumbs Up/Down)
   - Admin Dashboard for reviewing AI performance
+- **Observability:** Real token accounting + cost tracking (`cost_service.py`), single-line JSON query trace (`query_trace`)
+- **Security Hardening:** Read-only business DB connection, engine-agnostic row cap, consolidated SQL validation, API-key rate limiting
 
 ## Plans 0-5 Implementation (2026-03-19) — All Complete
 
@@ -103,6 +106,45 @@
 - `BusinessDBAdapter` for SQLite/PostgreSQL/MSSQL
 - Migration script to separate config tables from business data
 
+## Hardening F1-F11 (2026-07-11) — All Complete
+
+การแก้ไขจากรอบ code review ครั้งใหญ่ (ดู [plan/PLAN_FIX_MASTER.md](plan/PLAN_FIX_MASTER.md)):
+
+### F1-F2: Correctness + Hygiene
+- แก้ cache vs history, truncation warning, provider default, stale prompt date
+- ปิด resource leaks, เพิ่มความทนทาน SSE streaming
+
+### F3: CI + Eval Harness
+- GitHub Actions CI (ruff + pytest ทุก push/PR)
+- NL→SQL eval harness (`scripts/eval/run_eval.py`) + committed baseline — ดู [docs/EVAL_HARNESS.md](docs/EVAL_HARNESS.md)
+
+### F4: SQL Execution Hardening
+- Business DB เปิดแบบ **read-only** (`mode=ro`), row cap แบบ engine-agnostic
+- รวม SQL validation เหลือตัวเดียว + per-minute rate limit
+
+### F5: Telegram Hardening
+- Webhook lifecycle (auto-setWebhook), explicit `/admin` routing, polling hardening
+
+### F6: Reports / xlsx Export
+- `POST /api/v1/reports` — export ผลลัพธ์เต็มเป็น xlsx ผ่าน Celery + cleanup job — ดู [docs/API_REPORTS.md](docs/API_REPORTS.md)
+
+### F7: Token Observability
+- Token accounting จริงต่อ provider + cost tracking (`cost_service.py`)
+- Single-line JSON `query_trace` log ต่อ query
+
+### F8-F9: Structured Output + Latency
+- Structured output สำหรับ intent extraction (two-pass, flag default OFF)
+- Template answers, parallel prep, intent state, escalation ladder (flags default OFF)
+
+### F10: DataFeed Integration (Pilot: Revenue)
+- Import `feed_*` tables จาก DataFeed contract พร้อม integrity gates (sha256, row counts, control totals)
+- Context `feed_revenue` + golden examples อัตโนมัติ — ดู [docs/DATAFEED_INTEGRATION.md](docs/DATAFEED_INTEGRATION.md)
+
+### F11: Dashboard Embed (Phase A)
+- Query API รองรับ `filters` (pinned dashboard filters) + `source` สำหรับ NT-Report portal — ดู [docs/PORTAL_INTEGRATION.md](docs/PORTAL_INTEGRATION.md)
+
+**งานที่เหลือ:** Plan 6 (SaaS/multi-tenant — design only), MCP SSE+Auth (deferred), BGE-M3 embedding (รออนุมัติ) — ดู [plan/PLAN_ROADMAP_MASTER.md](plan/PLAN_ROADMAP_MASTER.md)
+
 ## Architecture Overview
 
 ```
@@ -144,8 +186,10 @@ app/
 │   ├── admin/           # Admin CRUD package split by domain
 │   ├── chat.py          # Main chat + SSE streaming
 │   ├── admin_agent.py   # Admin Agent chat API
-│   └── query.py         # Stateless query API (API key auth)
-├── tools/admin/         # Admin tools (14 tools)
+│   ├── reports.py       # xlsx export API (F6)
+│   └── query.py         # Stateless query API (API key auth) + portal fields (F11)
+├── workers/             # Celery workers (email, report export)
+├── tools/admin/         # Admin tools (15 tool classes)
 ├── telegram/            # Telegram bot
 │   ├── bot.py           # Bot initialization
 │   ├── dispatcher.py    # Command routing
@@ -320,7 +364,7 @@ npm install && npm run build
 ### Verify หลัง Deploy
 
 - [ ] Backend: `curl https://api.your-domain.com/` → `{"message": "AI Assistant API"}`
-- [ ] Contexts: `curl https://api.your-domain.com/api/v1/query/contexts` → 4 contexts
+- [ ] Contexts: `curl https://api.your-domain.com/api/v1/query/contexts` → active contexts ครบ (ปัจจุบัน 5: revenue, expense, pl_costtype, transfer price, feed_revenue)
 - [ ] Admin UI: เปิด browser → login ได้
 - [ ] User App: ถามคำถาม → ได้คำตอบ
 
@@ -337,9 +381,17 @@ Once the backend is running, visit:
 
 ### Project Documentation
 
+ดัชนีเอกสารทั้งหมด: **[docs/README.md](docs/README.md)**
+
 - **[Admin Configuration System](docs/ADMIN_CONFIGURATION.md)** - Complete guide for AI provider management
-- **[Data Dictionary](docs/DATA_DICTIONARY.md)** - Database schema reference
-- **[CLAUDE.md](CLAUDE.md)** - Instructions for AI coding assistants
+- **[Data Dictionary](docs/DATA_DICTIONARY.md)** - Database schema reference (views ต่อ context)
+- **[Database Tables Guide](docs/DATABASE_TABLES_GUIDE.md)** - Config tables ใน 3-DB architecture
+- **[Eval Harness](docs/EVAL_HARNESS.md)** - NL→SQL evaluation + baseline
+- **[DataFeed Integration](docs/DATAFEED_INTEGRATION.md)** - feed_* tables + importer
+- **[Reports/Export API](docs/API_REPORTS.md)** - xlsx export endpoint
+- **[Portal Integration](docs/PORTAL_INTEGRATION.md)** - NT-Report dashboard embed
+- **[Deployment Security](docs/DEPLOYMENT_SECURITY.md)** - Production security checklist
+- **[CLAUDE.md](CLAUDE.md)** / **[AGENTS.md](AGENTS.md)** - Instructions for AI coding assistants
 
 ### Manuals
 
@@ -376,13 +428,18 @@ Once the backend is running, visit:
 
 **Run all tests:**
 ```bash
-pytest tests/ -v
+pytest -q
 ```
 
-**Current:** 366 tests passing (0 failures)
+**Current:** 363 passed, 3 skipped (verified 2026-07-11) — รันอัตโนมัติผ่าน GitHub Actions CI ทุก push/PR
 
-- **Unit tests:** `tests/unit/` — 25+ test files covering all services
+- **Unit tests:** `tests/unit/` — covering all services
 - **Integration tests:** `tests/integration/` — API endpoint tests
+
+**Run NL→SQL eval (ใช้ LLM จริง — manual only):**
+```bash
+python scripts/eval/run_eval.py --compare eval_results/BASELINE.json
+```
 
 **Verify AI SQL Generation:**
 ```bash
@@ -436,8 +493,8 @@ Access at: `http://localhost:5173/settings` (Admin login required)
 
 2. **Model Selection**
    - Claude: claude-sonnet-4-6, claude-opus-4-6, claude-haiku-4-5
-   - Gemini: gemini-3-flash, gemini-2.0-flash-exp, gemini-1.5-pro
-   - Matcha: gpt-4.1, gpt-4o, gpt-4-turbo, gpt-3.5-turbo
+   - Gemini: gemini-2.5-flash, gemini-3-flash-preview, gemini-2.0-flash-exp
+   - Matcha: gpt-4.1, gpt-4o, gpt-4-turbo
 
 3. **Feature Flags**
    - RAG Enabled: Toggle Retrieval-Augmented Generation
@@ -471,7 +528,7 @@ POST /api/v1/admin/config/features/{name}/toggle # Admin: Toggle feature
 
 **Backend:**
 - `app/services/admin_config_service.py` - Config service with fallback logic
-- `app/api/v1/admin.py` - Admin API endpoints
+- `app/api/v1/admin/` - Admin API endpoints (package split by domain)
 - `database/migrations/004_admin_config.sql` - Migration script
 
 **Frontend:**

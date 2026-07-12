@@ -17,7 +17,9 @@ Telegram Bot ช่วยให้ผู้ใช้สามารถสอบ�
 
 ```env
 TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrSTUvwxYZ
+TELEGRAM_BOT_MODE=polling            # "polling" (dev) หรือ "webhook" (prod)
 TELEGRAM_WEBHOOK_SECRET=your_random_secret_string
+TELEGRAM_WEBHOOK_URL=https://your-domain.com/telegram/webhook  # ใช้เมื่อ mode=webhook
 ```
 
 ### 3. Start Bot
@@ -30,11 +32,17 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ### 4. ตั้ง Webhook (Production)
 
+ตั้ง `TELEGRAM_BOT_MODE=webhook` + `TELEGRAM_WEBHOOK_URL` — app จะเรียก `setWebhook` ให้อัตโนมัติตอน startup (webhook endpoint อยู่ที่ `POST /telegram/webhook`)
+
+ถ้าไม่ได้ตั้ง `TELEGRAM_WEBHOOK_URL` ต้องเรียก setWebhook เอง:
+
 ```bash
 curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" \
-  -d "url=https://your-domain.com/api/v1/telegram/webhook" \
+  -d "url=https://your-domain.com/telegram/webhook" \
   -d "secret_token=your_random_secret_string"
 ```
+
+> หมายเหตุ: โหมด polling จะลบ webhook ค้าง (`delete_webhook`) อัตโนมัติตอน start เพื่อกัน 409 Conflict
 
 ## ลงทะเบียนผู้ใช้
 
@@ -52,6 +60,7 @@ curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" \
 | `/start <email>` | ลงทะเบียนด้วยอีเมลองค์กร |
 | `/help` | แสดงคำสั่งทั้งหมดและวิธีใช้ |
 | `/context` | เลือกชุดข้อมูล (revenue, expense, etc.) |
+| `/admin <คำสั่ง>` | เรียก Admin Agent โดยตรง (admin เท่านั้น) |
 
 ## ถามคำถาม
 
@@ -104,7 +113,7 @@ Admin (ตรวจสอบจากอีเมลที่ลงทะเบ�
 Telegram User
     |
     v
-Telegram Webhook (POST /api/v1/telegram/webhook)
+Telegram Webhook (POST /telegram/webhook) หรือ Polling
     |
     v
 Dispatcher
@@ -118,13 +127,13 @@ Formatters -> Message splitting -> Telegram API
 
 ## Database Tables
 
-`database/migrations/029_telegram_support.sql` สร้างตาราง:
+`database/migrations/029_telegram_support.sql` เพิ่ม column `telegram_chat_id` ใน `users` (+ index) — ไม่มีตารางแยกสำหรับ Telegram แต่ใช้ตารางเดิม:
 
 | Table | คำอธิบาย |
 |-------|----------|
-| `telegram_users` | ผู้ใช้ Telegram ที่ลงทะเบียน |
-| `telegram_otp` | OTP สำหรับยืนยันอีเมล |
-| `telegram_chat_link` | เชื่อมต่อ chat_id กับ user account |
+| `users.telegram_chat_id` | เชื่อม chat_id กับ user account |
+| `user_sessions` (platform=telegram, telegram_chat_id) | Session ของผู้ใช้ Telegram |
+| `otp_requests` (platform=telegram) | OTP สำหรับยืนยันอีเมล |
 
 ## Troubleshooting
 

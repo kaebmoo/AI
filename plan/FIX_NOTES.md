@@ -40,11 +40,11 @@
 
 - **Phase E (heuristic router) ไม่ได้ implement** — decision-gated ตามแผน ต้องอนุมัติก่อน
 - **Intent state ใช้ in-memory dict (TTL 1 ชม.)** แทน DB column — เหตุผล: zero migration, เสียแค่ latency optimization เมื่อ restart (fallback เงียบ), app รัน single-process; ถ้าย้ายเป็น multi-worker ต้องย้ายไป Redis/DB
-- ยังไม่มี flag ใดถูกเปิด — RESULT_F9.md มี measurement protocol รอรันเมื่อจะเปิด
+- ยังไม่มี flag ใดถูกเปิด — `archive/RESULT_F9.md` มี measurement protocol รอรันเมื่อจะเปิด
 
 ## จาก F10 (2026-07-11)
 
-- Import จริงผ่านครบ 4 gates — ดู `plan/RESULT_F10.md` (ค่าถูก 14/14 value-based; strict exact-match 0/14 เพราะ alias ไม่ตรง golden; YTD rule พิสูจน์แล้ว)
+- Import จริงผ่านครบ 4 gates — ดู `plan/archive/RESULT_F10.md` (ค่าถูก 14/14 value-based; strict exact-match 0/14 เพราะ alias ไม่ตรง golden; YTD rule พิสูจน์แล้ว)
 - ข้อ eval ที่ตก 1 ข้อ: โมเดลใส่คอลัมน์ `bu` เกิน → column-count mismatch (ค่าน่าจะถูก) — พิจารณาผ่อนเกณฑ์เทียบ (ignore constant label columns) ในรอบปรับปรุง eval
 - `vanna_documentation` มีจริง + `mark_brain_dirty()` มีจริง — ใช้เส้นทาง DB-driven docs ตามแผน (ไม่มีของค้าง migrate)
 - Acceptance "ถามผ่าน UI 5 คำถาม" ค้าง manual (ต้องเปิด frontend)
@@ -53,5 +53,5 @@
 
 - **Phase A:** `pinned_filters` = รับ-log เท่านั้นใน v1 (inject เข้า intent pipeline เกิน 0.5 วันตามที่แผนให้ตัดสิน) — งานต่อ: inject เป็น filter จริงเมื่อ demand ชัด
 - **Phase B/C commit แล้วใน repo NT-Report** (`c340d70`) — `$http.send` มีจริงใน PB v0.38 JSVM
-- **ค้าง manual (บังคับก่อนเปิดใช้จริง):** (1) ออก API key จริงให้ portal (ดู docs/PORTAL_INTEGRATION.md), (2) E2E ผ่าน local PB — user ไม่มีสิทธิ์ → 403 ไม่มี call ออก, audit ครบ, rate limit จริง, (3) ตารางเทียบเลข 10 คำถาม vs dashboard ลง `plan/RESULT_F11.md`
+- **ค้าง manual (บังคับก่อนเปิดใช้จริง):** (1) ออก API key จริงให้ portal (ดู docs/PORTAL_INTEGRATION.md), (2) E2E ผ่าน local PB — user ไม่มีสิทธิ์ → 403 ไม่มี call ออก, audit ครบ, rate limit จริง, (3) ตารางเทียบเลข 10 คำถาม vs dashboard ลง `plan/archive/RESULT_F11.md`
 - Phase D (postMessage filter state, streaming) = deferred ตามแผน

@@ -2,7 +2,9 @@
 
 **ที่มา:** Code review เต็มรูปแบบ (อ่าน source จริง 21 ไฟล์) วันที่ 2026-07-04
 **Project Root:** `/Users/seal/Documents/GitHub/AI/`
-**สถานะ:** พร้อม execute — ยกเว้นแผนที่ระบุ PENDING
+**สถานะ:** ✅ Executed ครบทุกแผน (2026-07-11) — ดูสถานะรวมใน `PLAN_ROADMAP_MASTER.md`
+
+> **หมายเหตุ (2026-07-12):** ไฟล์แผน `PLAN_F1`–`PLAN_F11` และ `RESULT_F9`/`RESULT_F10` ที่อ้างถึงในเอกสารนี้ ถูกย้ายไป `plan/archive/` แล้วหลังงานเสร็จ
 
 ---
 
@@ -100,7 +102,7 @@ Wave 6 (integration ข้ามระบบ)
 
 | แผน | สาระ | Gate สำคัญ |
 |------|------|-----------|
-| F9 Agentic Latency | template answers, parallel prep, follow-up state, escalation ladder, router | ทุก phase flag default OFF; เปิดได้ต่อเมื่อมีผลวัดใน `plan/RESULT_F9.md`; Phase E ต้องอนุมัติแยก |
+| F9 Agentic Latency | template answers, parallel prep, follow-up state, escalation ladder, router | ทุก phase flag default OFF; เปิดได้ต่อเมื่อมีผลวัดใน `plan/archive/RESULT_F9.md`; Phase E ต้องอนุมัติแยก |
 | F10 DataFeed Integration | import `feed_*` จาก NT-Report DataFeed + docs จาก contract + golden จาก control_totals | integrity gate 4 ชั้น (reconcile.ok, sha256, row counts, control totals) — พลาดชั้นเดียว = rollback |
 | F11 Dashboard Embed | chat panel ใน viewer.html ของ portal + PB hook proxy | **Decision บันทึกแล้ว (2026-07-04): dashboard mode ตอบจาก `feed_*` ชุดเดียวกับที่ build dashboard**; สิทธิ์ตรวจที่ PB ก่อนถึง assistant เสมอ |
 

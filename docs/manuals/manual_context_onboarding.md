@@ -218,9 +218,9 @@ curl -X POST http://localhost:8000/api/v1/admin/contexts/onboard/validate \
 
 ## หลัง Apply แล้วต้องทำอะไร
 
-1. **Restart server** หรือเรียก API `/admin/config/refresh-cache` เพื่อ clear cache
+1. **Restart server** หรือเรียก API `POST /api/v1/admin/refresh-cache` เพื่อ clear cache
 2. **ทดสอบ** — ถามคำถามภาษาไทยกับระบบ ดูว่า SQL ถูกต้อง
-3. **Sync golden examples** ไป Vanna (ถ้าเปิด RAG): `POST /admin/examples/sync-brain`
+3. **Sync golden examples** ไป Vanna (ถ้าเปิด RAG): `POST /api/v1/admin/sync-brain`
 4. **Review ผ่าน Admin UI** — ตรวจ business rules, semantic mappings ที่ generate มา
 
 ---

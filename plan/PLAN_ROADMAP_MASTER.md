@@ -6,7 +6,9 @@
 
 ---
 
-## สถานะรวม (Updated 2026-03-21 late — re-verified, post-fix)
+## สถานะรวม (Updated 2026-07-12)
+
+> **โครงสร้างโฟลเดอร์ (2026-07-12):** แผนที่ทำเสร็จแล้วทั้งหมด (Plans 0-5, F1-F11, refactoring plans) ย้ายไป `plan/archive/` — โฟลเดอร์ `plan/` ชั้นบนเหลือเฉพาะเอกสาร reference ที่ยังมีผล และแผนที่ยังไม่เริ่ม/รอตัดสินใจ ดู `plan/README.md`
 
 | Plan | สถานะ | % | Tests | หมายเหตุ |
 |------|--------|---|-------|---------|
@@ -234,16 +236,16 @@ ConfigSessionLocal = sessionmaker(bind=config_engine)
 
 | ไฟล์ | เนื้อหา |
 |------|---------|
-| `PLAN_0_FIX_LEGACY_TESTS.md` | ✅ Done |
-| `PLAN_1_ADMIN_AGENT.md` | ✅ Done |
-| `PLAN_1B_MCP_CONSOLIDATION.md` | 🟡 Phase A partial, Phase B done, Phase C deferred |
-| `PLAN_2_FEEDBACK_QUERYLOG.md` | ✅ Done |
-| `PLAN_3_SELF_LEARNING.md` | 🟡 Dedup+Analyzer done, Audit+Scheduler pending |
-| `PLAN_4_TELEGRAM.md` | 🟡 Files done, registration pending |
-| `PLAN_4B_OPENMINICREW_READINESS.md` | ✅ Done |
-| `PLAN_5_DB_MIGRATION.md` | 🟡 Script done, config integration pending |
+| `archive/PLAN_0_FIX_LEGACY_TESTS.md` | ✅ Done |
+| `archive/PLAN_1_ADMIN_AGENT.md` | ✅ Done |
+| `archive/PLAN_1B_MCP_CONSOLIDATION.md` | 🟡 Phase A partial, Phase B done, Phase C deferred |
+| `archive/PLAN_2_FEEDBACK_QUERYLOG.md` | ✅ Done |
+| `archive/PLAN_3_SELF_LEARNING.md` | 🟡 Dedup+Analyzer done, Audit+Scheduler pending |
+| `archive/PLAN_4_TELEGRAM.md` | 🟡 Files done, registration pending |
+| `archive/PLAN_4B_OPENMINICREW_READINESS.md` | ✅ Done |
+| `archive/PLAN_5_DB_MIGRATION.md` | 🟡 Script done, config integration pending |
 | `PLAN_6_SAAS.md` | ⬜ Design only |
-| `PLAN_TEST_MASTER.md` | ✅ 359 tests |
+| `archive/PLAN_TEST_MASTER.md` | ✅ 359 tests |
 | `docs/changelogs/PLANS_0_5_IMPLEMENTATION.md` | ✅ Changelog created |
 | `docs/manuals/manual_admin_agent.md` | ✅ Manual created |
 | `docs/manuals/manual_api_keys.md` | ✅ Manual created |

@@ -327,10 +327,11 @@ INSERT INTO schema_semantic_mapping (
 
 ### Test Query:
 ```python
-from app.services.schema_service import SchemaService
-from app.db.session import engine
+from app.services.schema_service import SchemaService  # shim → app/services/schema/service.py
+from app.db.session import config_engine, business_engine
 
-service = SchemaService(db_engine=engine)
+# semantic mappings อยู่ใน config.db (3-DB architecture)
+service = SchemaService(db_engine=config_engine, business_engine=business_engine)
 mappings = service.get_semantic_mappings()
 
 # ค้นหา mapping
@@ -373,5 +374,5 @@ A: ไม่! cache refresh อัตโนมัติแล้ว (ถ้า�
 
 ---
 
-**Updated:** 2026-02-26
-**Version:** 2.2 (เพิ่ม field `context_name` สำหรับ context-scoped mappings)
+**Updated:** 2026-07-12
+**Version:** 2.2.1 (แก้ตัวอย่าง test ให้ใช้ `config_engine` ตาม 3-DB architecture)

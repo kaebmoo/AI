@@ -1,7 +1,7 @@
 # Internal Schema Reference
 
-**Version:** 1.0
-**Last Updated:** 2026-03-22
+**Version:** 1.1
+**Last Updated:** 2026-07-12
 
 > Developer reference สำหรับ app.db และ config.db tables ที่ไม่เกี่ยวกับ SQL generation
 > ไฟล์นี้ **ไม่ถูก** Vanna RAG consume — เป็น internal reference เท่านั้น
@@ -28,16 +28,17 @@
 10. [api_key_usage](#10-api_key_usage)
 11. [admin_agent_conversations](#11-admin_agent_conversations)
 12. [admin_agent_messages](#12-admin_agent_messages)
+13. [report_exports](#13-report_exports)
 
 ### config.db (ORM Base: `ConfigBase`) — non-SQL-gen tables
 
-13. [admin_config](#13-admin_config)
-14. [ai_providers](#14-ai_providers)
-15. [ai_models](#15-ai_models)
-16. [config_audit_log](#16-config_audit_log)
-17. [suggested_fixes](#17-suggested_fixes)
-18. [data_warnings](#18-data_warnings)
-19. [query_complexity_patterns](#19-query_complexity_patterns)
+14. [admin_config](#14-admin_config)
+15. [ai_providers](#15-ai_providers)
+16. [ai_models](#16-ai_models)
+17. [config_audit_log](#17-config_audit_log)
+18. [suggested_fixes](#18-suggested_fixes)
+19. [data_warnings](#19-data_warnings)
+20. [query_complexity_patterns](#20-query_complexity_patterns)
 
 ---
 
@@ -311,6 +312,29 @@
 
 ---
 
+## 13. report_exports
+
+**Model:** `app/models/report_export.py` — class `ReportExport(Base)`
+**หน้าที่:** บันทึกการขอ export รายงาน xlsx (F6) — 1 row ต่อ 1 export request (ประมวลผลโดย Celery `report_worker`)
+
+| Column | Type | Constraints | Default | Description |
+|--------|------|-------------|---------|-------------|
+| id | String | PK | uuid4() | Export ID (UUID string) |
+| user_id | Integer | FK → users.id, indexed | — | ผู้ขอ export |
+| chat_history_id | Integer | FK → chat_history.id, nullable | NULL | Query ต้นทาง (ถ้ามี) |
+| question | Text | | — | คำถามต้นทาง |
+| sql_text | Text | | — | SQL ที่ใช้ export |
+| status | String | | 'pending' | pending / running / done / failed |
+| file_path | String | nullable | NULL | Path ไฟล์ xlsx ที่สร้างแล้ว |
+| row_count | Integer | nullable | NULL | จำนวน rows ที่ export |
+| truncated | Boolean | | False | ถูกตัดที่ row cap หรือไม่ |
+| error | Text | nullable | NULL | Error message (ถ้า failed) |
+| created_at | DateTime | | utcnow | |
+| completed_at | DateTime | nullable | NULL | |
+| expires_at | DateTime | nullable | NULL | ไฟล์หมดอายุ (scheduler ลบอัตโนมัติ) |
+
+---
+
 # config.db Tables (non-SQL-gen)
 
 > Tables ด้านล่างอยู่ใน config.db แต่ **ไม่เกี่ยวกับ SQL generation** โดยตรง
@@ -318,7 +342,7 @@
 
 ---
 
-## 13. admin_config
+## 14. admin_config
 
 **Migration:** `database/migrations/004_admin_config.sql`
 **หน้าที่:** Runtime configuration — AI providers, models, feature flags, DB settings
@@ -359,7 +383,7 @@
 
 ---
 
-## 14. ai_providers
+## 15. ai_providers
 
 **Migration:** `database/migrations/005_dynamic_providers.sql`
 **หน้าที่:** รายชื่อ AI providers ที่ระบบรองรับ (auto-discovered by provider system)
@@ -383,7 +407,7 @@
 
 ---
 
-## 15. ai_models
+## 16. ai_models
 
 **Migration:** `database/migrations/005_dynamic_providers.sql` + `022_ai_models_tier.sql`
 **หน้าที่:** Models ที่แต่ละ provider มี พร้อม capabilities และ cost
@@ -409,7 +433,7 @@
 
 ---
 
-## 16. config_audit_log
+## 17. config_audit_log
 
 **Migration:** `database/migrations/028_audit_log.sql`
 **หน้าที่:** Audit trail ของทุกการเปลี่ยนแปลง config.db (manual, auto_analyzer, admin_agent)
@@ -433,7 +457,7 @@
 
 ---
 
-## 17. suggested_fixes
+## 18. suggested_fixes
 
 **Migration:** `database/migrations/028_audit_log.sql`
 **หน้าที่:** คำแนะนำจาก auto_analyzer (add_mapping, add_rule, etc.) สำหรับ admin review
@@ -457,7 +481,7 @@
 
 ---
 
-## 18. data_warnings
+## 19. data_warnings
 
 **Model:** `app/models/schema_models.py` — class `DataWarningModel(ConfigBase)`
 **หน้าที่:** คำเตือนเกี่ยวกับ data quality (แทน hardcoded DATA_WARNINGS)
@@ -478,7 +502,7 @@
 
 ---
 
-## 19. query_complexity_patterns
+## 20. query_complexity_patterns
 
 **Model:** `app/models/schema_models.py` — class `QueryComplexityPattern(ConfigBase)`
 **หน้าที่:** Regex patterns สำหรับจำแนก query complexity (simple/complex) เพื่อเลือก model tier
@@ -508,6 +532,7 @@ app.db:
   otp_requests (standalone)
   trending_queries (standalone)
   api_keys ──< api_key_usage
+  report_exports (FK → users, chat_history)
 
 config.db:
   ai_providers ──< ai_models
@@ -533,7 +558,8 @@ config.db:
 | GET /api/v1/admin/query-logs | chat_history | Query log viewer |
 | GET /api/v1/admin/stats | chat_history, user_feedback | Dashboard stats |
 | GET/POST /api/v1/admin/api-keys | api_keys, api_key_usage | API key management |
-| GET/POST /api/v1/admin-agent/* | admin_agent_conversations, admin_agent_messages | Admin Agent |
+| GET/POST /api/v1/admin/agent/* | admin_agent_conversations, admin_agent_messages | Admin Agent |
+| GET/POST /api/v1/reports | report_exports | xlsx export (async via report_worker) |
 
 ### config.db endpoints (ใช้ `get_config_db()`)
 
@@ -541,8 +567,7 @@ config.db:
 |---|---|---|
 | GET/PUT /api/v1/admin/config/ai | admin_config | AI provider config |
 | GET /api/v1/admin/config/ai/providers | admin_config, ai_providers, ai_models | Active providers list |
-| GET /api/v1/admin/audit-log | config_audit_log | Audit trail |
-| GET /api/v1/admin/suggested-fixes | suggested_fixes | Auto-analyzer suggestions |
+> หมายเหตุ: `config_audit_log` และ `suggested_fixes` ยังไม่มี REST endpoint — เขียนโดย `AuditService` / `AutoAnalyzer` (scheduler) โดยตรง
 
 ---
 
@@ -551,3 +576,4 @@ config.db:
 | Date | Version | Changes |
 |---|---|---|
 | 2026-03-22 | 1.0 | Initial — all app.db + config.db non-SQL-gen tables |
+| 2026-07-12 | 1.1 | เพิ่ม report_exports (F6 xlsx export), แก้ endpoint paths (admin/agent, reports), ระบุว่า audit-log/suggested-fixes ยังไม่มี REST endpoint |

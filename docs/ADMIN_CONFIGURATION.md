@@ -1,6 +1,6 @@
 # Admin Configuration System
 
-Updated: 2026-03-23
+Updated: 2026-07-12
 
 ## Overview
 
@@ -514,11 +514,11 @@ assert config_service.get_config('default_ai_provider', 'matcha') == 'matcha'
 **Run Migration:**
 
 ```bash
-# SQLite
-sqlite3 nt_fi_report.sqlite < database/migrations/004_admin_config.sql
+# SQLite — admin_config อยู่ใน config.db (3-DB architecture)
+sqlite3 config.db < database/migrations/004_admin_config.sql
 
 # PostgreSQL
-psql -d nt_fi_report < database/migrations/004_admin_config.sql
+psql -d config_db < database/migrations/004_admin_config.sql
 ```
 
 **What it creates:**
@@ -626,8 +626,6 @@ curl -X POST http://localhost:8000/api/v1/admin/config/cache/clear
 1. Check `GET /api/v1/admin/brain-sync-status` or the Dashboard sync timestamp
 2. If `needs_sync=true`, trigger Sync Brain from Dashboard or Vanna Knowledge
 3. Re-test Vanna-backed retrieval after sync
-1. Remove from database, or
-2. Update via Admin UI (which updates database)
 
 ### Issue: API returns empty providers list
 
@@ -664,9 +662,7 @@ curl -X POST http://localhost:8000/api/v1/admin/config/cache/clear
 
 ### Planned Features
 
-1. **Model Cost Tracking**
-   - Log token usage per model
-   - Cost analytics dashboard
+1. **Model Cost Tracking** — token accounting shipped แล้ว (`app/services/cost_service.py` + query_trace log); เหลือ cost analytics dashboard
 
 2. **A/B Testing**
    - Test multiple providers side-by-side
@@ -690,7 +686,7 @@ curl -X POST http://localhost:8000/api/v1/admin/config/cache/clear
 
 **Files:**
 - Backend: `app/services/admin_config_service.py`
-- API: `app/api/v1/admin.py`
+- API: `app/api/v1/admin/` (package — config.py, providers.py, analytics.py, ฯลฯ)
 - Frontend: `frontend/components/Chat/ModelSelector.tsx`
 - Admin UI: `frontend-admin/src/pages/Settings.tsx`
 - Migration: `database/migrations/004_admin_config.sql`

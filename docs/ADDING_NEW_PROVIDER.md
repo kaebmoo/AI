@@ -420,8 +420,8 @@ DEEPSEEK_API_URL=https://api.deepseek.com/v1/chat/completions
 │                                                     │
 │  ตัวอย่าง:                                           │
 │  Matcha:  gpt-4.1-mini   gpt-4.1      gpt-4.1-mini │
-│  Claude:  haiku-3.5      sonnet-4.5   haiku-3.5    │
-│  Gemini:  flash-exp      flash-3      flash-exp    │
+│  Claude:  haiku-4-5      sonnet-4-6   haiku-4-5    │
+│  Gemini:  2.5-flash      2.5-flash    2.5-flash    │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -575,13 +575,13 @@ return {
 }
 ```
 
-> **หมายเหตุ:** `ai_service.py` มี handler สำหรับ 3 format นี้ ถ้าเพิ่ม provider แบบ OpenAI-compatible ให้ return format เหมือน matcha (จะทำงานได้ทันที)
+> **หมายเหตุ:** `app/services/ai/retry_loop.py` มี handler สำหรับ 3 format นี้ ถ้าเพิ่ม provider แบบ OpenAI-compatible ให้ return format เหมือน matcha (จะทำงานได้ทันที)
 
-### Q: ต้องเพิ่ม handler ใน `ai_service.py` ไหม?
+### Q: ต้องเพิ่ม handler สำหรับ parse response ไหม?
 
 **ถ้า OpenAI-compatible: ไม่ต้อง** — ระบบมี handler สำหรับ OpenAI format อยู่แล้ว (ใช้ร่วมกับ matcha)
 
-**ถ้า format ต่างออกไป:** ต้องเพิ่ม handling ใน `ai_service.py` → method `_handle_tool_call_response()` เพื่อ parse response ของ provider ใหม่
+**ถ้า format ต่างออกไป:** ต้องเพิ่ม handling ใน `app/services/ai/retry_loop.py` (`query_with_retry`) เพื่อ parse tool calls ของ provider ใหม่
 
 ### Q: dependency ใหม่ต้องทำยังไง?
 
@@ -610,8 +610,8 @@ pip install deepseek-sdk  # (ถ้ามี official SDK)
 | Provider | Default Model (งานยาก) | Cheap Model (งานง่าย) |
 |----------|----------------------|---------------------|
 | Matcha | gpt-4.1 | gpt-4.1-mini |
-| Claude | claude-sonnet-4-6 | claude-haiku-4-5 |
-| Gemini | gemini-3-flash | gemini-2.0-flash-exp |
+| Claude | claude-sonnet-4-6 | claude-haiku-4-5-20251001 |
+| Gemini | gemini-2.5-flash | gemini-2.5-flash (model เดียวทุก tier) |
 
 ---
 
