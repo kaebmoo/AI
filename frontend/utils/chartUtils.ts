@@ -116,7 +116,15 @@ export const smartMonthSort = (labels: string[]): string[] => {
     });
 };
 
-/** Truncate long labels */
+/** Grapheme-safe truncation — Thai vowels/tone marks are combining marks,
+ * so a raw UTF-16 slice can cut mid-syllable and produce a mangled glyph. */
+const thSegmenter = typeof Intl !== 'undefined' && 'Segmenter' in Intl
+    ? new Intl.Segmenter('th', { granularity: 'grapheme' })
+    : null;
+
+/** Truncate long labels on a grapheme boundary */
 export const truncateLabel = (label: string, maxLen: number = 12): string => {
-    return label.length > maxLen ? label.slice(0, maxLen) + '...' : label;
+    if (!thSegmenter) return label.length > maxLen ? label.slice(0, maxLen) + '…' : label;
+    const graphemes = [...thSegmenter.segment(label)].map(s => s.segment);
+    return graphemes.length > maxLen ? graphemes.slice(0, maxLen).join('') + '…' : label;
 };

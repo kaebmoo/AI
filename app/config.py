@@ -80,6 +80,10 @@ class Settings(BaseSettings):
     # Two-Pass SQL Generation
     TWO_PASS_ENABLED: bool = False
 
+    # Chart series bucketing (Wave 4) — max distinct series/pie-slices shown
+    # individually before collapsing the rest into an "อื่นๆ" bucket
+    CHART_MAX_SERIES: int = 5
+
     # Value Lookup (keyword index search)
     VALUE_LOOKUP_ENABLED: bool = False
 

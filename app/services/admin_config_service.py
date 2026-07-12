@@ -688,6 +688,18 @@ class AdminConfigService:
             logger.warning(f"Config {key}={raw!r} is not a valid positive number — using {default}")
             return default
 
+    def get_chart_max_series(self) -> int:
+        """Max distinct series/pie-slices shown before bucketing the rest into
+        'อื่นๆ' (Wave 4). 3-tier: admin_config DB -> .env (CHART_MAX_SERIES) ->
+        hardcoded default. >=2 required (Top-N + one 'อื่นๆ' bucket)."""
+        raw = self.get_config("chart_max_series", str(settings.CHART_MAX_SERIES))
+        try:
+            value = int(raw)
+            return value if value >= 2 else settings.CHART_MAX_SERIES
+        except (TypeError, ValueError):
+            logger.warning(f"Config chart_max_series={raw!r} is not a valid integer — using {settings.CHART_MAX_SERIES}")
+            return settings.CHART_MAX_SERIES
+
     def toggle_feature(self, feature_name: str, enabled: bool, updated_by: Optional[str] = None) -> bool:
         """
         Toggle a feature flag.

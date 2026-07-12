@@ -33,7 +33,8 @@ CHART_TYPE_MAP: dict[str, str] = {
     # Others
     'น้ำตก': 'waterfall', 'waterfall': 'waterfall',
     'area': 'area', 'พื้นที่': 'area',
-    'scatter': 'scatter', 'กระจาย': 'scatter',
+    # scatter removed (Wave 2 L8) — no chart type renders it, was a silent
+    # vertical_bar fallback for anyone who explicitly asked for it
 }
 
 

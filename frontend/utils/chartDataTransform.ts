@@ -2,8 +2,59 @@
  * ECharts option builders — transforms backend data into ECharts option objects.
  */
 import { resolveChartType, type ChartConfig } from '../types/chart';
-import { NT_CHART_PALETTE, FINANCIAL_COLORS, CHART_THEME, HEATMAP_COLORS } from '../constants/chartColors';
+import { NT_CHART_PALETTE, NT_LINE_PALETTE, FINANCIAL_COLORS, CHART_THEME, HEATMAP_COLORS } from '../constants/chartColors';
 import { safelyParseNumber, formatNumberWithUnit, truncateLabel } from './chartUtils';
+import { THAI_FONT_FAMILY } from '../constants/theme';
+
+// Wave 4: neutral gray for the collapsed "อื่นๆ" bucket — deliberately NOT
+// #545859 (that's a real brand color already used for individual series)
+const OTHER_BUCKET_COLOR = '#9CA3AF';
+
+/** Sum the measure per distinct category. Pie / single-series bar charts show
+ *  ONE mark per category, but SQL frequently returns several rows per category
+ *  (e.g. grouped by category × month). Without this, buildPie/buildBar treat
+ *  each row as its own slice/bar — duplicate marks, and Top-N bucketing then
+ *  hides real categories (the "5 groups → only 3 shown" pie bug). No-op when
+ *  data already has one row per category. First-seen category order preserved. */
+function aggregateByCategory(
+    data: Record<string, any>[],
+    catCol: string,
+    measureCol: string,
+): Record<string, any>[] {
+    const order: string[] = [];
+    const sums = new Map<string, number>();
+    for (const d of data) {
+        const cat = String(d[catCol] ?? '');
+        if (!sums.has(cat)) { sums.set(cat, 0); order.push(cat); }
+        sums.set(cat, (sums.get(cat) as number) + safelyParseNumber(d[measureCol]));
+    }
+    return order.map(cat => ({ [catCol]: cat, [measureCol]: sums.get(cat) }));
+}
+
+/** Linear interpolate between two hex colors (no dependency). */
+function lerpHex(a: string, b: string, t: number): string {
+    const pa = a.replace('#', ''), pb = b.replace('#', '');
+    const ch = (h: string, i: number) => parseInt(h.slice(i, i + 2), 16);
+    const mix = (i: number) => Math.round(ch(pa, i) + (ch(pb, i) - ch(pa, i)) * t);
+    return '#' + [mix(0), mix(2), mix(4)].map(x => x.toString(16).padStart(2, '0')).join('');
+}
+
+/** Wave 5: colors for a SINGLE-series bar chart.
+ *  - up to palette size (5): each bar gets a distinct NT brand color (lively,
+ *    no repeats) — user preference
+ *  - beyond that: a single-hue yellow ramp keyed to |value| (bigger = deeper),
+ *    which stays pretty, never repeats an ambiguous color, and encodes magnitude
+ *    (the correct high-cardinality single-series treatment). */
+const _BAR_RAMP_LIGHT = '#FFEA80'; // light NT-yellow tint
+const _BAR_RAMP_DARK = '#B8860B';  // deep amber — still the yellow family, readable
+function singleSeriesBarColors(values: number[]): string[] {
+    if (values.length <= NT_CHART_PALETTE.length) {
+        return values.map((_, i) => NT_CHART_PALETTE[i]);
+    }
+    const abs = values.map(v => Math.abs(v));
+    const min = Math.min(...abs), max = Math.max(...abs);
+    return abs.map(v => lerpHex(_BAR_RAMP_LIGHT, _BAR_RAMP_DARK, max > min ? (v - min) / (max - min) : 1));
+}
 
 /** Thai tooltip number formatter */
 const formatTooltipValue = (value: number, columnName?: string): string => {
@@ -64,8 +115,12 @@ function tooltipFormatter(params: any): string {
 function applyThemeColors(option: any, isDark: boolean): any {
     const t = isDark ? CHART_THEME.dark : CHART_THEME.light;
 
-    // Global default text color
-    option.textStyle = { ...(option.textStyle || {}), color: t.text };
+    // Global default text color + Thai-safe font stack (L4/B3 — shared with chat UI)
+    option.textStyle = {
+        ...(option.textStyle || {}),
+        color: t.text,
+        fontFamily: THAI_FONT_FAMILY,
+    };
 
     // Background transparent — container handles bg color
     option.backgroundColor = 'transparent';
@@ -121,6 +176,12 @@ export function buildEChartsOption(
     isDark: boolean = false,
 ): object | null {
     if (!data || data.length === 0) return null;
+
+    // 'table'/'single_value' are non-chart visualizations — must skip before
+    // resolveChartType's available_types fallback (which is populated regardless
+    // of visualization type and would otherwise silently render a bogus bar chart
+    // on top of a table, or duplicate the single-value big-number display).
+    if (visualization === 'table' || visualization === 'single_value') return null;
 
     // Default to vertical_bar when no chart type resolved (prevents fallback to gifted-charts)
     const chartType = resolveChartType(visualization, chartConfig) || 'vertical_bar';
@@ -308,27 +369,33 @@ function buildVerticalBar(
     measureCol: string,
     config?: ChartConfig,
 ): object {
-    const categories = data.map(d => truncateLabel(String(d[catCol] ?? ''), 15));
-    const values = data.map(d => safelyParseNumber(d[measureCol]));
+    // Aggregate per category so multi-row data doesn't produce duplicate bars
+    const agg = aggregateByCategory(data, catCol, measureCol);
+    // L1: send full labels — ECharts truncates for display, tooltip shows full name
+    const categories = agg.map(d => String(d[catCol] ?? ''));
+    const values = agg.map(d => safelyParseNumber(d[measureCol]));
 
     return {
-        title: config?.title ? { text: config.title, left: 'center', textStyle: { fontSize: 14 } } : undefined,
+        title: config?.title ? { text: config.title, left: 'center', textStyle: { fontSize: 14, fontWeight: 600 } } : undefined, // B3: title heavier than body
         tooltip: { ...baseTooltip(), trigger: 'axis', formatter: tooltipFormatter },
         grid: { left: '3%', right: '5%', bottom: '15%', top: config?.title ? '15%' : '10%', containLabel: true },
         xAxis: {
             type: 'category',
             data: categories,
-            axisLabel: { rotate: categories.length > 6 ? 30 : 0, fontSize: 11 },
+            axisLabel: {
+                rotate: categories.length > 6 ? 45 : 0, fontSize: 11,
+                width: 90, overflow: 'truncate', ellipsis: '…', hideOverlap: true,
+            },
         },
-        yAxis: { type: 'value', name: buildYAxisLabel(measureCol, config), nameLocation: 'middle', nameGap: 50, nameTextStyle: { fontSize: 12 }, axisLabel: { fontSize: 11, formatter: yAxisFormatter } },
+        yAxis: { type: 'value', name: config?.title ? '' : buildYAxisLabel(measureCol, config), nameLocation: 'middle', nameGap: 50, nameTextStyle: { fontSize: 12 }, axisLabel: { fontSize: 11, formatter: yAxisFormatter } },
         series: [{
             type: 'bar',
-            data: values.map((v, i) => ({
-                value: v,
-                itemStyle: { color: NT_CHART_PALETTE[i % NT_CHART_PALETTE.length] },
-            })),
+            // Wave 5: distinct NT colors when ≤5 bars, else a magnitude ramp
+            data: (() => { const colors = singleSeriesBarColors(values); return values.map((v, i) => ({ value: v, itemStyle: { color: colors[i] } })); })(),
             barMaxWidth: 50,
-            label: config?.show_data_labels ? { show: true, position: 'top', fontSize: 10, formatter: dataLabelFormatter } : undefined,
+            // Top data labels crowd/overlap once there are many vertical bars —
+            // show them only for a small count (horizontal bar shows all values cleanly)
+            label: (config?.show_data_labels && categories.length <= 8) ? { show: true, position: 'top', fontSize: 10, formatter: dataLabelFormatter, color: '#212121' } : undefined,
         }],
     };
 }
@@ -339,28 +406,33 @@ function buildHorizontalBar(
     measureCol: string,
     config?: ChartConfig,
 ): object {
-    const categories = data.map(d => truncateLabel(String(d[catCol] ?? ''), 20));
-    const values = data.map(d => safelyParseNumber(d[measureCol]));
+    // Aggregate per category so multi-row data doesn't produce duplicate bars
+    const agg = aggregateByCategory(data, catCol, measureCol);
+    // L1: send full labels — ECharts truncates for display, tooltip shows full name
+    const categories = agg.map(d => String(d[catCol] ?? ''));
+    const values = agg.map(d => safelyParseNumber(d[measureCol]));
 
     return {
-        title: config?.title ? { text: config.title, left: 'center', textStyle: { fontSize: 14 } } : undefined,
+        title: config?.title ? { text: config.title, left: 'center', textStyle: { fontSize: 14, fontWeight: 600 } } : undefined, // B3: title heavier than body
         tooltip: { ...baseTooltip(), trigger: 'axis', formatter: tooltipFormatter },
-        grid: { left: '25%', right: '5%', bottom: '10%', top: config?.title ? '15%' : '10%', containLabel: false },
-        xAxis: { type: 'value', name: buildYAxisLabel(measureCol, config), nameLocation: 'middle', nameGap: 30, nameTextStyle: { fontSize: 12 }, axisLabel: { fontSize: 11, formatter: yAxisFormatter } },
+        // right: fixed room so the value labels (position:'right') on the longest bar don't clip at narrow widths
+        grid: { left: 8, right: 80, bottom: '10%', top: config?.title ? '15%' : '10%', containLabel: true },
+        xAxis: { type: 'value', name: config?.title ? '' : buildYAxisLabel(measureCol, config), nameLocation: 'middle', nameGap: 30, nameTextStyle: { fontSize: 12 }, axisLabel: { fontSize: 11, formatter: yAxisFormatter, hideOverlap: true } },
         yAxis: {
             type: 'category',
             data: categories,
-            axisLabel: { fontSize: 11 },
+            axisLabel: {
+                fontSize: 11, width: 140, overflow: 'truncate', ellipsis: '…',
+                hideOverlap: true, interval: 0,
+            },
             inverse: true,
         },
         series: [{
             type: 'bar',
-            data: values.map((v, i) => ({
-                value: v,
-                itemStyle: { color: NT_CHART_PALETTE[i % NT_CHART_PALETTE.length] },
-            })),
+            // Wave 5: distinct NT colors when ≤5 bars, else a magnitude ramp
+            data: (() => { const colors = singleSeriesBarColors(values); return values.map((v, i) => ({ value: v, itemStyle: { color: colors[i] } })); })(),
             barMaxWidth: 30,
-            label: config?.show_data_labels ? { show: true, position: 'right', fontSize: 10, formatter: dataLabelFormatter } : undefined,
+            label: config?.show_data_labels ? { show: true, position: 'right', fontSize: 10, formatter: dataLabelFormatter, color: '#212121' } : undefined,
         }],
     };
 }
@@ -371,25 +443,29 @@ function buildLine(
     measureCol: string,
     config?: ChartConfig,
 ): object {
-    const categories = data.map(d => truncateLabel(String(d[catCol] ?? ''), 15));
+    // L1: send full labels — ECharts truncates for display, tooltip shows full name
+    const categories = data.map(d => String(d[catCol] ?? ''));
     const values = data.map(d => safelyParseNumber(d[measureCol]));
 
     return {
-        title: config?.title ? { text: config.title, left: 'center', textStyle: { fontSize: 14 } } : undefined,
+        title: config?.title ? { text: config.title, left: 'center', textStyle: { fontSize: 14, fontWeight: 600 } } : undefined, // B3: title heavier than body
         tooltip: { ...baseTooltip(), trigger: 'axis', formatter: tooltipFormatter },
         grid: { left: '3%', right: '5%', bottom: '15%', top: config?.title ? '15%' : '10%', containLabel: true },
         xAxis: {
             type: 'category',
             data: categories,
             boundaryGap: false,
-            axisLabel: { rotate: categories.length > 6 ? 30 : 0, fontSize: 11 },
+            axisLabel: {
+                rotate: categories.length > 6 ? 45 : 0, fontSize: 11,
+                width: 90, overflow: 'truncate', ellipsis: '…', hideOverlap: true,
+            },
         },
-        yAxis: { type: 'value', name: buildYAxisLabel(measureCol, config), nameLocation: 'middle', nameGap: 50, nameTextStyle: { fontSize: 12 }, axisLabel: { fontSize: 11, formatter: yAxisFormatter } },
+        yAxis: { type: 'value', name: config?.title ? '' : buildYAxisLabel(measureCol, config), nameLocation: 'middle', nameGap: 50, nameTextStyle: { fontSize: 12 }, axisLabel: { fontSize: 11, formatter: yAxisFormatter } },
         series: [{
             type: 'line',
             data: values,
             smooth: true,
-            itemStyle: { color: NT_CHART_PALETTE[0] },
+            itemStyle: { color: NT_LINE_PALETTE[0] }, // B1: never Yellow on a 2px line
             areaStyle: undefined,
             label: config?.show_data_labels ? { show: true, position: 'top', fontSize: 10, formatter: dataLabelFormatter } : undefined,
         }],
@@ -414,37 +490,68 @@ function buildMultiSeries(
     const seriesNames = [...new Set(data.map(d => String(d[seriesCol] ?? '')))];
     const categories = [...new Set(data.map(d => String(d[catCol] ?? '')))];
 
-    const seriesData = seriesNames.map((name, idx) => {
-        const seriesValues = categories.map(cat => {
-            const row = data.find(d => String(d[catCol]) === cat && String(d[seriesCol]) === name);
-            return row ? safelyParseNumber(row[measureCol]) : 0;
-        });
+    const isLine = chartType === 'multi_line';
+    const isStacked = chartType === 'stacked_bar' || chartType === 'stacked_bar_100' || chartType === 'stacked_area';
+    // B1: multi_line series never get Yellow (unreadable as a thin stroke) —
+    // bar-family series can, it's a fill, not a line
+    const linePalette = isLine ? NT_LINE_PALETTE : NT_CHART_PALETTE;
 
-        const isLine = chartType === 'multi_line';
-        const isStacked = chartType === 'stacked_bar' || chartType === 'stacked_bar_100' || chartType === 'stacked_area';
+    // Wave 4 งานที่ 2: Top-(max_series-1) individually + rest collapsed into
+    // "อื่นๆ", ranked by |sum| so the biggest movers (positive or negative)
+    // stay visible. "อื่นๆ" per-category value is a fresh re-aggregation of
+    // the raw rows (never derived by subtracting a stored total), so it can't
+    // silently drift from the true sum — this is a financial system.
+    const maxSeries = config?.max_series ?? 5;
+    let visibleNames = seriesNames;
+    let otherNames: string[] = [];
+    if (seriesNames.length > maxSeries) {
+        const seriesSum = (name: string) => Math.abs(
+            data.filter(d => String(d[seriesCol]) === name)
+                .reduce((sum, d) => sum + safelyParseNumber(d[measureCol]), 0)
+        );
+        const ranked = [...seriesNames].sort((a, b) => seriesSum(b) - seriesSum(a));
+        visibleNames = ranked.slice(0, maxSeries - 1);
+        otherNames = ranked.slice(maxSeries - 1);
+    }
 
-        return {
-            name,
-            type: isLine ? 'line' : 'bar',
-            data: seriesValues,
-            stack: isStacked ? 'total' : undefined,
-            smooth: isLine,
-            itemStyle: { color: NT_CHART_PALETTE[idx % NT_CHART_PALETTE.length] },
-            label: config?.show_data_labels ? { show: true, position: isStacked ? 'inside' : 'top', fontSize: 9, formatter: dataLabelFormatter } : undefined,
-        };
+    const sumForCategory = (rows: Record<string, any>[], cat: string) =>
+        rows.filter(d => String(d[catCol]) === cat)
+            .reduce((sum, d) => sum + safelyParseNumber(d[measureCol]), 0);
+
+    const buildSeries = (name: string, rows: Record<string, any>[], color: string) => ({
+        name,
+        type: isLine ? 'line' : 'bar',
+        data: categories.map(cat => sumForCategory(rows, cat)),
+        stack: isStacked ? 'total' : undefined,
+        smooth: isLine,
+        itemStyle: { color },
+        label: config?.show_data_labels ? { show: true, position: isStacked ? 'inside' : 'top', fontSize: 9, formatter: dataLabelFormatter } : undefined,
     });
 
+    const seriesData = visibleNames.map((name, idx) =>
+        buildSeries(name, data.filter(d => String(d[seriesCol]) === name), linePalette[idx % linePalette.length])
+    );
+    if (otherNames.length > 0) {
+        const otherRows = data.filter(d => otherNames.includes(String(d[seriesCol])));
+        seriesData.push(buildSeries(`อื่นๆ (รวม ${otherNames.length} กลุ่ม)`, otherRows, OTHER_BUCKET_COLOR));
+    }
+    const legendNames = seriesData.map(s => s.name);
+
     return {
-        title: config?.title ? { text: config.title, left: 'center', textStyle: { fontSize: 14 } } : undefined,
+        title: config?.title ? { text: config.title, left: 'center', textStyle: { fontSize: 14, fontWeight: 600 } } : undefined, // B3: title heavier than body
         tooltip: { ...baseTooltip(), trigger: 'axis', formatter: tooltipFormatter },
-        legend: { data: seriesNames, bottom: 0, type: 'scroll', textStyle: { fontSize: 10 } },
+        legend: { data: legendNames, bottom: 0, type: 'scroll', textStyle: { fontSize: 10 } },
         grid: { left: '3%', right: '5%', bottom: '20%', top: config?.title ? '15%' : '10%', containLabel: true },
         xAxis: {
             type: 'category',
-            data: categories.map(c => truncateLabel(c, 12)),
-            axisLabel: { rotate: categories.length > 6 ? 30 : 0, fontSize: 11 },
+            // L1: full labels — ECharts truncates for display, tooltip shows full name
+            data: categories,
+            axisLabel: {
+                rotate: categories.length > 6 ? 45 : 0, fontSize: 11,
+                width: 80, overflow: 'truncate', ellipsis: '…', hideOverlap: true,
+            },
         },
-        yAxis: { type: 'value', name: buildYAxisLabel(measureCol, config), nameLocation: 'middle', nameGap: 50, nameTextStyle: { fontSize: 12 }, axisLabel: { fontSize: 11, formatter: yAxisFormatter } },
+        yAxis: { type: 'value', name: config?.title ? '' : buildYAxisLabel(measureCol, config), nameLocation: 'middle', nameGap: 50, nameTextStyle: { fontSize: 12 }, axisLabel: { fontSize: 11, formatter: yAxisFormatter } },
         series: seriesData,
     };
 }
@@ -456,14 +563,49 @@ function buildPie(
     config?: ChartConfig,
     isDonut: boolean = false,
 ): object {
-    const pieData = data.map((d, i) => ({
-        name: truncateLabel(String(d[catCol] ?? ''), 20),
-        value: safelyParseNumber(d[measureCol]),
-        itemStyle: { color: NT_CHART_PALETTE[i % NT_CHART_PALETTE.length] },
-    }));
+    // Aggregate per category FIRST — a pie shows proportion of the measure per
+    // distinct category, but SQL often returns many rows per category. Without
+    // this, each row became its own slice and Top-N bucketing hid real groups
+    // ("5 กลุ่ม but only 3 shown"). No-op when data is already one-row-per-group.
+    const aggData = aggregateByCategory(data, catCol, measureCol);
+
+    // Wave 4 งานที่ 2: Top-(max_series-1) slices individually + rest collapsed
+    // into "อื่นๆ", ranked by |value|. "อื่นๆ" value = sum of the bucketed rows.
+    const maxSeries = config?.max_series ?? 5;
+    let visibleRows = aggData;
+    let otherRows: Record<string, any>[] = [];
+    if (aggData.length > maxSeries) {
+        const ranked = [...aggData].sort((a, b) =>
+            Math.abs(safelyParseNumber(b[measureCol])) - Math.abs(safelyParseNumber(a[measureCol]))
+        );
+        visibleRows = ranked.slice(0, maxSeries - 1);
+        otherRows = ranked.slice(maxSeries - 1);
+    }
+
+    // Pie slice labels stay truncated (no axis to lean on for ellipsis) —
+    // L1/L3: grapheme-safe truncateLabel for the visible label, full name kept
+    // for the tooltip via `fullName` (params.name would otherwise be truncated too).
+    const pieData = visibleRows.map((d, i) => {
+        const fullName = String(d[catCol] ?? '');
+        return {
+            name: truncateLabel(fullName, 20),
+            fullName,
+            value: safelyParseNumber(d[measureCol]),
+            itemStyle: { color: NT_CHART_PALETTE[i % NT_CHART_PALETTE.length] },
+        };
+    });
+    if (otherRows.length > 0) {
+        const otherLabel = `อื่นๆ (รวม ${otherRows.length} กลุ่ม)`;
+        pieData.push({
+            name: truncateLabel(otherLabel, 20),
+            fullName: otherLabel,
+            value: otherRows.reduce((sum, d) => sum + safelyParseNumber(d[measureCol]), 0),
+            itemStyle: { color: OTHER_BUCKET_COLOR },
+        });
+    }
 
     return {
-        title: config?.title ? { text: config.title, left: 'center', textStyle: { fontSize: 14 } } : undefined,
+        title: config?.title ? { text: config.title, left: 'center', textStyle: { fontSize: 14, fontWeight: 600 } } : undefined, // B3: title heavier than body
         tooltip: {
             trigger: 'item',
             confine: true,
@@ -475,7 +617,8 @@ function buildPie(
                 else if (abs >= 1_000_000) { text = fmtNum(val / 1_000_000); unit = 'ล้านบาท'; }
                 else if (abs >= 1_000) { text = fmtNum(val / 1_000); unit = 'พันบาท'; }
                 else { text = fmtNum(val); unit = 'บาท'; }
-                return `${params.marker} ${params.name}: <b>${text} ${unit}</b> (${params.percent}%)`;
+                const label = params.data?.fullName || params.name;
+                return `${params.marker} ${label}: <b>${text} ${unit}</b> (${params.percent}%)`;
             },
         },
         legend: { bottom: 0, type: 'scroll', textStyle: { fontSize: 10 } },
@@ -510,12 +653,21 @@ function buildArea(
         : buildLine(data, catCol, measureCol, config) as any;
 
     if (base?.series) {
-        for (const s of base.series) {
+        base.series.forEach((s: any, idx: number) => {
             s.type = 'line';
             s.areaStyle = { opacity: 0.3 };
             s.smooth = true;
             if (chartType === 'stacked_area') s.stack = 'total';
-        }
+            // Every path through here ends up rendered as a line — stacked_area
+            // delegates to buildMultiSeries(..., 'stacked_bar', ...) to get
+            // stacking math, which skips buildMultiSeries's own isLine color
+            // guard. Re-color here so it's never Yellow regardless of path —
+            // EXCEPT the Wave 4 "อื่นๆ" bucket, whose gray would otherwise get
+            // silently overwritten by this index-based palette cycling.
+            if (!String(s.name || '').startsWith('อื่นๆ')) {
+                s.itemStyle = { ...(s.itemStyle || {}), color: NT_LINE_PALETTE[idx % NT_LINE_PALETTE.length] };
+            }
+        });
     }
     return base;
 }
@@ -526,7 +678,8 @@ function buildWaterfall(
     measureCol: string,
     config?: ChartConfig,
 ): object {
-    const categories = data.map(d => truncateLabel(String(d[catCol] ?? ''), 15));
+    // L1: full labels — ECharts truncates for display, tooltip shows full name
+    const categories = data.map(d => String(d[catCol] ?? ''));
     const values = data.map(d => safelyParseNumber(d[measureCol]));
 
     // Calculate running total for waterfall
@@ -549,15 +702,18 @@ function buildWaterfall(
     });
 
     return {
-        title: config?.title ? { text: config.title, left: 'center', textStyle: { fontSize: 14 } } : undefined,
+        title: config?.title ? { text: config.title, left: 'center', textStyle: { fontSize: 14, fontWeight: 600 } } : undefined, // B3: title heavier than body
         tooltip: { ...baseTooltip(), trigger: 'axis', formatter: tooltipFormatter },
         grid: { left: '3%', right: '5%', bottom: '15%', top: config?.title ? '15%' : '10%', containLabel: true },
         xAxis: {
             type: 'category',
             data: categories,
-            axisLabel: { rotate: categories.length > 6 ? 30 : 0, fontSize: 11 },
+            axisLabel: {
+                rotate: categories.length > 6 ? 45 : 0, fontSize: 11,
+                width: 90, overflow: 'truncate', ellipsis: '…', hideOverlap: true,
+            },
         },
-        yAxis: { type: 'value', name: buildYAxisLabel(measureCol, config), nameLocation: 'middle', nameGap: 50, nameTextStyle: { fontSize: 12 }, axisLabel: { fontSize: 11, formatter: yAxisFormatter } },
+        yAxis: { type: 'value', name: config?.title ? '' : buildYAxisLabel(measureCol, config), nameLocation: 'middle', nameGap: 50, nameTextStyle: { fontSize: 12 }, axisLabel: { fontSize: 11, formatter: yAxisFormatter } },
         series: [
             {
                 name: 'Base',
@@ -624,7 +780,7 @@ function buildHeatmap(
     if (minVal === Infinity) { minVal = 0; maxVal = 1; }
 
     return {
-        title: config?.title ? { text: config.title, left: 'center', textStyle: { fontSize: 14 } } : undefined,
+        title: config?.title ? { text: config.title, left: 'center', textStyle: { fontSize: 14, fontWeight: 600 } } : undefined, // B3: title heavier than body
         tooltip: {
             position: 'top',
             confine: true,
@@ -644,24 +800,31 @@ function buildHeatmap(
             },
         },
         grid: {
-            left: '25%',
+            left: 8,
             right: '10%',
             bottom: '20%',
             top: config?.title ? '15%' : '10%',
-            containLabel: false,
+            containLabel: true,
         },
         xAxis: {
             type: 'category',
-            data: xLabels.map(l => truncateLabel(l, 10)),
+            // L1: full labels — ECharts truncates for display, tooltip shows full name
+            data: xLabels,
             splitArea: { show: true },
-            axisLabel: { rotate: xLabels.length > 6 ? 45 : 0, fontSize: 10 },
+            axisLabel: {
+                rotate: xLabels.length > 6 ? 45 : 0, fontSize: 10,
+                width: 80, overflow: 'truncate', ellipsis: '…', hideOverlap: true,
+            },
             position: 'bottom',
         },
         yAxis: {
             type: 'category',
-            data: yLabels.map(l => truncateLabel(l, 15)),
+            data: yLabels,
             splitArea: { show: true },
-            axisLabel: { fontSize: 10 },
+            axisLabel: {
+                fontSize: 10, width: 140, overflow: 'truncate', ellipsis: '…',
+                hideOverlap: true, interval: 0,
+            },
         },
         visualMap: {
             min: minVal,

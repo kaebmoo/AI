@@ -25,21 +25,26 @@ export interface ChartConfig {
     sort_by?: string;
     show_data_labels?: boolean;
     warning?: string;
+    is_time_axis?: boolean;
+    max_series?: number;  // Wave 4 — max series/pie-slices before bucketing into "อื่นๆ"
 }
 
-/** Backend visualization strings */
+/** Backend visualization strings
+ * mixed_bar_line / scatter removed (Wave 2 L8) — no ChartConfig shape
+ * supports either, and buildEChartsOption had no case for them, so picking
+ * one silently rendered vertical_bar. */
 export type BackendVisualizationType =
     | 'bar_chart' | 'horizontal_bar' | 'line_chart' | 'multi_line'
     | 'pie_chart' | 'donut_chart' | 'grouped_bar' | 'stacked_bar'
     | 'stacked_bar_100' | 'area' | 'stacked_area' | 'waterfall'
-    | 'mixed_bar_line' | 'scatter' | 'heatmap' | 'table' | 'single_value';
+    | 'heatmap' | 'table' | 'single_value';
 
 /** ECharts-ready chart type strings */
 export type EChartsType =
     | 'vertical_bar' | 'horizontal_bar' | 'line' | 'multi_line'
     | 'pie_chart' | 'donut_chart' | 'grouped_bar' | 'stacked_bar'
     | 'stacked_bar_100' | 'area' | 'stacked_area' | 'waterfall'
-    | 'mixed_bar_line' | 'scatter' | 'heatmap';
+    | 'heatmap';
 
 /** Maps backend visualization → ECharts-ready type */
 const VISUALIZATION_TO_ECHARTS: Record<string, string | null> = {
@@ -55,8 +60,6 @@ const VISUALIZATION_TO_ECHARTS: Record<string, string | null> = {
     area: 'area',
     stacked_area: 'stacked_area',
     waterfall: 'waterfall',
-    mixed_bar_line: 'mixed_bar_line',
-    scatter: 'scatter',
     heatmap: 'heatmap',
     table: null,
     single_value: null,

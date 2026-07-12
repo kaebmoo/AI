@@ -68,6 +68,8 @@ class ChartConfig(BaseModel):
     sort_by: Optional[str] = Field(default=None, description="Sort hint: value_desc, value_asc, category_asc, original")
     show_data_labels: Optional[bool] = Field(default=None, description="Whether to show data labels on chart")
     warning: Optional[str] = Field(default=None, description="Chart compatibility warning")
+    is_time_axis: Optional[bool] = Field(default=None, description="True when category_column is a time dimension")
+    max_series: Optional[int] = Field(default=None, description="Max series/pie-slices shown before bucketing the rest into 'อื่นๆ' (Wave 4)")
 
 
 class ChatResponse(BaseModel):

@@ -11,8 +11,10 @@ from pydantic import BaseModel
 # Visualization types — superset of backend prompt values
 # Backend prompt: bar_chart, horizontal_bar, line_chart, pie_chart,
 #                 donut_chart, table, single_value, grouped_bar, stacked_bar
-# Extended:       multi_line, area, stacked_area, stacked_bar_100,
-#                 waterfall, mixed_bar_line, scatter
+# Extended:       multi_line, area, stacked_area, stacked_bar_100, waterfall
+# mixed_bar_line / scatter removed (Wave 2 L8) — no ChartConfig shape supports
+# them (no dual-measure or bar/line-per-series split) and buildEChartsOption
+# had no case for either, so selecting them silently rendered vertical_bar.
 VisualizationType = Literal[
     'bar_chart',
     'horizontal_bar',
@@ -26,8 +28,6 @@ VisualizationType = Literal[
     'area',
     'stacked_area',
     'waterfall',
-    'mixed_bar_line',
-    'scatter',
     'heatmap',
 ]
 
@@ -45,8 +45,6 @@ VISUALIZATION_TO_ECHARTS: dict[str, Optional[str]] = {
     'area':             'area',
     'stacked_area':     'stacked_area',
     'waterfall':        'waterfall',
-    'mixed_bar_line':   'mixed_bar_line',
-    'scatter':          'scatter',
     'heatmap':          'heatmap',
     # Non-chart types
     'table':            None,

@@ -117,6 +117,14 @@ export const chatService = {
         const token = await storage.getItem('session_token');
         const baseURL = api.defaults.baseURL || API_BASE_URL;
 
+        // Total-request timeout: the backend sends keepalive comments so the
+        // socket stays busy even if the query hangs — an idle timeout wouldn't
+        // fire. Cap the whole request so a hang surfaces as an error, not a
+        // stuck "⏳". gotResult guards against aborting a nearly-done stream.
+        const controller = new AbortController();
+        let gotResult = false;
+        const timeout = setTimeout(() => { if (!gotResult) controller.abort(); }, 180000);
+
         try {
             const response = await fetch(`${baseURL}/chat/stream`, {
                 method: 'POST',
@@ -125,6 +133,7 @@ export const chatService = {
                     'X-Session-Token': token || '',
                 },
                 body: JSON.stringify(payload),
+                signal: controller.signal,
             });
 
             if (!response.ok) {
@@ -164,12 +173,14 @@ export const chatService = {
                                     callbacks.onDataReady?.(data.data, data.sql_query);
                                     break;
                                 case 'answer':
+                                    gotResult = true;
                                     callbacks.onAnswer?.(data as ChatResponse);
                                     break;
                                 case 'done':
                                     callbacks.onDone?.(data.id, data.conversation_id);
                                     break;
                                 case 'error':
+                                    gotResult = true;
                                     callbacks.onError?.(data.message);
                                     break;
                             }
@@ -184,13 +195,32 @@ export const chatService = {
                     }
                 }
             }
+
+            // Stream ended without an answer OR error event (dropped connection,
+            // backend closed early) — never leave the chat silently waiting.
+            if (!gotResult) {
+                callbacks.onError?.('ไม่ได้รับคำตอบจากเซิร์ฟเวอร์ (การเชื่อมต่ออาจถูกตัด) — กรุณาลองใหม่');
+            }
         } catch (err: any) {
-            console.warn('SSE streaming failed, falling back to regular API:', err.message);
-            // Fallback to regular request
-            callbacks.onStatus?.('generating', 'Processing...');
-            const response = await chatService.sendMessage(payload);
-            callbacks.onAnswer?.(response);
-            callbacks.onDone?.(response.id, response.conversation_id);
+            console.error('SSE streaming error:', err);
+            if (controller.signal.aborted) {
+                callbacks.onError?.('คำขอใช้เวลานานเกินไป (timeout) — กรุณาลองใหม่');
+            } else {
+                // Network-level failure before/around the SSE stream → try the
+                // plain endpoint once; if THAT fails too, surface it (never swallow).
+                try {
+                    callbacks.onStatus?.('generating', 'Processing...');
+                    const response = await chatService.sendMessage(payload);
+                    callbacks.onAnswer?.(response);
+                    callbacks.onDone?.(response.id, response.conversation_id);
+                } catch (fallbackErr: any) {
+                    console.error('Fallback request also failed:', fallbackErr);
+                    const msg = fallbackErr?.response?.data?.detail || fallbackErr?.message || 'ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้';
+                    callbacks.onError?.(msg);
+                }
+            }
+        } finally {
+            clearTimeout(timeout);
         }
     },
 

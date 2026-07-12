@@ -20,6 +20,32 @@ TIME_KEYS = [
     'เดือน', 'ปี', 'วันที่', 'ไตรมาส', 'งวด', 'เวลา',
 ]
 
+# visualization types that require a time-dimension category axis (C1)
+TEMPORAL_TYPES = {"line_chart", "multi_line", "area", "stacked_area"}
+
+# Wave 4 — hardcoded fallback tier only. The real 3-tier value (admin_config DB
+# -> .env CHART_MAX_SERIES -> this) is resolved in AdminConfigService.get_chart_max_series()
+# and applied in app/api/v1/chat.py — this module has no DB access by design (pure,
+# wrapped in try/except everywhere), so it can only ever see this hardcoded default
+# unless a caller explicitly passes max_series=.
+DEFAULT_MAX_SERIES = 5
+
+
+def _is_time_column(col: str, time_columns: Optional[List[str]] = None) -> bool:
+    """True if `col` is a time-axis column.
+
+    Checks schema_metadata-derived `time_columns` (dimension_group == 'time_period')
+    AND the TIME_KEYS keyword heuristic — union, not either/or. A SQL alias
+    (e.g. `month AS "เดือน"`) won't exact-match schema_metadata's raw column
+    name, so the heuristic must still get a chance to catch it. A false
+    positive here only means "don't downgrade" (trust the LLM's chart type);
+    a false negative would visibly corrupt a legitimately time-based chart.
+    """
+    col_lower = str(col).lower()
+    if time_columns and col_lower in [c.lower() for c in time_columns]:
+        return True
+    return any(t in col_lower for t in TIME_KEYS)
+
 
 def parse_explanation_response(text: str) -> Dict:
     """
@@ -85,13 +111,8 @@ def enforce_time_series_rule(parsed_result: Dict, time_columns: Optional[List[st
         series = str(config.get("series_column", "")).lower()
 
         # Use schema_metadata time_columns if available, else fallback to keyword heuristic
-        if time_columns:
-            time_cols_lower = [c.lower() for c in time_columns]
-            is_series_time = series in time_cols_lower
-            is_cat_time = cat in time_cols_lower
-        else:
-            is_series_time = any(t in series for t in TIME_KEYS)
-            is_cat_time = any(t in cat for t in TIME_KEYS)
+        is_series_time = _is_time_column(series, time_columns)
+        is_cat_time = _is_time_column(cat, time_columns)
 
         logger.debug(f"Chart Config: Cat='{cat}', Series='{series}', IsSeriesTime={is_series_time}, IsCatTime={is_cat_time}")
 
@@ -107,6 +128,48 @@ def enforce_time_series_rule(parsed_result: Dict, time_columns: Optional[List[st
         return parsed_result
     except Exception as e:
         logger.error(f"Error in enforce_time_series_rule: {e}")
+        return parsed_result
+
+
+def enforce_categorical_axis_rule(
+    parsed_result: Dict,
+    time_columns: Optional[List[str]] = None,
+    data: Optional[List[Dict]] = None,
+) -> Dict:
+    """
+    Post-process chart config to ensure line/area-family charts only appear
+    when category_column is a time dimension. If the LLM proposes a temporal
+    chart type over a non-time category, downgrade to the bar-family
+    equivalent (deterministic — does not trust the LLM's choice).
+
+    Run AFTER enforce_time_series_rule (which may have already swapped
+    category/series so the final category_column reflects the real axis).
+    """
+    try:
+        if isinstance(parsed_result, str):
+            parsed_result = {"explanation": parsed_result}
+
+        viz = parsed_result.get("visualization")
+        if viz not in TEMPORAL_TYPES:
+            return parsed_result
+
+        cat = (parsed_result.get("chart_config") or {}).get("category_column")
+        if cat and _is_time_column(cat, time_columns):
+            return parsed_result
+
+        downgrade = {
+            "line_chart": "bar_chart",
+            "area": "bar_chart",
+            "multi_line": "grouped_bar",
+            "stacked_area": "stacked_bar",
+        }
+        logger.info(f"Categorical Axis Rule violated. Downgrading '{viz}' -> '{downgrade[viz]}' (category='{cat}')")
+        parsed_result["visualization"] = downgrade[viz]
+        cfg = parsed_result.setdefault("chart_config", {})
+        cfg["warning"] = "ปรับจากกราฟเส้นเป็นกราฟแท่ง เนื่องจากแกน X ไม่ใช่คาบเวลา"
+        return parsed_result
+    except Exception as e:
+        logger.error(f"Error in enforce_categorical_axis_rule: {e}")
         return parsed_result
 
 
@@ -281,7 +344,7 @@ Ensure the "explanation" value is formatted as **beautiful Markdown**:
 CRITICAL: You must analyze the data and recommend the best visualization type.
 Return the result as a JSON object with these keys:
 1. "explanation": The beautifully formatted Thai markdown explanation.
-2. "visualization": One of ['bar_chart', 'horizontal_bar', 'line_chart', 'pie_chart', 'donut_chart', 'table', 'single_value', 'grouped_bar', 'stacked_bar', 'waterfall', 'mixed_bar_line', 'heatmap']
+2. "visualization": One of ['bar_chart', 'horizontal_bar', 'line_chart', 'pie_chart', 'donut_chart', 'table', 'single_value', 'grouped_bar', 'stacked_bar', 'waterfall', 'heatmap']
 2b. "chart_title": (optional) Short Thai title for the chart, e.g. "รายได้ตามกลุ่มธุรกิจ Q1/2567"
 3. "chart_config": Object with column mappings for the chart:
    - "category_column": The column name for X-axis labels (the PRIMARY grouping)
@@ -296,6 +359,11 @@ Return the result as a JSON object with these keys:
      OR when SQL already has pre-pivoted columns (e.g., month names as columns like "ม.ค.", "ก.พ.", "มี.ค.").
      USE 'flat' when the SQL output is already in the desired display format and should NOT be re-pivoted.
 5. "hierarchy_columns": (REQUIRED if display_hint='hierarchical') Array of actual column names ordered HIGHEST (parent) to LOWEST (child).
+
+IMPORTANT for chart type selection:
+- 'line_chart', 'area': ONLY when category_column is a time dimension (Month/Year/Date).
+  For categorical breakdowns (account, department, product) with no time axis,
+  use 'bar_chart' (<=6 categories) or 'horizontal_bar' (>6 or long Thai labels).
 
 IMPORTANT for time-based comparisons:
 - **CRITICAL**: If a Time column exists (Month, Year, Date), YOU MUST USE IT AS 'category_column' (X-axis).
@@ -551,14 +619,49 @@ def _suggest_available_types(
         return ['heatmap', 'grouped_bar', 'stacked_bar', 'table']
     if not has_series:
         if n_categories <= 8:
-            return ['bar_chart', 'horizontal_bar', 'line_chart', 'pie_chart', 'donut_chart']
+            types = ['bar_chart', 'horizontal_bar', 'line_chart', 'pie_chart', 'donut_chart']
         else:
-            return ['bar_chart', 'horizontal_bar', 'line_chart']
+            types = ['bar_chart', 'horizontal_bar', 'line_chart']
     else:
         if has_time_category:
-            return ['line_chart', 'multi_line', 'grouped_bar', 'stacked_bar', 'area']
+            types = ['line_chart', 'multi_line', 'grouped_bar', 'stacked_bar', 'area']
         else:
-            return ['grouped_bar', 'stacked_bar', 'stacked_bar_100', 'bar_chart']
+            types = ['grouped_bar', 'stacked_bar', 'stacked_bar_100', 'bar_chart']
+
+    # C2: category axis isn't time — line/area family isn't valid, drop it
+    if not has_time_category:
+        types = [t for t in types if t not in TEMPORAL_TYPES]
+    return types
+
+
+def resolve_max_series_warning(
+    data: List[Dict],
+    cat_col: str,
+    ser_col: str,
+    viz: str,
+    max_series: int,
+) -> Optional[str]:
+    """Top-N + 'อื่นๆ' threshold warning (Wave 4) — shared between
+    enrich_chart_config (hardcoded-default tier) and app/api/v1/chat.py's
+    response formatting (real 3-tier-resolved value), so the two never drift
+    out of sync on wording or the count they check.
+
+    pie/donut bucket by distinct category_column values (each slice = one
+    category); other multi-series chart types bucket by distinct
+    series_column values. Single-series bar/line charts have nothing to
+    bucket — always None for those.
+    """
+    if viz in ('pie_chart', 'donut_chart'):
+        bucket_count = len(set(str(row.get(cat_col, '')) for row in data[:200])) if cat_col and data else 0
+    elif ser_col:
+        bucket_count = len(set(str(row.get(ser_col, '')) for row in data[:200])) if data else 0
+    else:
+        return None
+
+    if bucket_count <= max_series:
+        return None
+    top_n = max_series - 1
+    return f"แสดง Top-{top_n} จาก {bucket_count} กลุ่ม — กลุ่มที่เหลือรวมเป็น 'อื่นๆ' (ดูข้อมูลเต็มในตาราง)"
 
 
 def enrich_chart_config(
@@ -566,15 +669,21 @@ def enrich_chart_config(
     data: List[Dict],
     schema_metadata: Optional[List[Dict]] = None,
     chart_title: str = "",
+    max_series: Optional[int] = None,
 ) -> Dict:
     """
     Step 4 in post-processing pipeline — AFTER enforce_dimension_family_rule().
 
     Adds: suggested_type (ECharts-ready), available_types, column_roles,
-          title, sort_by, show_data_labels, warning.
+          title, sort_by, show_data_labels, warning, max_series (Wave 4).
 
     Does NOT change: category_column, measure_column, series_column,
                      visualization (backend string), or any existing rules output.
+
+    max_series: caller-resolved 3-tier value (admin_config -> .env -> default).
+        Falls back to DEFAULT_MAX_SERIES when the caller doesn't have DB access
+        (this module deliberately doesn't) — callers that DO (app/api/v1/chat.py)
+        should pass the real resolved value.
     """
     try:
         from app.models.chart import VISUALIZATION_TO_ECHARTS
@@ -596,13 +705,18 @@ def enrich_chart_config(
         if echarts_type == "line" and ser_col:
             echarts_type = "multi_line"
 
+        # --- Time axis detection: schema_metadata (dimension_group == 'time_period') first, else TIME_KEYS ---
+        time_columns = [m['column_name'] for m in schema_metadata
+                         if m.get('dimension_group') == 'time_period'] if schema_metadata else None
+        has_time_cat = bool(cat_col) and _is_time_column(cat_col, time_columns)
+
         # --- Column roles ---
         roles = []
         if cat_col:
             roles.append({
                 "column": cat_col, "role": "category",
                 "label": cat_col,
-                "format": "date" if any(t in cat_col.lower() for t in TIME_KEYS) else "number",
+                "format": "date" if has_time_cat else "number",
             })
         if ser_col:
             roles.append({"column": ser_col, "role": "series", "label": ser_col})
@@ -616,15 +730,15 @@ def enrich_chart_config(
 
         # --- Stats for suggestions ---
         n_categories = len(set(str(row.get(cat_col, '')) for row in data[:100])) if cat_col and data else 1
-        has_time_cat = bool(cat_col) and any(t in cat_col.lower() for t in TIME_KEYS)
         has_series = bool(ser_col)
 
         # --- Warnings ---
+        resolved_max_series = max_series if max_series is not None else DEFAULT_MAX_SERIES
         warning = None
         if viz in ('pie_chart', 'donut_chart') and has_series:
             warning = "Pie/Donut chart ไม่รองรับ series column — พิจารณาใช้ bar_chart แทน"
-        elif viz in ('pie_chart', 'donut_chart') and n_categories > 10:
-            warning = f"Pie chart มีมากกว่า 10 ประเภท ({n_categories} ประเภท) อาจอ่านยาก"
+        else:
+            warning = resolve_max_series_warning(data, cat_col, ser_col, viz, resolved_max_series)
 
         # --- Sort hint ---
         sort_by = 'category_asc' if has_time_cat else 'original'
@@ -637,6 +751,8 @@ def enrich_chart_config(
         config["title"] = chart_title or ""
         config["sort_by"] = sort_by
         config["show_data_labels"] = len(data) <= 20 if data else False
+        config["is_time_axis"] = has_time_cat
+        config["max_series"] = resolved_max_series
         if warning:
             config["warning"] = warning
 

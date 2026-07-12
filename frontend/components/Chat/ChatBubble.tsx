@@ -8,6 +8,7 @@ import { DataTable } from './DataTable';
 import { PivotDataView } from './PivotDataView';
 import { ConfidenceBadge, ConfidenceData } from './ConfidenceBadge';
 import { chatService, FeedbackRating, FeedbackCategory } from '@/services/chat';
+import { THAI_FONT_FAMILY } from '@/constants/theme';
 
 export interface DataWarning {
     code: string;
@@ -53,11 +54,14 @@ export const ChatBubble = ({ message, onTrain }: ChatBubbleProps) => {
     const colors = {
         userBg: '#2563EB', // Blue 600
         userText: '#FFFFFF',
-        assistantBg: isDark ? '#1F2937' : '#FFFFFF', // Gray 800 : White
-        assistantText: isDark ? '#E5E7EB' : '#1F2937', // Gray 200 : Gray 800
+        // B2: near-white bubble (not pure white) — dark mode value set independently, not a hex flip
+        assistantBg: isDark ? '#1F2937' : '#FCFCFD',
+        // B2: #212121 body text on near-white (avoids #000 on #FFF)
+        assistantText: isDark ? '#E5E7EB' : '#212121',
         assistantBorder: isDark ? '#374151' : '#E5E7EB', // Gray 700 : Gray 200
         codeBg: isDark ? '#111827' : '#F3F4F6', // Gray 900 : Gray 100
-        accent: '#3B82F6', // Blue 500
+        // W5: link/accent — muted teal (readable, brand-family), not generic blue
+        accent: isDark ? '#5EEAD4' : '#0F766E',
     };
 
     const [showAllData, setShowAllData] = useState(false);
@@ -100,7 +104,7 @@ export const ChatBubble = ({ message, onTrain }: ChatBubbleProps) => {
             color: colors.assistantText,
             fontSize: 16,
             lineHeight: 26,
-            fontFamily: 'System',
+            fontFamily: THAI_FONT_FAMILY, // B3: same font as chart (L4)
         },
         paragraph: {
             marginBottom: 12,
@@ -113,6 +117,7 @@ export const ChatBubble = ({ message, onTrain }: ChatBubbleProps) => {
             marginTop: 20,
             marginBottom: 10,
             lineHeight: 32,
+            fontFamily: THAI_FONT_FAMILY,
         },
         heading2: {
             fontSize: 20,
@@ -121,6 +126,7 @@ export const ChatBubble = ({ message, onTrain }: ChatBubbleProps) => {
             marginTop: 16,
             marginBottom: 8,
             lineHeight: 28,
+            fontFamily: THAI_FONT_FAMILY,
         },
         heading3: {
             fontSize: 18,
@@ -129,6 +135,7 @@ export const ChatBubble = ({ message, onTrain }: ChatBubbleProps) => {
             marginTop: 12,
             marginBottom: 6,
             lineHeight: 26,
+            fontFamily: THAI_FONT_FAMILY,
         },
         code_inline: {
             backgroundColor: colors.codeBg,
@@ -178,8 +185,9 @@ export const ChatBubble = ({ message, onTrain }: ChatBubbleProps) => {
             fontWeight: '500',
         },
         blockquote: {
-            backgroundColor: isDark ? 'rgba(59, 130, 246, 0.1)' : '#EFF6FF',
-            borderLeftColor: colors.accent,
+            // W5: NT-yellow-tinted callout instead of the blue one
+            backgroundColor: isDark ? 'rgba(255, 209, 0, 0.10)' : '#FFFBEB',
+            borderLeftColor: '#FFD100',
             borderLeftWidth: 4,
             paddingHorizontal: 12,
             paddingVertical: 8,
@@ -187,8 +195,9 @@ export const ChatBubble = ({ message, onTrain }: ChatBubbleProps) => {
             borderRadius: 8,
         },
         strong: {
+            // W5: bold = heavier weight in strong neutral, not a loud colored highlight
             fontWeight: '700',
-            color: isDark ? '#60A5FA' : '#2563EB', // Highlighting bold text with primary color for emphasis
+            color: isDark ? '#F9FAFB' : '#111827',
         },
         em: {
             fontStyle: 'italic',
@@ -226,9 +235,10 @@ export const ChatBubble = ({ message, onTrain }: ChatBubbleProps) => {
             <View
                 className={`max-w-[88%] rounded-[20px] px-5 py-4 shadow-sm ${isUser
                     ? 'bg-blue-600 rounded-tr-md'
-                    : 'bg-white dark:bg-gray-800 border-[0.5px] border-gray-200 dark:border-gray-700 rounded-tl-md shadow-slate-200/50 dark:shadow-none'
+                    : 'border-[0.5px] border-gray-200 dark:border-gray-700 rounded-tl-md shadow-slate-200/50 dark:shadow-none'
                     }`}
                 style={!isUser ? {
+                    backgroundColor: colors.assistantBg, // B2: near-white bubble, not pure white
                     boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.05)',
                 } : {}}
             >
@@ -255,15 +265,18 @@ export const ChatBubble = ({ message, onTrain }: ChatBubbleProps) => {
                             />
                         )}
 
-                        {/* Key Metric Visualization (Single Value) */}
+                        {/* Key Metric Visualization (Single Value) — W5: neutral card w/ NT top accent */}
                         {message.data && message.data.length === 1 && Object.keys(message.data[0]).length <= 2 && (
-                            <View className="mt-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl p-4 border border-blue-100 dark:border-blue-800">
+                            <View className="mt-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl p-4 border border-gray-200 dark:border-gray-700"
+                                style={{ borderTopColor: '#FFD100', borderTopWidth: 3 }}>
                                 {Object.entries(message.data[0]).map(([key, value]) => (
                                     <View key={key} className="items-center">
-                                        <Text className="text-sm text-gray-500 dark:text-gray-400 font-medium uppercase tracking-wide mb-1">
+                                        <Text className="text-sm text-gray-500 dark:text-gray-400 font-medium uppercase tracking-wide mb-1"
+                                            style={{ fontFamily: THAI_FONT_FAMILY }}>
                                             {key}
                                         </Text>
-                                        <Text className="text-3xl font-bold text-blue-700 dark:text-blue-300">
+                                        <Text className="text-3xl font-bold text-gray-900 dark:text-gray-50"
+                                            style={{ fontFamily: THAI_FONT_FAMILY }}>
                                             {typeof value === 'number'
                                                 ? value.toLocaleString('th-TH', { maximumFractionDigits: 2 })
                                                 : String(value)}
@@ -287,7 +300,8 @@ export const ChatBubble = ({ message, onTrain }: ChatBubbleProps) => {
                                 onPress={() => setShowAllData(!showAllData)}
                                 className="py-3 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 active:bg-gray-50 dark:active:bg-gray-700 transition"
                             >
-                                <Text className="text-[13px] text-blue-600 dark:text-blue-400 text-center font-semibold">
+                                <Text className="text-[13px] text-center font-semibold"
+                                    style={{ color: colors.accent, fontFamily: THAI_FONT_FAMILY }}>
                                     {showAllData
                                         ? '▲ ย่อข้อมูล'
                                         : `▼ แสดงทั้งหมด ${message.data?.length || 0} รายการ`}
@@ -302,15 +316,16 @@ export const ChatBubble = ({ message, onTrain }: ChatBubbleProps) => {
                                     onPress={() => setShowPivot(!showPivot)}
                                     className={`self-end mr-1 mb-1 flex-row items-center px-3 py-1.5 rounded-full border ${
                                         showPivot
-                                            ? 'bg-blue-600 border-blue-600'
+                                            ? ''
                                             : isDark
                                                 ? 'bg-gray-700 border-gray-600'
                                                 : 'bg-gray-100 border-gray-300'
                                     }`}
+                                    // W5: active = NT yellow (matches chart toolbar active state)
+                                    style={showPivot ? { backgroundColor: '#FFD100', borderColor: '#FFD100' } : undefined}
                                 >
-                                    <Text className={`text-xs font-semibold ${
-                                        showPivot ? 'text-white' : isDark ? 'text-gray-300' : 'text-gray-600'
-                                    }`}>
+                                    <Text className={`text-xs font-semibold ${showPivot ? '' : isDark ? 'text-gray-300' : 'text-gray-600'}`}
+                                        style={{ fontFamily: THAI_FONT_FAMILY, ...(showPivot ? { color: '#212121' } : {}) }}>
                                         {showPivot ? '✕ ปิด Pivot' : '⊞ เปิด Pivot Tool'}
                                     </Text>
                                 </TouchableOpacity>
@@ -335,7 +350,7 @@ export const ChatBubble = ({ message, onTrain }: ChatBubbleProps) => {
                                     ? 'bg-red-50 dark:bg-red-900/10 border-red-100 dark:border-red-900/30'
                                     : warning.severity === 'warning'
                                         ? 'bg-amber-50 dark:bg-amber-900/10 border-amber-100 dark:border-amber-900/30'
-                                        : 'bg-blue-50 dark:bg-blue-900/10 border-blue-100 dark:border-blue-900/30'
+                                        : 'bg-gray-50 dark:bg-gray-800/40 border-gray-200 dark:border-gray-700'
                                     }`}
                             >
                                 <Text className="mr-3 text-base">
@@ -346,8 +361,9 @@ export const ChatBubble = ({ message, onTrain }: ChatBubbleProps) => {
                                         ? 'text-red-800 dark:text-red-200'
                                         : warning.severity === 'warning'
                                             ? 'text-amber-800 dark:text-amber-200'
-                                            : 'text-blue-800 dark:text-blue-200'
+                                            : 'text-gray-700 dark:text-gray-200'
                                         }`}
+                                    style={{ fontFamily: THAI_FONT_FAMILY }}
                                 >
                                     {warning.message}
                                 </Text>

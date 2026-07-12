@@ -5,6 +5,7 @@ import * as Clipboard from 'expo-clipboard';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { Ionicons } from '@expo/vector-icons';
+import { THAI_FONT_FAMILY } from '@/constants/theme';
 
 interface DataTableProps {
     data: Record<string, any>[];
@@ -134,11 +135,11 @@ export const DataTable = ({ data, displayHint, hierarchyColumns }: DataTableProp
         });
     };
 
-    // Render Sort Arrow
+    // Render Sort Arrow — NT amber accent (not generic blue)
     const renderSortIcon = (key: string) => {
         if (sortConfig.key !== key) return null;
         return (
-            <Text className="text-[10px] text-blue-500 ml-1">
+            <Text className="text-[10px] ml-1" style={{ color: '#CA8A04' }}>
                 {sortConfig.direction === 'asc' ? '▲' : '▼'}
             </Text>
         );
@@ -718,17 +719,19 @@ export const DataTable = ({ data, displayHint, hierarchyColumns }: DataTableProp
             return totals;
         };
 
+        // Wave 5: restrained neutral ramp (Claude-like) — depth shown by
+        // indentation + a lightening background + text weight, not loud hues.
         const levelColors = [
-            isDark ? '#1E3A5F' : '#DBEAFE', // Level 0 — deep blue
-            isDark ? '#1A3A2A' : '#DCFCE7', // Level 1 — green
-            isDark ? '#3B2F18' : '#FEF9C3', // Level 2 — amber
-            isDark ? '#2D1A3A' : '#F3E8FF', // Level 3 — purple
+            isDark ? '#374151' : '#EEF0F3', // Level 0 — deepest neutral
+            isDark ? '#2C333D' : '#F3F5F7',
+            isDark ? '#232A33' : '#F8F9FA',
+            isDark ? '#1F2530' : '#FCFCFD',
         ];
         const levelTextColors = [
-            isDark ? '#93C5FD' : '#1D4ED8',
-            isDark ? '#86EFAC' : '#15803D',
-            isDark ? '#FCD34D' : '#92400E',
-            isDark ? '#C084FC' : '#6B21A8',
+            isDark ? '#F3F4F6' : '#111827',
+            isDark ? '#E5E7EB' : '#1F2937',
+            isDark ? '#D1D5DB' : '#374151',
+            isDark ? '#9CA3AF' : '#4B5563',
         ];
 
         const tree = buildTree(data, 0);
@@ -816,13 +819,13 @@ export const DataTable = ({ data, displayHint, hierarchyColumns }: DataTableProp
         return (
             <View>
                 {/* Header */}
-                <View style={{ flexDirection: 'row', backgroundColor: isDark ? '#1F2937' : '#F1F5F9', paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 2, borderBottomColor: isDark ? '#374151' : '#CBD5E1' }}>
-                    <Text style={{ flex: 1, fontSize: 11, fontWeight: '700', color: isDark ? '#9CA3AF' : '#475569', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                <View style={{ flexDirection: 'row', backgroundColor: isDark ? '#1F2937' : '#F9FAFB', paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 2, borderBottomColor: isDark ? '#374151' : '#E5E7EB' }}>
+                    <Text style={{ flex: 1, fontSize: 11, fontWeight: '700', color: isDark ? '#9CA3AF' : '#6B7280', textTransform: 'uppercase', letterSpacing: 0.5, fontFamily: THAI_FONT_FAMILY }}>
                         {levels.join(' › ')}
                     </Text>
                     {valueCols.map(col => (
                         <TouchableOpacity key={col} onPress={() => handleSort(col)} style={{ width: getColumnWidth(col), flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end' }}>
-                            <Text style={{ fontSize: 11, fontWeight: '700', color: isDark ? '#9CA3AF' : '#475569', textTransform: 'uppercase', textAlign: 'right' }}>{col}</Text>
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: isDark ? '#9CA3AF' : '#6B7280', textTransform: 'uppercase', textAlign: 'right', fontFamily: THAI_FONT_FAMILY }}>{col}</Text>
                             {renderSortIcon(col)}
                         </TouchableOpacity>
                     ))}
@@ -883,9 +886,9 @@ export const DataTable = ({ data, displayHint, hierarchyColumns }: DataTableProp
         return (
             <View>
                 {/* Header Row */}
-                <View className="flex-row bg-blue-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+                <View className="flex-row bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
                     {/* Frozen First Column Header */}
-                    <TouchableOpacity onPress={() => handleSort('_rowLabel')} className="px-4 py-3 bg-blue-100/50 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex-row items-center justify-between" style={{ width: getColumnWidth(rowKey, true) }}>
+                    <TouchableOpacity onPress={() => handleSort('_rowLabel')} className="px-4 py-3 bg-gray-100 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex-row items-center justify-between" style={{ width: getColumnWidth(rowKey, true) }}>
                         <Text className="text-xs font-bold text-gray-700 dark:text-gray-200 uppercase">{rowKey}</Text>
                         {renderSortIcon('_rowLabel')}
                     </TouchableOpacity>
@@ -933,8 +936,8 @@ export const DataTable = ({ data, displayHint, hierarchyColumns }: DataTableProp
             <View>
                 {Object.entries(grouped).map(([groupName, groupItems], gIdx) => (
                     <View key={groupName} className="mb-4">
-                        <View className="bg-blue-50 dark:bg-blue-900/40 px-4 py-2 border-l-4 border-blue-500 mb-1">
-                            <Text className="font-bold text-gray-800 dark:text-gray-200">{groupName}</Text>
+                        <View className="bg-gray-50 dark:bg-gray-800 px-4 py-2 border-l-4 mb-1" style={{ borderLeftColor: '#FFD100' }}>
+                            <Text className="font-bold text-gray-800 dark:text-gray-200" style={{ fontFamily: THAI_FONT_FAMILY }}>{groupName}</Text>
                         </View>
                         <View className="flex-row bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
                             {displayKeys.map((key, idx) => (
@@ -1077,11 +1080,13 @@ export const DataTable = ({ data, displayHint, hierarchyColumns }: DataTableProp
     };
 
     return (
-        <View className="mt-4 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden shadow-sm">
+        // fontFamily on the container → all descendant text inherits Sarabun on web (RN-Web renders Text as inheriting DOM nodes)
+        <View className="mt-4 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden shadow-sm" style={{ fontFamily: THAI_FONT_FAMILY } as any}>
             <View className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/50 flex-row justify-between items-center">
-                <View className="flex-row items-center space-x-2">
-                    <Text className="text-base">🔢</Text>
-                    <Text className="text-sm font-semibold text-gray-800 dark:text-gray-200">
+                <View className="flex-row items-center" style={{ flex: 1, flexShrink: 1 }}>
+                    {/* NT-yellow accent tick instead of the emoji */}
+                    <View style={{ width: 3, height: 14, borderRadius: 2, backgroundColor: '#FFD100', marginRight: 8 }} />
+                    <Text className="text-sm font-semibold text-gray-800 dark:text-gray-200" style={{ fontFamily: THAI_FONT_FAMILY, flexShrink: 1 }} numberOfLines={1}>
                         {isCrosstab
                             ? `${rowKey} × ${colKey}`
                             : isHierarchical
@@ -1091,15 +1096,16 @@ export const DataTable = ({ data, displayHint, hierarchyColumns }: DataTableProp
                                     : 'ตารางข้อมูล'}
                     </Text>
                 </View>
-                <View className="flex-row items-center gap-2">
-                    <Text className="text-xs text-gray-500 dark:text-gray-400 font-medium bg-white dark:bg-gray-800 px-2 py-1 rounded-md border border-gray-200 dark:border-gray-700">
+                <View className="flex-row items-center gap-2" style={{ flexShrink: 0 }}>
+                    <Text className="text-xs text-gray-500 dark:text-gray-400 font-medium bg-white dark:bg-gray-800 px-2 py-1 rounded-md border border-gray-200 dark:border-gray-700" style={{ fontFamily: THAI_FONT_FAMILY }}>
                         {data.length} รายการ
                     </Text>
                     <TouchableOpacity
                         onPress={exportToCSV}
-                        className="p-2 rounded-lg bg-green-50 dark:bg-green-900/30 active:bg-green-100 dark:active:bg-green-900/50"
+                        className="p-2 rounded-lg bg-gray-100 dark:bg-gray-700 active:bg-gray-200 dark:active:bg-gray-600"
+                        accessibilityLabel="ดาวน์โหลด CSV"
                     >
-                        <Ionicons name="download-outline" size={18} color={isDark ? '#86EFAC' : '#16A34A'} />
+                        <Ionicons name="download-outline" size={18} color={isDark ? '#D1D5DB' : '#6B7280'} />
                     </TouchableOpacity>
                 </View>
             </View>

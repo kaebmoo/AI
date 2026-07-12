@@ -27,6 +27,12 @@ export const Colors = {
   },
 };
 
+/** Thai-safe font stack — shared by chart text (ECharts textStyle) and chat UI
+ * (markdown body/headings) so both render consistently (Wave 3 B3/L4).
+ * Sarabun 400/600 is loaded via @font-face in global.css, served from
+ * frontend/public/fonts/ — falls back to system-ui only if that fails to load. */
+export const THAI_FONT_FAMILY = "'Sarabun', 'Noto Sans Thai', system-ui, sans-serif";
+
 export const Fonts = Platform.select({
   ios: {
     /** iOS `UIFontDescriptorSystemDesignDefault` */
