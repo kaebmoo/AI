@@ -6,7 +6,7 @@
 
 **Phase:** Plans 0-5 Complete + Hardening F1-F11 Complete (2026-07-11)
 **Current Version:** 1.0.0
-**Tests:** 363 passed, 3 skipped (verified 2026-07-11) — CI: GitHub Actions (ruff + pytest)
+**Tests:** 553 passed, 3 skipped (verified 2026-07-12) — CI: GitHub Actions (ruff + pytest)
 **Roadmap:** ดู [plan/PLAN_ROADMAP_MASTER.md](plan/PLAN_ROADMAP_MASTER.md)
 
 ## Features Implemented
@@ -189,7 +189,7 @@ app/
 │   ├── reports.py       # xlsx export API (F6)
 │   └── query.py         # Stateless query API (API key auth) + portal fields (F11)
 ├── workers/             # Celery workers (email, report export)
-├── tools/admin/         # Admin tools (15 tool classes)
+├── tools/admin/         # Admin tools (14 tool classes)
 ├── telegram/            # Telegram bot
 │   ├── bot.py           # Bot initialization
 │   ├── dispatcher.py    # Command routing
@@ -431,7 +431,7 @@ Once the backend is running, visit:
 pytest -q
 ```
 
-**Current:** 363 passed, 3 skipped (verified 2026-07-11) — รันอัตโนมัติผ่าน GitHub Actions CI ทุก push/PR
+**Current:** 553 passed, 3 skipped (verified 2026-07-12) — รันอัตโนมัติผ่าน GitHub Actions CI ทุก push/PR
 
 - **Unit tests:** `tests/unit/` — covering all services
 - **Integration tests:** `tests/integration/` — API endpoint tests
