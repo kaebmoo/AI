@@ -17,6 +17,7 @@ from app.providers.chart_postprocessor import (
     parse_explanation_response,
     enforce_time_series_rule,
     enforce_dimension_family_rule,
+    enforce_categorical_axis_rule,
     build_explain_prompt,
     auto_detect_chart_config,
     enrich_chart_config,
@@ -132,6 +133,7 @@ class MatchaProvider(AIProvider):
         parsed_result = parse_explanation_response(response_text)
         parsed_result = enforce_time_series_rule(parsed_result, time_columns=time_columns)
         parsed_result = enforce_dimension_family_rule(parsed_result, dimension_families)
+        parsed_result = enforce_categorical_axis_rule(parsed_result, time_columns=time_columns)
 
         # Fallback: If no chart_config, try to infer from data
         if "chart_config" not in parsed_result and data and len(data) > 0:

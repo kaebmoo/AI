@@ -15,7 +15,9 @@ from app.providers.chart_postprocessor import (
     parse_explanation_response,
     enforce_time_series_rule,
     enforce_dimension_family_rule,
+    enforce_categorical_axis_rule,
     build_explain_prompt,
+    auto_detect_chart_config,
     enrich_chart_config,
 )
 
@@ -203,6 +205,13 @@ class GeminiProvider(AIProvider):
         parsed_result = parse_explanation_response(text)
         parsed_result = enforce_time_series_rule(parsed_result, time_columns=time_columns)
         parsed_result = enforce_dimension_family_rule(parsed_result, dimension_families)
+        parsed_result = enforce_categorical_axis_rule(parsed_result, time_columns=time_columns)
+
+        # Fallback: If no chart_config, try to infer from data
+        if "chart_config" not in parsed_result and data and len(data) > 0:
+            logger.info("Gemini: No chart_config found, attempting auto-detection")
+            parsed_result = auto_detect_chart_config(data, parsed_result, schema_metadata=schema_metadata)
+
         parsed_result = enrich_chart_config(
             parsed_result=parsed_result,
             data=data,

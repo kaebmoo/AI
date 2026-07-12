@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, FlatList,
-  KeyboardAvoidingView, Platform, ActivityIndicator, Alert,
+  KeyboardAvoidingView, Platform, ActivityIndicator,
   SafeAreaView, useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,6 +9,7 @@ import { useLocalSearchParams, router } from 'expo-router';
 import { ModelSelector } from '../../components/Chat/ModelSelector';
 import { ContextSelector, ContextBadge, DataContext } from '../../components/Chat/ContextSelector';
 import { ChatBubble, Message } from '../../components/Chat/ChatBubble';
+import { ErrorBoundary } from '../../components/ErrorBoundary';
 import { ConversationList } from '../../components/Chat/ConversationList';
 import { chatService } from '../../services/chat';
 import { conversationService } from '../../services/conversation';
@@ -27,6 +28,26 @@ const STATUS_LABELS: Record<string, string> = {
   validating: 'กำลังตรวจสอบ SQL...',
   executing: 'กำลังดึงข้อมูล...',
   explaining: 'กำลังสรุปผล...',
+};
+
+/** Map a raw backend/provider error into an actionable Thai message.
+ *  Alert.alert is a no-op on web, so errors are shown as an inline chat bubble
+ *  instead — this keeps them from failing silently. */
+const friendlyErrorMessage = (raw: string): string => {
+  const s = String(raw || '');
+  if (/RESOURCE_EXHAUSTED|spending cap|quota|\b429\b|exceeded/i.test(s)) {
+    return '⚠️ **ระบบ AI ใช้โควตาหมดชั่วคราว** — ผู้ให้บริการ (เช่น Gemini) เกินวงเงิน/quota รายเดือน\n\nลองใหม่ภายหลัง หรือ**สลับผู้ให้บริการ AI** (Claude / Matcha) ที่ปุ่มเลือกโมเดลด้านบน';
+  }
+  if (/\b401\b|unauthorized|invalid api key|api key/i.test(s)) {
+    return '⚠️ **เชื่อมต่อผู้ให้บริการ AI ไม่สำเร็จ** (API key ไม่ถูกต้อง/หมดอายุ) — กรุณาแจ้งผู้ดูแลระบบ';
+  }
+  if (/timeout|timed out|ETIMEDOUT|deadline/i.test(s)) {
+    return '⚠️ **ระบบใช้เวลานานเกินไป** — กรุณาลองใหม่อีกครั้ง';
+  }
+  if (/\b5\d\d\b|internal server|bad gateway|unavailable/i.test(s)) {
+    return '⚠️ **เซิร์ฟเวอร์มีปัญหาชั่วคราว** — กรุณาลองใหม่ภายหลัง';
+  }
+  return `⚠️ **เกิดข้อผิดพลาด**\n\n${s.slice(0, 400)}`;
 };
 
 export default function ChatScreen() {
@@ -247,15 +268,27 @@ export default function ChatScreen() {
             setSidebarRefresh((n) => n + 1);
           },
           onError: (error) => {
-            Alert.alert('Error', error);
+            showErrorBubble(error);
           },
         }
       );
     } catch (error: any) {
-      const msg = error.response?.data?.detail || 'Failed to get response';
-      Alert.alert('Error', msg);
+      const msg = error.response?.data?.detail || error.message || 'Failed to get response';
+      showErrorBubble(msg);
     } finally {
       setLoading(false);
+      setStatusText('');
+    }
+
+    // Surface an error inline (Alert.alert is a no-op on web → would fail silently).
+    // Replaces any "⏳ กำลังสรุปผล" preview so the chat never gets stuck.
+    function showErrorBubble(raw: string) {
+      const errorMessage: Message = {
+        id: `error-${Date.now()}`,
+        role: 'assistant',
+        content: friendlyErrorMessage(raw),
+      };
+      setMessages((prev) => [...prev.filter((m) => m.id !== streamingId), errorMessage]);
       setStatusText('');
     }
   };
@@ -372,7 +405,11 @@ export default function ChatScreen() {
                   data={messages}
                   keyExtractor={(item) => item.id.toString()}
                   renderItem={({ item }) => (
-                    <ChatBubble message={item} onTrain={handleTrain} />
+                    // Per-message boundary: a crash in one bubble (bad chart/table
+                    // data) shows a fallback for that message only, never blanks the app
+                    <ErrorBoundary label="ChatBubble">
+                      <ChatBubble message={item} onTrain={handleTrain} />
+                    </ErrorBoundary>
                   )}
                   contentContainerStyle={{ padding: 16, paddingBottom: 20 }}
                   className="flex-1"

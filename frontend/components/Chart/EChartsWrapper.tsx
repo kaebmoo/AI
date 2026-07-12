@@ -5,7 +5,7 @@
  * Falls back to null if echarts is not installed.
  */
 import React, { useRef, useEffect, useState, memo } from 'react';
-import { Platform, View, type ViewStyle } from 'react-native';
+import { Platform, View, type ViewStyle, useWindowDimensions } from 'react-native';
 
 interface EChartsWrapperProps {
     option: object;
@@ -13,6 +13,9 @@ interface EChartsWrapperProps {
     notMerge?: boolean;
     width?: number;
     height?: number;
+    /** Called with the live ECharts instance once ready — lets the parent
+     *  export the chart (getDataURL) without reaching into internals. */
+    onChartReady?: (chart: any) => void;
 }
 
 // ============================================================
@@ -68,12 +71,21 @@ const EChartsWrapperInner: React.FC<EChartsWrapperProps> = ({
     notMerge = true,
     width,
     height = 300,
+    onChartReady,
 }) => {
     // --- Hooks (called unconditionally to satisfy Rules of Hooks) ---
+    // L7: reactive fallback for mobile SVG width when the caller doesn't pass one
+    // (was a stale hardcoded 350 — never updated on rotation/resize)
+    const { width: windowWidth } = useWindowDimensions();
     const containerRef = useRef<HTMLDivElement>(null);
     const chartRef = useRef<any>(null);
     const svgRef = useRef<any>(null);
     const [webReady, setWebReady] = useState(!!_echartsWeb);
+    // Keep the latest onChartReady in a ref so the init effect can call it
+    // without listing it as a dep (an inline parent callback would otherwise
+    // re-run init on every render).
+    const onChartReadyRef = useRef(onChartReady);
+    onChartReadyRef.current = onChartReady;
 
     // Web: dynamically load echarts on first mount
     useEffect(() => {
@@ -97,22 +109,31 @@ const EChartsWrapperInner: React.FC<EChartsWrapperProps> = ({
     useEffect(() => {
         if (Platform.OS !== 'web' || !_echartsWeb || !containerRef.current) return;
 
+        const el = containerRef.current;
         try {
             if (!chartRef.current) {
                 // Ensure container has dimensions before init
-                const el = containerRef.current;
                 chartRef.current = _echartsWeb.init(el);
             }
             chartRef.current.setOption(option, notMerge);
+            onChartReadyRef.current?.(chartRef.current);
         } catch (err) {
             console.error('[ECharts] Failed to init/setOption:', err);
         }
 
-        // Resize on window resize
+        // Resize to the ACTUAL container width — the div is width:100%, so
+        // echarts must follow the container (bubble narrows when the sidebar
+        // opens / on small screens), not a fixed window-derived pixel width
+        // that would overflow and get clipped by RN-Web's overflow:hidden.
+        const ro = typeof ResizeObserver !== 'undefined'
+            ? new ResizeObserver(() => chartRef.current?.resize())
+            : null;
+        ro?.observe(el);
         const handleResize = () => chartRef.current?.resize();
         window.addEventListener('resize', handleResize);
 
         return () => {
+            ro?.disconnect();
             window.removeEventListener('resize', handleResize);
         };
     }, [option, notMerge, webReady]);
@@ -132,18 +153,22 @@ const EChartsWrapperInner: React.FC<EChartsWrapperProps> = ({
 
         const chart = echartsStatic.init(svgRef.current, 'light', {
             renderer: 'svg',
-            width: width || 350,
+            width: width || windowWidth,
             height,
         });
         chart.setOption(option);
         return () => chart?.dispose();
-    }, [option, width, height]);
+    }, [option, width, height, windowWidth]);
 
     // ===== WEB RENDER =====
+    // On web the chart is ALWAYS responsive to its container (width:100% + the
+    // ResizeObserver above). The numeric `width` prop is intentionally ignored
+    // here — it only feeds the native SVG path below, which can't auto-size.
+    // A fixed pixel width would overflow narrower bubbles and get clipped.
     if (Platform.OS === 'web') {
         if (!webReady) {
             return (
-                <View style={[{ width: width || '100%', height }, style]}>
+                <View style={[{ width: '100%', height }, style]}>
                     {/* @ts-ignore */}
                     <div style={{
                         width: '100%',
@@ -161,12 +186,12 @@ const EChartsWrapperInner: React.FC<EChartsWrapperProps> = ({
         }
 
         return (
-            <View style={[{ width: width || '100%', height }, style]}>
+            <View style={[{ width: '100%', height }, style]}>
                 {/* @ts-ignore — div is web-only */}
                 <div
                     ref={containerRef}
                     style={{
-                        width: typeof width === 'number' ? width : '100%',
+                        width: '100%',
                         height: typeof height === 'number' ? height : 300,
                     }}
                 />

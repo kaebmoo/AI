@@ -2,25 +2,29 @@
  * Shared chart color palettes.
  */
 
-/** Primary NT chart palette — 10 colors */
+/** Primary NT chart palette — 5 official brand colors.
+ * Order matters for colorblind separation (verified via CIELAB dE76 under
+ * deuteranopia/protanopia simulation): Dark Grey buffers Brick Red from both
+ * Teal (original risk) and Brown (red-family collision under protanopia) —
+ * do not move Brick Red adjacent to Teal or Brown. */
 export const NT_CHART_PALETTE = [
-    '#3B82F6', // Blue 500
-    '#10B981', // Emerald 500
-    '#F59E0B', // Amber 500
-    '#EF4444', // Red 500
-    '#8B5CF6', // Violet 500
-    '#EC4899', // Pink 500
-    '#06B6D4', // Cyan 500
-    '#F97316', // Orange 500
-    '#14B8A6', // Teal 500
-    '#6366F1', // Indigo 500
+    '#FFD100', // NT Yellow (PANTONE 109C) — bar/area fill only, see B1 line-color rule
+    '#40C1AC', // Teal 7465C
+    '#924C2E', // Brown 7587C
+    '#545859', // Dark Grey 425C
+    '#E1523E', // Brick Red 7625C
 ];
 
-/** Financial chart colors */
+/** Line-series palette — NT_CHART_PALETTE without Yellow (~1.4:1 contrast on
+ * white, unreadable as a thin 2px stroke). Used for any 'line' series type,
+ * single or multi. */
+export const NT_LINE_PALETTE = NT_CHART_PALETTE.slice(1);
+
+/** Financial chart colors — brand-aligned, still reads positive/negative by instinct */
 export const FINANCIAL_COLORS = {
-    positive: '#10B981',
-    negative: '#EF4444',
-    neutral: '#6B7280',
+    positive: '#40C1AC',
+    negative: '#E1523E',
+    neutral: '#545859',
 };
 
 /** Dark/light mode text & line colors for ECharts */

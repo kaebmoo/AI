@@ -1,3 +1,21 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Wave 3 B3/L4: Thai-safe font — matches THAI_FONT_FAMILY in constants/theme.ts.
+   Without this, that fontFamily string was a no-op (falls back to system-ui). */
+@font-face {
+    font-family: 'Sarabun';
+    src: url('/fonts/Sarabun-Regular.ttf') format('truetype');
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'Sarabun';
+    src: url('/fonts/Sarabun-SemiBold.ttf') format('truetype');
+    font-weight: 600;
+    font-style: normal;
+    font-display: swap;
+}

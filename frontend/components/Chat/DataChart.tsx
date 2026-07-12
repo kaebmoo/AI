@@ -1,6 +1,6 @@
 
-import React, { useMemo, useState, useEffect } from 'react';
-import { View, Text, Dimensions, ScrollView, Modal, TouchableOpacity, Pressable } from 'react-native';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
+import { View, Text, useWindowDimensions, ScrollView, Modal, TouchableOpacity, Pressable, Platform } from 'react-native';
 import { BarChart, LineChart, PieChart } from 'react-native-gifted-charts';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Ionicons } from '@expo/vector-icons';
@@ -188,11 +188,38 @@ interface ChartAnalysis {
 export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) => {
     const colorScheme = useColorScheme();
     const isDark = colorScheme === 'dark';
-    const screenWidth = Dimensions.get('window').width;
+    // L7: reactive to rotation/resize — Dimensions.get() is a one-shot read
+    const { width: screenWidth } = useWindowDimensions();
     const chartWidth = Math.min(screenWidth - 64, 500);
 
     // Full screen modal state
     const [isFullScreen, setIsFullScreen] = useState(false);
+
+    // Live ECharts instance (for PNG export) — set via EChartsWrapper.onChartReady
+    const exportChartRef = useRef<any>(null);
+
+    /** Export the current chart as a PNG download (web). ECharts' built-in
+     *  getDataURL — no extra dependency. Mobile export is a follow-up. */
+    const handleExportPng = () => {
+        const chart = exportChartRef.current;
+        if (!chart || Platform.OS !== 'web') return;
+        try {
+            const url = chart.getDataURL({
+                type: 'png',
+                pixelRatio: 2, // retina-crisp
+                backgroundColor: isDark ? '#1F2937' : '#FFFFFF',
+            });
+            const safeTitle = (chartConfig?.title || 'chart').replace(/[^\p{L}\p{N}_-]+/gu, '_').slice(0, 60);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${safeTitle}.png`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        } catch (e) {
+            console.error('[DataChart] PNG export failed:', e);
+        }
+    };
 
     // ============================================================
     // ECharts hooks — MUST be called before any early returns (React rules of hooks)
@@ -667,9 +694,8 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
         area: 'พื้นที่',
         stacked_area: 'พื้นที่สะสม',
         waterfall: 'น้ำตก',
-        scatter: 'กระจาย',
-        mixed_bar_line: 'ผสม',
-        treemap: 'แผนผัง',
+        // scatter / mixed_bar_line / treemap removed — no case in buildEChartsOption's
+        // switch, never suggested by _suggest_available_types, unreachable dead labels
     };
 
     // Toolbar renderer — shared between normal and fullscreen views (ECharts path)
@@ -687,7 +713,8 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
                                     paddingHorizontal: 12,
                                     paddingVertical: 6,
                                     borderRadius: 16,
-                                    backgroundColor: isActive ? '#3B82F6' : (isDark ? '#374151' : '#F3F4F6'),
+                                    // B2: 10% accent = NT Yellow, reserved for the active/selected state
+                                    backgroundColor: isActive ? '#FFD100' : (isDark ? '#374151' : '#F3F4F6'),
                                     borderWidth: isActive ? 0 : 1,
                                     borderColor: isDark ? '#4B5563' : '#E5E7EB',
                                 }}
@@ -695,7 +722,8 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
                                 <Text style={{
                                     fontSize: 12,
                                     fontWeight: isActive ? '600' : '400',
-                                    color: isActive ? '#FFFFFF' : (isDark ? '#D1D5DB' : '#4B5563'),
+                                    // #212121 on #FFD100 = 11:1 contrast (WCAG requires >=4.5:1)
+                                    color: isActive ? '#212121' : (isDark ? '#D1D5DB' : '#4B5563'),
                                 }}>
                                     {CHART_LABELS[type] || type}
                                 </Text>
@@ -706,6 +734,11 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
             </ScrollView>
         ) : null
     );
+
+    // L6: horizontal_bar grows with row count instead of a fixed 400px
+    const echartsCardHeight = activeType === 'horizontal_bar'
+        ? Math.max(300, (data?.length ?? 0) * 32 + 96)
+        : 400;
 
     // If ECharts is available and we have a valid option, render chart
     // This runs BEFORE the analysis null-guard so charts show even for visualization='table'
@@ -725,6 +758,23 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
                         style={{ flex: 1, flexShrink: 1 }} numberOfLines={2}>
                         {chartConfig?.title || ''}
                     </Text>
+                    {/* Export PNG (web only) */}
+                    {Platform.OS === 'web' && (
+                        <TouchableOpacity
+                            onPress={handleExportPng}
+                            style={{
+                                padding: 6,
+                                borderRadius: 6,
+                                backgroundColor: isDark ? '#374151' : '#F3F4F6',
+                                flexShrink: 0,
+                                marginLeft: 8,
+                            }}
+                            activeOpacity={0.7}
+                            accessibilityLabel="ดาวน์โหลดกราฟเป็นรูป PNG"
+                        >
+                            <Ionicons name="download-outline" size={18} color={isDark ? '#D1D5DB' : '#6B7280'} />
+                        </TouchableOpacity>
+                    )}
                     <TouchableOpacity
                         onPress={() => setIsFullScreen(true)}
                         style={{
@@ -746,8 +796,9 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
                 {/* ECharts Render */}
                 <EChartsWrapper
                     option={echartsOption}
-                    height={400}
+                    height={echartsCardHeight}
                     width={Math.min(screenWidth - 48, 800)}
+                    onChartReady={(c) => { exportChartRef.current = c; }}
                 />
 
                 {/* Warning */}
@@ -1324,7 +1375,11 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
             .some(term => k.toLowerCase().includes(term))
     );
 
-    const isTimeSeries = !!(yearKey || monthKey);
+    // Backend now flags the time axis explicitly (chart_postprocessor is_time_axis) —
+    // trust it when present, only fall back to the column-name heuristic otherwise.
+    const isTimeSeries = chartConfig?.is_time_axis !== undefined
+        ? chartConfig.is_time_axis
+        : !!(yearKey || monthKey);
     const isLineChart = isTimeSeries && data.length > 1;
 
     // Process data for non-grouped charts

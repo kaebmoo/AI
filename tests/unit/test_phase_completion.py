@@ -82,7 +82,9 @@ class TestPhase2Authentication:
     def test_auth_endpoints_registered(self):
         """Test auth endpoints are registered"""
         from app.main import app
-        routes = [route.path for route in app.routes]
+        # ponytail: openapi paths are version-proof; app.routes internals changed
+        # (Starlette 1.x include_router leaves _IncludedRouter wrappers w/o .path)
+        routes = list(app.openapi()["paths"].keys())
 
         assert "/api/v1/auth/login" in routes
         assert "/api/v1/auth/verify" in routes
@@ -125,7 +127,9 @@ class TestPhase3CoreFeatures:
     def test_chat_endpoints_registered(self):
         """Test chat endpoints are registered"""
         from app.main import app
-        routes = [route.path for route in app.routes]
+        # ponytail: openapi paths are version-proof; app.routes internals changed
+        # (Starlette 1.x include_router leaves _IncludedRouter wrappers w/o .path)
+        routes = list(app.openapi()["paths"].keys())
 
         assert "/api/v1/chat/" in routes
         assert "/api/v1/chat/history" in routes
@@ -173,7 +177,9 @@ class TestPhase35FeedbackLoop:
     def test_feedback_endpoints_registered(self):
         """Test feedback endpoints are registered"""
         from app.main import app
-        routes = [route.path for route in app.routes]
+        # ponytail: openapi paths are version-proof; app.routes internals changed
+        # (Starlette 1.x include_router leaves _IncludedRouter wrappers w/o .path)
+        routes = list(app.openapi()["paths"].keys())
 
         feedback_routes = [r for r in routes if "/feedback" in r]
         assert len(feedback_routes) > 0
@@ -181,13 +187,17 @@ class TestPhase35FeedbackLoop:
     def test_feedback_submit_endpoint(self):
         """Test feedback submit endpoint exists"""
         from app.main import app
-        routes = [route.path for route in app.routes]
+        # ponytail: openapi paths are version-proof; app.routes internals changed
+        # (Starlette 1.x include_router leaves _IncludedRouter wrappers w/o .path)
+        routes = list(app.openapi()["paths"].keys())
         assert any("/feedback/{chat_id}" in r for r in routes)
 
     def test_feedback_pending_endpoint(self):
         """Test feedback pending endpoint exists"""
         from app.main import app
-        routes = [route.path for route in app.routes]
+        # ponytail: openapi paths are version-proof; app.routes internals changed
+        # (Starlette 1.x include_router leaves _IncludedRouter wrappers w/o .path)
+        routes = list(app.openapi()["paths"].keys())
         assert any("/feedback/pending" in r or "/pending" in r for r in routes)
 
     def test_feedback_service_exists(self):
@@ -246,7 +256,9 @@ class TestAPIEndpointsSummary:
     def test_all_required_endpoints_exist(self):
         """Test all required endpoints are registered"""
         from app.main import app
-        routes = [route.path for route in app.routes]
+        # ponytail: openapi paths are version-proof; app.routes internals changed
+        # (Starlette 1.x include_router leaves _IncludedRouter wrappers w/o .path)
+        routes = list(app.openapi()["paths"].keys())
 
         required_endpoints = [
             "/api/v1/auth/login",

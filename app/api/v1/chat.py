@@ -19,7 +19,7 @@ from app.services.ai_service import AIService
 from app.services.schema_service import SchemaService
 from app.services.query_engine import QueryEngine, QueryEngineResult, detect_context_from_question
 from app.services.intent_classifier import classify_intent
-from app.providers.chart_postprocessor import enrich_chart_config
+from app.providers.chart_postprocessor import enrich_chart_config, resolve_max_series_warning
 from app.models.chat_session import ChatSessionData
 from app.config import settings
 from app.core.time_utils import utcnow
@@ -244,6 +244,7 @@ def _format_response(
     chat_entry: ChatHistory,
     conversation_id: str,
     engine_result: QueryEngineResult,
+    admin_config=None,
 ) -> dict:
     """Format QueryEngineResult into API response dict."""
     result = engine_result.query_result
@@ -292,6 +293,26 @@ def _format_response(
         display_hint_response = result.explanation.get("display_hint")
         hierarchy_columns_response = result.explanation.get("hierarchy_columns")
         logger.info(f"AI Response - visualization: {visualization_response}, display_hint: {display_hint_response}, hierarchy_columns: {hierarchy_columns_response}")
+
+        # Wave 4: enrich_chart_config (called deep inside the provider, no DB
+        # access) only ever sees DEFAULT_MAX_SERIES — override with the real
+        # 3-tier-resolved value now that we have admin_config in scope.
+        if admin_config is not None and isinstance(chart_config_response, dict):
+            resolved_max_series = admin_config.get_chart_max_series()
+            chart_config_response["max_series"] = resolved_max_series
+            cat_col = chart_config_response.get("category_column") or ""
+            ser_col = chart_config_response.get("series_column") or ""
+            viz = visualization_response or ""
+            if not (viz in ("pie_chart", "donut_chart") and ser_col):
+                # pie+series keeps its "not supported" warning untouched — anything
+                # else recomputes against the real threshold
+                max_series_warning = resolve_max_series_warning(
+                    result.data or [], cat_col, ser_col, viz, resolved_max_series
+                )
+                if max_series_warning:
+                    chart_config_response["warning"] = max_series_warning
+                elif str(chart_config_response.get("warning", "")).startswith("แสดง Top-"):
+                    del chart_config_response["warning"]
 
     return {
         "id": chat_entry.id,
@@ -354,7 +375,7 @@ def _get_session_data(db: Session, conversation_id: str) -> dict:
     }
 
 
-def _handle_chart_only(db: Session, conversation_id: str, question: str, intent: dict) -> dict:
+def _handle_chart_only(db: Session, conversation_id: str, question: str, intent: dict, admin_config=None) -> dict:
     """Handle chart-only intent — return enriched chart config with existing session data."""
     session = _get_session_data(db, conversation_id)
 
@@ -383,6 +404,7 @@ def _handle_chart_only(db: Session, conversation_id: str, question: str, intent:
         parsed_result=mock_result,
         data=session["data"],
         chart_title=prev_config.get("title", ""),
+        max_series=admin_config.get_chart_max_series() if admin_config is not None else None,
     )
 
     return {
@@ -424,7 +446,7 @@ async def chat(
     # 2. Chart-only intent detection
     intent = classify_intent(request.question)
     if intent["is_chart_request"] and intent["confidence"] == "high":
-        return _handle_chart_only(db, conversation_id, request.question, intent)
+        return _handle_chart_only(db, conversation_id, request.question, intent, admin_config)
 
     # 3. Get history
     history, previous_chats = _get_conversation_history(db, conversation_id, current_user.id)
@@ -465,7 +487,7 @@ async def chat(
     _update_conversation_meta(db, conversation_id, request.question)
 
     # 9. Format response
-    return _format_response(chat_entry, conversation_id, engine_result)
+    return _format_response(chat_entry, conversation_id, engine_result, admin_config)
 
 
 # =============================================================================
@@ -520,7 +542,7 @@ async def chat_stream(
         try:
             # Chart-only: skip QueryEngine, return session data directly
             if intent["is_chart_request"] and intent["confidence"] == "high":
-                chart_response = _handle_chart_only(db, conversation_id, request.question, intent)
+                chart_response = _handle_chart_only(db, conversation_id, request.question, intent, admin_config)
                 yield _sse_format("answer", chart_response)
                 yield _sse_format("done", {"id": None, "conversation_id": conversation_id})
                 return
@@ -587,7 +609,7 @@ async def chat_stream(
                     logger.warning(f"Failed to save session data (non-fatal): {e}")
 
             # Send full response
-            response_data = _format_response(chat_entry, conversation_id, engine_result)
+            response_data = _format_response(chat_entry, conversation_id, engine_result, admin_config)
             yield _sse_format("answer", response_data)
 
             # Done
