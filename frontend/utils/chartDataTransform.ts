@@ -3,12 +3,13 @@
  */
 import { resolveChartType, type ChartConfig } from '../types/chart';
 import { NT_CHART_PALETTE, NT_LINE_PALETTE, FINANCIAL_COLORS, CHART_THEME, HEATMAP_COLORS } from '../constants/chartColors';
-import { safelyParseNumber, formatNumberWithUnit, truncateLabel, smartMonthSort } from './chartUtils';
+import { safelyParseNumber, detectUnitFromColumnName, truncateLabel, smartMonthSort } from './chartUtils';
 import { THAI_FONT_FAMILY } from '../constants/theme';
 
 // Wave 4: neutral gray for the collapsed "อื่นๆ" bucket — deliberately NOT
 // #545859 (that's a real brand color already used for individual series)
 const OTHER_BUCKET_COLOR = '#9CA3AF';
+const MAX_CATEGORY_MARKS = 20;
 
 /** Sum the measure per distinct category. Pie / single-series bar charts show
  *  ONE mark per category, but SQL frequently returns several rows per category
@@ -29,6 +30,33 @@ function aggregateByCategory(
         sums.set(cat, (sums.get(cat) as number) + safelyParseNumber(d[measureCol]));
     }
     return order.map(cat => ({ [catCol]: cat, [measureCol]: sums.get(cat) }));
+}
+
+function limitCategoryRows(
+    rows: Record<string, any>[],
+    catCol: string,
+    measureCol: string,
+    config?: ChartConfig,
+): Record<string, any>[] {
+    if (rows.length <= MAX_CATEGORY_MARKS) return rows;
+    const isTemporal = config?.chart_spec?.x?.kind === 'temporal' || isTemporalColumnName(catCol);
+    if (isTemporal) return rows;
+
+    const ranked = [...rows].sort((a, b) =>
+        Math.abs(safelyParseNumber(b[measureCol])) - Math.abs(safelyParseNumber(a[measureCol]))
+    );
+    const visible = ranked.slice(0, MAX_CATEGORY_MARKS - 1);
+    const otherValue = ranked
+        .slice(MAX_CATEGORY_MARKS - 1)
+        .reduce((sum, row) => sum + safelyParseNumber(row[measureCol]), 0);
+    const otherLabel = config?.chart_spec?.series?.other_label || 'อื่นๆ';
+    return [
+        ...visible,
+        {
+            [catCol]: `${otherLabel} (รวม ${ranked.length - visible.length} กลุ่ม)`,
+            [measureCol]: otherValue,
+        },
+    ];
 }
 
 function sortRowsBySpec(
@@ -90,12 +118,6 @@ function singleSeriesBarColors(values: number[]): string[] {
     return abs.map(v => lerpHex(_BAR_RAMP_LIGHT, _BAR_RAMP_DARK, max > min ? (v - min) / (max - min) : 1));
 }
 
-/** Thai tooltip number formatter */
-const formatTooltipValue = (value: number, columnName?: string): string => {
-    const result = formatNumberWithUnit(value, value, columnName);
-    return `${result.text} ${result.unit}`;
-};
-
 /** Format number with commas and max 2 decimals */
 function fmtNum(value: number, decimals: number = 2): string {
     // Use toFixed then add comma separators
@@ -104,44 +126,54 @@ function fmtNum(value: number, decimals: number = 2): string {
     return parts.join('.');
 }
 
-/** Smart Y-axis formatter — abbreviates large numbers (max 2 decimals) */
-function yAxisFormatter(value: number): string {
+function formatValueWithUnit(value: any, unitHint?: string): string {
+    const numericValue = typeof value === 'number' ? value : safelyParseNumber(value);
+    if (!Number.isFinite(numericValue)) return String(value ?? '');
+    value = numericValue;
     const abs = Math.abs(value);
-    if (abs >= 1_000_000_000) return `${fmtNum(value / 1_000_000_000)} พลบ.`;
-    if (abs >= 1_000_000) return `${fmtNum(value / 1_000_000)} ลบ.`;
-    if (abs >= 1_000) return `${fmtNum(value / 1_000, 0)}k`;
+    const unit = detectUnitFromColumnName(unitHint);
+
+    if (unit === 'billion') return `${fmtNum(value)} พันล้านบาท`;
+    if (unit === 'million') {
+        return abs >= 1000
+            ? `${fmtNum(value / 1000)} พันล้านบาท`
+            : `${fmtNum(value)} ล้านบาท`;
+    }
+    if (unit === 'thousand') {
+        return abs >= 1000
+            ? `${fmtNum(value / 1000)} ล้านบาท`
+            : `${fmtNum(value)} พันบาท`;
+    }
+
+    if (abs >= 1_000_000_000) return `${fmtNum(value / 1_000_000_000)} พันล้านบาท`;
+    if (abs >= 1_000_000) return `${fmtNum(value / 1_000_000)} ล้านบาท`;
+    if (abs >= 1_000) return `${fmtNum(value / 1_000, 0)} พันบาท`;
     return fmtNum(value, 0);
 }
 
+/** Smart Y-axis formatter — abbreviates large numbers (max 2 decimals) */
+function yAxisFormatter(value: number, unitHint?: string): string {
+    return formatValueWithUnit(value, unitHint);
+}
+
 /** Smart label formatter for bar/line data labels (max 2 decimals) */
-function dataLabelFormatter(params: any): string {
+function dataLabelFormatter(params: any, unitHint?: string): string {
     const v = typeof params === 'object' ? params.value : params;
     if (v == null) return '';
-    const abs = Math.abs(v);
-    if (abs >= 1_000_000_000) return `${fmtNum(v / 1_000_000_000)} พลบ.`;
-    if (abs >= 1_000_000) return `${fmtNum(v / 1_000_000)} ลบ.`;
-    if (abs >= 1_000) return `${fmtNum(v / 1_000, 0)}k`;
-    return fmtNum(v);
+    return formatValueWithUnit(v, unitHint);
 }
 
 /** Tooltip formatter with Thai number formatting (max 2 decimals) */
-function tooltipFormatter(params: any): string {
+function tooltipFormatter(params: any, unitHint?: string): string {
     if (!params) return '';
     const items = Array.isArray(params) ? params : [params];
     const lines = items.map((item: any) => {
         const marker = item.marker || '';
         const name = item.seriesName || item.name || '';
         const val = item.value ?? 0;
-        const abs = Math.abs(val);
-        let text: string;
-        let unit: string;
-        if (abs >= 1_000_000_000) { text = fmtNum(val / 1_000_000_000); unit = 'พันล้านบาท'; }
-        else if (abs >= 1_000_000) { text = fmtNum(val / 1_000_000); unit = 'ล้านบาท'; }
-        else if (abs >= 1_000) { text = fmtNum(val / 1_000); unit = 'พันบาท'; }
-        else { text = fmtNum(val); unit = 'บาท'; }
-        return `${marker} ${name}: <b>${text} ${unit}</b>`;
+        return `${marker} ${name}: <b>${formatValueWithUnit(val, unitHint)}</b>`;
     });
-    const header = items[0]?.axisValueLabel || items[0]?.name || '';
+    const header = items[0]?.axisValue || items[0]?.axisValueLabel || items[0]?.name || '';
     return `<b>${header}</b><br/>` + lines.join('<br/>');
 }
 
@@ -252,8 +284,16 @@ export function buildEChartsOption(
         : chartConfig;
     const resolvedVisualization = spec?.chart_type || visualization;
 
-    // Default to vertical_bar when no chart type resolved (prevents fallback to gifted-charts)
-    let chartType = resolveChartType(resolvedVisualization, resolvedConfig) || 'vertical_bar';
+    const requestedChartType = resolvedConfig?.suggested_type || resolvedVisualization;
+    const resolvedChartType = resolveChartType(resolvedVisualization, resolvedConfig);
+    if (resolvedChartType === null) {
+        if (requestedChartType && !['table', 'single_value'].includes(requestedChartType)) {
+            throw new Error(`Unsupported chart type: ${requestedChartType}`);
+        }
+        if (requestedChartType) return null;
+    }
+    // Default only when no chart type was provided at all.
+    let chartType = resolvedChartType || 'vertical_bar';
 
     const dataKeys = Object.keys(data[0]);
     // Validate chartConfig columns against actual data keys (handles aliased SQL columns)
@@ -300,6 +340,33 @@ export function buildEChartsOption(
         }
     }
 
+    const categoryLabels = catCol
+        ? [...new Set(data.map(row => String(row[catCol] ?? '')))]
+        : [];
+    const hasLongCategories = categoryLabels.some(label => label.length > 24);
+    const requestedVerticalBar = resolvedConfig?.suggested_type === 'bar_chart'
+        || resolvedConfig?.suggested_type === 'vertical_bar';
+    if (
+        chartType === 'vertical_bar'
+        && !seriesCol
+        && !isTemporalColumnName(catCol)
+        && !requestedVerticalBar
+        && (categoryLabels.length > 12 || (categoryLabels.length > 6 && hasLongCategories))
+    ) {
+        chartType = 'horizontal_bar';
+    }
+
+    const hasNegative = measureCol
+        ? data.some(row => safelyParseNumber(row[measureCol]) < 0)
+        : false;
+    if (hasNegative) {
+        if (['stacked_bar', 'stacked_bar_100', 'stacked_area'].includes(chartType)) {
+            chartType = 'grouped_bar';
+        } else if (['pie_chart', 'donut_chart'].includes(chartType)) {
+            chartType = 'horizontal_bar';
+        }
+    }
+
 
 
     if (!catCol || !measureCol) return null;
@@ -338,7 +405,7 @@ export function buildEChartsOption(
             result = buildHeatmap(data, catCol, measureCol, seriesCol, resolvedConfig);
             break;
         default:
-            result = buildVerticalBar(data, catCol, measureCol, chartConfig);
+            throw new Error(`Unsupported chart type: ${chartType}`);
     }
 
     // Apply dark/light mode theme colors as final step
@@ -474,26 +541,32 @@ function buildVerticalBar(
     config?: ChartConfig,
 ): object {
     // Aggregate per category so multi-row data doesn't produce duplicate bars
-    const agg = sortRowsBySpec(aggregateByCategory(data, catCol, measureCol), catCol, measureCol, config);
+    const agg = limitCategoryRows(
+        sortRowsBySpec(aggregateByCategory(data, catCol, measureCol), catCol, measureCol, config),
+        catCol,
+        measureCol,
+        config,
+    );
     // L1: send full labels — ECharts truncates for display, tooltip shows full name
     const categories = agg.map(d => String(d[catCol] ?? ''));
     const values = agg.map(d => safelyParseNumber(d[measureCol]));
+    const unitHint = `${measureCol} ${config?.title || ''}`;
 
     return {
         title: config?.title ? { text: config.title, left: 'center', textStyle: { fontSize: 14, fontWeight: 600 } } : undefined, // B3: title heavier than body
-        tooltip: { ...baseTooltip(), trigger: 'axis', formatter: tooltipFormatter },
+        tooltip: { ...baseTooltip(), trigger: 'axis', formatter: (params: any) => tooltipFormatter(params, unitHint) },
         grid: { left: '3%', right: '5%', bottom: '15%', top: config?.title ? '15%' : '10%', containLabel: true },
         xAxis: {
             type: 'category',
             data: categories,
             axisLabel: {
-                // width 130 (not 90): long Thai category names truncated to unreadable "ค่าสื่อ…";
-                // containLabel:true auto-reserves the extra rotated-label height, even on short charts
                 rotate: categories.length > 6 ? 45 : 0, fontSize: 11,
-                width: 130, overflow: 'truncate', ellipsis: '…', hideOverlap: true,
+                width: 120, overflow: 'truncate',
+                formatter: (value: string) => truncateLabel(value, 16),
+                hideOverlap: true,
             },
         },
-        yAxis: { type: 'value', name: config?.title ? '' : buildYAxisLabel(measureCol, config), nameLocation: 'middle', nameGap: 50, nameTextStyle: { fontSize: 12 }, axisLabel: { fontSize: 11, formatter: yAxisFormatter } },
+        yAxis: { type: 'value', name: config?.title ? '' : buildYAxisLabel(measureCol, config), nameLocation: 'middle', nameGap: 50, nameTextStyle: { fontSize: 12 }, axisLabel: { fontSize: 11, formatter: (value: number) => yAxisFormatter(value, unitHint) } },
         series: [{
             type: 'bar',
             // Wave 5: distinct NT colors when ≤5 bars, else a magnitude ramp
@@ -501,7 +574,7 @@ function buildVerticalBar(
             barMaxWidth: 50,
             // Top data labels crowd/overlap once there are many vertical bars —
             // show them only for a small count (horizontal bar shows all values cleanly)
-            label: (config?.show_data_labels && categories.length <= 8) ? { show: true, position: 'top', fontSize: 10, formatter: dataLabelFormatter, color: '#212121' } : undefined,
+            label: (config?.show_data_labels && categories.length <= 8) ? { show: true, position: 'top', fontSize: 10, formatter: (params: any) => dataLabelFormatter(params, unitHint), color: '#212121' } : undefined,
         }],
     };
 }
@@ -513,23 +586,31 @@ function buildHorizontalBar(
     config?: ChartConfig,
 ): object {
     // Aggregate per category so multi-row data doesn't produce duplicate bars
-    const agg = sortRowsBySpec(aggregateByCategory(data, catCol, measureCol), catCol, measureCol, config);
+    const agg = limitCategoryRows(
+        sortRowsBySpec(aggregateByCategory(data, catCol, measureCol), catCol, measureCol, config),
+        catCol,
+        measureCol,
+        config,
+    );
     // L1: send full labels — ECharts truncates for display, tooltip shows full name
     const categories = agg.map(d => String(d[catCol] ?? ''));
     const values = agg.map(d => safelyParseNumber(d[measureCol]));
+    const unitHint = `${measureCol} ${config?.title || ''}`;
 
     return {
         title: config?.title ? { text: config.title, left: 'center', textStyle: { fontSize: 14, fontWeight: 600 } } : undefined, // B3: title heavier than body
-        tooltip: { ...baseTooltip(), trigger: 'axis', formatter: tooltipFormatter },
-        // right: fixed room so the value labels (position:'right') on the longest bar don't clip at narrow widths
-        grid: { left: 8, right: 80, bottom: '10%', top: config?.title ? '15%' : '10%', containLabel: true },
-        xAxis: { type: 'value', name: config?.title ? '' : buildYAxisLabel(measureCol, config), nameLocation: 'middle', nameGap: 30, nameTextStyle: { fontSize: 12 }, axisLabel: { fontSize: 11, formatter: yAxisFormatter, hideOverlap: true } },
+        tooltip: { ...baseTooltip(), trigger: 'axis', formatter: (params: any) => tooltipFormatter(params, unitHint) },
+        // containLabel keeps mobile plots from collapsing while axisLabel.width
+        // keeps long labels to one truncated line.
+        grid: { left: 8, right: config?.show_data_labels ? 72 : 24, bottom: 48, top: config?.title ? 56 : 32, containLabel: true },
+        xAxis: { type: 'value', name: config?.title ? '' : buildYAxisLabel(measureCol, config), nameLocation: 'middle', nameGap: 30, nameTextStyle: { fontSize: 12 }, axisLabel: { fontSize: 11, formatter: (value: number) => yAxisFormatter(value, unitHint), hideOverlap: true } },
         yAxis: {
             type: 'category',
             data: categories,
             axisLabel: {
-                fontSize: 11, width: 140, overflow: 'truncate', ellipsis: '…',
-                hideOverlap: true, interval: 0,
+                fontSize: 11, width: 180, overflow: 'truncate',
+                formatter: (value: string) => truncateLabel(value, 24),
+                hideOverlap: false, interval: 0,
             },
             inverse: true,
         },
@@ -538,7 +619,7 @@ function buildHorizontalBar(
             // Wave 5: distinct NT colors when ≤5 bars, else a magnitude ramp
             data: (() => { const colors = singleSeriesBarColors(values); return values.map((v, i) => ({ value: v, itemStyle: { color: colors[i] } })); })(),
             barMaxWidth: 30,
-            label: config?.show_data_labels ? { show: true, position: 'right', fontSize: 10, formatter: dataLabelFormatter, color: '#212121' } : undefined,
+            label: config?.show_data_labels ? { show: true, position: 'right', fontSize: 10, formatter: (params: any) => dataLabelFormatter(params, unitHint), color: '#212121' } : undefined,
         }],
     };
 }
@@ -552,10 +633,11 @@ function buildLine(
     // L1: send full labels — ECharts truncates for display, tooltip shows full name
     const categories = data.map(d => String(d[catCol] ?? ''));
     const values = data.map(d => safelyParseNumber(d[measureCol]));
+    const unitHint = `${measureCol} ${config?.title || ''}`;
 
     return {
         title: config?.title ? { text: config.title, left: 'center', textStyle: { fontSize: 14, fontWeight: 600 } } : undefined, // B3: title heavier than body
-        tooltip: { ...baseTooltip(), trigger: 'axis', formatter: tooltipFormatter },
+        tooltip: { ...baseTooltip(), trigger: 'axis', formatter: (params: any) => tooltipFormatter(params, unitHint) },
         // right: headroom so the last point's data label ("105.28 ลบ.") isn't clipped at narrow widths (containLabel ignores series labels)
         grid: { left: '3%', right: config?.show_data_labels ? 56 : '5%', bottom: '15%', top: config?.title ? '15%' : '10%', containLabel: true },
         xAxis: {
@@ -567,14 +649,14 @@ function buildLine(
                 width: 130, overflow: 'truncate', ellipsis: '…', hideOverlap: true,
             },
         },
-        yAxis: { type: 'value', name: config?.title ? '' : buildYAxisLabel(measureCol, config), nameLocation: 'middle', nameGap: 50, nameTextStyle: { fontSize: 12 }, axisLabel: { fontSize: 11, formatter: yAxisFormatter } },
+        yAxis: { type: 'value', name: config?.title ? '' : buildYAxisLabel(measureCol, config), nameLocation: 'middle', nameGap: 50, nameTextStyle: { fontSize: 12 }, axisLabel: { fontSize: 11, formatter: (value: number) => yAxisFormatter(value, unitHint) } },
         series: [{
             type: 'line',
             data: values,
             smooth: true,
             itemStyle: { color: NT_LINE_PALETTE[0] }, // B1: never Yellow on a 2px line
             areaStyle: undefined,
-            label: config?.show_data_labels ? { show: true, position: 'top', fontSize: 10, formatter: dataLabelFormatter } : undefined,
+            label: config?.show_data_labels ? { show: true, position: 'top', fontSize: 10, formatter: (params: any) => dataLabelFormatter(params, unitHint) } : undefined,
             // hideOverlap: drop colliding value labels instead of stacking them into an unreadable smear at narrow widths
             labelLayout: config?.show_data_labels ? { hideOverlap: true } : undefined,
         }],
@@ -604,6 +686,7 @@ function buildMultiSeries(
 
     const isLine = chartType === 'multi_line';
     const isStacked = chartType === 'stacked_bar' || chartType === 'stacked_bar_100' || chartType === 'stacked_area';
+    const unitHint = `${measureCol} ${config?.title || ''}`;
     // B1: multi_line series never get Yellow (unreadable as a thin stroke) —
     // bar-family series can, it's a fill, not a line
     const linePalette = isLine ? NT_LINE_PALETTE : NT_CHART_PALETTE;
@@ -637,7 +720,7 @@ function buildMultiSeries(
         stack: isStacked ? 'total' : undefined,
         smooth: isLine,
         itemStyle: { color },
-        label: config?.show_data_labels ? { show: true, position: isStacked ? 'inside' : 'top', fontSize: 9, formatter: dataLabelFormatter } : undefined,
+        label: config?.show_data_labels ? { show: true, position: isStacked ? 'inside' : 'top', fontSize: 9, formatter: (params: any) => dataLabelFormatter(params, unitHint) } : undefined,
     });
 
     const seriesData = visibleNames.map((name, idx) =>
@@ -652,7 +735,7 @@ function buildMultiSeries(
 
     return {
         title: config?.title ? { text: config.title, left: 'center', textStyle: { fontSize: 14, fontWeight: 600 } } : undefined, // B3: title heavier than body
-        tooltip: { ...baseTooltip(), trigger: 'axis', formatter: tooltipFormatter },
+        tooltip: { ...baseTooltip(), trigger: 'axis', formatter: (params: any) => tooltipFormatter(params, unitHint) },
         legend: { data: legendNames, bottom: 0, type: 'scroll', textStyle: { fontSize: 10 } },
         grid: { left: '3%', right: '5%', bottom: '20%', top: config?.title ? '15%' : '10%', containLabel: true },
         xAxis: {
@@ -664,7 +747,7 @@ function buildMultiSeries(
                 width: 80, overflow: 'truncate', ellipsis: '…', hideOverlap: true,
             },
         },
-        yAxis: { type: 'value', name: config?.title ? '' : buildYAxisLabel(measureCol, config), nameLocation: 'middle', nameGap: 50, nameTextStyle: { fontSize: 12 }, axisLabel: { fontSize: 11, formatter: yAxisFormatter } },
+        yAxis: { type: 'value', name: config?.title ? '' : buildYAxisLabel(measureCol, config), nameLocation: 'middle', nameGap: 50, nameTextStyle: { fontSize: 12 }, axisLabel: { fontSize: 11, formatter: (value: number) => yAxisFormatter(value, unitHint) } },
         series: seriesData,
     };
 }
@@ -794,6 +877,7 @@ function buildWaterfall(
     // L1: full labels — ECharts truncates for display, tooltip shows full name
     const categories = data.map(d => String(d[catCol] ?? ''));
     const values = data.map(d => safelyParseNumber(d[measureCol]));
+    const unitHint = `${measureCol} ${config?.title || ''}`;
 
     // Calculate running total for waterfall
     let runningTotal = 0;
@@ -816,7 +900,7 @@ function buildWaterfall(
 
     return {
         title: config?.title ? { text: config.title, left: 'center', textStyle: { fontSize: 14, fontWeight: 600 } } : undefined, // B3: title heavier than body
-        tooltip: { ...baseTooltip(), trigger: 'axis', formatter: tooltipFormatter },
+        tooltip: { ...baseTooltip(), trigger: 'axis', formatter: (params: any) => tooltipFormatter(params, unitHint) },
         grid: { left: '3%', right: '5%', bottom: '15%', top: config?.title ? '15%' : '10%', containLabel: true },
         xAxis: {
             type: 'category',
@@ -826,7 +910,7 @@ function buildWaterfall(
                 width: 90, overflow: 'truncate', ellipsis: '…', hideOverlap: true,
             },
         },
-        yAxis: { type: 'value', name: config?.title ? '' : buildYAxisLabel(measureCol, config), nameLocation: 'middle', nameGap: 50, nameTextStyle: { fontSize: 12 }, axisLabel: { fontSize: 11, formatter: yAxisFormatter } },
+        yAxis: { type: 'value', name: config?.title ? '' : buildYAxisLabel(measureCol, config), nameLocation: 'middle', nameGap: 50, nameTextStyle: { fontSize: 12 }, axisLabel: { fontSize: 11, formatter: (value: number) => yAxisFormatter(value, unitHint) } },
         series: [
             {
                 name: 'Base',
@@ -937,7 +1021,7 @@ function buildHeatmap(
                 let text: string, unit: string;
                 if (abs >= 1_000_000_000) { text = fmtNum(val / 1_000_000_000); unit = 'พันล้านบาท'; }
                 else if (abs >= 1_000_000) { text = fmtNum(val / 1_000_000); unit = 'ล้านบาท'; }
-                else if (abs >= 1_000) { text = fmtNum(val / 1_000, 0); unit = 'k'; }
+                else if (abs >= 1_000) { text = fmtNum(val / 1_000, 0); unit = 'พันบาท'; }
                 else { text = fmtNum(val); unit = ''; }
                 return `${yName} → ${xName}<br/><b>${text} ${unit}</b>`;
             },
@@ -983,7 +1067,7 @@ function buildHeatmap(
             formatter: (value: number) => {
                 const abs = Math.abs(value);
                 if (abs >= 1_000_000) return `${fmtNum(value / 1_000_000)} ล้านบาท`;
-                if (abs >= 1_000) return `${fmtNum(value / 1_000, 0)}k`;
+                if (abs >= 1_000) return `${fmtNum(value / 1_000, 0)} พันบาท`;
                 return fmtNum(value, 0);
             },
         },
@@ -997,7 +1081,7 @@ function buildHeatmap(
                     const val = params.value[2];
                     const abs = Math.abs(val);
                     if (abs >= 1_000_000) return `${fmtNum(val / 1_000_000)}`;
-                    if (abs >= 1_000) return `${fmtNum(val / 1_000, 0)}k`;
+                    if (abs >= 1_000) return `${fmtNum(val / 1_000, 0)} พันบาท`;
                     return fmtNum(val, 0);
                 },
             },

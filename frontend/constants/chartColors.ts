@@ -43,12 +43,13 @@ export const CHART_THEME = {
     },
 };
 
-/** Diverging heatmap — negative (blue) → zero (near-white) → positive (orange).
- * The renderer centres the visual scale at zero for signed financial data. */
+/** Diverging heatmap — negative (blue) → zero (cool light gray) → positive
+ * (orange). The stronger endpoints and visible midpoint keep low-contrast
+ * cells distinguishable while the renderer centres signed data at zero. */
 export const HEATMAP_COLORS = {
-    min: '#1E5AA8',
-    mid: '#FFF7ED',
-    max: '#B93815',
+    min: '#1D4ED8',
+    mid: '#E5E7EB',
+    max: '#C2410C',
 };
 
 /** Backward-compat alias used by DataChart.tsx */

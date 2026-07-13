@@ -5,6 +5,11 @@ Line/area-family charts must only survive when category_column is a time
 dimension. See plan/PLAN_UI_CHART_IMPROVEMENT.md Wave 1.
 """
 
+import json
+from pathlib import Path
+
+import pytest
+
 from app.providers.chart_postprocessor import (
     build_explain_prompt,
     compact_explanation_currency,
@@ -14,8 +19,11 @@ from app.providers.chart_postprocessor import (
     _is_time_column,
     resolve_max_series_warning,
     enrich_chart_config,
+    profile_chart_data,
+    decide_chart_structure,
     DEFAULT_MAX_SERIES,
 )
+from app.models.chart import ChartSpec
 
 TIME_COLS = ["year", "month"]
 
@@ -365,6 +373,49 @@ class TestEnrichChartConfigMaxSeries:
         }
         assert spec["missing"] == "blank"
 
+    def test_profile_centralizes_roles_cardinality_negative_and_matrix_shape(self):
+        data = [
+            {"account": f"A{i}", "month": str(month), "amount": (i - 4) * month}
+            for i in range(8)
+            for month in range(1, 13)
+        ]
+
+        profile = profile_chart_data(data)
+
+        assert profile.column_roles == {
+            "account": "categorical",
+            "month": "temporal",
+            "amount": "quantitative",
+        }
+        assert profile.cardinality["account"] == 8
+        assert profile.cardinality["month"] == 12
+        assert profile.cardinality["amount"] == len({row["amount"] for row in data})
+        assert profile.negative_columns["amount"] is True
+        assert profile.matrix_shape["kind"] == "time_matrix"
+        assert profile.matrix_shape["time_column"] == "month"
+        assert profile.matrix_shape["dimension_column"] == "account"
+
+    def test_decision_engine_is_independent_of_provider_chart_mapping(self):
+        data = [
+            {"account": f"A{i}", "month": str(month), "amount": i * month}
+            for i in range(8)
+            for month in range(1, 13)
+        ]
+
+        decision = decide_chart_structure(
+            data,
+            category_column="account",
+            series_column="month",
+            measure_column="amount",
+            visualization="bar_chart",
+        )
+
+        assert decision["visualization"] == "heatmap"
+        assert decision["category_column"] == "account"
+        assert decision["series_column"] == "month"
+        assert decision["measure_column"] == "amount"
+        assert decision["has_time_category"] is False
+
     def test_small_monthly_matrix_prefers_multi_line(self):
         data = [
             {"account": f"A{i}", "month": str(month), "amount": i * month}
@@ -401,3 +452,181 @@ class TestEnrichChartConfigMaxSeries:
 
         assert result["visualization"] == "grouped_bar"
         assert "ค่าติดลบ" in result["chart_config"]["warning"]
+
+
+class TestChartDecisionContract:
+    @staticmethod
+    def _schema():
+        jsonschema = pytest.importorskip("jsonschema")
+        schema_path = Path(__file__).parents[2] / "shared" / "chart_spec.schema.json"
+        return jsonschema, json.loads(schema_path.read_text(encoding="utf-8"))
+
+    @staticmethod
+    def _monthly_data(category_count=3, signed=False):
+        return [
+            {
+                "account": f"A{i}",
+                "month": str(month),
+                "amount": ((i - 2) if signed else (i + 1)) * month,
+            }
+            for i in range(category_count)
+            for month in range(1, 13)
+        ]
+
+    def test_every_core_decision_shape_matches_shared_schema(self):
+        jsonschema, schema = self._schema()
+        cases = [
+            (
+                [{"account": "A", "amount": 1}, {"account": "B", "amount": 2}],
+                {"category_column": "account", "measure_column": "amount", "visualization": "bar_chart"},
+            ),
+            (
+                self._monthly_data(3),
+                {"category_column": "account", "measure_column": "amount", "visualization": "bar_chart"},
+            ),
+            (
+                self._monthly_data(8),
+                {"category_column": "account", "measure_column": "amount", "visualization": "bar_chart"},
+            ),
+            (
+                [
+                    {"source": f"S{i}", "target": f"T{j}", "amount": i + j}
+                    for i in range(4)
+                    for j in range(4)
+                ],
+                {"category_column": "source", "measure_column": "amount", "visualization": "bar_chart"},
+            ),
+            (
+                self._monthly_data(6, signed=True),
+                {
+                    "category_column": "month",
+                    "series_column": "account",
+                    "measure_column": "amount",
+                    "visualization": "stacked_bar",
+                },
+            ),
+        ]
+
+        for data, kwargs in cases:
+            decision = decide_chart_structure(data, **kwargs)
+            assert decision.chart_spec is not None
+            jsonschema.validate(decision.chart_spec, schema)
+
+    def test_requested_matrix_type_is_vetoed_with_explanation(self):
+        data = self._monthly_data(19)
+
+        decision = decide_chart_structure(
+            data,
+            category_column="account",
+            measure_column="amount",
+            visualization="heatmap",
+            requested_type="horizontal_bar",
+        )
+
+        assert decision.visualization == "heatmap"
+        assert decision.requested_type_vetoed is True
+        assert decision.requested_type_accepted is False
+        assert decision.warning
+        assert "19 หมวด × 12 ช่วงเวลา" in decision.warning
+
+    def test_enrich_passes_requested_type_to_shared_engine(self):
+        result = enrich_chart_config(
+            {
+                "visualization": "heatmap",
+                "chart_config": {
+                    "category_column": "account",
+                    "measure_column": "amount",
+                },
+            },
+            self._monthly_data(19),
+            requested_type="horizontal_bar",
+        )
+
+        assert result["visualization"] == "heatmap"
+        assert "19 หมวด × 12 ช่วงเวลา" in result["chart_config"]["warning"]
+
+    def test_many_or_long_categories_use_horizontal_bar(self):
+        data = [
+            {"account": f"หมวดค่าใช้จ่ายชื่อยาวมาก {i}", "amount": i * 100}
+            for i in range(13)
+        ]
+
+        decision = decide_chart_structure(
+            data,
+            category_column="account",
+            measure_column="amount",
+            visualization="bar_chart",
+        )
+
+        assert decision.visualization == "horizontal_bar"
+        assert "แนวนอน" in decision.warning
+        assert "horizontal_bar" in decision.available_types
+        assert "bar_chart" in decision.available_types
+
+    def test_requested_vertical_bar_is_respected_for_long_categories(self):
+        data = [
+            {"account": f"หมวดค่าใช้จ่ายชื่อยาวมาก {i}", "amount": i * 100}
+            for i in range(13)
+        ]
+
+        decision = decide_chart_structure(
+            data,
+            category_column="account",
+            measure_column="amount",
+            visualization="horizontal_bar",
+            requested_type="bar_chart",
+        )
+
+        assert decision.visualization == "bar_chart"
+        assert decision.requested_type_accepted is True
+        assert decision.requested_type_vetoed is False
+        assert not decision.warning or "แนวนอน" not in decision.warning
+
+    def test_non_temporal_matrix_veto_does_not_report_request_as_accepted(self):
+        data = [
+            {"source": f"S{i}", "target": f"T{j}", "amount": i + j}
+            for i in range(4)
+            for j in range(4)
+        ]
+
+        decision = decide_chart_structure(
+            data,
+            category_column="source",
+            series_column="target",
+            measure_column="amount",
+            visualization="bar_chart",
+            requested_type="stacked_bar",
+        )
+
+        assert decision.visualization == "heatmap"
+        assert decision.requested_type_accepted is False
+        assert decision.requested_type_vetoed is True
+        assert decision.requested_type_effective is None
+        assert "เมทริกซ์" in decision.warning
+
+    def test_pydantic_chart_spec_schema_matches_shared_contract(self):
+        _, shared = self._schema()
+        generated = ChartSpec.model_json_schema()
+
+        assert generated["type"] == shared["type"] == "object"
+        assert generated["additionalProperties"] is False
+        assert shared["additionalProperties"] is False
+        assert generated["required"] == shared["required"]
+        assert set(generated["properties"]) == set(shared["properties"])
+        assert generated["properties"]["version"]["const"] == shared["properties"]["version"]["const"] == 1
+
+        for definition in ("ChartEncoding", "ChartSeries"):
+            generated_def = generated["$defs"][definition]
+            shared_def = shared["$defs"][definition]
+            assert generated_def["required"] == shared_def["required"]
+            assert set(generated_def["properties"]) == set(shared_def["properties"])
+
+        assert (
+            generated["$defs"]["ChartEncoding"]["properties"]["kind"]["enum"]
+            == shared["$defs"]["ChartEncoding"]["properties"]["kind"]["enum"]
+        )
+        assert (
+            generated["$defs"]["ChartSeries"]["properties"]["top_n"]["anyOf"][0]["minimum"]
+            == shared["$defs"]["ChartSeries"]["properties"]["top_n"]["anyOf"][0]["minimum"]
+            == 1
+        )

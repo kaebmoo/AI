@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nt-ai-assistant.local/schemas/chart_spec.schema.json",
+  "title": "ChartSpec",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "chart_type", "x", "y"],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "chart_type": {
+      "type": "string",
+      "minLength": 1
+    },
+    "title": {
+      "type": ["string", "null"]
+    },
+    "x": {
+      "$ref": "#/$defs/ChartEncoding"
+    },
+    "y": {
+      "$ref": "#/$defs/ChartEncoding"
+    },
+    "color": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ChartEncoding"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "series": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ChartSeries"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "missing": {
+      "enum": ["blank", "zero", "omit"]
+    }
+  },
+  "$defs": {
+    "ChartEncoding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "kind"],
+      "properties": {
+        "field": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": ["temporal", "nominal", "ordinal", "quantitative"]
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sort": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scale": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ChartSeries": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field"],
+      "properties": {
+        "field": {
+          "type": "string",
+          "minLength": 1
+        },
+        "top_n": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "other_label": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

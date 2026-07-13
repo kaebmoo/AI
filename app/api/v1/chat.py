@@ -21,6 +21,9 @@ from app.services.query_engine import QueryEngine, QueryEngineResult, detect_con
 from app.services.intent_classifier import classify_intent
 from app.providers.chart_postprocessor import enrich_chart_config, resolve_max_series_warning
 from app.models.chat_session import ChatSessionData
+from app.models.feedback_models import ChartFeedbackEvent
+from app.services.chart import decide_chart_structure
+from app.services.chart.profiler import DEFAULT_MAX_SERIES
 from app.config import settings
 from app.core.time_utils import utcnow
 
@@ -378,7 +381,78 @@ def _get_session_data(db: Session, conversation_id: str) -> dict:
     }
 
 
-def _handle_chart_only(db: Session, conversation_id: str, question: str, intent: dict, admin_config=None) -> dict:
+def _log_chart_feedback_event(
+    db: Session,
+    conversation_id: str,
+    user_id: int | None,
+    question: str,
+    intent: dict,
+    prev_config: dict,
+    enriched: dict,
+    data: list,
+) -> None:
+    """Persist chart-switch decision facts for later feedback analysis."""
+    try:
+        chart_config = enriched.get("chart_config") or {}
+        max_series = chart_config.get("max_series")
+        decision = decide_chart_structure(
+            data=data,
+            category_column=prev_config.get("category_column") or chart_config.get("category_column"),
+            series_column=prev_config.get("series_column") or chart_config.get("series_column"),
+            measure_column=prev_config.get("measure_column") or chart_config.get("measure_column"),
+            visualization=prev_config.get("visualization") or enriched.get("visualization"),
+            max_series=int(max_series) if max_series else DEFAULT_MAX_SERIES,
+            requested_type=intent.get("requested_type"),
+            title=prev_config.get("title", ""),
+        )
+        profile = decision.profile
+        profile_payload = {
+            "row_count": len(data),
+            "columns": profile.columns,
+            "column_roles": profile.column_roles,
+            "cardinality": profile.cardinality,
+            "temporal_columns": profile.temporal_columns,
+            "categorical_columns": profile.categorical_columns,
+            "quantitative_columns": profile.quantitative_columns,
+            "negative_columns": profile.negative_columns,
+            "measure_column": profile.measure_column,
+            "matrix_shape": profile.matrix_shape,
+        }
+        decision_payload = {
+            "category_column": decision.category_column,
+            "series_column": decision.series_column,
+            "measure_column": decision.measure_column,
+            "visualization": decision.visualization,
+            "available_types": decision.available_types,
+            "warning": decision.warning,
+            "warnings": decision.warnings,
+            "chart_spec": decision.chart_spec,
+        }
+        db.add(ChartFeedbackEvent(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            question=question,
+            requested_type=intent.get("requested_type"),
+            resolved_type=decision.visualization,
+            requested_type_accepted=decision.requested_type_accepted,
+            requested_type_vetoed=decision.requested_type_vetoed,
+            profile_json=json.dumps(profile_payload, ensure_ascii=False, default=str),
+            decision_json=json.dumps(decision_payload, ensure_ascii=False, default=str),
+        ))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.warning(f"Failed to log chart feedback event (non-fatal): {e}")
+
+
+def _handle_chart_only(
+    db: Session,
+    conversation_id: str,
+    question: str,
+    intent: dict,
+    admin_config=None,
+    user_id: int | None = None,
+) -> dict:
     """Handle chart-only intent — return enriched chart config with existing session data."""
     session = _get_session_data(db, conversation_id)
 
@@ -396,7 +470,10 @@ def _handle_chart_only(db: Session, conversation_id: str, question: str, intent:
 
     prev_config = session.get("chart_config") or {}
     mock_result = {
-        "visualization": intent["requested_type"] or prev_config.get("visualization"),
+        # Keep the previous/provider visualization as a hint. The user's
+        # toolbar choice is passed separately so the shared engine can
+        # validate it against the full result shape and explain any veto.
+        "visualization": prev_config.get("visualization"),
         "chart_config": {
             "category_column": prev_config.get("category_column"),
             "measure_column": prev_config.get("measure_column"),
@@ -408,6 +485,17 @@ def _handle_chart_only(db: Session, conversation_id: str, question: str, intent:
         data=session["data"],
         chart_title=prev_config.get("title", ""),
         max_series=admin_config.get_chart_max_series() if admin_config is not None else None,
+        requested_type=intent.get("requested_type"),
+    )
+    _log_chart_feedback_event(
+        db=db,
+        conversation_id=conversation_id,
+        user_id=user_id,
+        question=question,
+        intent=intent,
+        prev_config=prev_config,
+        enriched=enriched,
+        data=session["data"],
     )
 
     return {
@@ -449,7 +537,9 @@ async def chat(
     # 2. Chart-only intent detection
     intent = classify_intent(request.question)
     if intent["is_chart_request"] and intent["confidence"] == "high":
-        return _handle_chart_only(db, conversation_id, request.question, intent, admin_config)
+        return _handle_chart_only(
+            db, conversation_id, request.question, intent, admin_config, current_user.id
+        )
 
     # 3. Get history
     history, previous_chats = _get_conversation_history(db, conversation_id, current_user.id)
@@ -545,7 +635,9 @@ async def chat_stream(
         try:
             # Chart-only: skip QueryEngine, return session data directly
             if intent["is_chart_request"] and intent["confidence"] == "high":
-                chart_response = _handle_chart_only(db, conversation_id, request.question, intent, admin_config)
+                chart_response = _handle_chart_only(
+                    db, conversation_id, request.question, intent, admin_config, current_user.id
+                )
                 yield _sse_format("answer", chart_response)
                 yield _sse_format("done", {"id": None, "conversation_id": conversation_id})
                 return

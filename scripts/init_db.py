@@ -11,7 +11,7 @@ from app.models.user import User  # noqa: F401
 from app.models.session import UserSession  # noqa: F401
 from app.models.otp import OTPRequest  # noqa: F401
 from app.models.chat import ChatHistory  # noqa: F401
-from app.models.feedback_models import GoldenExample, UserFeedback  # noqa: F401
+from app.models.feedback_models import ChartFeedbackEvent, GoldenExample, UserFeedback  # noqa: F401
 from app.models.report_export import ReportExport  # noqa: F401
 # Config models (registered on ConfigBase)
 from app.models.schema_models import SchemaMetadata, SchemaSemanticMapping, SchemaBusinessRule, VannaDocumentation  # noqa: F401

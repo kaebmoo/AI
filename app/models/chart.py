@@ -5,7 +5,7 @@ ChartConfigV2 extends the existing ChartConfig in schemas/chat.py
 by adding available_types, column_roles, title, sort_by, warning.
 """
 from typing import Literal, Optional, List
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # Visualization types — superset of backend prompt values
@@ -54,29 +54,32 @@ VISUALIZATION_TO_ECHARTS: dict[str, Optional[str]] = {
 
 class ChartEncoding(BaseModel):
     """Renderer-neutral field encoding used by the chart contract."""
-    field: str
+    field: str = Field(min_length=1)
     kind: Literal['temporal', 'nominal', 'ordinal', 'quantitative']
     unit: Optional[str] = None
     sort: Optional[str] = None
     scale: Optional[str] = None
+    model_config = ConfigDict(extra='forbid')
 
 
 class ChartSeries(BaseModel):
-    field: str
-    top_n: Optional[int] = None
+    field: str = Field(min_length=1)
+    top_n: Optional[int] = Field(default=None, ge=1)
     other_label: str = 'อื่นๆ'
+    model_config = ConfigDict(extra='forbid')
 
 
 class ChartSpec(BaseModel):
     """Small declarative chart spec; never contains renderer-specific options."""
-    version: int = 1
-    chart_type: str
+    version: Literal[1]
+    chart_type: str = Field(min_length=1)
     title: Optional[str] = None
     x: ChartEncoding
     y: ChartEncoding
     color: Optional[ChartEncoding] = None
     series: Optional[ChartSeries] = None
     missing: Literal['blank', 'zero', 'omit'] = 'omit'
+    model_config = ConfigDict(extra='forbid')
 
 
 class ColumnRole(BaseModel):

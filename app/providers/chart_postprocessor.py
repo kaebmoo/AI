@@ -11,180 +11,22 @@ import re
 import logging
 from typing import Dict, List, Any, Optional
 
+from app.services.chart.engine import (
+    TEMPORAL_TYPES,
+    decide_chart_structure,
+)
+from app.services.chart.engine import _suggest_available_types  # noqa: F401 — compatibility re-export
+from app.services.chart.engine import resolve_max_series_warning  # noqa: F401 — compatibility re-export
+from app.services.chart.profiler import DEFAULT_MAX_SERIES, _is_time_column
+from app.services.chart.profiler import profile_chart_data  # noqa: F401 — compatibility re-export
+
 logger = logging.getLogger(__name__)
-
-# Time-related column name keywords (English + Thai)
-TIME_KEYS = [
-    'month', 'year', 'date', 'day', 'time', 'quarter', 'week',
-    'hour', 'minute', 'second',
-    'เดือน', 'ปี', 'วันที่', 'ไตรมาส', 'งวด', 'เวลา',
-]
-
-# visualization types that require a time-dimension category axis (C1)
-TEMPORAL_TYPES = {"line_chart", "multi_line", "area", "stacked_area"}
 
 _BAHT_RANGE_RE = re.compile(
     r"(?P<start>-?\d[\d,]*(?:\.\d+)?)\s*(?P<sep>-|–|—|ถึง)\s*"
     r"(?P<end>-?\d[\d,]*(?:\.\d+)?)\s*บาท"
 )
 _BAHT_VALUE_RE = re.compile(r"(?P<value>-?\d[\d,]*(?:\.\d+)?)\s*บาท")
-
-# Wave 4 — hardcoded fallback tier only. The real 3-tier value (admin_config DB
-# -> .env CHART_MAX_SERIES -> this) is resolved in AdminConfigService.get_chart_max_series()
-# and applied in app/api/v1/chat.py — this module has no DB access by design (pure,
-# wrapped in try/except everywhere), so it can only ever see this hardcoded default
-# unless a caller explicitly passes max_series=.
-DEFAULT_MAX_SERIES = 5
-
-
-def _is_time_column(col: str, time_columns: Optional[List[str]] = None) -> bool:
-    """True if `col` is a time-axis column.
-
-    Checks schema_metadata-derived `time_columns` (dimension_group == 'time_period')
-    AND the TIME_KEYS keyword heuristic — union, not either/or. A SQL alias
-    (e.g. `month AS "เดือน"`) won't exact-match schema_metadata's raw column
-    name, so the heuristic must still get a chance to catch it. A false
-    positive here only means "don't downgrade" (trust the LLM's chart type);
-    a false negative would visibly corrupt a legitimately time-based chart.
-    """
-    col_lower = str(col).lower()
-    if time_columns and col_lower in [c.lower() for c in time_columns]:
-        return True
-    return any(t in col_lower for t in TIME_KEYS)
-
-
-def _non_null_values(data: List[Dict], column: str) -> List[str]:
-    """Return stable, stringified values for shape detection."""
-    return [str(row.get(column)) for row in data if row.get(column) is not None]
-
-
-def _has_negative_measure(data: List[Dict], measure_col: str) -> bool:
-    for row in data:
-        value = row.get(measure_col)
-        try:
-            if float(str(value).replace(',', '')) < 0:
-                return True
-        except (TypeError, ValueError):
-            continue
-    return False
-
-
-def _infer_matrix_shape(
-    data: List[Dict],
-    measure_col: str,
-    time_columns: Optional[List[str]] = None,
-) -> Optional[Dict[str, Any]]:
-    """Infer a dense two-dimensional result from the returned rows.
-
-    The AI may omit ``series_column`` or put the time dimension on the wrong
-    axis. The result shape is more reliable than that recommendation, so this
-    classifier is the single source of truth for matrix-like data. It returns
-    row/column dimensions plus a deterministic chart family recommendation.
-    """
-    if not data or not measure_col:
-        return None
-
-    keys = list(data[0].keys())
-    time_candidates = [
-        key for key in keys
-        if key != measure_col and _is_time_column(key, time_columns)
-    ]
-    dimension_candidates = [
-        key for key in keys
-        if key != measure_col and key not in time_candidates
-    ]
-
-    def profile(column: str) -> tuple[int, bool]:
-        values = _non_null_values(data, column)
-        numeric = 0
-        for value in values:
-            try:
-                float(value.replace(',', ''))
-                numeric += 1
-            except (TypeError, ValueError):
-                pass
-        return len(set(values)), bool(values) and numeric / len(values) < 0.8
-
-    def pair_coverage(left: str, right: str) -> tuple[int, int, float]:
-        left_values = set(_non_null_values(data, left))
-        right_values = set(_non_null_values(data, right))
-        pairs = {
-            (str(row.get(left)), str(row.get(right)))
-            for row in data
-            if row.get(left) is not None and row.get(right) is not None
-        }
-        expected = len(left_values) * len(right_values)
-        return len(left_values), len(right_values), len(pairs) / expected if expected else 0.0
-
-    has_negative = _has_negative_measure(data, measure_col)
-
-    # Prefer a time × categorical matrix when the result has enough periods
-    # and categories to make a single-series chart misleading.
-    for time_col in time_candidates:
-        time_count, _ = profile(time_col)
-        if time_count < 4:
-            continue
-        for dimension_col in dimension_candidates:
-            dimension_count, is_categorical = profile(dimension_col)
-            if not is_categorical or dimension_count < 3:
-                continue
-            _, _, coverage = pair_coverage(time_col, dimension_col)
-            if len(data) >= 12 and coverage >= 0.5:
-                if time_count >= 6 and dimension_count >= 8:
-                    # Keep the matrix readable. Larger shapes fall back to a
-                    # Top-N-capable bar family rather than rendering hundreds
-                    # of unreadable cells.
-                    recommendation = (
-                        'heatmap'
-                        if time_count <= 24 and dimension_count <= 40
-                        else ('grouped_bar' if has_negative else 'stacked_bar')
-                    )
-                elif time_count >= 6 and dimension_count <= 5:
-                    recommendation = 'multi_line'
-                else:
-                    recommendation = (
-                        'stacked_bar'
-                        if dimension_count > DEFAULT_MAX_SERIES and not has_negative
-                        else 'grouped_bar'
-                    )
-                return {
-                    'kind': 'time_matrix',
-                    'time_column': time_col,
-                    'dimension_column': dimension_col,
-                    'time_count': time_count,
-                    'dimension_count': dimension_count,
-                    'coverage': coverage,
-                    'has_negative': has_negative,
-                    'recommendation': recommendation,
-                }
-
-    # A non-temporal matrix is also a heatmap candidate (e.g. source × target).
-    # Keep the threshold conservative so an ordinary category + measure result
-    # remains a bar chart.
-    categorical = [
-        (column, profile(column)[0])
-        for column in dimension_candidates
-        if profile(column)[1] and profile(column)[0] >= 3
-    ]
-    for index, (row_col, row_count) in enumerate(categorical):
-        for col_col, col_count in categorical[index + 1:]:
-            _, _, coverage = pair_coverage(row_col, col_col)
-            if (
-                row_count >= 3 and col_count >= 3
-                and row_count <= 40 and col_count <= 40
-                and len(data) >= 12 and coverage >= 0.4
-            ):
-                return {
-                    'kind': 'matrix',
-                    'row_column': row_col,
-                    'column_column': col_col,
-                    'row_count': row_count,
-                    'column_count': col_count,
-                    'coverage': coverage,
-                    'recommendation': 'heatmap',
-                }
-    return None
-
 
 def _format_million_baht(raw_value: str) -> Optional[str]:
     """Compact raw-baht literals in narrative text; leave sub-million values alone."""
@@ -585,150 +427,17 @@ def auto_detect_chart_config(data: List[Dict], parsed_result: Dict = None,
     if not data or len(data) == 0:
         return parsed_result
 
-    keys = list(data[0].keys())
-
-    # Build metadata-driven lookups if available
-    meta_measure_cols = set()
-    meta_time_cols = set()
-    meta_dimension_cols = set()
-    if schema_metadata:
-        for m in schema_metadata:
-            col = m.get('column_name', '')
-            if m.get('is_summable'):
-                meta_measure_cols.add(col.lower())
-            dg = m.get('dimension_group', '')
-            if dg == 'time_period':
-                meta_time_cols.add(col.lower())
-            if m.get('is_groupable'):
-                meta_dimension_cols.add(col.lower())
-
-    # Fallback patterns (used when schema_metadata not available)
-    _measure_patterns = [
-        'revenue', 'value', 'amount', 'total', 'sum', 'count', 'baht',
-        'รายได้', 'จำนวน', 'ยอด',
-    ]
-    _dimension_patterns = [
-        'year', 'month', 'date', 'day', 'week', 'quarter',
-        'ปี', 'เดือน', 'วันที่', 'id',
-    ]
-    _time_patterns = ['month', 'year', 'date', 'เดือน', 'ปี', 'วันที่']
-
-    # Find measure column
-    measure_col = None
-    numeric_cols = []
-
-    for key in keys:
-        sample_val = data[0][key]
-        is_numeric = isinstance(sample_val, (int, float)) or (
-            isinstance(sample_val, str)
-            and sample_val.replace(',', '').replace('.', '').replace('-', '').isdigit()
-        )
-        if is_numeric:
-            numeric_cols.append(key)
-
-    # Priority 0 (metadata): Column marked is_summable
-    if meta_measure_cols:
-        for col in numeric_cols:
-            if col.lower() in meta_measure_cols:
-                measure_col = col
-                break
-
-    # Priority 1: Column with measure-like name
-    if not measure_col:
-        for col in numeric_cols:
-            if any(p in col.lower() for p in _measure_patterns):
-                measure_col = col
-                break
-
-    # Priority 2: Numeric column that's NOT a dimension
-    if not measure_col:
-        for col in reversed(numeric_cols):
-            if not any(p in col.lower() for p in _dimension_patterns):
-                measure_col = col
-                break
-
-    # Priority 3: Last numeric column
-    if not measure_col and numeric_cols:
-        measure_col = numeric_cols[-1]
-
-    # Find category column
-    category_col = None
-    series_col = None
-    potential_cats = [k for k in keys if k != measure_col]
-
-    # Use metadata time columns if available
-    if meta_time_cols:
-        time_cats = [k for k in potential_cats if k.lower() in meta_time_cols]
-        # Prefer month over year
-        month_cols = [k for k in time_cats if 'month' in k.lower()]
-        if month_cols:
-            category_col = month_cols[0]
-        elif time_cats:
-            category_col = time_cats[0]
-    else:
-        has_month = any('month' in k.lower() for k in potential_cats)
-        has_year = any('year' in k.lower() for k in potential_cats)
-        if has_month:
-            category_col = next((k for k in potential_cats if 'month' in k.lower()), potential_cats[0] if potential_cats else None)
-        elif has_year:
-            category_col = next((k for k in potential_cats if 'year' in k.lower()), potential_cats[0] if potential_cats else None)
-
-    if not category_col and potential_cats:
-        category_col = potential_cats[0]
-
-    # Infer Series Column
-    if len(potential_cats) >= 2:
-        remaining_cols = [k for k in potential_cats if k != category_col]
-        string_cols = []
-        for col in remaining_cols:
-            sample_val = data[0].get(col)
-            if isinstance(sample_val, str):
-                unique_vals = set(str(row.get(col, '')) for row in data[:50])
-                if 2 <= len(unique_vals) <= 30:
-                    string_cols.append(col)
-
-        if string_cols:
-            series_col = string_cols[0]
-        else:
-            non_year_cols = [k for k in remaining_cols if 'year' not in k.lower()]
-            series_col = non_year_cols[0] if non_year_cols else (remaining_cols[0] if remaining_cols else None)
-
-    # Determine visualization type
-    if meta_time_cols:
-        is_time_category = category_col and category_col.lower() in meta_time_cols
-    else:
-        is_time_category = category_col and any(
-            pattern in category_col.lower() for pattern in _time_patterns
-        )
-
-    # Check for time on series side too
-    if meta_time_cols:
-        is_time_series = series_col and series_col.lower() in meta_time_cols
-    else:
-        is_time_series = series_col and any(
-            pattern in series_col.lower() for pattern in _time_patterns
-        )
-
-    # Matrix/heatmap detection: 2 non-time categorical dims + 1 measure, many-to-many
-    is_matrix = False
-    if (series_col and category_col and measure_col
-            and not is_time_category and not is_time_series):
-        unique_cat = len(set(str(row.get(category_col, '')) for row in data))
-        unique_ser = len(set(str(row.get(series_col, '')) for row in data))
-        if unique_cat >= 3 and unique_ser >= 3:
-            expected = unique_cat * unique_ser
-            if len(data) >= expected * 0.4:
-                is_matrix = True
-
-    viz_type = "bar_chart"
-    if is_matrix:
-        viz_type = "heatmap"
-    elif series_col and is_time_category:
-        viz_type = "line_chart"
-    elif series_col:
-        viz_type = "stacked_bar"
-    elif is_time_category and len(data) > 10:
-        viz_type = "line_chart"
+    viz_type = parsed_result.get("visualization") or "bar_chart"
+    decision = decide_chart_structure(
+        data=data,
+        measure_column=None,
+        visualization=viz_type,
+        schema_metadata=schema_metadata,
+    )
+    category_col = decision.category_column
+    series_col = decision.series_column
+    measure_col = decision.measure_column
+    viz_type = decision.visualization
 
     logger.info(f"Auto-detected: viz={viz_type}, cat={category_col}, measure={measure_col}, series={series_col}")
 
@@ -853,122 +562,13 @@ def _build_display_label(col: str, schema_metadata: Optional[List[Dict]] = None)
     return col
 
 
-def _build_chart_spec(
-    viz: str,
-    category_col: str,
-    series_col: str,
-    measure_col: str,
-    time_columns: Optional[List[str]],
-    max_series: int,
-    has_negative: bool,
-    title: str = "",
-) -> Dict[str, Any]:
-    """Create the renderer-neutral contract consumed by every frontend chart."""
-    def dimension(column: str, sort: Optional[str] = None) -> Dict[str, Any]:
-        return {
-            "field": column,
-            "kind": "temporal" if _is_time_column(column, time_columns) else "nominal",
-            **({"sort": sort} if sort else {}),
-        }
-
-    value = {
-        "field": measure_col,
-        "kind": "quantitative",
-        "unit": "THB" if _detect_col_format(measure_col) == "currency_thb" else "number",
-        "scale": "diverging_zero" if has_negative else "auto",
-    }
-    if viz == "heatmap":
-        return {
-            "version": 1,
-            "chart_type": viz,
-            "title": title or None,
-            "x": dimension(series_col, "chronological" if _is_time_column(series_col, time_columns) else "original"),
-            "y": dimension(category_col, "value_desc"),
-            "color": value,
-            "missing": "blank",
-        }
-
-    return {
-        "version": 1,
-        "chart_type": viz,
-        "title": title or None,
-        "x": dimension(category_col, "chronological" if _is_time_column(category_col, time_columns) else "value_desc"),
-        "y": value,
-        "series": (
-            {"field": series_col, "top_n": max(1, max_series - 1), "other_label": "อื่นๆ"}
-            if series_col else None
-        ),
-        "missing": "omit",
-    }
-
-
-def _suggest_available_types(
-    n_categories: int,
-    has_series: bool,
-    has_time_category: bool,
-    is_matrix: bool = False,
-) -> list:
-    """Rule-based available_types suggestion."""
-    if is_matrix:
-        return ['heatmap', 'grouped_bar', 'stacked_bar', 'table']
-    if not has_series:
-        if n_categories <= 8:
-            types = ['bar_chart', 'horizontal_bar', 'line_chart', 'pie_chart', 'donut_chart']
-        else:
-            types = ['bar_chart', 'horizontal_bar', 'line_chart']
-    else:
-        if has_time_category:
-            types = ['line_chart', 'multi_line', 'grouped_bar', 'stacked_bar', 'area']
-        else:
-            types = ['grouped_bar', 'stacked_bar', 'stacked_bar_100', 'bar_chart']
-
-    # C2: category axis isn't time — line/area family isn't valid, drop it
-    if not has_time_category:
-        types = [t for t in types if t not in TEMPORAL_TYPES]
-    return types
-
-
-def resolve_max_series_warning(
-    data: List[Dict],
-    cat_col: str,
-    ser_col: str,
-    viz: str,
-    max_series: int,
-) -> Optional[str]:
-    """Top-N + 'อื่นๆ' threshold warning (Wave 4) — shared between
-    enrich_chart_config (hardcoded-default tier) and app/api/v1/chat.py's
-    response formatting (real 3-tier-resolved value), so the two never drift
-    out of sync on wording or the count they check.
-
-    pie/donut bucket by distinct category_column values (each slice = one
-    category); other multi-series chart types bucket by distinct
-    series_column values. Single-series bar/line charts have nothing to
-    bucket — always None for those.
-    """
-    # A heatmap is a matrix, not a series chart. Time/category axes must stay
-    # complete so the user can see missing cells and seasonality; the renderer
-    # does not apply the Top-N series bucketing used by bar/line charts.
-    if viz == 'heatmap':
-        return None
-    if viz in ('pie_chart', 'donut_chart'):
-        bucket_count = len(set(str(row.get(cat_col, '')) for row in data)) if cat_col and data else 0
-    elif ser_col:
-        bucket_count = len(set(str(row.get(ser_col, '')) for row in data)) if data else 0
-    else:
-        return None
-
-    if bucket_count <= max_series:
-        return None
-    top_n = max_series - 1
-    return f"แสดง Top-{top_n} จาก {bucket_count} กลุ่ม — กลุ่มที่เหลือรวมเป็น 'อื่นๆ' (ดูข้อมูลเต็มในตาราง)"
-
-
 def enrich_chart_config(
     parsed_result: Dict,
     data: List[Dict],
     schema_metadata: Optional[List[Dict]] = None,
     chart_title: str = "",
     max_series: Optional[int] = None,
+    requested_type: Optional[str] = None,
 ) -> Dict:
     """
     Step 4 in post-processing pipeline — AFTER enforce_dimension_family_rule().
@@ -994,76 +594,39 @@ def enrich_chart_config(
         if not config:
             return parsed_result
 
-        viz = parsed_result.get("visualization", "")
-        cat_col = config.get("category_column") or ""
-        msr_col = config.get("measure_column") or ""
-        ser_col = config.get("series_column") or ""
-
-        # --- Time axis detection: schema_metadata (dimension_group == 'time_period') first, else TIME_KEYS ---
-        time_columns = [m['column_name'] for m in schema_metadata
-                         if m.get('dimension_group') == 'time_period'] if schema_metadata else None
         resolved_max_series = max_series if max_series is not None else DEFAULT_MAX_SERIES
+        decision = decide_chart_structure(
+            data=data,
+            category_column=config.get("category_column") or None,
+            series_column=config.get("series_column") or None,
+            measure_column=config.get("measure_column") or None,
+            visualization=parsed_result.get("visualization", ""),
+            schema_metadata=schema_metadata,
+            max_series=resolved_max_series,
+            requested_type=requested_type,
+            title=chart_title,
+        )
+        matrix = decision.matrix
+        cat_col = decision.category_column or ""
+        msr_col = decision.measure_column or ""
+        ser_col = decision.series_column or ""
+        viz = decision.visualization
+        has_time_cat = decision.has_time_category
 
-        # The returned data shape is authoritative. Repair both missing and
-        # swapped AI mappings here, after provider-specific parsing and before
-        # the response is persisted. This is the durable guard for any future
-        # provider/model, not a prompt-only preference.
-        matrix = _infer_matrix_shape(data, msr_col, time_columns)
+        if cat_col:
+            config['category_column'] = cat_col
+        if ser_col:
+            config['series_column'] = ser_col
+        if msr_col:
+            config['measure_column'] = msr_col
+        parsed_result['visualization'] = viz
+        if decision.warning:
+            config['warning'] = decision.warning
         if matrix:
-            if matrix['kind'] == 'time_matrix':
-                time_col = matrix['time_column']
-                dimension_col = matrix['dimension_column']
-                recommendation = matrix['recommendation']
-                if recommendation == 'heatmap':
-                    # buildHeatmap treats category as Y/rows and series as X/columns.
-                    cat_col, ser_col, viz = dimension_col, time_col, 'heatmap'
-                else:
-                    cat_col, ser_col, viz = time_col, dimension_col, recommendation
-                config['category_column'] = cat_col
-                config['series_column'] = ser_col
-                parsed_result['visualization'] = viz
-                if matrix.get('has_negative') and viz == 'grouped_bar':
-                    config['warning'] = "พบค่าติดลบ จึงปรับจากกราฟสะสมเป็นกราฟเปรียบเทียบ"
-                logger.info(
-                    "Data-shape chart decision: kind=%s, rows=%s, columns=%s, viz=%s, coverage=%.2f",
-                    matrix['kind'], cat_col, ser_col, viz, matrix['coverage'],
-                )
-            else:
-                cat_col = matrix['row_column']
-                ser_col = matrix['column_column']
-                viz = 'heatmap'
-                config['category_column'] = cat_col
-                config['series_column'] = ser_col
-                parsed_result['visualization'] = viz
-                logger.info(
-                    "Data-shape chart decision: kind=%s, rows=%s, columns=%s, viz=%s, coverage=%.2f",
-                    matrix['kind'], cat_col, ser_col, viz, matrix['coverage'],
-                )
-
-        has_time_cat = bool(cat_col) and _is_time_column(cat_col, time_columns)
-
-        # Repair an incomplete AI config for category × time × measure data.
-        # Without the secondary dimension, each row is drawn as one continuous
-        # line and the time labels repeat (Q1, Q1, ... Q2, Q2, ...).
-        if not matrix and has_time_cat and not ser_col and data:
-            other_dimensions = []
-            for col in data[0].keys():
-                if col in (cat_col, msr_col) or _is_time_column(col, time_columns):
-                    continue
-                values = {str(row.get(col, '')) for row in data if row.get(col) is not None}
-                sample = next((row.get(col) for row in data if row.get(col) is not None), None)
-                if isinstance(sample, str) and 2 <= len(values) <= 30:
-                    other_dimensions.append((col, len(values)))
-
-            if len(other_dimensions) == 1:
-                ser_col, series_count = other_dimensions[0]
-                config["series_column"] = ser_col
-                viz = "stacked_bar" if series_count > resolved_max_series else "grouped_bar"
-                parsed_result["visualization"] = viz
-                logger.info(
-                    "Repaired missing series column: category='%s', series='%s', viz='%s'",
-                    cat_col, ser_col, viz,
-                )
+            logger.info(
+                "Data-shape chart decision: kind=%s, rows=%s, columns=%s, viz=%s, coverage=%.2f",
+                matrix['kind'], cat_col, ser_col, viz, matrix['coverage'],
+            )
 
         # --- Column roles ---
         roles = []
@@ -1083,31 +646,7 @@ def enrich_chart_config(
                 "format": _detect_col_format(msr_col), "axis": "left",
             })
 
-        # --- Stats for suggestions ---
-        n_categories = len(set(str(row.get(cat_col, '')) for row in data)) if cat_col and data else 1
         has_series = bool(ser_col)
-        series_count = len(set(str(row.get(ser_col, '')) for row in data)) if has_series and data else 0
-        is_dense_time_series = has_time_cat and series_count > resolved_max_series
-        has_negative = _has_negative_measure(data, msr_col)
-
-        # Dense category × time data must not fall back to a line-family chart.
-        # Keep this rule in the API contract so older frontend bundles that pick
-        # the first available type still receive stacked_bar first.
-        if is_dense_time_series and viz in TEMPORAL_TYPES:
-            viz = "stacked_bar"
-            parsed_result["visualization"] = viz
-
-        # Stacking and pie slices imply a non-negative additive whole. Signed
-        # expense/adjustment data violates that assumption, so use a comparison
-        # chart instead of producing a visually misleading composition.
-        if has_negative and viz in {"stacked_bar", "stacked_area"}:
-            viz = "grouped_bar" if ser_col else "horizontal_bar"
-            parsed_result["visualization"] = viz
-            config["warning"] = "พบค่าติดลบ จึงปรับจากกราฟสะสมเป็นกราฟเปรียบเทียบ"
-        elif has_negative and viz in {"pie_chart", "donut_chart"}:
-            viz = "horizontal_bar"
-            parsed_result["visualization"] = viz
-            config["warning"] = "พบค่าติดลบ จึงปรับจากกราฟวงกลมเป็นกราฟแท่งแนวนอน"
 
         # --- ECharts-ready type (after all config repairs) ---
         echarts_type = VISUALIZATION_TO_ECHARTS.get(viz)
@@ -1115,36 +654,26 @@ def enrich_chart_config(
             echarts_type = "multi_line"
 
         # --- Warnings ---
-        warning = config.get("warning")
+        warning = config.get("warning") or decision.warning
         if viz in ('pie_chart', 'donut_chart') and has_series:
             warning = "Pie/Donut chart ไม่รองรับ series column — พิจารณาใช้ bar_chart แทน"
-        elif not warning:
-            warning = resolve_max_series_warning(data, cat_col, ser_col, viz, resolved_max_series)
 
         # --- Sort hint ---
         sort_by = 'category_asc' if has_time_cat else 'original'
 
         # --- Merge into chart_config (extend, don't replace) ---
         config["suggested_type"] = echarts_type
-        is_matrix = viz == 'heatmap'
-        config["available_types"] = (
-            ['stacked_bar', 'grouped_bar']
-            if is_dense_time_series
-            else _suggest_available_types(n_categories, has_series, has_time_cat, is_matrix=is_matrix)
-        )
+        config["available_types"] = decision.available_types
         config["column_roles"] = roles
         config["title"] = chart_title or ""
         config["sort_by"] = sort_by
         config["show_data_labels"] = len(data) <= 20 if data else False
         config["is_time_axis"] = has_time_cat
         config["max_series"] = resolved_max_series
-        if cat_col and msr_col and (viz != "heatmap" or ser_col):
-            spec = _build_chart_spec(
-                viz, cat_col, ser_col, msr_col, time_columns,
-                resolved_max_series, has_negative,
-                chart_title,
-            )
-            config["chart_spec"] = ChartSpec.model_validate(spec).model_dump(exclude_none=True)
+        if decision.chart_spec:
+            config["chart_spec"] = ChartSpec.model_validate(
+                decision.chart_spec
+            ).model_dump(exclude_none=True)
         if warning:
             config["warning"] = warning
 

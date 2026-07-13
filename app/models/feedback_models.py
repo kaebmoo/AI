@@ -51,6 +51,25 @@ class UserFeedback(Base):
     # Relations
     chat = relationship("ChatHistory", backref=backref("feedback", uselist=False))
 
+
+class ChartFeedbackEvent(Base):
+    __tablename__ = "chart_feedback_events"
+    __table_args__ = (
+        Index("ix_chart_feedback_events_conversation_created", "conversation_id", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(String, index=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    question = Column(Text, nullable=False)
+    requested_type = Column(String, nullable=True)
+    resolved_type = Column(String, nullable=True)
+    requested_type_accepted = Column(Boolean, default=False)
+    requested_type_vetoed = Column(Boolean, default=False)
+    profile_json = Column(Text, nullable=False)
+    decision_json = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=utcnow)
+
 class TrendingQuery(Base):
     __tablename__ = "trending_queries"
     

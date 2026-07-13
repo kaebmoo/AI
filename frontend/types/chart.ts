@@ -12,6 +12,8 @@ export interface ColumnRole {
     axis?: 'left' | 'right';
 }
 
+// Canonical renderer-neutral contract: ../../shared/chart_spec.schema.json
+// Keep this TypeScript shape aligned with that shared schema.
 export interface ChartEncoding {
     field: string;
     kind: 'temporal' | 'nominal' | 'ordinal' | 'quantitative';

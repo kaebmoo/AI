@@ -236,9 +236,13 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
     const seriesCount = chartConfig?.series_column
         ? new Set(data.map(row => String(row[chartConfig.series_column!] ?? ''))).size
         : 0;
+    const hasNegativeMeasure = chartConfig?.measure_column
+        ? data.some(row => safelyParseNumber(row[chartConfig.measure_column!]) < 0)
+        : false;
     const isDenseSeries = seriesCount > (chartConfig?.max_series ?? 5);
     const availableTypes = (chartConfig?.available_types ?? []).filter(type =>
-        !isDenseSeries || !['line_chart', 'multi_line', 'area', 'stacked_area'].includes(type)
+        (!isDenseSeries || !['line_chart', 'multi_line', 'area', 'stacked_area'].includes(type))
+        && (!hasNegativeMeasure || !['stacked_bar', 'stacked_bar_100', 'stacked_area', 'pie_chart', 'donut_chart'].includes(type))
     );
     const showToolbar = availableTypes.length > 1;
 
@@ -711,11 +715,12 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={containerStyle}>
                 <View style={{ flexDirection: 'row', gap: 6, paddingHorizontal: 2 }}>
                     {availableTypes.map((type) => {
-                        const isActive = type === activeType;
+                        const resolvedToolbarType = resolveChartType(type) || type;
+                        const isActive = resolvedToolbarType === activeType;
                         return (
                             <TouchableOpacity
                                 key={type}
-                                onPress={() => setActiveType(type)}
+                                onPress={() => setActiveType(resolvedToolbarType)}
                                 style={{
                                     paddingHorizontal: 12,
                                     paddingVertical: 6,
@@ -747,7 +752,7 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
         ? new Set(data.map(row => String(row[chartConfig.category_column!] ?? ''))).size
         : data.length;
     const echartsCardHeight = activeType === 'horizontal_bar'
-        ? Math.max(300, chartCategoryCount * 32 + 96)
+        ? Math.min(720, Math.max(300, chartCategoryCount * 28 + 120))
         : activeType === 'heatmap'
             ? Math.min(720, Math.max(420, chartCategoryCount * 28 + 150))
             : 400;
@@ -917,8 +922,9 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
     const formatYLabel = (val: string) => {
         const num = safelyParseNumber(val);
         const abs = Math.abs(num);
-        if (abs >= 1_000_000) return (num / 1_000_000).toLocaleString('th-TH', { maximumFractionDigits: 2 }) + ' ลบ.';
-        if (abs >= 1_000) return (num / 1_000).toLocaleString('th-TH', { maximumFractionDigits: 2 }) + 'k';
+        if (abs >= 1_000_000_000) return (num / 1_000_000_000).toLocaleString('th-TH', { maximumFractionDigits: 2 }) + ' พันล้านบาท';
+        if (abs >= 1_000_000) return (num / 1_000_000).toLocaleString('th-TH', { maximumFractionDigits: 2 }) + ' ล้านบาท';
+        if (abs >= 1_000) return (num / 1_000).toLocaleString('th-TH', { maximumFractionDigits: 2 }) + ' พันบาท';
         return num.toLocaleString('th-TH', { maximumFractionDigits: 2 });
     };
 
