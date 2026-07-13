@@ -202,6 +202,7 @@
 
 - มี conversation/history capability ใน component/service แล้ว
 - แต่จาก route structure ที่เห็นชัด ยังไม่ได้มีหน้าแยกหลายหน้าแบบเอกสารเก่าบางส่วนเคยอ้าง
+- (F12, 2026-07-13) เปิดประวัติแล้วเห็นกราฟ/ตาราง/pivot เหมือนตอนถามจริงแล้ว ไม่ใช่ text-only อีกต่อไป
 
 ### สถานะ
 
@@ -290,6 +291,7 @@ Phase นี้อยู่ในสภาพใช้งานจริงแ�
 - **DataFeed integration (F10 pilot revenue)** — ตาราง `feed_revenue_*` 255k แถว + integrity gates 4 ชั้น, context/docs/golden จาก contract อัตโนมัติ (3 scripts domain-agnostic ใน `scripts/datafeed/`)
 - **Agentic latency (F9 A-D)** — template answers, parallel metadata prep, intent state, escalation ladder — flags ทั้งหมด default OFF รอวัด (`plan/archive/RESULT_F9.md`); Phase E รออนุมัติ
 - **Dashboard embed (F11)** — API ฝั่ง AI พร้อม (`pinned_filters`/`source`), PB hook + viewer panel commit แล้วใน NT-Report (`c340d70`) — E2E manual ค้าง (FIX_NOTES)
+- **History render persistence (F12, 2026-07-13)** — `chat_history` เพิ่ม `render_meta`/`result_data` (nullable), persist หลัง `_format_response` เสมอ (เก็บค่า post-enrichment รวม `max_series`/warning ที่ mutate ทีหลัง ไม่ใช่ค่าดิบก่อน enrich) ทั้ง `/chat/` และ `/chat/stream`; `GET /conversations/{id}` คืน payload พร้อม fail-safe JSON parse สำหรับแถวเก่า/JSON เสีย; frontend `loadConversation` restore กราฟ/ตาราง/pivot ครบ; chart-only switch (`_handle_chart_only`) อัปเดต `render_meta` ของแถวล่าสุดด้วย (Phase C) — ดู `plan/PLAN_F12_HISTORY_RENDER_PERSISTENCE.md`, verified ผ่าน browser QA จริง (reload restore ครบ, legacy row text-only ไม่ error, สลับ conversation ไม่ปนข้อมูล)
 
 ### ยังขาด
 

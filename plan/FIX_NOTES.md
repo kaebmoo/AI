@@ -49,6 +49,14 @@
 - `vanna_documentation` มีจริง + `mark_brain_dirty()` มีจริง — ใช้เส้นทาง DB-driven docs ตามแผน (ไม่มีของค้าง migrate)
 - Acceptance "ถามผ่าน UI 5 คำถาม" ค้าง manual (ต้องเปิด frontend)
 
+## จาก F12 (2026-07-13)
+
+- **app.db size ก่อน/หลัง migration:** 8,368,128 bytes ทั้งก่อนและหลัง (`ALTER TABLE ADD COLUMN` เป็น schema-only change ใน SQLite ไม่ rewrite ทั้งไฟล์; แถวเก่าได้ `NULL` โดยไม่เพิ่มขนาด) — QA จริงที่เพิ่ม 2 conversation ทำให้ไฟล์โตชั่วคราว แต่ลบ test data ออกหมดแล้วก่อนบันทึกตัวเลขนี้ ดังนั้นตัวเลข "หลัง" นี้ยังไม่สะท้อน steady-state growth จริงจาก `result_data` — ต้องรอ production traffic สะสมสักพักก่อนตัดสินใจเรื่อง retention job
+- **Baseline pytest ในแผนคลาดเคลื่อน:** แผนระบุ baseline `363 passed, 3 skipped` (ค่าจาก PLAN_FIX_MASTER ตอน 2026-07-11) แต่ตอนเริ่มงานจริง (2026-07-13) วัดได้ `617 passed, 3 skipped` แล้ว (มี test เพิ่มจากงานอื่นระหว่างทาง) — ใช้ 617 เป็น baseline จริงแทน ไม่ใช่บั๊ก แค่เอกสารไม่ sync
+- **raw-SQL DDL fixture drift:** `tests/unit/test_auto_analyzer.py` และ `tests/unit/test_feedback_enhanced.py` สร้าง `chat_history` ด้วย SQL ดิบ (ไม่ใช่ `Base.metadata.create_all`) จึงไม่ sync กับ ORM model อัตโนมัติ — ต้องแก้ DDL เพิ่ม `render_meta`/`result_data` ด้วยมือ (in-scope เพราะจำเป็นให้ suite เขียว ไม่ใช่ scope creep) — **รูปแบบนี้จะเกิดซ้ำทุกครั้งที่มีคน migrate `chat_history` ในอนาคต** ควรพิจารณาเปลี่ยน fixture 2 ไฟล์นี้ไปใช้ `Base.metadata.create_all` แทนในรอบ cleanup ถัดไป เพื่อไม่ต้อง sync มือทุกครั้ง
+- **codex review พบ 2 bugs จริง หลังจบ Phase C** (แก้แล้วใน commit `7416fe3`, มี test คุม): (1) `_persist_chart_only_switch` เลือกแถวผิดถ้า turn ล่าสุดเป็น text-only/error (มี `render_meta` แต่ไม่มี `result_data`) — เพิ่มเงื่อนไข `result_data IS NOT NULL`; (2) `_safe_json` ป้องกันแค่ JSON syntax เสีย ไม่ป้องกัน shape ผิด (valid JSON แต่ไม่ใช่ dict/list ตามที่ควร) — เพิ่ม `expected_type` param
+- **Phase A.4 หมายเหตุ:** `msg["chart_config"]` (จาก `GET /conversations/{id}`) ไม่เท่ากับ `chat_response["chart_config"]` (จาก `POST /chat/`) แบบ 1:1 เพราะ `/chat/` re-serialize ผ่าน `ChatResponse`/`ChartConfig` pydantic model ซึ่งเติม key ที่ไม่มีค่าเป็น `null` เพิ่ม ส่วนที่ persist ไว้เป็น raw dict ก่อน pydantic (ตามที่แผนตั้งใจ — "ใช้ Dict[str, Any] ไม่ import ChartConfig schema") — ไม่ใช่บั๊ก แต่ควรรู้ไว้ถ้าจะเขียน consumer ที่ diff สอง response นี้ตรง ๆ ในอนาคต
+
 ## จาก F11 (2026-07-11)
 
 - **Phase A:** `pinned_filters` = รับ-log เท่านั้นใน v1 (inject เข้า intent pipeline เกิน 0.5 วันตามที่แผนให้ตัดสิน) — งานต่อ: inject เป็น filter จริงเมื่อ demand ชัด

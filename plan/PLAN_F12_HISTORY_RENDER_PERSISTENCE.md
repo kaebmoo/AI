@@ -299,9 +299,9 @@ restored.push({
 
 ## Definition of Done
 
-- [ ] Migration รันแล้วบน `app.db` (idempotent — รันซ้ำไม่พัง)
-- [ ] ถาม → ได้กราฟ/ตาราง/pivot → reload → เห็นเหมือนเดิม (รวม max_series/warning ที่ enrich แล้ว)
-- [ ] ประวัติเก่าก่อน migration เปิดได้ปกติแบบ text-only
-- [ ] `pytest tests/unit tests/integration` เขียวทั้งชุด (baseline: 363 passed, 3 skipped)
-- [ ] อัปเดต `plan/IMPLEMENTATION_STATUS.md` และ `plan/README.md` (เพิ่ม F12)
-- [ ] จด baseline ขนาด `app.db` ใน `plan/FIX_NOTES.md` เพื่อประกอบการตัดสินใจ retention job
+- [x] Migration รันแล้วบน `app.db` (idempotent — รันซ้ำไม่พัง, verified 2 ครั้ง)
+- [x] ถาม → ได้กราฟ/ตาราง/pivot → reload → เห็นเหมือนเดิม (รวม max_series/warning ที่ enrich แล้ว) — verified ผ่าน browser จริง (backend :8000 + frontend :8081)
+- [x] ประวัติเก่าก่อน migration เปิดได้ปกติแบบ text-only — verified ผ่าน browser จริง
+- [x] `pytest tests/unit tests/integration` เขียวทั้งชุด (baseline จริงตอนเริ่มงาน 2026-07-13 คือ 617 passed/3 skipped ไม่ใช่ 363 ตามแผน — ดู FIX_NOTES; จบงานทั้งหมด 635 passed, 3 skipped)
+- [x] อัปเดต `plan/IMPLEMENTATION_STATUS.md` และ `plan/README.md` (เพิ่ม F12)
+- [x] จด baseline ขนาด `app.db` ใน `plan/FIX_NOTES.md` เพื่อประกอบการตัดสินใจ retention job (8,368,128 bytes ก่อน = หลัง)
