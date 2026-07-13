@@ -383,8 +383,10 @@ function buildVerticalBar(
             type: 'category',
             data: categories,
             axisLabel: {
+                // width 130 (not 90): long Thai category names truncated to unreadable "ค่าสื่อ…";
+                // containLabel:true auto-reserves the extra rotated-label height, even on short charts
                 rotate: categories.length > 6 ? 45 : 0, fontSize: 11,
-                width: 90, overflow: 'truncate', ellipsis: '…', hideOverlap: true,
+                width: 130, overflow: 'truncate', ellipsis: '…', hideOverlap: true,
             },
         },
         yAxis: { type: 'value', name: config?.title ? '' : buildYAxisLabel(measureCol, config), nameLocation: 'middle', nameGap: 50, nameTextStyle: { fontSize: 12 }, axisLabel: { fontSize: 11, formatter: yAxisFormatter } },
@@ -450,14 +452,15 @@ function buildLine(
     return {
         title: config?.title ? { text: config.title, left: 'center', textStyle: { fontSize: 14, fontWeight: 600 } } : undefined, // B3: title heavier than body
         tooltip: { ...baseTooltip(), trigger: 'axis', formatter: tooltipFormatter },
-        grid: { left: '3%', right: '5%', bottom: '15%', top: config?.title ? '15%' : '10%', containLabel: true },
+        // right: headroom so the last point's data label ("105.28 ลบ.") isn't clipped at narrow widths (containLabel ignores series labels)
+        grid: { left: '3%', right: config?.show_data_labels ? 56 : '5%', bottom: '15%', top: config?.title ? '15%' : '10%', containLabel: true },
         xAxis: {
             type: 'category',
             data: categories,
             boundaryGap: false,
             axisLabel: {
                 rotate: categories.length > 6 ? 45 : 0, fontSize: 11,
-                width: 90, overflow: 'truncate', ellipsis: '…', hideOverlap: true,
+                width: 130, overflow: 'truncate', ellipsis: '…', hideOverlap: true,
             },
         },
         yAxis: { type: 'value', name: config?.title ? '' : buildYAxisLabel(measureCol, config), nameLocation: 'middle', nameGap: 50, nameTextStyle: { fontSize: 12 }, axisLabel: { fontSize: 11, formatter: yAxisFormatter } },
@@ -468,6 +471,8 @@ function buildLine(
             itemStyle: { color: NT_LINE_PALETTE[0] }, // B1: never Yellow on a 2px line
             areaStyle: undefined,
             label: config?.show_data_labels ? { show: true, position: 'top', fontSize: 10, formatter: dataLabelFormatter } : undefined,
+            // hideOverlap: drop colliding value labels instead of stacking them into an unreadable smear at narrow widths
+            labelLayout: config?.show_data_labels ? { hideOverlap: true } : undefined,
         }],
     };
 }
