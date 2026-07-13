@@ -1,4 +1,6 @@
 import api from './api';
+import type { ChartConfig } from '../types/chart';
+import type { DataWarning } from '../services/chat';
 
 export interface ConversationItem {
     id: string;
@@ -27,6 +29,15 @@ export interface ConversationMessage {
     is_bookmarked: boolean;
     feedback_rating: number | null;
     execution_time_ms: number;
+    // F12: render payload สำหรับ restore กราฟ/ตาราง/pivot ตอนเปิดประวัติ
+    data?: Record<string, any>[] | null;
+    visualization?: string | null;
+    chart_config?: ChartConfig | null;
+    display_hint?: 'hierarchical' | 'crosstab' | 'flat' | null;
+    hierarchy_columns?: string[] | null;
+    warnings?: DataWarning[] | null;
+    confidence?: any | null;
+    data_truncated?: boolean;
 }
 
 export interface ConversationDetail {

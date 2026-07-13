@@ -271,10 +271,10 @@ restored.push({
 
 ### Phase B — Checklist
 
-- [ ] `conversation.ts` interface อัปเดต
-- [ ] `loadConversation` map ครบทุก field
-- [ ] หมายเหตุ data_truncated (minimal)
-- [ ] QA manual ตาม B.3 ผ่านทั้ง 3 ข้อ
+- [x] `conversation.ts` interface อัปเดต
+- [x] `loadConversation` map ครบทุก field
+- [x] หมายเหตุ data_truncated (minimal — ต่อท้าย `content` ด้วย markdown italic แทนการเพิ่ม warning bubble แยก)
+- [x] QA manual ตาม B.3 ผ่านทั้ง 3 ข้อ (ทดสอบจริงผ่าน backend :8000 + frontend :8081 ที่รันอยู่แล้ว, login ผ่าน dev-OTP; ลบ test data ที่สร้างออกจาก app.db หลังทดสอบเสร็จ)
 
 ---
 

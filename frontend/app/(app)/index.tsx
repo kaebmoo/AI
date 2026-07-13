@@ -105,10 +105,20 @@ export default function ChatScreen() {
             id: m.id,
             chatId: m.id,
             role: 'assistant',
-            content: m.ai_response,
+            content: m.data_truncated
+              ? `${m.ai_response}\n\n_(แสดงข้อมูลบางส่วนจากประวัติ)_`
+              : m.ai_response,
             sql: m.generated_sql || undefined,
             question: m.question,
             executionTime: m.execution_time_ms,
+            // F12: restore chart/table/pivot
+            data: m.data || undefined,
+            visualization: m.visualization || undefined,
+            chartConfig: (m.chart_config as any) || undefined,
+            displayHint: m.display_hint || undefined,
+            hierarchyColumns: m.hierarchy_columns || undefined,
+            warnings: m.warnings || undefined,
+            confidence: m.confidence || undefined,
           });
         }
       }
