@@ -54,7 +54,8 @@ def feedback_db(tmp_path):
             ai_response TEXT, tokens_used INTEGER DEFAULT 0,
             execution_time_ms REAL DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             context_name TEXT, is_bookmarked INTEGER DEFAULT 0,
-            feedback_rating INTEGER
+            feedback_rating INTEGER,
+            render_meta TEXT, result_data TEXT
         )
     """)
 

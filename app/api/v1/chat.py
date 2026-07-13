@@ -340,6 +340,37 @@ def _format_response(
     }
 
 
+def _persist_render_payload(db: Session, chat_entry: ChatHistory, response_data: dict) -> None:
+    """
+    F12: เก็บ payload ที่ client เห็นจริงลง chat_history (เรียกหลัง _format_response เสมอ
+    เพราะ _format_response mutate chart_config — max_series override + warning recompute)
+    Non-fatal: ล้มเหลวแค่ log warning ห้ามทำให้ response พัง
+    """
+    try:
+        data = response_data.get("data") or []
+        max_rows = settings.HISTORY_RENDER_MAX_ROWS
+        truncated = len(data) > max_rows
+
+        meta = {
+            "visualization": response_data.get("visualization"),
+            "chart_config": response_data.get("chart_config"),
+            "display_hint": response_data.get("display_hint"),
+            "hierarchy_columns": response_data.get("hierarchy_columns"),
+            "warnings": response_data.get("warnings"),
+            "confidence": response_data.get("confidence"),
+            "data_truncated": truncated,
+            "total_rows": len(data),
+        }
+        chat_entry.render_meta = json.dumps(meta, ensure_ascii=False, default=str)
+        chat_entry.result_data = (
+            json.dumps(data[:max_rows], ensure_ascii=False, default=str) if data else None
+        )
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.warning(f"Failed to persist render payload (non-fatal): {e}")
+
+
 def _save_session_data(db: Session, conversation_id: str, data: list, columns: list, chart_config: dict = None):
     """Upsert last query data for chart-only re-render."""
     existing = db.query(ChatSessionData).filter(
@@ -580,7 +611,9 @@ async def chat(
     _update_conversation_meta(db, conversation_id, request.question)
 
     # 9. Format response
-    return _format_response(chat_entry, conversation_id, engine_result, admin_config)
+    response_data = _format_response(chat_entry, conversation_id, engine_result, admin_config)
+    _persist_render_payload(db, chat_entry, response_data)
+    return response_data
 
 
 # =============================================================================
@@ -705,6 +738,7 @@ async def chat_stream(
 
             # Send full response
             response_data = _format_response(chat_entry, conversation_id, engine_result, admin_config)
+            _persist_render_payload(db, chat_entry, response_data)
             yield _sse_format("answer", response_data)
 
             # Done

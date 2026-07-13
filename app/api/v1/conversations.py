@@ -4,6 +4,7 @@ from sqlalchemy import func, desc
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 from datetime import datetime
+import json
 import logging
 
 from app.api import deps
@@ -47,6 +48,15 @@ class ConversationMessageItem(BaseModel):
     is_bookmarked: bool = False
     feedback_rating: Optional[int] = None
     execution_time_ms: float = 0.0
+    # F12: render payload สำหรับ restore กราฟ/ตาราง/pivot ตอนเปิดประวัติ
+    data: Optional[List[Dict[str, Any]]] = None
+    visualization: Optional[str] = None
+    chart_config: Optional[Dict[str, Any]] = None
+    display_hint: Optional[str] = None
+    hierarchy_columns: Optional[List[str]] = None
+    warnings: Optional[List[Dict[str, Any]]] = None
+    confidence: Optional[Dict[str, Any]] = None
+    data_truncated: bool = False
 
 
 class ConversationDetailResponse(BaseModel):
@@ -73,6 +83,17 @@ class ConversationUpdateResponse(BaseModel):
     id: str
     title: Optional[str] = None
     updated_at: Optional[datetime] = None
+
+
+def _safe_json(text_val, default=None):
+    """F12: parse JSON แบบกันพัง — แถวเก่า (NULL) หรือ JSON เสีย คืน default แทนที่จะ 500"""
+    if not text_val:
+        return default
+    try:
+        return json.loads(text_val)
+    except (ValueError, TypeError):
+        logger.warning("Corrupted render payload JSON in chat_history — returning None")
+        return default
 
 
 # --- Endpoints ---
@@ -151,8 +172,10 @@ def get_conversation(
         ChatHistory.conversation_id == conversation_id
     ).order_by(ChatHistory.created_at.asc()).all()
 
-    message_items = [
-        ConversationMessageItem(
+    message_items = []
+    for m in messages:
+        meta = _safe_json(m.render_meta, {}) or {}
+        message_items.append(ConversationMessageItem(
             id=m.id,
             question=m.question,
             ai_response=compact_explanation_currency(m.ai_response) if m.ai_response else None,
@@ -164,9 +187,15 @@ def get_conversation(
             is_bookmarked=m.is_bookmarked or False,
             feedback_rating=m.feedback_rating,
             execution_time_ms=m.execution_time_ms or 0.0,
-        )
-        for m in messages
-    ]
+            data=_safe_json(m.result_data),
+            visualization=meta.get("visualization"),
+            chart_config=meta.get("chart_config"),
+            display_hint=meta.get("display_hint"),
+            hierarchy_columns=meta.get("hierarchy_columns"),
+            warnings=meta.get("warnings"),
+            confidence=meta.get("confidence"),
+            data_truncated=bool(meta.get("data_truncated", False)),
+        ))
 
     return ConversationDetailResponse(
         id=conv.id,

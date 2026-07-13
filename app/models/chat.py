@@ -25,6 +25,11 @@ class ChatHistory(Base):
     is_bookmarked = Column(Boolean, default=False)
     feedback_rating = Column(Integer, nullable=True) # 1-5
 
+    # F12: render payload สำหรับ restore กราฟ/ตาราง/pivot ตอนเปิดประวัติ
+    # แยก 2 คอลัมน์เพื่อให้ retention job อนาคตลบ result_data ได้โดยไม่เสีย metadata
+    render_meta = Column(Text, nullable=True)   # JSON: visualization, chart_config, display_hint, hierarchy_columns, warnings, confidence, data_truncated, total_rows
+    result_data = Column(Text, nullable=True)   # JSON: list of row dicts (capped ที่ HISTORY_RENDER_MAX_ROWS)
+
     # Relationships
     user = relationship("User", back_populates="chats")
     conversation = relationship("Conversation", back_populates="messages")

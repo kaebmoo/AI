@@ -97,6 +97,9 @@ class Settings(BaseSettings):
     MAX_HISTORY_MESSAGES: int = 10  # Max conversation turns to keep as context
     DEDUP_TTL_SECONDS: float = 5.0  # Ignore duplicate questions within N seconds
 
+    # F12: row cap สำหรับ chat_history.result_data (query layer ตัดที่ 1,000 แถวอยู่แล้ว)
+    HISTORY_RENDER_MAX_ROWS: int = 1000
+
     # Vanna AI (RAG) Settings
     VANNA_CHROMA_PATH: str = "./chroma_db"
     VANNA_DISTANCE_THRESHOLD: float = 1.8

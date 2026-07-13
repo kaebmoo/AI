@@ -36,7 +36,8 @@ def analyzer_db(tmp_path):
             ai_response TEXT, tokens_used INTEGER DEFAULT 0,
             execution_time_ms REAL DEFAULT 0, context_name TEXT,
             is_bookmarked INTEGER DEFAULT 0, feedback_rating INTEGER,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            render_meta TEXT, result_data TEXT
         )
     """)
 
@@ -152,7 +153,8 @@ class TestAutoAnalyzer:
             conversation_id TEXT, question TEXT, generated_sql TEXT, sql_result_summary TEXT,
             ai_response TEXT, tokens_used INTEGER DEFAULT 0, execution_time_ms REAL DEFAULT 0,
             context_name TEXT, is_bookmarked INTEGER DEFAULT 0, feedback_rating INTEGER,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            render_meta TEXT, result_data TEXT)""")
         c.execute("""CREATE TABLE user_feedback (id INTEGER PRIMARY KEY, chat_id INTEGER NOT NULL,
             rating TEXT NOT NULL, feedback_category TEXT, feedback_text TEXT,
             reviewed_at TIMESTAMP, reviewed_by INTEGER, review_notes TEXT,
