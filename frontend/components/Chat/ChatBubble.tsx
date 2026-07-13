@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity } from 'react-native';
 import Markdown from 'react-native-markdown-display';
 import { TechnicalAccordion } from './TechnicalAccordion';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -9,15 +9,14 @@ import { PivotDataView } from './PivotDataView';
 import { ConfidenceBadge, ConfidenceData } from './ConfidenceBadge';
 import { chatService, FeedbackRating, FeedbackCategory } from '@/services/chat';
 import { THAI_FONT_FAMILY } from '@/constants/theme';
+import type { ChartConfig } from '../../types/chart';
+export type { ChartConfig } from '../../types/chart';
 
 export interface DataWarning {
     code: string;
     message: string;
     severity: 'info' | 'warning' | 'important';
 }
-
-export type { ChartConfig } from '../../types/chart';
-import type { ChartConfig } from '../../types/chart';
 
 export interface Message {
     id: string | number;
@@ -233,7 +232,7 @@ export const ChatBubble = ({ message, onTrain }: ChatBubbleProps) => {
     return (
         <View className={`mb-6 w-full flex-row ${isUser ? 'justify-end' : 'justify-start'}`}>
             <View
-                className={`max-w-[88%] rounded-[20px] px-5 py-4 shadow-sm ${isUser
+                className={`${isUser ? 'max-w-[88%]' : 'w-full'} rounded-[20px] px-5 py-4 shadow-sm ${isUser
                     ? 'bg-blue-600 rounded-tr-md'
                     : 'border-[0.5px] border-gray-200 dark:border-gray-700 rounded-tl-md shadow-slate-200/50 dark:shadow-none'
                     }`}
@@ -249,12 +248,14 @@ export const ChatBubble = ({ message, onTrain }: ChatBubbleProps) => {
                 ) : (
                     <View>
                         {/* Markdown Display */}
-                        <Markdown
-                            // @ts-ignore
-                            style={markdownStyles}
-                        >
-                            {message.content}
-                        </Markdown>
+                        <View style={{ maxWidth: 900 }}>
+                            <Markdown
+                                // @ts-ignore
+                                style={markdownStyles}
+                            >
+                                {message.content}
+                            </Markdown>
+                        </View>
 
                         {/* Data Chart Visualization */}
                         {message.data && message.data.length > 0 && (

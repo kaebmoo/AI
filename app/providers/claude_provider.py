@@ -4,23 +4,15 @@ NT AI Assistant - Claude Provider
 Anthropic Claude API implementation.
 """
 
-import json
 import logging
 from typing import Dict, List, Optional, Any, Union
 
 from app.providers.base import AIProvider, TokenUsage
 from app.providers.retry_config import ai_retry
 from app.providers.chart_postprocessor import (
-    parse_explanation_response,
-    enforce_time_series_rule,
-    enforce_dimension_family_rule,
-    enforce_categorical_axis_rule,
     build_explain_prompt,
-    auto_detect_chart_config,
-    enrich_chart_config,
+    postprocess_chart_result,
 )
-from app.config import settings
-
 logger = logging.getLogger(__name__)
 
 
@@ -164,26 +156,13 @@ class ClaudeProvider(AIProvider):
 
         content = response.content[0].text
 
-        # Use shared post-processor
-        time_columns = [m['column_name'] for m in schema_metadata
-                        if m.get('dimension_group') == 'time_period'] if schema_metadata else None
-        parsed_result = parse_explanation_response(content)
-        parsed_result = enforce_time_series_rule(parsed_result, time_columns=time_columns)
-        parsed_result = enforce_dimension_family_rule(parsed_result, dimension_families)
-        parsed_result = enforce_categorical_axis_rule(parsed_result, time_columns=time_columns)
-
-        # Fallback: If no chart_config, try to infer from data
-        if "chart_config" not in parsed_result and data and len(data) > 0:
-            logger.info("Claude: No chart_config found, attempting auto-detection")
-            parsed_result = auto_detect_chart_config(data, parsed_result, schema_metadata=schema_metadata)
-
-        parsed_result = enrich_chart_config(
-            parsed_result=parsed_result,
+        return postprocess_chart_result(
+            content,
             data=data,
+            dimension_families=dimension_families,
+            hierarchy_info=hierarchy_info,
             schema_metadata=schema_metadata,
-            chart_title=parsed_result.get("chart_title", ""),
         )
-        return parsed_result
 
     async def generate_structured(self, prompt: str, schema: Dict[str, Any], system_prompt: Optional[str] = None, schema_name: str = "result") -> Optional[Dict]:
         """Structured output via forced tool call (tool_choice)."""

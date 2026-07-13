@@ -6,6 +6,8 @@ dimension. See plan/PLAN_UI_CHART_IMPROVEMENT.md Wave 1.
 """
 
 from app.providers.chart_postprocessor import (
+    build_explain_prompt,
+    compact_explanation_currency,
     enforce_categorical_axis_rule,
     enforce_time_series_rule,
     _suggest_available_types,
@@ -16,6 +18,27 @@ from app.providers.chart_postprocessor import (
 )
 
 TIME_COLS = ["year", "month"]
+
+
+class TestNarrativeCurrencyFormatting:
+    def test_compacts_large_baht_values_and_ranges_to_million_baht(self):
+        text = (
+            "สูงกว่า 7,400,000,000 บาท ติดลบ -3,686,967,403 บาท "
+            "และอยู่ระหว่าง 2,800,000,000 - 3,000,000,000 บาท"
+        )
+
+        assert compact_explanation_currency(text) == (
+            "สูงกว่า 7,400 ล้านบาท ติดลบ -3,686.97 ล้านบาท "
+            "และอยู่ระหว่าง 2,800-3,000 ล้านบาท"
+        )
+
+    def test_keeps_sub_million_baht_values_unchanged(self):
+        assert compact_explanation_currency("ค่าใช้จ่าย 750,000 บาท") == "ค่าใช้จ่าย 750,000 บาท"
+
+    def test_prompt_explicitly_requests_million_baht_narrative(self):
+        prompt = build_explain_prompt("คำถาม", "SELECT 1", [{"amount": 7_400_000_000}])
+
+        assert "7,400,000,000 บาท → 7,400 ล้านบาท" in prompt
 
 
 class TestEnforceCategoricalAxisRule:
@@ -217,6 +240,14 @@ class TestResolveMaxSeriesWarning:
         warning = resolve_max_series_warning(data, "account", "", "pie_chart", max_series=3)
         assert "Top-2" in warning
 
+    def test_heatmap_does_not_bucket_time_axis_as_series(self):
+        data = [
+            {"account": f"A{i}", "month": str(month), "amount": i * month}
+            for i in range(8)
+            for month in range(1, 13)
+        ]
+        assert resolve_max_series_warning(data, "account", "month", "heatmap", max_series=5) is None
+
 
 class TestEnrichChartConfigMaxSeries:
     def _parsed(self, viz, cat_col="account", ser_col=""):
@@ -255,3 +286,118 @@ class TestEnrichChartConfigMaxSeries:
         data = _rows("account", ["a", "b", "c"])
         result = enrich_chart_config(self._parsed("bar_chart"), data, max_series=5)
         assert "warning" not in result["chart_config"]
+
+    def test_repairs_missing_series_for_quarter_by_account_data(self):
+        data = [
+            {"หมวดบัญชี": account, "ไตรมาส": quarter, "ค่าใช้จ่ายรวม": amount}
+            for quarter in ("Q1", "Q2", "Q3", "Q4")
+            for account, amount in (("ค่าเช่า", 7_400_000_000), ("ค่าแรง", 2_700_000_000), ("ค่าเสื่อม", 3_000_000_000),
+                                    ("ค่าสวัสดิการ", 400_000_000), ("ค่าสาธารณูปโภค", 350_000_000), ("ค่าซ่อม", 700_000_000))
+        ]
+        parsed = {
+            "visualization": "line_chart",
+            "chart_config": {
+                "category_column": "ไตรมาส",
+                "measure_column": "ค่าใช้จ่ายรวม",
+            },
+        }
+
+        result = enrich_chart_config(parsed, data)
+
+        assert result["chart_config"]["series_column"] == "หมวดบัญชี"
+        assert result["visualization"] == "stacked_bar"
+        assert result["chart_config"]["suggested_type"] == "stacked_bar"
+        assert result["chart_config"]["available_types"] == ["stacked_bar", "grouped_bar"]
+
+    def test_dense_time_series_overrides_ai_line_choice(self):
+        data = [
+            {"quarter": quarter, "account": account, "amount": amount}
+            for quarter in ("Q1", "Q2", "Q3", "Q4")
+            for account, amount in (("A", 6), ("B", 5), ("C", 4), ("D", 3), ("E", 2), ("F", 1))
+        ]
+        parsed = {
+            "visualization": "line_chart",
+            "chart_config": {
+                "category_column": "quarter",
+                "series_column": "account",
+                "measure_column": "amount",
+            },
+        }
+
+        result = enrich_chart_config(parsed, data, max_series=5)
+
+        assert result["visualization"] == "stacked_bar"
+        assert result["chart_config"]["suggested_type"] == "stacked_bar"
+        assert result["chart_config"]["available_types"] == ["stacked_bar", "grouped_bar"]
+
+    def test_dense_monthly_matrix_overrides_ai_bar_and_keeps_months_visible(self):
+        """A category × 12-month result must not collapse to one bar per category."""
+        data = [
+            {"หมวดบัญชี": f"หมวด {i}", "เดือน": str(month), "ค่าใช้จ่ายรวม": (i - 4) * month * 1_000_000}
+            for i in range(8)
+            for month in range(1, 13)
+        ]
+        parsed = {
+            "visualization": "bar_chart",
+            "chart_config": {
+                "category_column": "หมวดบัญชี",
+                "measure_column": "ค่าใช้จ่ายรวม",
+            },
+        }
+
+        result = enrich_chart_config(parsed, data)
+
+        assert result["visualization"] == "heatmap"
+        assert result["chart_config"]["category_column"] == "หมวดบัญชี"
+        assert result["chart_config"]["series_column"] == "เดือน"
+        assert result["chart_config"]["suggested_type"] == "heatmap"
+        assert result["chart_config"]["available_types"][0] == "heatmap"
+        spec = result["chart_config"]["chart_spec"]
+        assert spec["version"] == 1
+        assert spec["chart_type"] == "heatmap"
+        assert spec["x"] == {"field": "เดือน", "kind": "temporal", "sort": "chronological"}
+        assert spec["y"]["field"] == "หมวดบัญชี"
+        assert spec["color"] == {
+            "field": "ค่าใช้จ่ายรวม",
+            "kind": "quantitative",
+            "unit": "THB",
+            "scale": "diverging_zero",
+        }
+        assert spec["missing"] == "blank"
+
+    def test_small_monthly_matrix_prefers_multi_line(self):
+        data = [
+            {"account": f"A{i}", "month": str(month), "amount": i * month}
+            for i in range(3)
+            for month in range(1, 13)
+        ]
+        parsed = {
+            "visualization": "bar_chart",
+            "chart_config": {"category_column": "account", "measure_column": "amount"},
+        }
+
+        result = enrich_chart_config(parsed, data)
+
+        assert result["visualization"] == "multi_line"
+        assert result["chart_config"]["category_column"] == "month"
+        assert result["chart_config"]["series_column"] == "account"
+
+    def test_signed_values_do_not_use_stacked_composition(self):
+        data = [
+            {"quarter": quarter, "account": account, "amount": amount}
+            for quarter in ("Q1", "Q2", "Q3", "Q4")
+            for account, amount in (("A", 10), ("B", -4), ("C", 3), ("D", 2), ("E", 1), ("F", 1))
+        ]
+        parsed = {
+            "visualization": "stacked_bar",
+            "chart_config": {
+                "category_column": "quarter",
+                "series_column": "account",
+                "measure_column": "amount",
+            },
+        }
+
+        result = enrich_chart_config(parsed, data)
+
+        assert result["visualization"] == "grouped_bar"
+        assert "ค่าติดลบ" in result["chart_config"]["warning"]

@@ -3,7 +3,7 @@
  */
 import { resolveChartType, type ChartConfig } from '../types/chart';
 import { NT_CHART_PALETTE, NT_LINE_PALETTE, FINANCIAL_COLORS, CHART_THEME, HEATMAP_COLORS } from '../constants/chartColors';
-import { safelyParseNumber, formatNumberWithUnit, truncateLabel } from './chartUtils';
+import { safelyParseNumber, formatNumberWithUnit, truncateLabel, smartMonthSort } from './chartUtils';
 import { THAI_FONT_FAMILY } from '../constants/theme';
 
 // Wave 4: neutral gray for the collapsed "อื่นๆ" bucket — deliberately NOT
@@ -29,6 +29,40 @@ function aggregateByCategory(
         sums.set(cat, (sums.get(cat) as number) + safelyParseNumber(d[measureCol]));
     }
     return order.map(cat => ({ [catCol]: cat, [measureCol]: sums.get(cat) }));
+}
+
+function sortRowsBySpec(
+    rows: Record<string, any>[],
+    categoryCol: string,
+    measureCol: string,
+    config?: ChartConfig,
+): Record<string, any>[] {
+    const sort = config?.chart_spec?.x?.sort;
+    if (!sort || sort === 'original') return rows;
+    if (sort === 'chronological') {
+        const labels = smartMonthSort(rows.map(row => String(row[categoryCol] ?? '')));
+        const rank = new Map(labels.map((label, index) => [label, index]));
+        return [...rows].sort((a, b) =>
+            (rank.get(String(a[categoryCol] ?? '')) ?? 0) - (rank.get(String(b[categoryCol] ?? '')) ?? 0)
+        );
+    }
+    if (sort === 'value_desc' || sort === 'value_asc') {
+        const direction = sort === 'value_desc' ? -1 : 1;
+        return [...rows].sort((a, b) => direction * (
+            safelyParseNumber(a[measureCol]) - safelyParseNumber(b[measureCol])
+        ));
+    }
+    return rows;
+}
+
+// Legacy-response fallback only. New responses carry schema-backed ChartSpec;
+// this keyword check keeps cached/older responses from putting a time field in
+// the legend when they predate that contract.
+function isTemporalColumnName(column?: string): boolean {
+    if (!column) return false;
+    const lower = column.toLowerCase();
+    return ['month', 'year', 'date', 'day', 'quarter', 'week', 'เดือน', 'ปี', 'วันที่', 'ไตรมาส']
+        .some(token => lower.includes(token));
 }
 
 /** Linear interpolate between two hex colors (no dependency). */
@@ -183,18 +217,88 @@ export function buildEChartsOption(
     // on top of a table, or duplicate the single-value big-number display).
     if (visualization === 'table' || visualization === 'single_value') return null;
 
+    // The declarative spec is canonical. Legacy fields remain as a migration
+    // adapter so cached responses and older API clients continue to render.
+    const spec = chartConfig?.chart_spec;
+    // A heatmap spec describes the matrix as X=time and Y=category. If the
+    // user switches to a bar/line view, keep those semantic axes instead of
+    // reusing the legacy renderer mapping (which would put category on X and
+    // time in the legend). This is the source of the misleading category-
+    // total bars when a monthly matrix is rendered as grouped/stacked bars.
+    const isHeatmapAlternative = spec?.chart_type === 'heatmap'
+        && !!chartConfig?.suggested_type
+        && chartConfig.suggested_type !== 'heatmap';
+    const resolvedConfig = spec
+        ? {
+            ...chartConfig,
+            suggested_type: chartConfig?.suggested_type || spec.chart_type,
+            title: spec.title || chartConfig?.title,
+            category_column: spec.chart_type === 'heatmap' && !isHeatmapAlternative
+                ? spec.y.field
+                : spec.x.field,
+            measure_column: spec.chart_type === 'heatmap'
+                ? (spec.color?.field || spec.y.field)
+                : spec.y.field,
+            series_column: spec.chart_type === 'heatmap' && !isHeatmapAlternative
+                ? spec.x.field
+                : (isHeatmapAlternative ? spec.y.field : spec.series?.field),
+            // The heatmap's Y dimension becomes the series dimension for an
+            // alternative chart. Preserve the backend's cap so dense matrices
+            // still collapse the tail into "อื่นๆ".
+            max_series: isHeatmapAlternative
+                ? (chartConfig?.max_series ?? 5)
+                : (spec.series?.top_n ? spec.series.top_n + 1 : chartConfig?.max_series),
+        }
+        : chartConfig;
+    const resolvedVisualization = spec?.chart_type || visualization;
+
     // Default to vertical_bar when no chart type resolved (prevents fallback to gifted-charts)
-    const chartType = resolveChartType(visualization, chartConfig) || 'vertical_bar';
+    let chartType = resolveChartType(resolvedVisualization, resolvedConfig) || 'vertical_bar';
 
     const dataKeys = Object.keys(data[0]);
     // Validate chartConfig columns against actual data keys (handles aliased SQL columns)
-    const catCol = resolveColumn(chartConfig?.category_column, dataKeys) || dataKeys[0];
-    const measureCol = resolveColumn(chartConfig?.measure_column, dataKeys) || findMeasureColumn(data[0], catCol);
+    let catCol = resolveColumn(resolvedConfig?.category_column, dataKeys) || dataKeys[0];
+    const measureCol = resolveColumn(resolvedConfig?.measure_column, dataKeys) || findMeasureColumn(data[0], catCol);
     // Auto-detect series column when chart type is multi-series but series_column is missing/invalid
-    const seriesCol = resolveColumn(chartConfig?.series_column, dataKeys)
+    let seriesCol = resolveColumn(resolvedConfig?.series_column, dataKeys)
         || (['grouped_bar', 'stacked_bar', 'stacked_bar_100', 'multi_line', 'stacked_area', 'heatmap'].includes(chartType)
             ? autoDetectSeriesColumn(data, catCol, measureCol || '')
             : undefined);
+
+    // Cached responses may not have chart_spec yet. If their category is a
+    // descriptive dimension and the result contains a repeated time axis,
+    // repair the old category/time swap at the last safe boundary. The
+    // explicit ChartSpec path above remains authoritative for new responses.
+    if (!spec && measureCol && !isTemporalColumnName(catCol)) {
+        const timeCandidates = dataKeys
+            .filter(key => key !== catCol && key !== measureCol && isTemporalColumnName(key))
+            .map(key => [key, new Set(data.map(row => String(row[key] ?? ''))).size] as const)
+            .filter(([, count]) => count >= 4)
+            .sort(([, leftCount], [, rightCount]) => rightCount - leftCount);
+        const timeCol = timeCandidates[0]?.[0];
+        const categoryCount = new Set(data.map(row => String(row[catCol] ?? ''))).size;
+        if (timeCol && data.length > categoryCount) {
+            const oldCategory = catCol;
+            catCol = timeCol;
+            seriesCol = oldCategory;
+            if (chartType === 'vertical_bar') chartType = 'grouped_bar';
+        }
+    }
+
+    // A single line is invalid when the time category repeats because rows are
+    // split by another dimension (Q1 × account, Q2 × account, ...). Old cached
+    // configs may omit series_column, so repair again at the rendering boundary.
+    if ((chartType === 'line' || chartType === 'area') && measureCol) {
+        const repeatedCategories = new Set(data.map(row => String(row[catCol] ?? ''))).size < data.length;
+        const inferredSeries = seriesCol || autoDetectSeriesColumn(data, catCol, measureCol);
+        if (repeatedCategories && inferredSeries) {
+            seriesCol = inferredSeries;
+            const seriesCount = new Set(data.map(row => String(row[inferredSeries] ?? ''))).size;
+            chartType = seriesCount > (resolvedConfig?.max_series ?? 5)
+                ? 'stacked_bar'
+                : (chartType === 'line' ? 'multi_line' : 'area');
+        }
+    }
 
 
 
@@ -203,35 +307,35 @@ export function buildEChartsOption(
     let result: object | null;
     switch (chartType) {
         case 'vertical_bar':
-            result = buildVerticalBar(data, catCol, measureCol, chartConfig);
+            result = buildVerticalBar(data, catCol, measureCol, resolvedConfig);
             break;
         case 'horizontal_bar':
-            result = buildHorizontalBar(data, catCol, measureCol, chartConfig);
+            result = buildHorizontalBar(data, catCol, measureCol, resolvedConfig);
             break;
         case 'line':
-            result = buildLine(data, catCol, measureCol, chartConfig);
+            result = buildLine(data, catCol, measureCol, resolvedConfig);
             break;
         case 'multi_line':
         case 'grouped_bar':
         case 'stacked_bar':
         case 'stacked_bar_100':
-            result = buildMultiSeries(data, catCol, measureCol, seriesCol, chartType, chartConfig);
+            result = buildMultiSeries(data, catCol, measureCol, seriesCol, chartType, resolvedConfig);
             break;
         case 'pie_chart':
-            result = buildPie(data, catCol, measureCol, chartConfig, false);
+            result = buildPie(data, catCol, measureCol, resolvedConfig, false);
             break;
         case 'donut_chart':
-            result = buildPie(data, catCol, measureCol, chartConfig, true);
+            result = buildPie(data, catCol, measureCol, resolvedConfig, true);
             break;
         case 'area':
         case 'stacked_area':
-            result = buildArea(data, catCol, measureCol, seriesCol, chartType, chartConfig);
+            result = buildArea(data, catCol, measureCol, seriesCol, chartType, resolvedConfig);
             break;
         case 'waterfall':
-            result = buildWaterfall(data, catCol, measureCol, chartConfig);
+            result = buildWaterfall(data, catCol, measureCol, resolvedConfig);
             break;
         case 'heatmap':
-            result = buildHeatmap(data, catCol, measureCol, seriesCol, chartConfig);
+            result = buildHeatmap(data, catCol, measureCol, seriesCol, resolvedConfig);
             break;
         default:
             result = buildVerticalBar(data, catCol, measureCol, chartConfig);
@@ -370,7 +474,7 @@ function buildVerticalBar(
     config?: ChartConfig,
 ): object {
     // Aggregate per category so multi-row data doesn't produce duplicate bars
-    const agg = aggregateByCategory(data, catCol, measureCol);
+    const agg = sortRowsBySpec(aggregateByCategory(data, catCol, measureCol), catCol, measureCol, config);
     // L1: send full labels — ECharts truncates for display, tooltip shows full name
     const categories = agg.map(d => String(d[catCol] ?? ''));
     const values = agg.map(d => safelyParseNumber(d[measureCol]));
@@ -409,7 +513,7 @@ function buildHorizontalBar(
     config?: ChartConfig,
 ): object {
     // Aggregate per category so multi-row data doesn't produce duplicate bars
-    const agg = aggregateByCategory(data, catCol, measureCol);
+    const agg = sortRowsBySpec(aggregateByCategory(data, catCol, measureCol), catCol, measureCol, config);
     // L1: send full labels — ECharts truncates for display, tooltip shows full name
     const categories = agg.map(d => String(d[catCol] ?? ''));
     const values = agg.map(d => safelyParseNumber(d[measureCol]));
@@ -494,6 +598,9 @@ function buildMultiSeries(
     // Group data by series
     const seriesNames = [...new Set(data.map(d => String(d[seriesCol] ?? '')))];
     const categories = [...new Set(data.map(d => String(d[catCol] ?? '')))];
+    if (config?.chart_spec?.x?.sort === 'chronological') {
+        categories.splice(0, categories.length, ...smartMonthSort(categories));
+    }
 
     const isLine = chartType === 'multi_line';
     const isStacked = chartType === 'stacked_bar' || chartType === 'stacked_bar_100' || chartType === 'stacked_area';
@@ -538,7 +645,8 @@ function buildMultiSeries(
     );
     if (otherNames.length > 0) {
         const otherRows = data.filter(d => otherNames.includes(String(d[seriesCol])));
-        seriesData.push(buildSeries(`อื่นๆ (รวม ${otherNames.length} กลุ่ม)`, otherRows, OTHER_BUCKET_COLOR));
+        const otherLabel = config?.chart_spec?.series?.other_label || 'อื่นๆ';
+        seriesData.push(buildSeries(`${otherLabel} (รวม ${otherNames.length} กลุ่ม)`, otherRows, OTHER_BUCKET_COLOR));
     }
     const legendNames = seriesData.map(s => s.name);
 
@@ -758,15 +866,31 @@ function buildHeatmap(
     const colDim = seriesCol || catCol;
     const rowDim = seriesCol ? catCol : (Object.keys(data[0] || {}).find(k => k !== catCol && k !== measureCol) || catCol);
 
-    // Unique labels for each axis
-    const xLabels = [...new Set(data.map(d => String(d[colDim] ?? '')))];
-    const yLabels = [...new Set(data.map(d => String(d[rowDim] ?? '')))];
+    const rawXLabels = [...new Set(data.map(d => String(d[colDim] ?? '')))];
+    let yLabels = [...new Set(data.map(d => String(d[rowDim] ?? '')))];
+    if (config?.chart_spec?.y?.sort === 'value_desc') {
+        const totals = new Map<string, number>();
+        data.forEach(row => {
+            const label = String(row[rowDim] ?? '');
+            totals.set(label, (totals.get(label) || 0) + safelyParseNumber(row[measureCol]));
+        });
+        yLabels = [...yLabels].sort((a, b) => Math.abs(totals.get(b) || 0) - Math.abs(totals.get(a) || 0));
+    }
 
-    // Build [xIndex, yIndex, value] tuples
-    const heatmapData: [number, number, number][] = [];
-    let minVal = Infinity;
-    let maxVal = -Infinity;
+    // Keep time columns chronological even when SQL returns category-major
+    // rows or the provider changes the GROUP BY order.
+    const lowerCol = colDim.toLowerCase();
+    const isTimeColumn = ['month', 'year', 'date', 'quarter', 'week', 'เดือน', 'ปี', 'วันที่', 'ไตรมาส']
+        .some(token => lowerCol.includes(token));
+    const numericMonthLabels = rawXLabels.length >= 4 && rawXLabels.every(label => {
+        const value = Number(label);
+        return Number.isInteger(value) && value >= 1 && value <= 12;
+    });
+    const xLabels = isTimeColumn || numericMonthLabels ? smartMonthSort(rawXLabels) : rawXLabels;
 
+    // Aggregate duplicate cells defensively. SQL normally returns one row per
+    // pair, but this keeps the renderer correct for less-aggregated results.
+    const cellValues = new Map<string, number>();
     for (const row of data) {
         const xVal = String(row[colDim] ?? '');
         const yVal = String(row[rowDim] ?? '');
@@ -775,14 +899,28 @@ function buildHeatmap(
         const xi = xLabels.indexOf(xVal);
         const yi = yLabels.indexOf(yVal);
         if (xi >= 0 && yi >= 0) {
-            heatmapData.push([xi, yi, val]);
-            if (val < minVal) minVal = val;
-            if (val > maxVal) maxVal = val;
+            const cellKey = `${xi}:${yi}`;
+            cellValues.set(cellKey, (cellValues.get(cellKey) || 0) + val);
         }
     }
 
-    // Handle edge case
-    if (minVal === Infinity) { minVal = 0; maxVal = 1; }
+    const heatmapData: [number, number, number][] = [];
+    cellValues.forEach((val, cellKey) => {
+        const [xi, yi] = cellKey.split(':').map(Number);
+        heatmapData.push([xi, yi, val]);
+    });
+
+    // Keep a signed, zero-centred scale, but do not let one extreme cell
+    // flatten the colour of the remaining matrix. Values beyond this visual
+    // range are clipped by ECharts; the exact value remains available in the
+    // tooltip, so this changes presentation only.
+    const magnitudes = heatmapData
+        .map(([, , value]) => Math.abs(value))
+        .filter(Number.isFinite)
+        .sort((a, b) => a - b);
+    const p95Index = Math.floor((magnitudes.length - 1) * 0.95);
+    const robustScale = magnitudes[p95Index] ?? 1;
+    const scale = Math.max(robustScale, 1);
 
     return {
         title: config?.title ? { text: config.title, left: 'center', textStyle: { fontSize: 14, fontWeight: 600 } } : undefined, // B3: title heavier than body
@@ -797,17 +935,17 @@ function buildHeatmap(
                 const yName = yLabels[yi] || '';
                 const abs = Math.abs(val);
                 let text: string, unit: string;
-                if (abs >= 1_000_000_000) { text = fmtNum(val / 1_000_000_000); unit = 'พลบ.'; }
-                else if (abs >= 1_000_000) { text = fmtNum(val / 1_000_000); unit = 'ลบ.'; }
+                if (abs >= 1_000_000_000) { text = fmtNum(val / 1_000_000_000); unit = 'พันล้านบาท'; }
+                else if (abs >= 1_000_000) { text = fmtNum(val / 1_000_000); unit = 'ล้านบาท'; }
                 else if (abs >= 1_000) { text = fmtNum(val / 1_000, 0); unit = 'k'; }
                 else { text = fmtNum(val); unit = ''; }
                 return `${yName} → ${xName}<br/><b>${text} ${unit}</b>`;
             },
         },
         grid: {
-            left: 8,
-            right: '10%',
-            bottom: '20%',
+            left: 170,
+            right: '8%',
+            bottom: '18%',
             top: config?.title ? '15%' : '10%',
             containLabel: true,
         },
@@ -827,13 +965,13 @@ function buildHeatmap(
             data: yLabels,
             splitArea: { show: true },
             axisLabel: {
-                fontSize: 10, width: 140, overflow: 'truncate', ellipsis: '…',
+                fontSize: 10, width: 155, overflow: 'truncate', ellipsis: '…',
                 hideOverlap: true, interval: 0,
             },
         },
         visualMap: {
-            min: minVal,
-            max: maxVal,
+            min: -scale,
+            max: scale,
             calculable: true,
             orient: 'horizontal',
             left: 'center',
@@ -844,7 +982,7 @@ function buildHeatmap(
             textStyle: { fontSize: 10 },
             formatter: (value: number) => {
                 const abs = Math.abs(value);
-                if (abs >= 1_000_000) return `${fmtNum(value / 1_000_000)} ลบ.`;
+                if (abs >= 1_000_000) return `${fmtNum(value / 1_000_000)} ล้านบาท`;
                 if (abs >= 1_000) return `${fmtNum(value / 1_000, 0)}k`;
                 return fmtNum(value, 0);
             },

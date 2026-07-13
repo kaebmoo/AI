@@ -300,6 +300,9 @@ def _format_response(
         if admin_config is not None and isinstance(chart_config_response, dict):
             resolved_max_series = admin_config.get_chart_max_series()
             chart_config_response["max_series"] = resolved_max_series
+            chart_spec = chart_config_response.get("chart_spec")
+            if isinstance(chart_spec, dict) and isinstance(chart_spec.get("series"), dict):
+                chart_spec["series"]["top_n"] = max(1, resolved_max_series - 1)
             cat_col = chart_config_response.get("category_column") or ""
             ser_col = chart_config_response.get("series_column") or ""
             viz = visualization_response or ""

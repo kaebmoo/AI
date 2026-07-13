@@ -11,6 +11,7 @@ from app.models.user import User
 from app.models.chat import ChatHistory
 from app.models.conversation import Conversation
 from app.core.time_utils import utcnow
+from app.providers.chart_postprocessor import compact_explanation_currency
 
 logger = logging.getLogger(__name__)
 
@@ -154,7 +155,7 @@ def get_conversation(
         ConversationMessageItem(
             id=m.id,
             question=m.question,
-            ai_response=m.ai_response,
+            ai_response=compact_explanation_currency(m.ai_response) if m.ai_response else None,
             created_at=m.created_at,
             generated_sql=m.generated_sql,
             sql_result_summary=m.sql_result_summary,

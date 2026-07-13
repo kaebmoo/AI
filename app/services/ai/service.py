@@ -178,8 +178,11 @@ class AIService:
         )
 
     @staticmethod
-    def _prepare_data_for_explanation(data: List[Dict]) -> List[Dict]:
-        return response_utils.prepare_data_for_explanation(data)
+    def _prepare_data_for_explanation(
+        data: List[Dict],
+        schema_metadata: Optional[List[Dict]] = None,
+    ) -> List[Dict]:
+        return response_utils.prepare_data_for_explanation(data, schema_metadata=schema_metadata)
 
     def _extract_sql(self, text: str) -> Optional[str]:
         return response_utils.extract_sql(text)
@@ -208,8 +211,12 @@ class AIService:
     def extract_explanation(self, text: str) -> str:
         return self._extract_explanation(text)
 
-    def prepare_data_for_explanation(self, data: List[Dict]) -> List[Dict]:
-        return self._prepare_data_for_explanation(data)
+    def prepare_data_for_explanation(
+        self,
+        data: List[Dict],
+        schema_metadata: Optional[List[Dict]] = None,
+    ) -> List[Dict]:
+        return self._prepare_data_for_explanation(data, schema_metadata=schema_metadata)
 
     def parse_intent_json(self, text: str) -> Optional[Dict]:
         return self._parse_intent_json(text)
@@ -457,4 +464,3 @@ class AIService:
                 }
                 for col in columns
             ]
-

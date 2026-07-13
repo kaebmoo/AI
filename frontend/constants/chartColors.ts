@@ -43,11 +43,12 @@ export const CHART_THEME = {
     },
 };
 
-/** Heatmap gradient — blue (low) → yellow (mid) → red (high) */
+/** Diverging heatmap — negative (blue) → zero (near-white) → positive (orange).
+ * The renderer centres the visual scale at zero for signed financial data. */
 export const HEATMAP_COLORS = {
-    min: '#313695',
-    mid: '#FFFFBF',
-    max: '#A50026',
+    min: '#1E5AA8',
+    mid: '#FFF7ED',
+    max: '#B93815',
 };
 
 /** Backward-compat alias used by DataChart.tsx */

@@ -5,6 +5,7 @@ import re
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, cast
 
 from app.providers.base import ConfidenceResult, QueryResult, RetryStatus
+from app.providers.chart_postprocessor import postprocess_chart_result
 from app.services.ai.hierarchy_context import get_column_hierarchies
 from app.services.ai.trace import new_trace, record_usage
 
@@ -205,7 +206,7 @@ async def build_explanation(
     sql_query: str,
     data: List[Dict],
     cheap_model: Optional[str],
-    prepare_data_for_explanation: Callable[[List[Dict]], List[Dict]],
+    prepare_data_for_explanation: Callable[..., List[Dict]],
     dim_families: Optional[Dict],
     hierarchy_info: Optional[List[Dict]],
     schema_metadata: Optional[List[Dict]],
@@ -218,7 +219,15 @@ async def build_explanation(
         import time
 
         t0 = time.perf_counter()
-        explain_data = prepare_data_for_explanation(data)
+        try:
+            explain_data = prepare_data_for_explanation(
+                data,
+                schema_metadata=schema_metadata,
+            )
+        except TypeError:
+            # Keep compatibility with lightweight test/third-party services
+            # that still expose the old one-argument hook.
+            explain_data = prepare_data_for_explanation(data)
         simple_system_prompt = "You are a data visualization assistant. Analyze the data and provide a Thai explanation and chart recommendation."
 
         original_model = None
@@ -257,6 +266,17 @@ async def build_explanation(
         finally:
             if original_model:
                 set_provider_model(service, original_model)
+
+        # The LLM may see a reduced payload, but chart structure must always be
+        # decided from the query's complete result. This runs for Claude,
+        # Gemini, Matcha, and any provider implementing the same interface.
+        explanation = postprocess_chart_result(
+            explanation,
+            data=data,
+            dimension_families=dim_families,
+            hierarchy_info=hierarchy_info,
+            schema_metadata=schema_metadata,
+        )
 
         t_explain = time.perf_counter() - t0
         logger.debug("Hybrid Mode: Explanation Generation took %.4fs", t_explain)
@@ -535,7 +555,7 @@ async def run_hybrid_attempt(
     extract_sql: Callable[[str], Optional[str]],
     extract_explanation: Callable[[str], str],
     log_value_corrections: Callable,
-    prepare_data_for_explanation: Callable[[List[Dict]], List[Dict]],
+    prepare_data_for_explanation: Callable[..., List[Dict]],
     start_request: float,
     trace=None,
     template_answers_enabled: bool = False,
@@ -637,18 +657,18 @@ async def run_hybrid_attempt(
         retry_history.append({"sql": sql_query, "error": f"Execution failed: {error_msg}"})
         return None, total_tokens, sql_query
 
-    data = exec_data.get("data", [])
-    logger.info("Hybrid Mode: Success! Got %s rows", len(data))
+    full_data = exec_data.get("data", [])
+    logger.info("Hybrid Mode: Success! Got %s rows", len(full_data))
 
     dim_families, schema_metadata, hierarchy_info = await metadata_task
 
-    if not data:
+    if not full_data:
         explanation = f"ไม่พบข้อมูลที่ตรงกับเงื่อนไข\n\nSQL ที่ใช้:\n```sql\n{sql_query}\n```\n\nอาจเป็นเพราะ:\n- ไม่มีข้อมูลที่ตรงกับคำค้นหา\n- ชื่อคอลัมน์หรือค่าที่ใช้ค้นหาอาจไม่ถูกต้อง"
     else:
         explanation = None
         if template_answers_enabled:
             from app.services.ai.template_answer import build_template_answer
-            explanation = build_template_answer(question, sql_query, data)
+            explanation = build_template_answer(question, sql_query, full_data)
             if explanation is not None:
                 logger.info("Hybrid Mode: explanation from template (no LLM call)")
                 if trace is not None:
@@ -660,7 +680,7 @@ async def run_hybrid_attempt(
                 service,
                 question,
                 sql_query,
-                data,
+                full_data,
                 cheap_model,
                 prepare_data_for_explanation,
                 dim_families,
@@ -683,7 +703,7 @@ async def run_hybrid_attempt(
         sql_query,
         question,
         context_name,
-        data,
+        full_data,
     )
 
     import time
@@ -698,7 +718,7 @@ async def run_hybrid_attempt(
     return QueryResult(
         question=question,
         sql_query=sql_query,
-        data=data,
+        data=full_data,
         explanation=explanation,
         tokens_used=total_tokens,
         provider=service.provider_name,

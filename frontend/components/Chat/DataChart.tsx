@@ -231,9 +231,15 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
     useEffect(() => {
         const newType = resolveChartType(visualization, chartConfig);
         if (newType) setActiveType(newType);
-    }, [visualization, chartConfig?.suggested_type]);
+    }, [visualization, chartConfig?.suggested_type, chartConfig?.chart_spec?.chart_type]);
 
-    const availableTypes = chartConfig?.available_types ?? [];
+    const seriesCount = chartConfig?.series_column
+        ? new Set(data.map(row => String(row[chartConfig.series_column!] ?? ''))).size
+        : 0;
+    const isDenseSeries = seriesCount > (chartConfig?.max_series ?? 5);
+    const availableTypes = (chartConfig?.available_types ?? []).filter(type =>
+        !isDenseSeries || !['line_chart', 'multi_line', 'area', 'stacked_area'].includes(type)
+    );
     const showToolbar = availableTypes.length > 1;
 
     const echartsOption = useMemo(() => {
@@ -694,6 +700,7 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
         area: 'พื้นที่',
         stacked_area: 'พื้นที่สะสม',
         waterfall: 'น้ำตก',
+        heatmap: 'แผนที่ความร้อน',
         // scatter / mixed_bar_line / treemap removed — no case in buildEChartsOption's
         // switch, never suggested by _suggest_available_types, unreachable dead labels
     };
@@ -736,9 +743,14 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
     );
 
     // L6: horizontal_bar grows with row count instead of a fixed 400px
+    const chartCategoryCount = chartConfig?.category_column
+        ? new Set(data.map(row => String(row[chartConfig.category_column!] ?? ''))).size
+        : data.length;
     const echartsCardHeight = activeType === 'horizontal_bar'
-        ? Math.max(300, (data?.length ?? 0) * 32 + 96)
-        : 400;
+        ? Math.max(300, chartCategoryCount * 32 + 96)
+        : activeType === 'heatmap'
+            ? Math.min(720, Math.max(420, chartCategoryCount * 28 + 150))
+            : 400;
 
     // If ECharts is available and we have a valid option, render chart
     // This runs BEFORE the analysis null-guard so charts show even for visualization='table'
@@ -965,7 +977,7 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
     // 3. Process Data for Chart
     // ============================================================
 
-    const groupedChartData = useMemo(() => {
+    const groupedChartData = (() => {
         if (!analysis || !data) return [];
 
         const groupedData: Record<string, Record<string, number>> = {};
@@ -1354,7 +1366,7 @@ export const DataChart = ({ data, visualization, chartConfig }: DataChartProps) 
                 </Modal>
             </View>
         );
-    }, [data, analysis, isDark, chartWidth, isFullScreen]); // Added isFullScreen dependency
+    })();
 
     // Grouped/stacked bar: only fall back to gifted-charts if ECharts is NOT available
     if ((analysis.mode === 'grouped_bar' || analysis.mode === 'stacked_bar' || analysis.seriesKey === '__pivoted__') && !(isEChartsAvailable() && echartsOption)) {

@@ -1,4 +1,5 @@
 import api, { API_BASE_URL } from './api';
+import type { ChartSpec } from '../types/chart';
 
 export interface ChatRequest {
     question: string;
@@ -56,6 +57,9 @@ export interface ChartConfig {
     sort_by?: string;
     show_data_labels?: boolean;
     warning?: string;
+    is_time_axis?: boolean;
+    max_series?: number;
+    chart_spec?: ChartSpec;
 }
 
 export interface ChatResponse {

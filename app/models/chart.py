@@ -52,6 +52,33 @@ VISUALIZATION_TO_ECHARTS: dict[str, Optional[str]] = {
 }
 
 
+class ChartEncoding(BaseModel):
+    """Renderer-neutral field encoding used by the chart contract."""
+    field: str
+    kind: Literal['temporal', 'nominal', 'ordinal', 'quantitative']
+    unit: Optional[str] = None
+    sort: Optional[str] = None
+    scale: Optional[str] = None
+
+
+class ChartSeries(BaseModel):
+    field: str
+    top_n: Optional[int] = None
+    other_label: str = 'อื่นๆ'
+
+
+class ChartSpec(BaseModel):
+    """Small declarative chart spec; never contains renderer-specific options."""
+    version: int = 1
+    chart_type: str
+    title: Optional[str] = None
+    x: ChartEncoding
+    y: ChartEncoding
+    color: Optional[ChartEncoding] = None
+    series: Optional[ChartSeries] = None
+    missing: Literal['blank', 'zero', 'omit'] = 'omit'
+
+
 class ColumnRole(BaseModel):
     column: str
     role: Literal['category', 'measure', 'series', 'secondary_measure']
@@ -79,3 +106,4 @@ class ChartConfigV2(BaseModel):
     show_data_labels: bool = False
     color_palette: Optional[List[str]] = None
     warning: Optional[str] = None
+    chart_spec: Optional[ChartSpec] = None

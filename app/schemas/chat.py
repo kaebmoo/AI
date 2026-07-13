@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional, List, Any, Dict
+from app.models.chart import ChartSpec
 
 
 
@@ -70,6 +71,7 @@ class ChartConfig(BaseModel):
     warning: Optional[str] = Field(default=None, description="Chart compatibility warning")
     is_time_axis: Optional[bool] = Field(default=None, description="True when category_column is a time dimension")
     max_series: Optional[int] = Field(default=None, description="Max series/pie-slices shown before bucketing the rest into 'อื่นๆ' (Wave 4)")
+    chart_spec: Optional[ChartSpec] = Field(default=None, description="Renderer-neutral declarative chart contract")
 
 
 class ChatResponse(BaseModel):

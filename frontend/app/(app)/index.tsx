@@ -196,14 +196,13 @@ export default function ChatScreen() {
           onStatus: (status, message) => {
             setStatusText(STATUS_LABELS[status] || message);
           },
-          onDataReady: (data, sqlQuery) => {
+          onDataReady: (_data, sqlQuery) => {
             setStatusText('กำลังสรุปผล...');
             const previewMessage: Message = {
               id: streamingId,
               role: 'assistant',
               content: '⏳ กำลังสรุปผลลัพธ์...',
               sql: sqlQuery,
-              data: data,
             };
             setMessages((prev) => [...prev, previewMessage]);
           },
@@ -349,7 +348,7 @@ export default function ChatScreen() {
 
         {/* Main chat area */}
         <View className="flex-1">
-          <View className="flex-1 w-full max-w-5xl mx-auto">
+          <View className="flex-1 w-full max-w-7xl mx-auto">
             {/* Header */}
             <View className="px-4 py-3 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 shadow-sm z-10 w-full">
               <View className="flex-row items-center justify-between">

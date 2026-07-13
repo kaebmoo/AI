@@ -5,22 +5,16 @@ Matcha AI (OpenAI Compatible) implementation via NT Gateway.
 """
 
 import json
-import re
 import logging
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any
 
 import httpx
 
 from app.providers.base import AIProvider, TokenUsage
 from app.providers.retry_config import ai_retry
 from app.providers.chart_postprocessor import (
-    parse_explanation_response,
-    enforce_time_series_rule,
-    enforce_dimension_family_rule,
-    enforce_categorical_axis_rule,
     build_explain_prompt,
-    auto_detect_chart_config,
-    enrich_chart_config,
+    postprocess_chart_result,
 )
 from app.config import settings
 
@@ -127,28 +121,13 @@ class MatchaProvider(AIProvider):
         )
         response_text = await self.generate_content(prompt, system_prompt)
 
-        # Use shared post-processor
-        time_columns = [m['column_name'] for m in schema_metadata
-                        if m.get('dimension_group') == 'time_period'] if schema_metadata else None
-        parsed_result = parse_explanation_response(response_text)
-        parsed_result = enforce_time_series_rule(parsed_result, time_columns=time_columns)
-        parsed_result = enforce_dimension_family_rule(parsed_result, dimension_families)
-        parsed_result = enforce_categorical_axis_rule(parsed_result, time_columns=time_columns)
-
-        # Fallback: If no chart_config, try to infer from data
-        if "chart_config" not in parsed_result and data and len(data) > 0:
-            logger.info("Matcha: No chart_config found, attempting auto-detection")
-            parsed_result = auto_detect_chart_config(data, parsed_result, schema_metadata=schema_metadata)
-
-        # Enrich chart config (runs on both AI-generated and auto-detected configs)
-        parsed_result = enrich_chart_config(
-            parsed_result=parsed_result,
+        return postprocess_chart_result(
+            response_text,
             data=data,
+            dimension_families=dimension_families,
+            hierarchy_info=hierarchy_info,
             schema_metadata=schema_metadata,
-            chart_title=parsed_result.get("chart_title", ""),
         )
-
-        return parsed_result
 
     async def generate_structured(self, prompt: str, schema: Dict[str, Any], system_prompt: Optional[str] = None, schema_name: str = "result") -> Optional[Dict]:
         """Structured output via response_format json_schema, falling back to json_object.
@@ -203,7 +182,7 @@ class MatchaProvider(AIProvider):
 
     async def generate_content(self, prompt: str, system_prompt: Optional[str] = None, history: Optional[List[Dict]] = None) -> str:
         """Generate content using Matcha/OpenAI-compatible API with optional native multi-turn history."""
-        logger.info(f"MatchaProvider.generate_content called")
+        logger.info("MatchaProvider.generate_content called")
 
         messages = []
         if system_prompt:

@@ -12,6 +12,31 @@ export interface ColumnRole {
     axis?: 'left' | 'right';
 }
 
+export interface ChartEncoding {
+    field: string;
+    kind: 'temporal' | 'nominal' | 'ordinal' | 'quantitative';
+    unit?: string;
+    sort?: string;
+    scale?: string;
+}
+
+export interface ChartSeries {
+    field: string;
+    top_n?: number;
+    other_label?: string;
+}
+
+export interface ChartSpec {
+    version: number;
+    chart_type: string;
+    title?: string;
+    x: ChartEncoding;
+    y: ChartEncoding;
+    color?: ChartEncoding;
+    series?: ChartSeries;
+    missing?: 'blank' | 'zero' | 'omit';
+}
+
 export interface ChartConfig {
     // Original 3 fields (backward compatible)
     category_column?: string;
@@ -27,6 +52,7 @@ export interface ChartConfig {
     warning?: string;
     is_time_axis?: boolean;
     max_series?: number;  // Wave 4 — max series/pie-slices before bucketing into "อื่นๆ"
+    chart_spec?: ChartSpec;
 }
 
 /** Backend visualization strings
@@ -74,10 +100,17 @@ export function resolveChartType(
     visualization?: string,
     chartConfig?: ChartConfig,
 ): string | null {
+    // suggested_type is also used for an explicit toolbar override; the
+    // canonical spec remains the default when no override is present.
     if (chartConfig?.suggested_type) {
         const st = chartConfig.suggested_type;
         // Map backend type → ECharts type if needed (e.g. 'line_chart' → 'line')
         // If already an ECharts type (not in map), return as-is
+        return VISUALIZATION_TO_ECHARTS[st] !== undefined ? VISUALIZATION_TO_ECHARTS[st] : st;
+    }
+
+    if (chartConfig?.chart_spec?.chart_type) {
+        const st = chartConfig.chart_spec.chart_type;
         return VISUALIZATION_TO_ECHARTS[st] !== undefined ? VISUALIZATION_TO_ECHARTS[st] : st;
     }
 
