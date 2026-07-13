@@ -85,15 +85,25 @@ class ConversationUpdateResponse(BaseModel):
     updated_at: Optional[datetime] = None
 
 
-def _safe_json(text_val, default=None):
-    """F12: parse JSON แบบกันพัง — แถวเก่า (NULL) หรือ JSON เสีย คืน default แทนที่จะ 500"""
+def _safe_json(text_val, default=None, expected_type=None):
+    """
+    F12: parse JSON แบบกันพัง — แถวเก่า (NULL), JSON เสีย, หรือ JSON ที่ parse ได้
+    แต่ shape ไม่ตรง (เช่น render_meta ที่ดันเป็น list/string แทน dict) คืน default
+    แทนที่จะ 500 (Pydantic validation หรือ .get() บน non-dict)
+    """
     if not text_val:
         return default
     try:
-        return json.loads(text_val)
+        parsed = json.loads(text_val)
     except (ValueError, TypeError):
-        logger.warning("Corrupted render payload JSON in chat_history — returning None")
+        logger.warning("Corrupted render payload JSON in chat_history — returning default")
         return default
+    if expected_type is not None and not isinstance(parsed, expected_type):
+        logger.warning(
+            f"Render payload JSON has unexpected shape (expected {expected_type}, got {type(parsed)}) — returning default"
+        )
+        return default
+    return parsed
 
 
 # --- Endpoints ---
@@ -174,7 +184,7 @@ def get_conversation(
 
     message_items = []
     for m in messages:
-        meta = _safe_json(m.render_meta, {}) or {}
+        meta = _safe_json(m.render_meta, {}, expected_type=dict) or {}
         message_items.append(ConversationMessageItem(
             id=m.id,
             question=m.question,
@@ -187,7 +197,7 @@ def get_conversation(
             is_bookmarked=m.is_bookmarked or False,
             feedback_rating=m.feedback_rating,
             execution_time_ms=m.execution_time_ms or 0.0,
-            data=_safe_json(m.result_data),
+            data=_safe_json(m.result_data, expected_type=list),
             visualization=meta.get("visualization"),
             chart_config=meta.get("chart_config"),
             display_hint=meta.get("display_hint"),

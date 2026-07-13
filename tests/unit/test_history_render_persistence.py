@@ -117,6 +117,17 @@ class TestSafeJson:
         assert _safe_json("{broken") is None
         assert _safe_json("{broken", {}) == {}
 
+    def test_wrong_shape_returns_default_not_raise(self):
+        """Valid JSON but wrong shape (e.g. render_meta stored as a list/string
+        instead of a dict) must not blow up meta.get() or Pydantic validation
+        downstream — regression test for codex finding."""
+        assert _safe_json("[1, 2, 3]", {}, expected_type=dict) == {}
+        assert _safe_json('"just a string"', {}, expected_type=dict) == {}
+        assert _safe_json('{"a": 1}', expected_type=list) is None
+        # Matching shape still parses through
+        assert _safe_json('{"a": 1}', expected_type=dict) == {"a": 1}
+        assert _safe_json('[1, 2]', expected_type=list) == [1, 2]
+
 
 # ============================================================
 # _persist_chart_only_switch (Phase C)
@@ -139,6 +150,7 @@ class TestPersistChartOnlySwitch:
                 "chart_config": {"category_column": "month"},
                 "total_rows": 3,
             }, ensure_ascii=False),
+            result_data=json.dumps([{"month": 1, "total": 100}]),
         )
         db_session.add(entry)
         db_session.commit()
@@ -155,6 +167,51 @@ class TestPersistChartOnlySwitch:
         assert meta["chart_config"]["max_series"] == 5
         # Untouched fields survive the update
         assert meta["total_rows"] == 3
+
+    def test_skips_text_only_latest_row_updates_earlier_data_row(self, db_session, test_user):
+        """A later text-only/error turn (render_meta set, no result_data) must
+        not shadow the earlier turn that actually holds the chart being
+        switched — regression test for codex finding."""
+        conv = Conversation(user_id=test_user.id, title="chart switch after smalltalk")
+        db_session.add(conv)
+        db_session.commit()
+        db_session.refresh(conv)
+
+        data_entry = ChatHistory(
+            user_id=test_user.id,
+            conversation_id=conv.id,
+            question="รายได้รวม",
+            ai_response="ตอบพร้อมกราฟ",
+            render_meta=json.dumps({"visualization": "bar_chart", "chart_config": {"category_column": "month"}}),
+            result_data=json.dumps([{"month": 1, "total": 100}]),
+        )
+        db_session.add(data_entry)
+        db_session.commit()
+
+        text_only_entry = ChatHistory(
+            user_id=test_user.id,
+            conversation_id=conv.id,
+            question="ขอบคุณครับ",
+            ai_response="ยินดีครับ",
+            render_meta=json.dumps({"visualization": None, "chart_config": None, "total_rows": 0}),
+            result_data=None,
+        )
+        db_session.add(text_only_entry)
+        db_session.commit()
+        db_session.refresh(data_entry)
+        db_session.refresh(text_only_entry)
+
+        _persist_chart_only_switch(
+            db_session, conv.id,
+            {"visualization": "pie_chart", "chart_config": {"category_column": "month"}},
+        )
+
+        db_session.refresh(data_entry)
+        db_session.refresh(text_only_entry)
+
+        assert json.loads(data_entry.render_meta)["visualization"] == "pie_chart"
+        # Text-only row (no result_data) must stay untouched
+        assert json.loads(text_only_entry.render_meta)["visualization"] is None
 
     def test_no_render_meta_row_does_not_crash(self, db_session, test_user):
         conv = Conversation(user_id=test_user.id, title="no render_meta yet")
@@ -178,6 +235,7 @@ class TestPersistChartOnlySwitch:
             question="q",
             ai_response="a",
             render_meta=json.dumps({"visualization": "bar_chart"}),
+            result_data=json.dumps([{"a": 1}]),
         )
         db_session.add(entry)
         db_session.commit()
@@ -232,6 +290,32 @@ class TestConversationRestoreEndpoint:
         assert msg["visualization"] is None
         assert msg["chart_config"] is None
         assert msg["data_truncated"] is False
+
+    def test_wrong_shape_render_payload_returns_none_not_500(self, conv_auth, db_session, test_user):
+        """render_meta valid JSON but a list (not dict), result_data valid JSON
+        but a dict (not list) — must not 500. Regression test for codex finding."""
+        conv = Conversation(user_id=test_user.id, title="wrong shape")
+        db_session.add(conv)
+        db_session.commit()
+        db_session.refresh(conv)
+
+        entry = ChatHistory(
+            user_id=test_user.id,
+            conversation_id=conv.id,
+            question="รูปทรงผิด",
+            ai_response="คำตอบ",
+            render_meta=json.dumps([1, 2, 3]),
+            result_data=json.dumps({"not": "a list"}),
+        )
+        db_session.add(entry)
+        db_session.commit()
+
+        resp = conv_auth.get(f"/api/v1/conversations/{conv.id}")
+        assert resp.status_code == 200
+        msg = resp.json()["messages"][0]
+        assert msg["data"] is None
+        assert msg["visualization"] is None
+        assert msg["chart_config"] is None
 
     def test_corrupted_render_meta_returns_none_not_500(self, conv_auth, db_session, test_user):
         conv = Conversation(user_id=test_user.id, title="broken")

@@ -485,11 +485,15 @@ def _persist_chart_only_switch(db: Session, conversation_id: str, enriched: dict
     Non-fatal: ล้มเหลวแค่ log warning ห้ามทำให้ response พัง
     """
     try:
+        # A later text-only/error turn (render_meta set, result_data NULL) must
+        # not shadow the earlier turn that actually holds the chart being
+        # switched — require result_data too, not just render_meta.
         chat_entry = (
             db.query(ChatHistory)
             .filter(
                 ChatHistory.conversation_id == conversation_id,
                 ChatHistory.render_meta.isnot(None),
+                ChatHistory.result_data.isnot(None),
             )
             .order_by(ChatHistory.created_at.desc())
             .first()
