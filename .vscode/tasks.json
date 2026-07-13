@@ -20,6 +20,9 @@
             "type": "shell",
             "command": "source venv/bin/activate && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000",
             "isBackground": true,
+            "runOptions": {
+                "instanceLimit": 1
+            },
             "problemMatcher": {
                 "pattern": [
                     {
@@ -45,6 +48,9 @@
             "type": "shell",
             "command": "source venv/bin/activate && celery -A app.celery worker -Q email-queue,celery --loglevel=info",
             "isBackground": true,
+            "runOptions": {
+                "instanceLimit": 1
+            },
             "problemMatcher": {
                 "pattern": [
                     {
@@ -73,6 +79,9 @@
                 "cwd": "${workspaceFolder}/frontend"
             },
             "isBackground": true,
+            "runOptions": {
+                "instanceLimit": 1
+            },
             "problemMatcher": {
                 "pattern": [
                     {
@@ -101,6 +110,9 @@
                 "cwd": "${workspaceFolder}/frontend-admin"
             },
             "isBackground": true,
+            "runOptions": {
+                "instanceLimit": 1
+            },
             "problemMatcher": {
                 "pattern": [
                     {
