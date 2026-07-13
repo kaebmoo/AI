@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.api.v1.chat import _persist_render_payload
+from app.api.v1.chat import _persist_render_payload, _persist_chart_only_switch
 from app.api.v1.conversations import _safe_json
 from app.config import settings
 from app.models.chat import ChatHistory
@@ -116,6 +116,78 @@ class TestSafeJson:
     def test_corrupted_json_returns_default_not_raise(self):
         assert _safe_json("{broken") is None
         assert _safe_json("{broken", {}) == {}
+
+
+# ============================================================
+# _persist_chart_only_switch (Phase C)
+# ============================================================
+
+class TestPersistChartOnlySwitch:
+    def test_updates_latest_row_render_meta(self, db_session, test_user):
+        conv = Conversation(user_id=test_user.id, title="chart switch")
+        db_session.add(conv)
+        db_session.commit()
+        db_session.refresh(conv)
+
+        entry = ChatHistory(
+            user_id=test_user.id,
+            conversation_id=conv.id,
+            question="รายได้รวม",
+            ai_response="ตอบ",
+            render_meta=json.dumps({
+                "visualization": "bar_chart",
+                "chart_config": {"category_column": "month"},
+                "total_rows": 3,
+            }, ensure_ascii=False),
+        )
+        db_session.add(entry)
+        db_session.commit()
+        db_session.refresh(entry)
+
+        _persist_chart_only_switch(
+            db_session, conv.id,
+            {"visualization": "pie_chart", "chart_config": {"category_column": "month", "max_series": 5}},
+        )
+
+        db_session.refresh(entry)
+        meta = json.loads(entry.render_meta)
+        assert meta["visualization"] == "pie_chart"
+        assert meta["chart_config"]["max_series"] == 5
+        # Untouched fields survive the update
+        assert meta["total_rows"] == 3
+
+    def test_no_render_meta_row_does_not_crash(self, db_session, test_user):
+        conv = Conversation(user_id=test_user.id, title="no render_meta yet")
+        db_session.add(conv)
+        db_session.commit()
+        db_session.refresh(conv)
+
+        # No ChatHistory row at all for this conversation
+        _persist_chart_only_switch(db_session, conv.id, {"visualization": "pie_chart", "chart_config": {}})
+        # Just must not raise
+
+    def test_commit_failure_is_non_fatal(self, db_session, test_user):
+        conv = Conversation(user_id=test_user.id, title="commit fails")
+        db_session.add(conv)
+        db_session.commit()
+        db_session.refresh(conv)
+
+        entry = ChatHistory(
+            user_id=test_user.id,
+            conversation_id=conv.id,
+            question="q",
+            ai_response="a",
+            render_meta=json.dumps({"visualization": "bar_chart"}),
+        )
+        db_session.add(entry)
+        db_session.commit()
+
+        with pytest.MonkeyPatch.context() as mp:
+            def boom():
+                raise Exception("db exploded")
+            mp.setattr(db_session, "commit", boom)
+            # Must not raise
+            _persist_chart_only_switch(db_session, conv.id, {"visualization": "pie_chart", "chart_config": {}})
 
 
 # ============================================================

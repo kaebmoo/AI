@@ -286,7 +286,7 @@ restored.push({
 
 **Test:** chart-only request → แถวล่าสุดใน chat_history มี `render_meta.visualization` เป็นค่าใหม่ / conversation ที่ไม่มีแถว render_meta → ไม่ crash
 
-- [ ] Phase C implemented + tests ผ่าน (หรือบันทึกว่า defer)
+- [x] Phase C implemented + tests ผ่าน — `_persist_chart_only_switch` เพิ่มใน `app/api/v1/chat.py`, เรียกท้าย `_handle_chart_only` หลัง `_log_chart_feedback_event`; tests 3 เคสใน `tests/unit/test_history_render_persistence.py` (632 passed, 3 skipped ทั้งชุด)
 
 ---
 

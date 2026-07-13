@@ -476,6 +476,36 @@ def _log_chart_feedback_event(
         logger.warning(f"Failed to log chart feedback event (non-fatal): {e}")
 
 
+def _persist_chart_only_switch(db: Session, conversation_id: str, enriched: dict) -> None:
+    """
+    F12 Phase C: chart-only switches (_handle_chart_only) don't create a new
+    ChatHistory row, so a plain reload would show the chart type from before
+    the switch. Update visualization/chart_config on the latest row's
+    render_meta so the switch survives a reload.
+    Non-fatal: ล้มเหลวแค่ log warning ห้ามทำให้ response พัง
+    """
+    try:
+        chat_entry = (
+            db.query(ChatHistory)
+            .filter(
+                ChatHistory.conversation_id == conversation_id,
+                ChatHistory.render_meta.isnot(None),
+            )
+            .order_by(ChatHistory.created_at.desc())
+            .first()
+        )
+        if not chat_entry:
+            return
+        meta = json.loads(chat_entry.render_meta)
+        meta["visualization"] = enriched.get("visualization")
+        meta["chart_config"] = enriched.get("chart_config")
+        chat_entry.render_meta = json.dumps(meta, ensure_ascii=False, default=str)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.warning(f"Failed to persist chart-only switch (non-fatal): {e}")
+
+
 def _handle_chart_only(
     db: Session,
     conversation_id: str,
@@ -528,6 +558,7 @@ def _handle_chart_only(
         enriched=enriched,
         data=session["data"],
     )
+    _persist_chart_only_switch(db, conversation_id, enriched)
 
     return {
         "id": None,
