@@ -380,15 +380,26 @@ DUCKDB_COLUMN_TYPES = {"BIGINT", "INTEGER", "DOUBLE", "VARCHAR", "BOOLEAN", "DAT
 DUCKDB_SYNTAX_RULES = {
     "thai": """   **. DuckDB Syntax (file source):**
        - หารจำนวนเต็มใช้ `//` เช่น `year_month // 100` — `/` ให้ผลเป็นทศนิยมเสมอ (202608 / 100 = 2026.08)
-       - `LIKE` แยกตัวพิมพ์เล็ก/ใหญ่ — ค้นข้อความภาษาอังกฤษแบบไม่สนตัวพิมพ์ให้ใช้ `ILIKE`
        - วันที่ปัจจุบันใช้ `current_date` (ห้ามใช้ `date('now')`)
+       - ห้ามเทียบหลายคอลัมน์กับ subquery ด้วย `=` เช่น `(year, month) = (SELECT ...)` — ใช้ `IN` หรือ subquery คอลัมน์เดียว เช่น `year_month = (SELECT MAX(year_month) FROM ...)`
        - ต่อสตริงใช้ `a || b`, จำกัดแถวใช้ `LIMIT`""",
     "english": """   **. DuckDB Syntax (file source):**
        - Integer division: use `//` e.g. `year_month // 100` — `/` always returns a decimal (202608 / 100 = 2026.08)
-       - `LIKE` is case-sensitive — use `ILIKE` for case-insensitive English text search
        - Current date: `current_date` (NO `date('now')`)
+       - NO multi-column `=` against a subquery like `(year, month) = (SELECT ...)` — use `IN` or a single-column subquery e.g. `year_month = (SELECT MAX(year_month) FROM ...)`
        - Concatenate with `a || b`, restrict rows with `LIMIT`""",
 }
+
+
+# SQLite LIKE ignores case, DuckDB LIKE does not. Prompts, golden, ValueVerifier and
+# WarningDetector were all built on SQLite semantics ('%HARD INFRA%' must match
+# '1.Hard Infrastructure'), so on a file source LIKE runs as ILIKE. String literals
+# and quoted identifiers are matched first so a LIKE inside them is left alone.
+_LIKE_OR_QUOTED = re.compile(r"'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\"|\bLIKE\b", re.IGNORECASE)
+
+
+def _sqlite_like(sql: str) -> str:
+    return _LIKE_OR_QUOTED.sub(lambda m: "ILIKE" if m.group(0).upper() == "LIKE" else m.group(0), sql)
 
 
 def _sql_str(value: str) -> str:
@@ -504,6 +515,7 @@ class DuckDBFileAdapter(DatabaseAdapter):
     def execute_query(self, sql: str, params: Optional[tuple] = None, max_rows: Optional[int] = None) -> List[Dict]:
         cur = self.cursor()
         try:
+            sql = _sqlite_like(sql)
             cur.execute(sql, params) if params else cur.execute(sql)
             if not cur.description:
                 return []
@@ -546,7 +558,9 @@ def execute_select(db, sql: str, limit: int = 100, validate_first: bool = True) 
 
     limit = min(max(1, limit), 1000)
     if validate_first:
-        validation = ValidationService(db=None).validate_sql(sql)
+        validation = ValidationService(db=None).validate_sql(
+            sql, file_source=getattr(db, "engine_name", None) == "duckdb",
+        )
         if not validation["valid"]:
             return {
                 "success": False, "error": "SQL validation failed", "issues": validation["issues"],

@@ -83,12 +83,23 @@ class SourceResolver:
             return LEGACY_SOURCE
         try:
             with self._engine().connect() as conn:
-                row = conn.execute(text(
-                    "SELECT ds.id, ds.name, ds.source_type, ds.root_path, ds.is_active "
-                    "FROM schema_contexts sc JOIN data_sources ds ON ds.id = sc.source_id "
-                    "WHERE sc.name = :ctx"
-                ), {"ctx": context_name}).mappings().first()
-                if row is None or row["source_type"] == LEGACY:
+                row = None
+                # Same row, same order as context_store.get_context_info (exact, '_'→' ',
+                # ' '→'_', active only) — the prompt and the data must come from one context
+                for name in dict.fromkeys([context_name, context_name.replace("_", " "),
+                                           context_name.replace(" ", "_")]):
+                    row = conn.execute(text(
+                        "SELECT sc.source_id, ds.id, ds.name, ds.source_type, ds.root_path, ds.is_active "
+                        "FROM schema_contexts sc LEFT JOIN data_sources ds ON ds.id = sc.source_id "
+                        "WHERE sc.name = :ctx AND sc.is_active = 1"
+                    ), {"ctx": name}).mappings().first()
+                    if row is not None:
+                        break
+                if row is None or row["source_id"] is None:
+                    return LEGACY_SOURCE
+                if row["id"] is None:
+                    raise ValueError(f"Context '{context_name}' points to missing data source id {row['source_id']}")
+                if row["source_type"] == LEGACY:
                     return LEGACY_SOURCE
                 tables = [dict(r) for r in conn.execute(text(
                     "SELECT table_name, file_name, columns FROM source_tables "

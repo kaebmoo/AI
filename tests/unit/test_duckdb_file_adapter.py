@@ -45,6 +45,14 @@ class TestViews:
         assert adapter.test_connection()
         assert [c["type"] for c in adapter.get_schema_info("feed_x_fact_bu_monthly")] == ["BIGINT", "VARCHAR", "DOUBLE"]
 
+    def test_like_keeps_sqlite_case_insensitivity(self, adapter):
+        # SQLite LIKE ignores case; the LLM/value verifier rely on it ('%HARD INFRA%')
+        q = "SELECT COUNT(*) AS n FROM feed_x_fact_bu_monthly WHERE bu {} '%01.a%'"
+        assert adapter.execute_query(q.format("LIKE"))[0]["n"] == 2
+        assert adapter.execute_query(q.format("NOT LIKE"))[0]["n"] == 1
+        # a LIKE inside a string literal is data, not the operator
+        assert adapter.execute_query("SELECT 'x LIKE y' AS w")[0]["w"] == "x LIKE y"
+
     def test_row_cap_and_truncated_flag(self, adapter):
         result = execute_select(adapter, "SELECT * FROM feed_x_fact_bu_monthly", limit=2)
         assert result["row_count"] == 2 and result["truncated"] is True
@@ -65,6 +73,12 @@ class TestRootSandbox:
     def test_validator_also_rejects_file_functions(self, adapter, source_root):
         result = execute_select(adapter, f"SELECT * FROM read_csv('{source_root}/secret.csv')")
         assert result["success"] is False and "SQL validation failed" in result["error"]
+
+    def test_file_access_rule_is_file_source_only(self):
+        from app.services.validation_service import ValidationService
+        sql = "SELECT PRODUCT_NAME FROM revenue_search WHERE glob('*CLOUD*', PRODUCT_NAME)"  # SQLite glob()
+        assert ValidationService().validate_sql(sql)["valid"] is True  # legacy unchanged
+        assert ValidationService().validate_sql(sql, file_source=True)["valid"] is False
 
     def test_registry_path_escaping_root_rejected(self, source_root, tmp_path):
         bad = [{**TABLES[0], "file_name": "../outside.csv"}]

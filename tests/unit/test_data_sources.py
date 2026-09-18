@@ -41,7 +41,8 @@ def config_engine(tmp_path, source_root):
     """Config DB with two contexts: 'revenue' (legacy) and 'feed_x' (file source)."""
     engine = create_engine(f"sqlite:///{tmp_path / 'config.db'}")
     with engine.begin() as conn:
-        conn.execute(text("CREATE TABLE schema_contexts (id INTEGER PRIMARY KEY, name TEXT, main_view TEXT)"))
+        conn.execute(text("CREATE TABLE schema_contexts (id INTEGER PRIMARY KEY, name TEXT, main_view TEXT, "
+                          "is_active BOOLEAN DEFAULT 1)"))
         conn.execute(text("INSERT INTO schema_contexts (name, main_view) VALUES "
                           "('revenue', 'revenue_search'), ('feed_x', 'feed_x_fact_bu_monthly')"))
     migrate(engine)
@@ -91,7 +92,7 @@ class TestResolver:
     def test_unmigrated_config_db_is_legacy(self, tmp_path):
         engine = create_engine(f"sqlite:///{tmp_path / 'old.db'}")
         with engine.begin() as conn:
-            conn.execute(text("CREATE TABLE schema_contexts (id INTEGER PRIMARY KEY, name TEXT)"))
+            conn.execute(text("CREATE TABLE schema_contexts (id INTEGER PRIMARY KEY, name TEXT, is_active BOOLEAN DEFAULT 1)"))
         assert SourceResolver(config_engine=engine).for_context("revenue") is LEGACY_SOURCE
 
     def test_adapter_cached_until_registration_changes(self, resolver, config_engine):
@@ -102,6 +103,17 @@ class TestResolver:
         a2 = resolver.for_context("feed_x").adapter
         assert a2 is not a1
         assert a2.execute_query("SELECT COUNT(*) AS n FROM feed_x_renamed")[0]["n"] == 3
+
+    def test_name_variants_resolve_like_get_context_info(self, resolver):
+        # get_context_info accepts 'feed x' for 'feed_x' — the data must follow the same row,
+        # not fall back to legacy while the prompt describes the file source
+        assert resolver.for_context("feed x").source_type == "duckdb_file"
+
+    def test_dangling_source_id_fails_loud(self, resolver, config_engine):
+        with config_engine.begin() as conn:
+            conn.execute(text("UPDATE schema_contexts SET source_id = 999 WHERE name = 'feed_x'"))
+        with pytest.raises(ValueError, match="missing data source"):
+            resolver.for_context("feed_x")
 
     def test_inactive_file_source_fails_loud_not_legacy(self, resolver, config_engine):
         with config_engine.begin() as conn:

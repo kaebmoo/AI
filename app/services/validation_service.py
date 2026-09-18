@@ -20,7 +20,7 @@ DANGEROUS_PATTERNS = [
 ]
 
 # File-source guard (Plan 7): SQL reads registered views only, never files directly
-# (DuckDB table functions; they don't exist in SQLite). allowed_paths in
+# (DuckDB table functions). Applied with validate_sql(file_source=True) only. allowed_paths in
 # DuckDBFileAdapter is the engine-level second layer.
 FILE_ACCESS_PATTERN = r'\b(read_\w+|\w+_scan|glob|sniff_csv|parquet_\w+)\s*\('
 
@@ -39,7 +39,7 @@ class ValidationService:
     def __init__(self, db=None):
         self.db = db
 
-    def validate_sql(self, sql: str) -> Dict[str, Any]:
+    def validate_sql(self, sql: str, file_source: bool = False) -> Dict[str, Any]:
         """Validate SQL query for safety and correctness.
 
         Returns:
@@ -72,7 +72,8 @@ class ValidationService:
             if re.search(rf'\b{pattern}\b', sql_upper):
                 issues.append(f"Dangerous operation detected: {pattern}")
 
-        if re.search(FILE_ACCESS_PATTERN, sql, re.IGNORECASE):
+        # DuckDB file source only — SQLite has a legitimate glob() (legacy unchanged)
+        if file_source and re.search(FILE_ACCESS_PATTERN, sql, re.IGNORECASE):
             issues.append("Direct file access is not allowed — query the registered views")
 
         # Injection patterns
