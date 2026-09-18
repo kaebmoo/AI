@@ -807,9 +807,15 @@ class ScopedSQLite:
         self._sa_engine = None
 
     def _connect(self):
+        # Shadow EVERY table/view (the non-scoped ones empty), as ScopedDuckDB does: the gate is
+        # not the only barrier. Names inside main views still resolve within main, so the scoped
+        # view keeps reading its real rows.
         conn = sqlite3.connect(self._uri, uri=True, check_same_thread=False)
-        for name, where in self.filters.items():
-            _shadow(conn.execute, name, where)
+        filters = {k.lower(): v for k, v in self.filters.items()}
+        names = [r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'")]
+        for name in names:
+            _shadow(conn.execute, name, filters.get(name.lower(), "0"))
         return conn
 
     def query(self, sql: str, params: Optional[tuple] = None, max_rows: Optional[int] = None):

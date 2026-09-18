@@ -169,6 +169,13 @@ class TestLegacyScope:
         with pytest.raises(PermissionError):
             resolve(env, "revenue", {"year": 2025}).adapter.execute_query(sql)
 
+    def test_every_other_table_is_shadowed_empty(self, env):
+        """Defense in depth (review): even SQL that got past the gate would read nothing else."""
+        with resolve(env, "revenue", {"year": 2025}).engine.connect() as conn:
+            assert conn.execute(text("SELECT COUNT(*) FROM revenue")).scalar() == 0
+            assert conn.execute(text("SELECT COUNT(*) FROM v_other")).scalar() == 0
+            assert conn.execute(text("SELECT SUM(revenue) FROM revenue_search")).scalar() == 6.0
+
     def test_goes_through_the_f4_validator(self, env):
         from app.services.database_adapter import execute_select
         out = execute_select(resolve(env, "revenue", {"year": 2025}).adapter, "DELETE FROM revenue")
