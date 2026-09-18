@@ -59,6 +59,7 @@ def verify_in_place(latest: Path, domain: str, contract: dict, manifest: dict, t
     from app.services.database_adapter import DuckDBFileAdapter
 
     with tempfile.TemporaryDirectory() as tmp:
+        # manifest already checked by check_integrity_pre — don't hash every file twice
         adapter = DuckDBFileAdapter(f"verify-{domain}", str(latest), tables, tmp)
         for t in tables:
             dataset = t["table_name"][len(f"feed_{domain}_"):]
@@ -75,10 +76,11 @@ def register(config_engine, domain: str, root: Path, tables: list) -> None:
 
     with config_engine.begin() as conn:
         conn.execute(text(
-            "INSERT INTO data_sources (name, source_type, root_path, description) "
-            "VALUES (:name, 'duckdb_file', :root, :desc) "
+            "INSERT INTO data_sources (name, source_type, root_path, manifest_file, description) "
+            "VALUES (:name, 'duckdb_file', :root, 'manifest.json', :desc) "
             "ON CONFLICT(name) DO UPDATE SET source_type='duckdb_file', root_path=excluded.root_path, "
-            "description=excluded.description, is_active=1, updated_at=CURRENT_TIMESTAMP"
+            "manifest_file=excluded.manifest_file, description=excluded.description, is_active=1, "
+            "updated_at=CURRENT_TIMESTAMP"
         ), {"name": source_name(domain), "root": str(root), "desc": f"DataFeed {domain} (zero-import)"})
         source_id = conn.execute(
             text("SELECT id FROM data_sources WHERE name = :name"), {"name": source_name(domain)}

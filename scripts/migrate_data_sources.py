@@ -31,6 +31,7 @@ def migrate(config_engine=None):
                 name TEXT NOT NULL UNIQUE,
                 source_type TEXT NOT NULL,          -- 'legacy' | 'duckdb_file'
                 root_path TEXT,                     -- duckdb_file: directory the files live in
+                manifest_file TEXT,                 -- e.g. manifest.json: verified per build (reconcile + sha256)
                 description TEXT,
                 is_active BOOLEAN DEFAULT 1,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -54,6 +55,12 @@ def migrate(config_engine=None):
             "INSERT INTO data_sources (name, source_type, description) "
             "VALUES (:name, 'legacy', 'business DB เดิม (BUSINESS_DB_PATH)') ON CONFLICT(name) DO NOTHING"
         ), {"name": LEGACY})
+
+    ds_columns = {c["name"] for c in inspect(config_engine).get_columns("data_sources")}
+    if "manifest_file" not in ds_columns:  # registries created before the manifest check
+        with config_engine.begin() as conn:
+            conn.execute(text("ALTER TABLE data_sources ADD COLUMN manifest_file TEXT"))
+        print("Added data_sources.manifest_file")
 
     existing = {c["name"] for c in inspect(config_engine).get_columns("schema_contexts")}
     with config_engine.begin() as conn:

@@ -164,3 +164,107 @@ class TestValidator:
         sql = "SELECT PRODUCT_NAME FROM revenue_search WHERE glob('*CLOUD*', PRODUCT_NAME)"  # SQLite glob()
         assert ValidationService().validate_sql(sql)["valid"] is True  # legacy unchanged
         assert ValidationService().validate_sql(sql, file_source=True)["valid"] is False
+
+
+# ── Publish race (PLAN_7 §11.7): verified builds only, never a half-published bundle ──
+
+import hashlib  # noqa: E402
+import json  # noqa: E402
+
+from app.services.database_adapter import SourceUnavailable  # noqa: E402
+
+
+def _publish(root, rows, *, ok=True, manifest=True):
+    """Write a bundle the way NT-Report does: data first, manifest.json last."""
+    csv = "year_month,bu,revenue\n" + "".join(f"{ym},{bu},{v}\n" for ym, bu, v in rows)
+    (root / "fact_bu_monthly.csv").write_text(csv)
+    if manifest:
+        sha = hashlib.sha256(csv.encode()).hexdigest()
+        (root / "manifest.json").write_text(json.dumps({
+            "period": max(r[0] for r in rows), "reconcile": {"ok": ok},
+            "files": {"fact_bu_monthly.csv": {"sha256": sha}},
+        }))
+
+
+@pytest.fixture
+def bundle(tmp_path):
+    root = tmp_path / "bundle"
+    root.mkdir()
+    _publish(root, [(202607, "01.A", 100.5), (202608, "01.A", 200.25)])
+    return root
+
+
+def _verified(root, tmp_path, name="m"):
+    return DuckDBFileAdapter(name, str(root), TABLES, str(tmp_path / "cache"), manifest_file="manifest.json")
+
+
+class TestManifestGate:
+    LATEST = "SELECT MAX(year_month) AS m FROM feed_x_fact_bu_monthly"
+
+    def test_verified_build_answers(self, bundle, tmp_path):
+        adapter = _verified(bundle, tmp_path)
+        assert adapter.manifest["period"] == 202608
+        assert adapter.execute_query(self.LATEST) == [{"m": 202608}]
+
+    def test_missing_manifest_refused(self, bundle, tmp_path):  # publisher rmtree'd / not done yet
+        (bundle / "manifest.json").unlink()
+        with pytest.raises(SourceUnavailable):
+            _verified(bundle, tmp_path)
+
+    def test_reconcile_not_ok_refused(self, bundle, tmp_path):
+        _publish(bundle, [(202608, "01.A", 1)], ok=False)
+        with pytest.raises(SourceUnavailable, match="reconcile"):
+            _verified(bundle, tmp_path)
+
+    def test_file_not_matching_manifest_refused(self, bundle, tmp_path):  # partial / newer file
+        (bundle / "fact_bu_monthly.csv").write_text("year_month,bu,revenue\n202607,01.A,100.5\n")
+        with pytest.raises(SourceUnavailable, match="manifest"):
+            _verified(bundle, tmp_path)
+
+    def test_in_place_publish_after_verification_refused(self, bundle, tmp_path):
+        adapter = _verified(bundle, tmp_path)
+        _publish(bundle, [(202609, "01.A", 1)], manifest=False)  # data rewritten, manifest not yet
+        assert not adapter.is_current()
+        with pytest.raises(SourceUnavailable):
+            adapter.execute_query(self.LATEST)
+
+    def test_publish_overlapping_the_read_refused(self, bundle, tmp_path, monkeypatch):
+        adapter = _verified(bundle, tmp_path)
+        calls = iter([adapter._identity, None])  # before: intact, after: files gone
+        monkeypatch.setattr(adapter, "_snapshot", lambda: next(calls))
+        with pytest.raises(SourceUnavailable):
+            adapter.execute_query(self.LATEST)
+
+    def test_file_missing_at_build_time_refused(self, bundle, tmp_path):  # rmtree window
+        (bundle / "fact_bu_monthly.csv").unlink()
+        with pytest.raises(SourceUnavailable):
+            _verified(bundle, tmp_path)
+
+    def test_read_failing_because_files_changed_is_a_publish(self, bundle, tmp_path, monkeypatch):
+        adapter = _verified(bundle, tmp_path)
+        monkeypatch.setattr(adapter, "_ensure_current", lambda: None)  # file vanishes after the check
+        (bundle / "fact_bu_monthly.csv").unlink()
+        with pytest.raises(SourceUnavailable):  # not the raw DuckDB IO/permission error
+            adapter.execute_query(self.LATEST)
+
+    def test_execute_select_surfaces_it_instead_of_a_sql_error(self, bundle, tmp_path):
+        adapter = _verified(bundle, tmp_path)
+        (bundle / "manifest.json").unlink()
+        with pytest.raises(SourceUnavailable):  # not {"success": False} → no LLM "fix the SQL" retry
+            execute_select(adapter, self.LATEST)
+
+    def test_views_pinned_to_one_build_across_a_symlink_swap(self, tmp_path):
+        builds = {}
+        for period in (202607, 202608):
+            d = tmp_path / f"build-{period}"
+            d.mkdir()
+            _publish(d, [(period, "01.A", 1)])
+            builds[period] = d
+        latest = tmp_path / "latest"
+        latest.symlink_to(builds[202607])
+        adapter = _verified(latest, tmp_path)
+        latest.unlink()
+        latest.symlink_to(builds[202608])  # atomic publish of the next build
+        # the in-flight adapter keeps answering from its own (still intact) build, no mixing
+        assert adapter.execute_query(self.LATEST) == [{"m": 202607}]
+        assert _verified(latest, tmp_path, "m2").execute_query(self.LATEST) == [{"m": 202608}]

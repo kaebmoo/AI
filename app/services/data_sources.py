@@ -44,6 +44,11 @@ class ResolvedSource:
     adapter: Optional[DuckDBFileAdapter] = None  # None = legacy
 
     @property
+    def version(self) -> str:
+        """Changes with every verified build — part of the query-cache validity check."""
+        return self.adapter.version if self.adapter else self.name
+
+    @property
     def engine(self):
         """SQLAlchemy engine for schema inspection of this source."""
         if self.adapter is None:
@@ -90,7 +95,7 @@ class SourceResolver:
                 for name in dict.fromkeys([context_name, context_name.replace("_", " "),
                                            context_name.replace(" ", "_")]):
                     row = conn.execute(text(
-                        "SELECT sc.source_id, ds.id, ds.name, ds.source_type, ds.root_path, ds.is_active "
+                        "SELECT sc.source_id, ds.* "
                         "FROM schema_contexts sc LEFT JOIN data_sources ds ON ds.id = sc.source_id "
                         "WHERE sc.name = :ctx AND sc.is_active = 1"
                     ), {"ctx": name}).mappings().first()
@@ -119,24 +124,34 @@ class SourceResolver:
             raise ValueError(f"Data source '{row['name']}' has no registered tables")
         for t in tables:
             t["columns"] = json.loads(t["columns"])
-        return ResolvedSource(row["name"], DUCKDB_FILE, self._adapter(row["name"], row["root_path"], tables))
+        # .get: a registry migrated before manifest_file existed simply has no manifest check
+        adapter = self._adapter(row["name"], row["root_path"], tables, row.get("manifest_file"))
+        return ResolvedSource(row["name"], DUCKDB_FILE, adapter)
 
-    def _adapter(self, name: str, root: str, tables: List[Dict]) -> DuckDBFileAdapter:
+    def _adapter(self, name: str, root: str, tables: List[Dict], manifest_file: Optional[str]) -> DuckDBFileAdapter:
         # realpath in the key: DuckDB pins allowed_paths to the real files at SET time, so a
         # re-pointed symlinked root (latest/ → 202609/) needs a new adapter, not the old lock
-        key = [name, root, os.path.realpath(root) if root else None, tables]
+        key = [name, root, os.path.realpath(root) if root else None, tables, manifest_file]
         fp = hashlib.sha256(json.dumps(key, sort_keys=True).encode()).hexdigest()[:12]
         with self._lock:
             cached = self._adapters.get(name)
-            if cached and cached[0] == fp:
+            # is_current: an in-place publish rewrote the verified files → verify the new build
+            if cached and cached[0] == fp and cached[1].is_current():
                 return cached[1]
             cache_dir = self._cache_dir
             if cache_dir is None:
                 from app.config import settings
                 cache_dir = settings.DATA_SOURCE_CACHE_DIR
-            adapter = DuckDBFileAdapter(f"{name}-{fp}", root, tables, cache_dir)
+            # raises SourceUnavailable while a publish is in progress — never falls back
+            adapter = DuckDBFileAdapter(f"{name}-{fp}", root, tables, cache_dir, manifest_file)
             # One adapter per source: a superseded one is dropped (not closed — in-flight
-            # requests may still hold it) and its DuckDB instance is freed once they finish
+            # requests may still hold it; its DuckDB instance is freed once they finish).
+            # Its view file can go now: an open file stays readable after unlink.
+            if cached and cached[1].db_path != adapter.db_path:
+                try:
+                    os.remove(cached[1].db_path)
+                except OSError:
+                    pass
             self._adapters[name] = (fp, adapter)
             logger.info(f"Data source '{name}' ready: {len(tables)} views over {adapter.root}")
             return adapter

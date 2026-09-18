@@ -276,3 +276,56 @@ class TestQueryCacheFollowsSource:
         assert ai_service.query_hybrid.await_count == 2
         qe._query_cache.clear()
         qe._dedup_store.clear()
+
+
+class TestPublishRaceResolver:
+    """Registry with manifest_file: the resolver serves verified builds only (PLAN_7 §11.7)."""
+
+    @staticmethod
+    def _publish(root, period, manifest=True):
+        import hashlib
+        csv = f"year_month,bu,revenue\n{period},01.A,1\n"
+        (root / "fact_bu_monthly.csv").write_text(csv)
+        if manifest:
+            (root / "manifest.json").write_text(json.dumps({
+                "period": period, "reconcile": {"ok": True},
+                "files": {"fact_bu_monthly.csv": {"sha256": hashlib.sha256(csv.encode()).hexdigest()}},
+            }))
+        elif (root / "manifest.json").exists():
+            (root / "manifest.json").unlink()
+
+    @pytest.fixture
+    def verified(self, resolver, config_engine, source_root):
+        self._publish(source_root, 202607)
+        with config_engine.begin() as conn:
+            conn.execute(text("UPDATE data_sources SET manifest_file = 'manifest.json' WHERE name = 'df_x'"))
+        return resolver
+
+    Q = "SELECT MAX(year_month) AS m FROM feed_x_fact_bu_monthly"
+
+    def test_new_build_is_verified_and_served(self, verified, source_root):
+        first = verified.for_context("feed_x")
+        assert first.adapter.execute_query(self.Q) == [{"m": 202607}]
+        self._publish(source_root, 202608)  # in-place publish completed (manifest last)
+        second = verified.for_context("feed_x")
+        assert second.adapter is not first.adapter
+        assert second.adapter.execute_query(self.Q) == [{"m": 202608}]
+        assert second.version != first.version  # query cache entries of 202607 become misses
+
+    def test_mid_publish_is_refused_not_legacy(self, verified, source_root):
+        from app.services.database_adapter import SourceUnavailable
+        verified.for_context("feed_x")
+        self._publish(source_root, 202608, manifest=False)  # data rewritten, manifest not yet
+        with pytest.raises(SourceUnavailable):
+            verified.for_context("feed_x")
+
+    def test_bound_client_raises_instead_of_sql_error(self, verified, source_root):
+        from app.services.database_adapter import SourceUnavailable
+        client = SourceBoundMCPClient(MagicMock(), verified.for_context("feed_x"))
+        self._publish(source_root, 202608, manifest=False)
+        with pytest.raises(SourceUnavailable):
+            asyncio.run(client.call_tool("execute_query", {"sql": self.Q}))
+
+    def test_migration_adds_manifest_column(self, config_engine):
+        from sqlalchemy import inspect as sa_inspect
+        assert "manifest_file" in {c["name"] for c in sa_inspect(config_engine).get_columns("data_sources")}

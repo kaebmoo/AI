@@ -13,6 +13,7 @@ Usage:
     result = adapter.execute_query("SELECT * FROM revenue_search LIMIT 10")
 """
 
+import hashlib
 import json
 import math
 import os
@@ -422,6 +423,22 @@ def _sql_ident(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
+class SourceUnavailable(Exception):
+    """The file source is not in a verified, consistent state (e.g. mid-publish).
+
+    Deliberately NOT a ValueError/RuntimeError: the query pipeline must surface it
+    to the user, never hand it to the LLM as a "fix your SQL" error.
+    """
+
+
+def _sha256(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 class DuckDBFileAdapter(DatabaseAdapter):
     """Read-only DuckDB over CSV files under one source root — nothing is imported.
 
@@ -442,31 +459,43 @@ class DuckDBFileAdapter(DatabaseAdapter):
         the process or log other users' SQL)
     """
 
-    def __init__(self, name: str, root: str, tables: List[Dict], cache_dir: str):
+    def __init__(self, name: str, root: str, tables: List[Dict], cache_dir: str,
+                 manifest_file: Optional[str] = None):
         import duckdb
 
         if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
             raise ValueError(f"Invalid source name: {name!r}")
         self.name = name
-        # Lexical path, not realpath: if <root> is a symlink (e.g. latest/ → 202608/)
-        # a re-point must reach the views without a rebuild
-        self.root = os.path.abspath(root)
-        if not os.path.isdir(self.root):
-            raise FileNotFoundError(f"Source root not found: {self.root}")
-        real_root = os.path.realpath(self.root)
+        # Pinned to ONE build: views read the real directory behind <root>, so a re-pointed
+        # symlinked latest/ can't mix two builds in one answer (the resolver builds a new
+        # adapter for the new build; in-flight requests finish on the old one)
+        lexical_root = os.path.abspath(root)
+        if not os.path.isdir(lexical_root):
+            raise SourceUnavailable(f"ไม่พบโฟลเดอร์ของ source '{name}' ({lexical_root}) — ข้อมูลอาจกำลังถูก publish")
+        self.root = os.path.realpath(lexical_root)
 
-        views = []
+        views, by_name = [], {}
         for t in tables:
-            path = os.path.abspath(os.path.join(self.root, t["file_name"]))
+            lexical = os.path.abspath(os.path.join(lexical_root, t["file_name"]))
+            path = os.path.realpath(lexical)
             # '..' (lexical) and symlinked files (real) must both stay under the root
-            if (os.path.commonpath([path, self.root]) != self.root
-                    or os.path.commonpath([os.path.realpath(path), real_root]) != real_root):
+            if (os.path.commonpath([lexical, lexical_root]) != lexical_root
+                    or os.path.commonpath([path, self.root]) != self.root):
                 raise ValueError(f"File outside source root: {t['file_name']}")
             if not os.path.isfile(path):
-                raise FileNotFoundError(f"Source file not found: {path}")
+                raise SourceUnavailable(f"ไม่พบไฟล์ {t['file_name']} ของ source '{name}' — ข้อมูลอาจกำลังถูก publish")
             views.append((t["table_name"], path, t["columns"]))
-        self.files = sorted({p for _, p, _ in views})
+            by_name[t["file_name"]] = path
+        self.files = sorted(by_name.values())
         self._views = {t.lower() for t, _, _ in views}
+        self._watched = self.files + ([os.path.join(self.root, manifest_file)] if manifest_file else [])
+
+        # Verify once per build, then only stat per query (publish race — PLAN_7 §11.7)
+        self.manifest = self._verify_manifest(manifest_file, by_name) if manifest_file else None
+        self._identity = self._snapshot()
+        if self._identity is None:
+            raise SourceUnavailable(f"ไฟล์ของ source '{name}' หายระหว่างเตรียม — ข้อมูลอาจกำลังถูก publish")
+        self.version = hashlib.sha256(repr(self._identity).encode()).hexdigest()[:12]
 
         db_path = self._build_view_db(views, cache_dir)
         self._conn = duckdb.connect(db_path, read_only=True, config={
@@ -490,7 +519,10 @@ class DuckDBFileAdapter(DatabaseAdapter):
         import duckdb
 
         os.makedirs(cache_dir, exist_ok=True)
-        final = os.path.join(cache_dir, f"{self.name}.duckdb")
+        # version in the name: a rebuilt build must not reuse DuckDB's instance cache for
+        # a path the previous (locked) adapter of this process still has open
+        final = os.path.join(cache_dir, f"{self.name}-{self.version}.duckdb")
+        self.db_path = final
         tmp = f"{final}.{os.getpid()}.tmp"
         if os.path.exists(tmp):
             os.remove(tmp)
@@ -514,6 +546,41 @@ class DuckDBFileAdapter(DatabaseAdapter):
             con.close()
         os.replace(tmp, final)
         return final
+
+    def _snapshot(self):
+        """(inode, size, mtime) of every watched file — None if any is missing."""
+        try:
+            return tuple((st.st_ino, st.st_size, st.st_mtime_ns) for st in map(os.stat, self._watched))
+        except FileNotFoundError:
+            return None
+
+    def _verify_manifest(self, manifest_file: str, by_name: Dict[str, str]) -> Dict:
+        """The files must be exactly what a passing manifest describes (sha256, once per build)."""
+        before = self._snapshot()
+        try:
+            with open(os.path.join(self.root, manifest_file), encoding="utf-8") as f:
+                manifest = json.load(f)
+        except (OSError, ValueError) as e:
+            raise SourceUnavailable(f"อ่าน {manifest_file} ไม่ได้ ({e}) — ข้อมูลอาจกำลังถูก publish")
+        if not (manifest.get("reconcile") or {}).get("ok"):
+            raise SourceUnavailable("manifest reconcile.ok ไม่ผ่าน — ไม่ตอบจากข้อมูลที่ไม่ผ่านการกระทบยอด")
+        listed = manifest.get("files") or {}
+        for file_name, path in by_name.items():
+            if (listed.get(file_name) or {}).get("sha256") != _sha256(path):
+                raise SourceUnavailable(f"{file_name} ไม่ตรง manifest — ข้อมูลอาจกำลังถูก publish")
+        if before is None or before != self._snapshot():
+            raise SourceUnavailable("ไฟล์เปลี่ยนระหว่างตรวจ manifest — ข้อมูลกำลังถูก publish")
+        logger.info(f"Source {self.name}: verified build period={manifest.get('period')} "
+                    f"built_at={manifest.get('built_at')}")
+        return manifest
+
+    def is_current(self) -> bool:
+        """False once any file of the verified build changed or vanished (in-place publish)."""
+        return self._snapshot() == self._identity
+
+    def _ensure_current(self) -> None:
+        if not self.is_current():
+            raise SourceUnavailable(f"ข้อมูลของ source '{self.name}' เปลี่ยนหรือกำลังถูก publish — กรุณาถามใหม่อีกครั้ง")
 
     @property
     def engine_name(self) -> str:
@@ -572,18 +639,26 @@ class DuckDBFileAdapter(DatabaseAdapter):
 
     def query(self, sql: str, params: Optional[tuple] = None, max_rows: Optional[int] = None):
         """(rows, column names) — column names survive a zero-row result (xlsx export header)."""
+        self._ensure_current()
         cur = self.cursor()
         try:
             sql = _sqlite_like(sql)
             self._check_select_over_views(cur, sql)
-            cur.execute(sql, params) if params else cur.execute(sql)
-            if not cur.description:
-                return [], []
-            columns = [d[0] for d in cur.description]
-            rows = cur.fetchmany(max_rows) if max_rows else cur.fetchall()
-            return [{c: _sqlite_value(v) for c, v in zip(columns, row)} for row in rows], columns
+            try:
+                cur.execute(sql, params) if params else cur.execute(sql)
+                if not cur.description:
+                    return [], []
+                columns = [d[0] for d in cur.description]
+                rows = cur.fetchmany(max_rows) if max_rows else cur.fetchall()
+            except Exception as e:
+                if not self.is_current():  # files changed under the read (partial / missing file)
+                    raise SourceUnavailable(
+                        f"ข้อมูลของ source '{self.name}' เปลี่ยนระหว่างอ่าน — กรุณาถามใหม่อีกครั้ง") from e
+                raise
         finally:
             cur.close()
+        self._ensure_current()  # a publish overlapped the read → the rows may mix two builds
+        return [{c: _sqlite_value(v) for c, v in zip(columns, row)} for row in rows], columns
 
     def get_schema_info(self, table_name: str) -> List[Dict]:
         rows = self.execute_query(f"DESCRIBE {_sql_ident(table_name)}")
@@ -633,6 +708,8 @@ def execute_select(db, sql: str, limit: int = 100, validate_first: bool = True) 
             "success": True, "data": rows, "row_count": len(rows),
             "columns": list(rows[0].keys()) if rows else [], "truncated": truncated, "error": None,
         }
+    except SourceUnavailable:
+        raise  # not a SQL problem — the caller must tell the user, not retry the LLM
     except Exception as e:
         logger.error(f"Query execution error: {e}")
         return {"success": False, "error": str(e), "data": [], "row_count": 0, "columns": [], "truncated": False}
