@@ -84,7 +84,7 @@
 - `allowed_paths` ถูกตรึงกับ realpath ตอน `SET` → ถ้า `latest/` เป็น symlink แล้วถูกชี้ใหม่ adapter เดิมจะอ่านไม่ได้ — resolver ใส่ realpath ของ root ใน fingerprint จึงสร้าง adapter ใหม่ให้เอง (มี test)
 
 **Bug เดิมที่พบระหว่างไล่ query path (ไม่แก้ — พฤติกรรม legacy ต้องไม่เปลี่ยน):**
-- ⚠️ `keyword_index.build_keyword_index` (admin `POST /admin/config/rebuild-keyword-index`) inspect column บน business DB แต่ `SELECT DISTINCT` บน **config DB** → SELECT ล้มทุกคอลัมน์ แต่ `DELETE` ใน transaction เดียวกัน commit → **กด rebuild = ลบ keyword index ทิ้งหมด (revenue 1679, expense 2155, pl_costtype 1271, transfer price 285 แถว) แล้วใส่ 0** (reproduce แล้วบนสำเนา config.db: revenue 1679 → 0) — **แก้แล้วในงานแยก `0f3aaa7`** (commit อยู่บน branch `plan7-phase1` ด้วย) — `search_db_for_keyword` (value lookup ใน query path) มีรูปแบบเดียวกัน → คืน `[]` เสมอ — **แก้แล้ว `0f3aaa7`** (ดูหัวข้อ "Keyword index engine fix" ท้ายไฟล์)
+- ⚠️ `keyword_index.build_keyword_index` (admin `POST /admin/config/rebuild-keyword-index`) inspect column บน business DB แต่ `SELECT DISTINCT` บน **config DB** → SELECT ล้มทุกคอลัมน์ แต่ `DELETE` ใน transaction เดียวกัน commit → **กด rebuild = ลบ keyword index ทิ้งหมด (revenue 1679, expense 2155, pl_costtype 1271, transfer price 285 แถว) แล้วใส่ 0** (reproduce แล้วบนสำเนา config.db: revenue 1679 → 0) — `search_db_for_keyword` (value lookup ใน query path) มีรูปแบบเดียวกัน → คืน `[]` เสมอ — **แก้แล้วในงานแยก `0f3aaa7`** (commit อยู่บน branch `plan7-phase1` ด้วย; ผล/eval ดูหัวข้อ "Keyword index engine fix" ท้ายไฟล์)
 - `hierarchy_service` (`detect_changes`, `bootstrap_from_view`, `get_available_views`) query view ธุรกิจบน config DB → ผลว่างเสมอ; `scripts/extract_hierarchy.py` เขียน `master_hierarchy*` ลง **business DB** (ของจริงอยู่ config DB)
 - `context_onboarding` ส่ง business DB path ให้ `ConfigApplicator`/`ConfigValidator` → apply ลงผิด DB (ล้มเงียบ), validate 500; `onboarding_tools` (admin agent) เรียก method ที่ไม่มี (`inspect_view`, `onboard`) → fail ทุกครั้ง
 - `vanna_service._sync_ddl` หา DDL ใน config DB → ไม่เคย train DDL เลย
@@ -105,3 +105,38 @@
 - `/chat/train` validate SQL กับ legacy DB เสมอ (ไม่ route ตาม context)
 - `.source_cache/<source>-<fingerprint>.duckdb` ของ fingerprint เก่าไม่ถูกลบ (ไฟล์ ~270KB ต่อครั้งที่ลงทะเบียนใหม่)
 - eval ข้อ YTD (#64 `revenue_ytd` ทั้งบริษัท) ตกทั้ง legacy และ file source วันนี้ — โมเดล (matcha gpt-4.1) เขียน `month <= 5` แล้ว SUM(revenue_ytd) (F10 เดือน ก.ค. เขียน `= 5`) — กฎ `bg8_ytd_not_summable` ใน contract ห้ามแค่ "sum revenue รายเดือน" ไม่ได้ห้าม sum `revenue_ytd` ข้ามงวดตรง ๆ → ควรเพิ่มกฎใน contract/knowledge (Phase 2) — ไม่ใช่ผลของ file source
+
+## จาก Keyword index engine fix (2026-09-18)
+
+แก้ bug ข้างบน (หัวข้อ Plan 7 Phase 1) — `0f3aaa7` — งานแยก ไม่ใช่ Plan 7
+
+**สิ่งที่แก้:**
+- `build_keyword_index`: `SELECT DISTINCT` รันบน `service.business_engine` (source ของ context) → `DELETE`+`INSERT` ลง `keyword_value_index` บน config engine ใน transaction เดียว **หลัง** scan เสร็จ
+- fail closed: scan คอลัมน์ไหน error หรือ scan ได้ 0 ค่า → **คง index เดิม** คืน 0 (เดิม error ถูกกลืนรายคอลัมน์แล้ว DELETE commit)
+- `search_db_for_keyword`: SELECT บน `service.business_engine` (เดิมบน config → `[]` เสมอ)
+- `POST /admin/config/rebuild-keyword-index`: ผูก SchemaService กับ source ของแต่ละ context (`source_resolver.for_context`) ไม่ใช่ global business engine — ถ้าไม่ผูก `feed_revenue` จะถูก index จาก**สำเนาเก่า**ใน legacy DB (29 งวด ถึง 202605) แทนไฟล์ (32 งวด ถึง 202608) — response มี `failed_contexts` (context ที่คง index เดิม)
+- tests: config/business SQLite แยกไฟล์ 5 ข้อ (rebuild เติมใหม่, scan ล้ม/ได้ 0 ค่าไม่ลบ, search_db เจอค่า, endpoint ผูก source ต่อ context) — **fail บน code เดิมครบ 5** — full suite 700 passed, 3 skipped
+
+**Rebuild บนสำเนา config.db** (ของจริง**ยังไม่ได้ rebuild**): code เดิม ทุก context → 0 แถว; code ใหม่ revenue 1679→6701, expense 2155→4064, transfer price 285→16821, pl_costtype 1271→1641, feed_revenue 0→47 (จากไฟล์)
+
+**ผลต่อ prompt — ตรวจแบบ deterministic ไม่เรียก LLM** (value lookup ของ golden 63 ข้อ, code เดิม vs ใหม่, `PYTHONHASHSEED=0`):
+- block "Actual Values Found" เปลี่ยน **4/63 ข้อ** ทั้งหมดเป็น feed_revenue #52/55/58/61 (`1.Hard Infrastructure` → เจอ `bu` = `1.Hard Infrastructure`) — **context legacy ไม่เปลี่ยนเลยใน golden**: keyword ที่ตกไป fallback ของ legacy (`percentile`, `COALESCE`, `radio`, ...) ไม่เจอค่าใน view — คำถามจริงที่มีคำอังกฤษตรงค่าใน data แต่ไม่อยู่ใน index จะได้ค่าจริงเพิ่ม (golden ไม่ครอบคลุม)
+- ⚠️ **latency:** fallback scan จริงแล้ว — `v_expense_mart` 333k แถว ~0.2 วินาที/คอลัมน์ × ~11 คอลัมน์ ≈ **2.2 วินาทีต่อ keyword** ที่ไม่อยู่ใน index/alias — golden expense #6/17/34/36 value lookup +2.3–5.4 วินาที (อยู่บน critical path ก่อนสร้าง prompt) — ถ้าเป็นปัญหา: scan ครั้งเดียวต่อ keyword ข้ามทุกคอลัมน์ แทน 1 scan ต่อคอลัมน์ หรือ rebuild index ให้ keyword ตก fallback น้อยลง
+
+**Eval ก่อน/หลัง** (matcha gpt-4.1 default, full 63 ข้อ, รันต่อกันวันเดียวกัน):
+
+| | strict | incl. value_match | value_match | golden_broken |
+|---|---|---|---|---|
+| ก่อน (`eval_20260918_1403_default`) | 4/51 = 7.84% | 37.25% | 15 | 12 |
+| หลัง (`eval_20260918_1414_default`) | 3/51 = 5.88% | 35.29% | 15 | 12 |
+
+- ต่าง 1 ข้อ: #25 "รายได้รายสายงาน" exact_match → mismatch (หลังรอบ LLM ลืม `BUSINESS_GROUP != 'รายได้อื่น'` → 12 แถวแทน 11) — value block ของข้อนี้ว่างทุกรอบ ไม่ถูก fix แตะ → **noise ของ LLM ไม่ใช่ผลของ fix**
+- 4 ข้อที่ prompt เปลี่ยน: value_match คงเดิมทั้ง 4 — SQL เปลี่ยนจาก `bu LIKE '%HARD INFRA%'` เป็น `bu LIKE '%1.Hard%'` ตาม recommendation (ค่าเท่าเดิม)
+- สรุป: **ไม่มีผล accuracy ที่วัดได้** บน golden ชุดนี้ (ทั้งบวกและลบ) — ความต่าง 1 ข้อ อยู่ในระดับ noise ระหว่าง run; latency รวมของ eval 632 → 611 วินาที (LLM variance กลบ +2–5 วินาทีของ lookup)
+- ⚠️ eval รอบก่อน fix ทั้งหมด (รวม baseline และผล Phase 1) วัดตอน `search_db_for_keyword` ยังคืน `[]`
+
+**⚠️ ยังไม่ควรกด rebuild บน production:** rebuild ใช้งานได้จริงแล้ว และจะ index ทุกคอลัมน์ที่ `schema_metadata.is_groupable=1` **รวมคอลัมน์ตัวเลข** (transfer price `total_price_value` 7597 + `quantity` 5486 แถว, `gl_code`, `PRODUCT_KEY`, `month` ...) → keyword ตัวเลขสั้น 479 คำ (`10`, `20`, `25`, ...) กลายเป็น known terms ที่ match ตัวเลขในคำถาม — บนสำเนาที่ rebuild แล้ว block "Actual Values Found" เปลี่ยน **37/63 ข้อ**: ได้ค่าจริงที่ดีขึ้น (feed_revenue ได้ BU `7.กลุ่มบริการอื่นไม่ใช่โทรคมนาคม`, `8.รายได้อื่น`; ตัด keyword ขยะ `ค่า`/`io` ของ expense) แต่มี noise ใหม่ (`10`/`20` จาก "10 อันดับ", `ด้วย`) — ก่อน rebuild จริง: ทบทวน `is_groupable` ของคอลัมน์ตัวเลข หรือกรอง keyword ที่เป็นตัวเลขล้วน แล้วรัน eval กับสำเนา config.db (`CONFIG_DB_URL=sqlite:///<copy> python -m scripts.eval.run_eval`)
+
+**พบระหว่างทาง (ไม่แก้):**
+- `get_known_terms` เรียง term ยาวเท่ากันตามลำดับ `set` → ขึ้นกับ `PYTHONHASHSEED` → keyword ใน prompt สลับตัวพิมพ์ระหว่าง process (#14 `NT HOME PHONE`/`NT Home Phone`, #18 `Mobile`/`mobile`) → prompt ของ eval ไม่ reproducible ข้าม run (แก้ง่าย: sort ด้วย `(-len, term)`)
+- หน้า admin Settings (`frontend-admin/src/pages/Settings.tsx`) โชว์แค่ `total_entries` — `failed_contexts` เห็นใน API response/`message` เท่านั้น
