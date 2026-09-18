@@ -80,18 +80,26 @@ Importer เปิด write connection ของตัวเอง ไม่ผ�
 
 ## File source (DuckDB) — zero-import (Plan 7 Phase 1)
 
-ตั้งแต่ Plan 7 Phase 1 context `feed_revenue` **อ่านไฟล์ CSV ใน `DataFeed/dist/revenue/latest/` ตรง**
+ตั้งแต่ Plan 7 Phase 1 context `feed_*` **อ่านไฟล์ CSV ใน `DataFeed/dist/<domain>/latest/` ตรง**
 ผ่าน DuckDB — ไม่ต้อง import อีก NT-Report publish งวดใหม่ลง `latest/` เมื่อไร คำถามถัดไปเห็นทันที
 (ตาราง `feed_revenue_*` ใน `nt_fi_report.sqlite` ยังอยู่เป็น fallback แต่ context ไม่ได้อ่านมันแล้ว)
+
+| Context (2026-09-18) | Source | งวด | สถานะ | eval |
+|---|---|---|---|---|
+| `feed_revenue` | `datafeed_revenue` | 202608 | ✅ active | 14/14 |
+| `feed_expense` | `datafeed_expense` | 202608 | ✅ active | 12/12 |
+| `feed_sales` | `datafeed_sales` | 202607 | ⏸ ปิด (`is_active=0`) — contract ไม่มีกฎ actual/target → ตอบยอดขายรวมเป้าด้วย | — |
+| `feed_ebt` | `datafeed_ebt` | 202607 | ⏸ ปิด — contract ไม่มี control totals / วิธีคำนวณ EBT | — |
+
+(รายละเอียด sales/ebt: `plan/archive/RESULT_P7_PHASE2.md`, `plan/PLAN_REMAINING_ITEMS.md` REMAIN-11)
 
 ### วิธีลงทะเบียน source
 
 ```bash
-python scripts/migrate_data_sources.py            # ครั้งเดียว (idempotent) — register script เรียกให้เองด้วย
-python -m scripts.datafeed.gen_docs_from_contract --domain revenue \
-    --contract /path/to/DataFeed/contracts/revenue.yaml   # ถ้ายังไม่มี context feed_<domain>
 python -m scripts.datafeed.register_file_source --domain revenue \
-    --source /path/to/DataFeed/dist
+    --source /path/to/DataFeed/dist          # migrate + gate + registry + context/knowledge ในคำสั่งเดียว
+python -m scripts.datafeed.gen_golden_from_controls --domain revenue \
+    --source /path/to/DataFeed/dist          # golden สำหรับ eval (ถ้า contract มี control_totals)
 ```
 
 `register_file_source` ผ่าน gate ชุดเดียวกับ importer แต่ตรวจ **ไฟล์ในที่เดิม** และเขียน registry
@@ -100,12 +108,26 @@ python -m scripts.datafeed.register_file_source --domain revenue \
 1. `manifest.reconcile.ok` = true
 2. sha256 ของทุกไฟล์ที่ใช้ตรง manifest — **allowlist = dataset ใน contract ที่ CSV อยู่ใน `manifest.files`**
 3. row count ผ่าน view (DuckDB) ตรง `manifest.row_counts`
-4. control totals ผ่าน view ตรง `control_totals.csv` ทุกแถว
+4. control totals ผ่าน view ตรง `control_totals.csv` ทุกแถว — ตาม spec ใน contract: `__ALL__` = grand-total dataset
+   ถ้ามี ไม่งั้นรวมจาก source (expense/sales); contract ที่ไม่มี `control_totals` (ebt) ข้าม gate นี้
 
-แล้วเขียน `data_sources` (`datafeed_<domain>`, `duckdb_file`, `root_path` = `.../latest`),
-`source_tables` (ชื่อ view `feed_<domain>_<dataset>` → ไฟล์ + ชนิดคอลัมน์จาก contract)
-และผูก `schema_contexts.source_id` ของ `feed_<domain>` — server ที่รันอยู่เห็นผลใน request ถัดไป
+แล้วเขียนใน **transaction เดียว**: `data_sources` (`datafeed_<domain>`, `duckdb_file`, `root_path` = `.../latest`,
+`contract_file`, `knowledge_sha`), `source_tables` (ชื่อ view `feed_<domain>_<dataset>` → ไฟล์ + ชนิดคอลัมน์จาก contract),
+context `feed_<domain>` + knowledge (สร้างถ้ายังไม่มี) และผูก `schema_contexts.source_id` — server ที่รันอยู่เห็นผลใน request ถัดไป
 (ไม่ต้อง restart; คำตอบที่ cache ไว้จาก source เดิมจะไม่ถูกใช้ต่อ)
+
+### Knowledge ตาม contract อัตโนมัติ (Phase 2)
+
+logic อยู่ที่ `app/services/datafeed_knowledge.py` (`gen_docs_from_contract` เหลือเป็น wrapper สำหรับโหมด import/สั่งมือ):
+- ทุก request ของ file source: `stat` ไฟล์ contract (~0.5 ms) — ถ้า contract หรือ `schema_version` ของ build เปลี่ยน
+  → เขียน context instruction / `schema_metadata` / `vanna_documentation` ใหม่จาก contract **ครั้งเดียวข้ามทุก process**
+  (compare-and-set บน `data_sources.knowledge_sha`) + `mark_brain_dirty()` + ล้าง query cache — ไม่ต้องรันอะไร
+- instruction + กฎ + metadata มีผลกับ request ถัดไปทันที (อ่านจาก config DB ตรง); docs ใน Vanna รอ admin กด Sync Brain
+- re-sync ล้ม (เช่น yaml เสีย) = คง knowledge เดิม, log error, request ไม่ล้ม
+- keywords/priority ของ context ตั้งตอนสร้างครั้งแรกเท่านั้น — admin แก้ได้ ไม่ถูกทับ
+  (default: คำโดเมน + marker `feed`/`datafeed`/`dashboard`/`แดชบอร์ด`, priority 1 → router เลือก feed เฉพาะเมื่อคำถามมี marker;
+  portal ส่ง `context` มาตรง ไม่ผ่าน router)
+- schema เพิ่ม/ลบคอลัมน์: knowledge ตามเอง แต่ view ยังเป็นชุดคอลัมน์ตอนลงทะเบียน → รัน `register_file_source` ใหม่
 
 **ย้อนกลับไปใช้ข้อมูลที่ import ไว้ (fallback):**
 `python -m scripts.datafeed.register_file_source --domain revenue --legacy` แล้วรัน
@@ -119,6 +141,8 @@ python -m scripts.datafeed.register_file_source --domain revenue \
   (`feed_revenue_fact_bu_monthly` ฯลฯ) บน `read_csv(<root>/<file>, columns={...})` ชนิดคอลัมน์จาก
   contract → คอลัมน์ string (เช่น `service_group_seq` "3.10", `*_code`) ไม่ถูกเดาเป็นตัวเลข —
   knowledge/golden ของ F10 จึงใช้ต่อได้โดยไม่ต้อง regen
+- อ่าน CSV ด้วย dialect ที่ pin ไว้ (`delim=','`, `quote='"'`, `escape='"'` แบบที่ pandas เขียน) — sniffer ของ DuckDB
+  ดูแค่ ~20k แถวแรก ไฟล์ที่ field มี quote ครั้งแรกทีหลัง (`fact_sales.csv`) จะถูกเดาเป็นไม่มี quote แล้วพัง
 - view definition (ไม่ใช่ข้อมูล) อยู่ในไฟล์เล็ก `DATA_SOURCE_CACHE_DIR/<source>-<fingerprint>.duckdb`
   (default `./.source_cache/`) สร้างใหม่ต่อ process
 - SQL ที่ LLM สร้างสำหรับ context นี้รัน in-process บน DuckDB (ไม่ผ่าน MCP) — ผ่าน F4 validator เสมอ
@@ -146,7 +170,8 @@ python -m scripts.datafeed.register_file_source --domain revenue \
 - ไม่มี spill ลงดิสก์ (`temp_directory=''` — กัน process แย่ง spill dir กัน) → query ที่ใช้หน่วยความจำเกิน memory_limit จะ error แทน
 - file source = **local path เท่านั้น** (D1 default) — S3/HTTPS ยังไม่ทำ
 - อ่าน **CSV** เท่านั้น — Parquet ที่ bundle มีอยู่แล้วยังไม่ใช้ (ดูผล latency ใน `plan/archive/RESULT_P7_PHASE1.md`)
-- ตรวจ manifest ต่อ build เฉพาะ source ที่มี `data_sources.manifest_file` (`register_file_source` ตั้งให้) — ยังไม่ re-sync knowledge อัตโนมัติเมื่อ contract/schema_version เปลี่ยน และยังไม่มี `data_as_of` ใน response → Phase 2
+- ตรวจ manifest ต่อ build เฉพาะ source ที่มี `data_sources.manifest_file` (`register_file_source` ตั้งให้);
+  `/api/v1/query` คืน `data_as_of` (`period`, `built_at`, `build_id` ของ build ที่ตรวจแล้ว — `docs/PORTAL_INTEGRATION.md`)
 - MCP tool `get_sample_values` / `get_table_stats` (ใช้เฉพาะ tool-loop mode) ตอบ error สำหรับ file source
   แทนการอ่าน DB เดิมเงียบ ๆ
 - หน้า admin (schema browser, onboarding, keyword index rebuild, sync-brain DDL) ยังเห็นแค่ business DB เดิม
@@ -174,11 +199,13 @@ python -m scripts.datafeed.gen_golden_from_controls --domain revenue \
   ("ต้อง quote เป็น double quote เสมอ"), business rules ทุกข้อ, กฎ format งวด YYYYMM
 - จบแล้ว `mark_brain_dirty()` ให้ Vanna re-sync
 
-**gen_golden_from_controls** (marker: `category = 'feed_<domain>'` — ลบ/regen สะอาด):
+**gen_golden_from_controls** (marker: `category = 'feed_<domain>'` — ลบ/regen สะอาด) — ทุกอย่างอ่านจาก `control_totals` ของ contract:
 - เลือกงวดแบบ deterministic: ล่าสุด + 3 งวดย้อนหลังกระจายเท่า ๆ กัน
-- ต่องวด: (ก) ยอดรวมองค์กร → `feed_<domain>_fact_total_monthly`,
-  (ข) ราย BG รวม BG ชื่อไทย (ทดสอบ string matching) → `feed_<domain>_fact_bu_monthly`,
-  (ค) คำถาม YTD ที่ต้องใช้ `revenue_ytd` (ทดสอบกฎ bg8 ตรง ๆ)
+- ต่องวด (measure `agg: sum`): (ก) ยอดรวมองค์กร → grand-total dataset ถ้ามี ไม่งั้น `SUM` จาก source,
+  (ข) กลุ่มแรก + กลุ่มชื่อไทยอีกกลุ่ม (ทดสอบ string matching; ใช้คอลัมน์ `*_name` ใน group_keys เป็นชื่อในคำถามถ้ามี)
+  → source (`SUM` เมื่อ source ละเอียดกว่า group × งวด),
+  (ค) measure `agg: point_in_time` → คำถาม YTD (ทดสอบกฎ ytd ตรง ๆ)
+- contract ที่ไม่มี `control_totals` (ebt) → ไม่สร้าง golden (ของเดิมไม่ถูกลบ)
 - คำถามใช้เดือนไทย + พ.ศ. — จงใจ exercise กฎแปลงปีของระบบ
 - ค่าที่คาดหวังมาจาก control_totals → ใช้กับ eval harness
   (`python -m scripts.eval.run_eval --context feed_revenue` — ดู `docs/EVAL_HARNESS.md`)

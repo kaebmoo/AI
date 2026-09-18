@@ -140,3 +140,23 @@
 **พบระหว่างทาง (ไม่แก้):**
 - `get_known_terms` เรียง term ยาวเท่ากันตามลำดับ `set` → ขึ้นกับ `PYTHONHASHSEED` → keyword ใน prompt สลับตัวพิมพ์ระหว่าง process (#14 `NT HOME PHONE`/`NT Home Phone`, #18 `Mobile`/`mobile`) → prompt ของ eval ไม่ reproducible ข้าม run (แก้ง่าย: sort ด้วย `(-len, term)`)
 - หน้า admin Settings (`frontend-admin/src/pages/Settings.tsx`) โชว์แค่ `total_entries` — `failed_contexts` เห็นใน API response/`message` เท่านั้น
+
+## จาก Plan 7 Phase 2 — Contract-driven knowledge + freshness (2026-09-18)
+
+ผลลัพธ์/ตัวเลข: `plan/archive/RESULT_P7_PHASE2.md`
+
+**Decision ที่ทำระหว่างทาง (ตรวจ/กลับได้):**
+- **keywords/priority ของ context `feed_*` ตั้งเฉพาะตอนสร้าง** (เดิม `gen_docs_from_contract` เขียนทับทุกครั้ง) — ไม่งั้น re-sync อัตโนมัติจะทับ routing ที่ admin แก้; instruction/metadata/docs ยังเขียนใหม่ทุกครั้งตามเดิม (ต้องตาม contract)
+- **router default:** feed context = คำโดเมนชุดเดียวกับ legacy (substring เดียวกัน เช่น "ค่าใช้จ่าย" ชน "ค่า"/"จ่าย") + marker `feed/datafeed/dashboard/แดชบอร์ด`, priority 1 → ชนะ legacy เฉพาะเมื่อมี marker (priority 1 ตัดเสมอกับ +1.0 ของ legacy revenue) — golden 63 ข้อ route เหมือนเดิม; อัปเดต `feed_revenue` ใน config จริงเป็น default ใหม่ด้วยมือครั้งเดียว
+- **"ยอดขาย" (ไม่มี marker) ยังไป legacy `revenue`** (keyword `sales`/`ยอดขาย` ของ legacy) ทั้งที่ contract บอก `sales_is_not_revenue` — ไม่แก้ เพราะเปลี่ยน routing ของ legacy; ถ้าจะให้ไป `feed_sales` ต้องลบ 2 คำนี้จาก legacy revenue (admin) หลัง sales ตอบถูกแล้ว
+- **knowledge key = sha ของ contract + `schema_version` ของ build** — contract อยู่นอก bundle (`DataFeed/contracts/`) ไม่ได้ publish พร้อม build; ถ้าอนาคตย้ายเข้า bundle (S3/HTTPS §13) key เดิมใช้ต่อได้
+- **ปิด `feed_sales` / `feed_ebt` (`is_active=0`)** หลังพบว่าตอบเลขผิดความหมาย — source + knowledge ยังลงทะเบียนอยู่ เปิดคืนได้ทันที
+
+**พบระหว่างทาง:**
+- ⚠️ **DuckDB CSV sniffer ดูแค่ ~20k แถวแรก** → ไฟล์ที่ quote ครั้งแรกหลังจากนั้น (`fact_sales.csv` บรรทัด ~43k) ถูกอ่านเป็น `quote=''` → แก้แล้ว (pin dialect) — revenue ไม่กระทบเพราะมี quote ในช่วงต้นไฟล์
+- ⚠️ **sales:** `metric` มี `actual` + `target`; contract ไม่มีกฎห้ามรวม และ `control_totals.csv` รวมทั้งสอง → golden จาก control totals ให้คะแนนคำตอบที่ถูกว่าผิด; โมเดลตอบ "ยอดขายรวม" = actual+target
+- ⚠️ **ebt:** contract ไม่มี control_totals และไม่มีกฎ EBT = รายได้ − ค่าใช้จ่าย (ค่าใช้จ่ายเก็บเป็นบวก) → โมเดลตอบ "กำไร" = รายได้ + ค่าใช้จ่าย
+- ebt/revenue: `schema_version` ใน manifest (build) ตามหลัง contract (1.0.0 vs 1.0.1, 2.0.0 vs 2.0.1) — ปกติ (แก้แค่กฎ ไม่ได้ build ใหม่); knowledge มาจาก contract จึงมีกฎล่าสุดแล้ว
+- schema เปลี่ยนแบบเพิ่ม/ลบคอลัมน์: knowledge re-sync เอง แต่ view ใช้ชุดคอลัมน์ตอนลงทะเบียน → ต้องรัน `register_file_source` ใหม่ (ไม่ได้ทำอัตโนมัติ — การลงทะเบียนมี gate row count/control totals ที่ไม่ควรข้าม)
+- value lookup บน file source: fallback scan ทีละคอลัมน์ = อ่าน CSV ทั้งไฟล์ต่อคอลัมน์ (REMAIN-10) — expense eval P50 7.07 s vs revenue 6.68 s
+- ruff: unused import เดิม 2 จุด (`app/api/v1/query.py` `HTTPException`, `app/services/query_engine.py` `uuid`) — มีก่อนงานนี้ ไม่แก้

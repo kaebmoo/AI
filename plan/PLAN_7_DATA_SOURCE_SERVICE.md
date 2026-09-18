@@ -1,6 +1,6 @@
 # Plan 7: Data Source as a Service — ถามข้อมูลจากแหล่งที่ผู้ใช้กำหนด โดยไม่ต้อง import
 
-**สถานะ:** 🟡 Phase 1 ✅ DONE (2026-09-18, branch `plan7-phase1`) — Phase 2–7 ยังไม่เริ่ม | ผล: `plan/archive/RESULT_P7_PHASE1.md`
+**สถานะ:** 🟡 Phase 1 ✅ DONE (2026-09-18) — Phase 2 🟡 code ครบ, exit ผ่าน 2/4 โดเมน (sales/ebt รอแก้ contract — §11.7) — Phase 3–7 ยังไม่เริ่ม | ผล: `plan/archive/RESULT_P7_PHASE1.md`, `plan/archive/RESULT_P7_PHASE2.md`
 **ความสัมพันธ์กับแผนเดิม:** ต่อยอด/แทนที่บางส่วนของ `PLAN_6_SAAS.md` (ดู §9), รวม Plan 1B-C (MCP SSE + API key) ไว้ใน Phase 6
 **ผู้ใช้รายแรก:** NT-Report portal (F11 dashboard Q&A) — ปัจจุบันถูก disable เพราะยังไม่ได้ตั้ง key และข้อมูลใน AI ค้างที่ revenue 202605
 
@@ -141,7 +141,11 @@ Response เพิ่ม `data_as_of` ต่อ context ที่ใช้ (จ�
 - ลงทะเบียน `feed_revenue` ใหม่เป็น file source ชี้ `DataFeed/dist/revenue/latest/`
 - **Exit:** eval `feed_revenue` จาก file source ได้ value match เท่า F10 (14/14) โดยไม่ import; latency P50 ไม่แย่กว่า F10 (10.5s) เกิน 20%; context เดิม (non-feed) ยังผ่าน test suite เดิมทั้งหมด
 
-### Phase 2 — Contract-driven knowledge + freshness (2–3 วัน)
+### Phase 2 — Contract-driven knowledge + freshness (2–3 วัน) — 🟡 code DONE 2026-09-18, exit 2/4 โดเมน
+> ผล (`plan/archive/RESULT_P7_PHASE2.md`): `data_as_of` ใน `/api/v1/query` (`deb0a7e`); knowledge จาก contract เป็น service
+> + re-sync อัตโนมัติเมื่อ contract/schema_version เปลี่ยน (`38ab63d`); ลงทะเบียน expense/sales/ebt + gate/golden อ่านจาก contract +
+> pin CSV dialect (`a2b8568`) — eval revenue **14/14**, expense **12/12**; publish build ใหม่แล้ว AI เห็นเอง (พิสูจน์บนสำเนา layout `builds/<id>`)
+> — **sales/ebt ตอบเลขผิดความหมาย** (sales รวม actual+target, ebt บวกรายได้กับค่าใช้จ่าย) เพราะ contract ไม่มีกฎ/control totals ที่จำเป็น → context ปิดไว้ รอตัดสิน (§11.7)
 > ทำไปแล้วบางส่วนตอนแก้ publish race (2026-09-18, `820052e`): ตรวจ manifest ต่อ build (reconcile.ok + sha256) + ปฏิเสธเมื่อไม่ตรง + query cache ผูก build
 > เพิ่มจาก Phase 1 (✅ ทำแล้ว 2026-09-18): regen knowledge ด้วย contract 2.0.1 + กฎ `revenue_ytd` ห้าม SUM ข้ามงวด → eval 14/14
 - ลงทะเบียน source พร้อม contract → gen knowledge + golden อัตโนมัติ (ยกจาก `gen_docs_from_contract` / `gen_golden_from_controls`)
@@ -360,6 +364,7 @@ NT-Report ไม่ต้อง import อะไรเข้า AI อีก ห
 
 ### 11.4 สถานะข้อมูล ณ วันที่เขียนแผน
 - business DB ของ AI มีแค่ `feed_revenue` 202605 (import 2026-07-11) ขณะที่ DataFeed มี revenue/expense 202608, sales/ebt 202607 — ถ้าต้องการเปิดใช้ก่อน Phase 1 เสร็จ ต้อง import ด้วยมือ (โหมดเดิม) ไปก่อน
+- **อัปเดต 2026-09-18 (Phase 2):** ลงทะเบียนครบ 4 โดเมนเป็น file source (revenue/expense 202608, sales/ebt 202607) — `feed_sales`/`feed_ebt` ปิดไว้ (`is_active=0`) จนกว่า contract จะมีกฎ actual/target และวิธีคำนวณ EBT
 - **อัปเดต 2026-09-18 (Phase 1):** `feed_revenue` ผูกกับ source `datafeed_revenue` (DuckDB file) แล้ว → เห็น revenue **202608** โดยไม่ import (schema 2.0.0); ตาราง `feed_revenue_*` ใน `nt_fi_report.sqlite` ยังอยู่เป็น fallback (`register_file_source --legacy`) — expense/sales/ebt ยังไม่ลงทะเบียน (Phase 2)
 
 ### 11.5 ต้องตรวจทางเทคนิคระหว่างทำ
@@ -373,12 +378,14 @@ NT-Report ไม่ต้อง import อะไรเข้า AI อีก ห
 - [x] **Exit criterion value match 14/14** — ✅ ครบ 2026-09-18: NT-Report เพิ่มกฎ `ytd_point_in_time` (contract 2.0.1, `2b64841`) + AI regen knowledge → eval file source 14/14 สองรอบ (#64 เขียน `month = 5` แล้ว)
 - [ ] merge branch `plan7-phase1` เข้า main (ยังไม่ push ตามคำสั่ง)
 - [ ] ยืนยัน D1–D3 ที่ใช้ค่า default (§11.1) + การเพิ่ม `duckdb-engine`
-- [ ] **publish race** — ✅ ฝั่ง AI `820052e` (replay: ตอบผิดเงียบ 181 → 0) · ✅ ฝั่ง NT-Report code แล้ว (`7d639b0` versioned build + symlink `latest`) — replay layout ใหม่กับฝั่ง AI: 2,978 คำตอบถูก, **0 error, 0 ผิด** ระหว่างสลับ build ต่อเนื่อง · ⬜ เหลือ: NT-Report รัน publish จริงครั้งแรก (ย้าย `latest/` เข้า `builds/` + สร้าง symlink) — ฝั่ง AI ไม่ต้องลงทะเบียนใหม่ (resolver ตาม realpath เอง)
+- [x] **publish race** — ✅ ฝั่ง AI `820052e` (replay: ตอบผิดเงียบ 181 → 0) · ✅ ฝั่ง NT-Report code แล้ว (`7d639b0` versioned build + symlink `latest`) — replay layout ใหม่กับฝั่ง AI: 2,978 คำตอบถูก, **0 error, 0 ผิด** ระหว่างสลับ build ต่อเนื่อง · ⬜ เหลือ: NT-Report รัน publish จริงครั้งแรก (ย้าย `latest/` เข้า `builds/` + สร้าง symlink) — ฝั่ง AI ไม่ต้องลงทะเบียนใหม่ (resolver ตาม realpath เอง)
 - [x] ⚠️ bug เดิม: `POST /admin/config/rebuild-keyword-index` ลบ keyword index ทิ้งหมด — แก้ในงานแยก `0f3aaa7` ซึ่ง commit อยู่บน branch `plan7-phase1` (ไม่ใช่งาน Plan 7) — ทำให้ value lookup ของ legacy context คืนค่าจริงแล้ว = พฤติกรรม legacy เปลี่ยน ตัดสินตอน merge ว่าจะแยก merge หรือไม่
 
 **ส่งต่อ Phase 2+:**
-- [x] runtime ตรวจ manifest ต่อ build (reconcile + sha256) + query cache ผูก build — `820052e` | [ ] ที่เหลือของ Phase 2: re-sync knowledge อัตโนมัติเมื่อ contract/schema_version เปลี่ยน + `data_as_of` ใน response
-- [ ] ลงทะเบียน expense/sales/ebt (script รองรับ `--domain` แล้ว ต้องมี context จาก `gen_docs_from_contract` ก่อน)
+- [x] runtime ตรวจ manifest ต่อ build (reconcile + sha256) + query cache ผูก build — `820052e` | [x] re-sync knowledge อัตโนมัติ (`38ab63d`) + `data_as_of` (`deb0a7e`) — Phase 2
+- [x] ลงทะเบียน expense/sales/ebt (`a2b8568`) — [ ] **รอตัดสิน (Phase 2 exit):** sales/ebt ตอบเลขผิดความหมาย เพราะ contract ขาดกฎ — ทางเลือก A แก้ contract ที่ NT-Report (แนะนำ, มี prompt ใน RESULT_P7_PHASE2) / B กฎ+golden ฝั่ง AI / C ปิด Phase 2 ที่ 2 โดเมนแล้วไป Phase 3
+- [ ] NT-Report ยังไม่ได้รัน publish แบบ atomic จริง (ตรวจ 2026-09-18: `latest/` ยังเป็นโฟลเดอร์, ไม่มี `build_id`) — ฝั่ง AI พร้อมแล้ว ไม่ต้องลงทะเบียนใหม่
+- [ ] schema เปลี่ยนแบบเพิ่ม/ลบคอลัมน์: knowledge re-sync เอง แต่ view (`source_tables`) ยังเป็นชุดคอลัมน์ตอนลงทะเบียน → ต้องรัน `register_file_source` ใหม่
 - [ ] (ภายใต้ D8 แบบผสม: ไม่บังคับ — พิจารณาเมื่อ workspace ใน deployment เดียวมีความลับต่างระดับกันมาก หรือถ้าไปถึง Tier 3) พิจารณารัน SQL ของ file source **นอก process** (แบบ MCP subprocess ของ legacy) — DuckDB รันใน API process: bug/abort ของ DuckDB ในอนาคต (แบบ `enable_logging` ที่ปิดด้วย query gate แล้ว) จะล้มทั้ง API; gate ตรวจแล้วกับทุก vector ที่ reviewer เสนอ (`query()`, `json_execute_serialized_sql`, `FROM '/path'`, comment/quote tricks, subquery) — เหลือ scalar ที่ผ่านได้แค่ตัวอ่านอย่างเดียว/no-op (`current_setting`, `getvariable`, `write_log` ขณะ logging ปิด)
 - [ ] tool-loop `get_sample_values`/`get_table_stats` บน DuckDB (ตอนนี้ fail closed)
 - [ ] admin UI/endpoint (schema browser, onboarding, keyword index, sync-brain) ให้เห็น file source — ตอนนี้เห็นแค่ business DB เดิม (สำหรับ `feed_*` = สำเนาเก่า)
