@@ -7,6 +7,14 @@ from typing import Any, Dict
 from app.tools.admin.base import AdminTool
 
 
+def _service():
+    """Onboarding reads the view from the business DB and writes config to the config DB
+    (REMAIN-9.7: the tools passed the agent's SQLAlchemy session as the DB path)."""
+    from app.db.session import business_engine
+    from app.services.context_onboarding import ContextOnboardingService
+    return ContextOnboardingService(business_engine.url.database)
+
+
 class InspectViewTool(AdminTool):
     name = "inspect_view"
     description = "Inspect a database view/table: list columns, types, sample data, row count."
@@ -29,9 +37,7 @@ class InspectViewTool(AdminTool):
 
     async def execute(self, params: Dict[str, Any], db) -> Dict[str, Any]:
         try:
-            from app.services.context_onboarding import ContextOnboardingService
-            service = ContextOnboardingService(db)
-            result = await service.inspect_view(params["view_name"])
+            result = _service().inspect(params["view_name"]).to_dict()
 
             return {
                 "success": True,
@@ -62,14 +68,9 @@ class RunOnboardingTool(AdminTool):
                     "type": "string",
                     "description": "Name of view or table to onboard"
                 },
-                "context_name": {
-                    "type": "string",
-                    "description": "Context name to create (defaults to view_name)"
-                },
                 "provider": {
                     "type": "string",
-                    "description": "AI provider to use for analysis (gemini/claude/matcha)",
-                    "default": "gemini"
+                    "description": "AI provider to use for analysis (gemini/claude/matcha; default = admin default)"
                 },
                 "dry_run": {
                     "type": "boolean",
@@ -82,15 +83,15 @@ class RunOnboardingTool(AdminTool):
 
     async def execute(self, params: Dict[str, Any], db) -> Dict[str, Any]:
         try:
-            from app.services.context_onboarding import ContextOnboardingService
-
-            service = ContextOnboardingService(db)
-            result = await service.onboard(
-                view_name=params["view_name"],
-                context_name=params.get("context_name", params["view_name"]),
-                provider=params.get("provider", "gemini"),
-                dry_run=params.get("dry_run", False),
-            )
+            # same pipeline as POST /admin/contexts/onboard
+            service = _service()
+            dry_run = params.get("dry_run", False)
+            analysis = await service.analyze(service.inspect(params["view_name"]), provider=params.get("provider"))
+            config = service.generate_config(analysis, view_name=params["view_name"])
+            result = service.apply(config, dry_run=dry_run)
+            if not dry_run:
+                from app.api.v1.admin._shared import mark_brain_dirty
+                mark_brain_dirty()
 
             return {
                 "success": True,
@@ -126,46 +127,27 @@ class ValidateConfigTool(AdminTool):
         }
 
     async def execute(self, params: Dict[str, Any], db) -> Dict[str, Any]:
-        from app.models.schema_models import (
-            SchemaContext, SchemaMetadata, SchemaBusinessRule,
-            SchemaSemanticMapping
-        )
-        from app.models.feedback_models import GoldenExample
+        # Config tables live in the config DB — the agent's session is the app DB, and the
+        # SchemaContext model this used never existed (REMAIN-9.7)
+        from sqlalchemy import text
+        from app.db.session import config_engine
 
         context_name = params["context_name"]
+        with config_engine.connect() as conn:
+            main_view = conn.execute(text(
+                "SELECT main_view FROM schema_contexts WHERE name = :c AND is_active = 1"), {"c": context_name}).scalar()
+            if main_view is None:
+                return {"success": False, "message": f"ไม่พบ context '{context_name}'", "data": None}
 
-        # Check context exists
-        context = db.query(SchemaContext).filter(
-            SchemaContext.context_name == context_name,
-            SchemaContext.is_active == True
-        ).first()
+            def count(sql):
+                return conn.execute(text(sql), {"c": context_name, "v": main_view}).scalar()
 
-        if not context:
-            return {
-                "success": False,
-                "message": f"ไม่พบ context '{context_name}'",
-                "data": None
-            }
-
-        # Count config items
-        metadata_count = db.query(SchemaMetadata).filter(
-            SchemaMetadata.table_name == getattr(context, "main_view", context_name)
-        ).count()
-
-        rules_count = db.query(SchemaBusinessRule).filter(
-            (SchemaBusinessRule.context_name == context_name) |
-            (SchemaBusinessRule.context_name == None)
-        ).filter(SchemaBusinessRule.is_active == True).count()
-
-        mappings_count = db.query(SchemaSemanticMapping).filter(
-            (SchemaSemanticMapping.context_name == context_name) |
-            (SchemaSemanticMapping.context_name == None)
-        ).filter(SchemaSemanticMapping.is_active == True).count()
-
-        examples_count = db.query(GoldenExample).filter(
-            GoldenExample.category == context_name,
-            GoldenExample.is_active == True
-        ).count()
+            metadata_count = count("SELECT COUNT(*) FROM schema_metadata WHERE table_name = :v")
+            rules_count = count("SELECT COUNT(*) FROM schema_business_rules "
+                                "WHERE (table_name = :v OR table_name IS NULL) AND is_active = 1")
+            mappings_count = count("SELECT COUNT(*) FROM schema_semantic_mapping "
+                                   "WHERE (context_name = :c OR context_name IS NULL) AND is_active = 1")
+            examples_count = count("SELECT COUNT(*) FROM golden_examples WHERE category = :c AND is_active = 1")
 
         # Assess completeness
         issues = []

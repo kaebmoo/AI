@@ -524,3 +524,41 @@ class TestOnboardingWritesConfigDb:
         assert sqlite3.connect(config_db).execute(count).fetchone()[0] == 1
         assert sqlite3.connect(business_db).execute(count).fetchone()[0] == 0  # business DB untouched
         assert (await service.validate("test_revenue")).passed is True
+
+
+class TestAdminAgentOnboardingTools:
+    """REMAIN-9.7: the admin-agent tools passed a session as the DB path and called missing methods."""
+
+    @pytest.fixture
+    def engines(self, business_db, monkeypatch):
+        from sqlalchemy import create_engine
+        engine = create_engine(f"sqlite:///{business_db}")  # single-file fixture: data + config tables
+        monkeypatch.setattr("app.db.session.business_engine", engine)
+        monkeypatch.setattr("app.db.session.config_engine", engine)
+        monkeypatch.setattr("app.api.v1.admin._shared.mark_brain_dirty", lambda: None)
+        return business_db
+
+    @pytest.mark.asyncio
+    async def test_inspect_view(self, engines):
+        from app.tools.admin.onboarding_tools import InspectViewTool
+        out = await InspectViewTool().execute({"view_name": "test_revenue"}, db=object())
+        assert out["success"] and out["data"]["row_count"] > 0
+
+    @pytest.mark.asyncio
+    async def test_run_onboarding_dry_run(self, engines, monkeypatch):
+        from unittest.mock import AsyncMock
+        from app.tools.admin.onboarding_tools import RunOnboardingTool
+        monkeypatch.setattr(ContextOnboardingService, "analyze", AsyncMock(return_value=MOCK_ANALYSIS))
+        monkeypatch.setattr(ConfigApplicator, "__init__", lambda self, db_path=None: setattr(self, "db_path", engines))
+        out = await RunOnboardingTool().execute({"view_name": "test_revenue", "dry_run": True}, db=object())
+        assert out["success"] and out["data"]["status"] == "dry_run" and out["data"]["sql_count"] > 0
+
+    @pytest.mark.asyncio
+    async def test_validate_config(self, engines):
+        from app.tools.admin.onboarding_tools import ValidateConfigTool
+        sqlite3.connect(engines).execute(
+            "INSERT INTO schema_contexts (name, main_view) VALUES ('ctx_t', 'test_revenue')").connection.commit()
+        out = await ValidateConfigTool().execute({"context_name": "ctx_t"}, db=object())
+        assert out["success"] and out["data"]["context_name"] == "ctx_t"
+        missing = await ValidateConfigTool().execute({"context_name": "nope"}, db=object())
+        assert missing["success"] is False
