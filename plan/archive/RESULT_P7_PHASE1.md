@@ -33,6 +33,7 @@ P50 = median, P95 = nearest-rank; ทุกรอบ strict exact_match = 0 เ�
 | ก่อน #2 | `eval_20260918_1314` | legacy (สลับด้วย `--legacy`) | เดียวกับหลัง #2 | 13/14 | #64 | 6.16 s | 8.15 s |
 | หลัง #3 | `eval_20260918_1315` | **file** | เดียวกับหลัง #2 | 13/14 | #64 | 6.06 s | 7.36 s |
 | **หลัง final** | `eval_20260918_1323` | **file** | final (query gate, bind by name) | **13/14** | #64 | **5.88 s** | **8.27 s** |
+| หลัง manifest check | `eval_20260918_2108` | **file** | + ตรวจ manifest (`820052e`) + keyword-index fix (`0f3aaa7`) | 13/14 | #64 | 6.57 s | 9.07 s |
 
 **สิ่งที่พบ:**
 - **หลัง #1 ตก 3 ข้อเพราะ source จริง:** โมเดลเขียน `bu LIKE '%HARD INFRA%'` — SQLite LIKE ไม่สนตัวพิมพ์ (ได้ค่า) แต่ DuckDB สน (0 แถว) → แก้ให้ file source รัน `LIKE` เป็น `ILIKE` (นอก literal) = พฤติกรรม SQLite → หายทั้ง 3 ข้อ
