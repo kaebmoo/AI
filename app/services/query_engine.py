@@ -25,6 +25,7 @@ from app.providers.registry import provider_registry
 from app.services.ai_service import AIService
 from app.services.mcp_client import MCPClientService
 from app.services.admin_config_service import AdminConfigService
+from app.services.data_sources import SourceBoundMCPClient, source_resolver
 from app.services.schema_service import SchemaService
 from app.services.warning_detector import WarningDetector
 from app.services.query_classifier import query_classifier
@@ -499,13 +500,21 @@ class QueryEngine:
         else:
             cheap_model = None  # same as default — no swap needed
 
-        ai_service = AIService(provider=provider_instance, mcp_client=self.mcp_client)
-
-        # 2. Detect context
+        # 2. Detect context → its data source (Plan 7): legacy = business DB เดิม via MCP,
+        # file source = DuckDB in-process. Everything below reads through these two.
         context_name = self._resolve_context(question, context, history)
+        source = source_resolver.for_context(context_name)
+        if source.adapter is None:
+            schema_service, mcp_client = self.schema_service, self.mcp_client
+        else:
+            from app.db.session import config_engine
+            schema_service = SchemaService(db_engine=config_engine, business_engine=source.engine)
+            mcp_client = SourceBoundMCPClient(self.mcp_client, source)
+
+        ai_service = AIService(provider=provider_instance, mcp_client=mcp_client)
 
         # 3. Build system prompt
-        system_prompt = self.schema_service.build_system_prompt(
+        system_prompt = schema_service.build_system_prompt(
             ai_provider=selected_provider,
             include_samples=True,
             language="thai",
@@ -535,7 +544,7 @@ class QueryEngine:
                 value_lookup_enabled=feature_flags.get("value_lookup_enabled", False),
                 value_verification_enabled=feature_flags.get("value_verification_enabled", True),
                 cheap_model=cheap_model,
-                schema_service=self.schema_service,
+                schema_service=schema_service,
                 trace=trace,
                 template_answers_enabled=feature_flags.get("template_answers_enabled", False),
                 conversation_id=conversation_id,
@@ -555,8 +564,8 @@ class QueryEngine:
 
         # 5. Detect warnings
         warning_detector = WarningDetector(
-            mcp_client=self.mcp_client,
-            schema_service=self.schema_service,
+            mcp_client=mcp_client,
+            schema_service=schema_service,
         )
         warnings = await warning_detector.detect(
             data=result.data,

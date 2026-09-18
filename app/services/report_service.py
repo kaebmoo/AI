@@ -83,12 +83,20 @@ def create_export(db: Session, user, chat_history_id: int) -> ReportExport:
     return export
 
 
-def _run_export_sql(sql: str, max_rows: int):
+def _run_export_sql(sql: str, max_rows: int, context_name: str = None):
     """Execute export SQL on a read-only business DB connection.
 
     SQLite: mode=ro at connection level (same enforcement as MCP servers, F4.1).
     Non-SQLite (MSSQL prod): read-only is credential-level — use business_engine.
+    File source (Plan 7): the chat's own source — never the stale imported copy.
     """
+    from app.services.data_sources import source_resolver
+
+    source = source_resolver.for_context(context_name)
+    if source.adapter is not None:
+        rows = source.adapter.execute_query(sql, max_rows=max_rows)
+        return rows, list(rows[0].keys()) if rows else []
+
     # SQLite = a sqlite:// URL or a bare file path (no URL scheme) — never guess
     # from the filename extension (.sqlite3 / extensionless files are valid SQLite)
     bp = settings.BUSINESS_DB_PATH or ""
@@ -132,7 +140,10 @@ def run_export(export_id: str, db: Session = None) -> None:
             max_rows = _config_int("export_max_rows", DEFAULT_MAX_ROWS)
             retention_days = _config_int("export_retention_days", DEFAULT_RETENTION_DAYS)
 
-            rows, columns = _run_export_sql(export.sql_text, max_rows + 1)
+            chat = db.get(ChatHistory, export.chat_history_id) if export.chat_history_id else None
+            rows, columns = _run_export_sql(
+                export.sql_text, max_rows + 1, chat.context_name if chat else None,
+            )
             truncated = len(rows) > max_rows
             if truncated:
                 rows = rows[:max_rows]

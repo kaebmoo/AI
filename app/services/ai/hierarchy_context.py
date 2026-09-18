@@ -171,8 +171,8 @@ def extract_keywords_from_question(_service: Any, question: str, context_name: s
 
 
 def lookup_values_from_question(service: Any, question: str, context_name: str, table_name: str) -> List[Dict]:
-    from app.db.session import business_engine as _business_engine
     from app.db.session import config_engine
+    from app.services.data_sources import source_resolver
     from app.services.schema_service import SchemaService
     import time
 
@@ -183,7 +183,10 @@ def lookup_values_from_question(service: Any, question: str, context_name: str, 
         return results
 
     try:
-        schema_service = SchemaService(db_engine=config_engine, business_engine=_business_engine)
+        # Plan 7: the context's own source, never the global business DB
+        schema_service = SchemaService(
+            db_engine=config_engine, business_engine=source_resolver.for_context(context_name).engine,
+        )
         try:
             from app.services.hierarchy_service import hierarchy_service
 

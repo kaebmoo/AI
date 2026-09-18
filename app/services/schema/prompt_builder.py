@@ -279,7 +279,16 @@ def get_default_instruction(
     return _build_english_prompt(service, ai_provider, main_view, context_name, context_info)
 
 
+def _is_duckdb(service: "SchemaService") -> bool:
+    """True when the context's data source is a DuckDB file source (Plan 7)."""
+    engine = getattr(service, "business_engine", None)
+    return getattr(getattr(engine, "dialect", None), "name", None) == "duckdb"
+
+
 def get_syntax_rules(service: "SchemaService", language: str = "thai") -> str:
+    if _is_duckdb(service):
+        from app.services.database_adapter import DUCKDB_SYNTAX_RULES
+        return DUCKDB_SYNTAX_RULES["thai" if language == "thai" else "english"]
     if service.engine and service.engine.name == "postgresql":
         if language == "thai":
             return """   **. PostgreSQL Syntax:**
@@ -311,6 +320,7 @@ def _build_thai_prompt(
 ) -> str:
     context_info = context_info or {}
     syntax_rules = get_syntax_rules(service, "thai")
+    sql_dialect = "DuckDB" if _is_duckdb(service) else "SQLite"
     context_instructions = context_info.get("instruction_th") or ""
     hierarchy_rule = service.build_hierarchy_rule_text(context_name)
     instruction_rules = service.build_instruction_rules_text(main_view)
@@ -345,7 +355,7 @@ STEP 3: FALLBACK
 4. อธิบายผลลัพธ์เป็นภาษาไทย
 
 ## กฎการสร้าง SQL
-1. ใช้ SQLite syntax เท่านั้น
+1. ใช้ {sql_dialect} syntax เท่านั้น
 2. ใช้ query จาก table/view: **{main_view}**
 3. Column ทั้งหมดเป็นภาษาอังกฤษ (ดู Schema ด้านล่าง)
 4. การค้นหาข้อความ (Text Search):
@@ -388,6 +398,7 @@ def _build_english_prompt(
 ) -> str:
     context_info = context_info or {}
     syntax_rules = get_syntax_rules(service, "english")
+    sql_dialect = "DuckDB" if _is_duckdb(service) else "SQLite"
     context_instructions = context_info.get("instruction_en") or ""
     return f"""You are an AI Assistant for analyzing NT data.
 Current Context: **{context_name.upper()}** (Table: `{main_view}`)
@@ -398,7 +409,7 @@ Current Context: **{context_name.upper()}** (Table: `{main_view}`)
 3. Explain results in Thai
 
 ## SQL Rules
-1. Use SQLite syntax
+1. Use {sql_dialect} syntax
 2. Query from: **{main_view}**
 3. Use English column names (see Schema)
 4. Filter time using `year` and `month`

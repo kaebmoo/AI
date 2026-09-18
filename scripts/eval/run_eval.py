@@ -108,9 +108,20 @@ def load_golden_examples(limit=None, context_filter=None):
     return rows
 
 
-def run_expected_sql(sql):
-    """Execute golden SQL against the business DB (read-only)."""
+def run_expected_sql(sql, context=None):
+    """Execute golden SQL against the context's source (read-only).
+
+    Plan 7: a file-source context compares against its files, not the imported copy.
+    """
     from app.config import settings
+    from app.services.data_sources import source_resolver
+
+    source = source_resolver.for_context(context)
+    if source.adapter is not None:
+        try:
+            return source.adapter.execute_query(sql, max_rows=2000), None
+        except Exception as e:
+            return None, str(e)
     path = Path(settings.BUSINESS_DB_PATH).resolve()
     conn = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
@@ -159,7 +170,8 @@ async def run_eval(provider=None, context_filter=None, limit=None):
                     "status": None, "latency_s": None, "tokens": None, "detail": None,
                 }
 
-                expected_rows, exp_err = run_expected_sql(ex["expected_sql"])
+                ctx = ex["category"] if ex["category"] in contexts else None
+                expected_rows, exp_err = run_expected_sql(ex["expected_sql"], ctx)
                 if exp_err:
                     record["status"] = "golden_broken"  # data drift — admin must fix the golden, not the model
                     record["detail"] = exp_err
@@ -167,7 +179,6 @@ async def run_eval(provider=None, context_filter=None, limit=None):
                     continue
 
                 clear_query_cache()  # never serve a cached answer during eval
-                ctx = ex["category"] if ex["category"] in contexts else None
                 t0 = time.time()
                 try:
                     # Hard per-example timeout — a hung gateway call must not stall the whole run
