@@ -19,7 +19,8 @@
 
 | ไฟล์ | สถานะ |
 |------|--------|
-| [PLAN_6_SAAS.md](PLAN_6_SAAS.md) | Design only — multi-tenant/SaaS (prerequisite Plan 5 เสร็จแล้ว) |
+| [PLAN_6_SAAS.md](PLAN_6_SAAS.md) | Design only — multi-tenant/SaaS (prerequisite Plan 5 เสร็จแล้ว) — ส่วน Model A/C/D ย้ายไปอยู่ใน Plan 7 |
+| [PLAN_7_DATA_SOURCE_SERVICE.md](PLAN_7_DATA_SOURCE_SERVICE.md) | Design (2026-09-18) — zero-import: ถามข้อมูลจากแหล่งที่ผู้ใช้ลงทะเบียน (SQL / ไฟล์ผ่าน DuckDB), scope บังคับที่ SQL, API key ผูก context |
 | [PLAN_PENDING_BGE_M3.md](PLAN_PENDING_BGE_M3.md) | **รออนุมัติ** — เปลี่ยน Vanna embedding เป็น BGE-M3 (ห้าม execute จนกว่าจะอนุมัติ) |
 
 หมายเหตุ: Plan 1B-C (MCP SSE + API key auth) deferred ไปทำพร้อม Plan 6 — รายละเอียดใน `archive/PLAN_1B_MCP_CONSOLIDATION.md` และ REMAIN-8

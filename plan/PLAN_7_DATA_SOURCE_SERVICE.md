@@ -1,0 +1,320 @@
+# Plan 7: Data Source as a Service — ถามข้อมูลจากแหล่งที่ผู้ใช้กำหนด โดยไม่ต้อง import
+
+**สถานะ:** ⬜ DESIGN (2026-09-18) — ยังไม่เริ่ม code
+**ความสัมพันธ์กับแผนเดิม:** ต่อยอด/แทนที่บางส่วนของ `PLAN_6_SAAS.md` (ดู §9), รวม Plan 1B-C (MCP SSE + API key) ไว้ใน Phase 6
+**ผู้ใช้รายแรก:** NT-Report portal (F11 dashboard Q&A) — ปัจจุบันถูก disable เพราะยังไม่ได้ตั้ง key และข้อมูลใน AI ค้างที่ revenue 202605
+
+---
+
+## 1. ปัญหาของสถาปัตยกรรมปัจจุบัน
+
+```
+web chat / API ──► QueryEngine ──► LLM (Vanna) ──► SQL ──► business DB ก้อนเดียว (nt_fi_report.sqlite)
+                                                              ▲
+                                  ข้อมูลผู้ใช้ต้อง "import" เข้ามาก่อน (F10: import_datafeed.py)
+```
+
+ข้อเท็จจริงจาก code (ตรวจ 2026-09-18):
+
+| จุด | สภาพปัจจุบัน | ผลกระทบ |
+|---|---|---|
+| `app/db/session.py` | `business_engine` เป็น **global ตัวเดียว** จาก `BUSINESS_DB_PATH` | ต่อได้ทีละ 1 database ทั้งระบบ |
+| `app/services/database_adapter.py`, `business_db.py` | มี adapter SQLite / PostgreSQL / MSSQL แล้ว | ✅ ฐานดี — แต่เลือกจาก settings ไม่ใช่ต่อ request |
+| `app/services/context_onboarding.py` | ใช้ `sqlite3.connect` ตรง ๆ | onboarding ได้เฉพาะ SQLite |
+| `schema_contexts` | ไม่มีคอลัมน์บอกว่า context นี้อยู่ใน data source ไหน | context ผูกกับ DB ก้อนเดียวโดยปริยาย |
+| `ContextRouter` / `/api/v1/query/` | 1 คำถาม = 1 context | ถามข้ามโดเมน (รายได้ + ค่าใช้จ่าย) ไม่ได้ |
+| `pinned_filters` (F11-A) | log อย่างเดียว | ผู้เรียกกำหนดงวด/ขอบเขตข้อมูลไม่ได้จริง |
+| API key (`api_key_service.py`) | scope = `query/admin/full` ต่อ user | ไม่จำกัดว่า key นี้เห็น context/แหล่งข้อมูลไหน |
+| Vanna/Chroma | collection เดียวที่ `./chroma_db` | training ของทุกแหล่งปนกัน |
+| ข้อมูล NT-Report ใน AI | มีแค่ `feed_revenue` 202605 (import 2026-07-11) ขณะที่ DataFeed มี revenue/expense 202608, sales/ebt 202607 | **import ด้วยมือ = ข้อมูลเก่าเสมอ** |
+
+ต้นเหตุหลัก: ระบบถูกออกแบบให้ "ข้อมูลต้องย้ายเข้ามาอยู่ใน AI" ทุกครั้งที่ข้อมูลต้นทางเปลี่ยน ต้องมีคน import ใหม่
+
+## 2. เป้าหมาย
+
+AI Project เป็น **บริการถามข้อมูล (Q&A service)** ที่:
+
+1. **ไปอ่านข้อมูล ณ ที่ที่ข้อมูลอยู่** — ไม่ copy เข้ามาเก็บ (zero-import)
+2. เจ้าของข้อมูล (เช่น NT-Report) **ลงทะเบียนแค่ "ข้อมูลอยู่ที่ไหน + ความหมายของข้อมูล"** แล้วได้ API key
+3. ผู้เรียก **กำหนดขอบเขตได้จริง** (งวด, หน่วยงาน) — บังคับที่ชั้น SQL ไม่ใช่ขอร้อง LLM
+4. ใช้ได้หลายช่องทาง: REST API (มีแล้ว), web chat ของ AI เอง, MCP, หรือ UI ที่ผู้เรียกสร้างเอง
+5. ถามข้ามหลายแหล่งในคำถามเดียวได้ (Phase ท้าย)
+
+**ไม่ใช่เป้าหมาย (ตอนนี้):** billing, self-signup, tenant ภายนอกองค์กร — ทำเมื่อมีผู้ใช้จริงนอก NT (ดู §9)
+
+### ข้อสังเกตสำคัญ: "ไม่ import ข้อมูล" ≠ "ไม่ต้อง onboard"
+
+สิ่งที่ทำให้ AI ตอบถูกไม่ใช่ตัวข้อมูล แต่คือ **ความรู้เกี่ยวกับข้อมูล**: คอลัมน์หมายถึงอะไร หน่วยอะไร อะไร sum ได้/ไม่ได้ (เช่น `bg8_ytd_not_summable`, `sales_is_not_revenue`, EBT sum ได้เฉพาะ `ADDITIVE`) — F10 พิสูจน์แล้วว่า knowledge จาก contract ทำให้ได้ value match 14/14
+→ แผนนี้เลิก copy **ข้อมูล** แต่ยังต้องลงทะเบียน **ความรู้** (contract) ซึ่งเบาและเปลี่ยนไม่บ่อย
+
+## 3. สถาปัตยกรรมเป้าหมาย
+
+```
+┌──────────────── ผู้เรียก (client) ─────────────────┐
+│ NT-Report PB hook │ AI web chat │ MCP client │ อื่น ๆ │
+└─────────┬──────────────────────────────────────────┘
+          │ X-API-Key (ผูก workspace + allowlist ของ context)
+          │ {question, contexts?, scope: {year_month, org...}}
+          ▼
+┌──────────────── AI Service ─────────────────────────┐
+│ Auth → Resolve workspace → Context router (ใน allowlist)│
+│   → Knowledge (per context, จาก contract/onboarding)  │
+│   → LLM → SQL → Validator (F4) → Scope enforcer       │
+│   → Source resolver ──► Engine ตาม source type        │
+└─────────┬───────────────────────┬───────────────────┘
+          ▼                       ▼
+  [SQL source]               [File source — DuckDB]
+  PostgreSQL / MSSQL /       CSV / Parquet ที่ path / HTTPS / S3
+  SQLite (read-only)         เช่น NT-Report/DataFeed/dist/<domain>/latest/
+```
+
+### 3.1 แนวคิดหลัก (data model)
+
+| Entity | คืออะไร | ตัวอย่าง |
+|---|---|---|
+| **Workspace** | ขอบเขตการแยกข้อมูล/ความรู้ (tenant แบบเบา) | `nt-report` |
+| **Data Source** | ที่อยู่ของข้อมูล + วิธีเชื่อม + credential (เข้ารหัส) | `file://…/DataFeed/dist/revenue/latest/`, `mssql://dw/…` |
+| **Dataset / Table** | ตาราง/ไฟล์ใน source ที่อนุญาตให้ query (allowlist) | `fact_bu_monthly.csv` |
+| **Context** | ชุดความรู้สำหรับถามตอบ ผูกกับ source 1 ตัว | `feed_revenue`, `feed_expense`, `feed_ebt` |
+| **Contract** | คำอธิบายข้อมูลที่เจ้าของส่งมา (ความหมาย, หน่วย, grain, keys, business rules, control totals) | `DataFeed/contracts/revenue.yaml` |
+| **API key** | ผูก workspace + รายการ context ที่เรียกได้ + rate limit | key ของ portal เห็นเฉพาะ `feed_*` |
+
+### 3.2 ทำไมใช้ DuckDB สำหรับ file source
+
+- query CSV/Parquet **ในที่เดิม** ได้ด้วย SQL (`read_csv_auto`, `read_parquet`) ทั้ง local path, HTTPS, S3
+- DataFeed ของ NT-Report เป็น CSV + `manifest.json` อยู่แล้ว → ต่อได้ทันทีโดยไม่ต้องให้ NT-Report ทำ DB
+- เร็วพอสำหรับขนาดนี้ (revenue feed ≈ 255k แถว) — ถ้าช้าค่อยแปลงเป็น Parquet cache (ดู §7)
+- ข้อดีเรื่อง freshness: ชี้ที่ `latest/` → รอบใหม่ของ NT-Report publish เมื่อไร AI เห็นทันที ไม่มีขั้น import
+
+View ที่ AI สร้างตอน query (ชื่อตารางเดิมที่ LLM รู้จัก → ไฟล์จริง):
+```sql
+CREATE VIEW feed_revenue_fact_bu_monthly AS
+  SELECT * FROM read_csv_auto('<source_root>/fact_bu_monthly.csv');
+```
+→ knowledge/golden เดิมจาก F10 ใช้ต่อได้เกือบทั้งหมด เพราะชื่อตารางไม่เปลี่ยน
+
+### 3.3 Scope enforcement (แทน `pinned_filters` แบบ log อย่างเดียว)
+
+ผู้เรียกส่ง `scope` เช่น `{"year_month": 202608}` หรือ `{"org_code": ["..."]}`:
+- AI **ห่อทุก view ด้วย WHERE** ตาม scope ก่อนส่งให้ SQL ที่ LLM สร้างรัน (row-level filter ที่ชั้น engine)
+- LLM ไม่มีทางหลุด scope เพราะมองเห็นแค่ view ที่ถูกกรองแล้ว
+- คอลัมน์ที่ใช้เป็น scope ต้องประกาศใน contract (`scope_columns`) — scope ที่ไม่รู้จัก = 400 ไม่ใช่ข้ามเฉย ๆ
+
+ใช้แก้ 2 ปัญหาของ F11 ในคราวเดียว: (1) ตอบตรงงวดของรายงานที่เปิดอยู่ (2) รายงานที่จำกัดหน่วยงาน ไม่รั่วข้อมูลหน่วยงานอื่น
+
+### 3.4 Freshness ในทุกคำตอบ
+
+Response เพิ่ม `data_as_of` ต่อ context ที่ใช้ (จาก `manifest.period` / `built_at`) — client แสดงให้ผู้ใช้เห็น และปฏิเสธ/เตือนเองได้เมื่อไม่ตรงกับงวดของรายงาน
+
+## 4. สิ่งที่ต้องแก้ใน code (ภาพรวม)
+
+| ไฟล์/ส่วน | เปลี่ยนอย่างไร |
+|---|---|
+| `app/db/session.py` | เลิกใช้ `business_engine` global ใน query path → `SourceResolver.get_engine(context)` ต่อ request (cache connection ต่อ source) |
+| `app/services/database_adapter.py` | เพิ่ม `DuckDBFileAdapter` (สร้าง view จาก manifest/allowlist, read-only, จำกัด path) |
+| `context_onboarding.py` | เปลี่ยนจาก `sqlite3.connect` เป็นใช้ adapter → onboarding ได้ทุก source type |
+| `schema_contexts` + migration | เพิ่ม `workspace_id`, `source_id`; ตารางใหม่ `workspaces`, `data_sources`, `source_tables` |
+| `scripts/datafeed/gen_docs_from_contract.py` | ยกเป็น service: รับ contract ตอนลงทะเบียน source, re-sync อัตโนมัติเมื่อ contract hash เปลี่ยน |
+| `api_key_service.py` + `APIKey` model | เพิ่ม `workspace_id`, `allowed_contexts` |
+| `ContextRouter` | เลือกเฉพาะใน allowlist ของ key; รับ `contexts` จากผู้เรียกเป็น hint/บังคับ |
+| `vanna_service.py` | แยก Chroma collection ต่อ workspace (หรือ metadata filter) |
+| `/api/v1/query/` | `pinned_filters` → `scope` (บังคับจริง); response เพิ่ม `data_as_of` |
+| `scripts/datafeed/import_datafeed.py` | คงไว้เป็น fallback (โหมด import) จนกว่า Phase 1 ผ่าน แล้วค่อยพิจารณาเลิก |
+
+## 5. Phases
+
+แต่ละ phase ต้องผ่าน exit criteria ก่อนไป phase ถัดไป
+
+### Phase 0 — ตัดสินใจ (0.5 วัน)
+- [ ] **ข้อมูลของ NT-Report จะอยู่ที่ไหนที่ AI server อ่านถึง:** (ก) AI รันเครื่องเดียวกัน → local path, (ข) shared folder/NFS, (ค) object storage (S3/MinIO), (ง) HTTPS ที่มี token — ขึ้นกับว่า AI deploy ที่ไหน
+- [ ] ยืนยันใช้ DuckDB (เพิ่ม dependency 1 ตัว) สำหรับ file source
+- [ ] ยืนยันชื่อ field: `scope` แทน `pinned_filters` (หรือเก็บ `pinned_filters` เป็น alias ช่วงเปลี่ยนผ่าน)
+
+### Phase 1 — Source registry + DuckDB file source (3–4 วัน)
+- ตาราง `data_sources`, `source_tables`; `schema_contexts.source_id` (context เดิมทั้งหมด → source "legacy" = business DB เดิม → ไม่มีอะไรพัง)
+- `DuckDBFileAdapter` + `SourceResolver` ต่อ request
+- ลงทะเบียน `feed_revenue` ใหม่เป็น file source ชี้ `DataFeed/dist/revenue/latest/`
+- **Exit:** eval `feed_revenue` จาก file source ได้ value match เท่า F10 (14/14) โดยไม่ import; latency P50 ไม่แย่กว่า F10 (10.5s) เกิน 20%; context เดิม (non-feed) ยังผ่าน test suite เดิมทั้งหมด
+
+### Phase 2 — Contract-driven knowledge + freshness (2–3 วัน)
+- ลงทะเบียน source พร้อม contract → gen knowledge + golden อัตโนมัติ (ยกจาก `gen_docs_from_contract` / `gen_golden_from_controls`)
+- ตรวจ `manifest.json` ทุก query (หรือ cache ตาม mtime/sha): ถ้า contract/schema_version เปลี่ยน → re-sync knowledge + `mark_brain_dirty()`
+- ถ้า `manifest.reconcile.ok = false` → ปฏิเสธตอบพร้อมเหตุผล (ไม่ตอบจากข้อมูลที่ไม่ผ่านการกระทบยอด)
+- response มี `data_as_of`
+- ขยายไป `feed_expense`, `feed_sales`, `feed_ebt`
+- **Exit:** 4 โดเมนตอบได้, eval แต่ละโดเมนเทียบ control_totals ผ่านเกณฑ์ value match ≥ 90%; publish รอบใหม่ของ NT-Report แล้ว AI เห็นงวดใหม่โดยไม่ต้องรันอะไร
+
+### Phase 3 — Scope enforcement (2 วัน)
+- `scope` → ห่อ view ด้วย WHERE; `scope_columns` ใน contract
+- **Exit:** test: scope `year_month=202607` แล้วถาม "เดือนล่าสุด" ได้ 202607 ไม่ใช่ 202608; scope หน่วยงาน A ถามถึงหน่วยงาน B ได้ 0 แถว/ปฏิเสธ; scope คอลัมน์ที่ไม่ประกาศ = 400
+
+### Phase 4 — Workspace + scoped API key + admin (3 วัน)
+- `workspaces`, `APIKey.workspace_id/allowed_contexts`, Chroma แยกต่อ workspace
+- Admin API/UI: ลงทะเบียน source, ทดสอบการเชื่อมต่อ, ดู freshness, ออก key
+- **Exit:** key ของ workspace A เรียก context ของ B ไม่ได้ (403) — มี test คุม
+
+### Phase 5 — ถามข้ามหลาย context (4–5 วัน)
+- ทางเลือกตามลำดับความง่าย:
+  1. **ใช้ context ที่รวมมาแล้วจากต้นทาง** (เช่น `feed_ebt` = รายได้ − ค่าใช้จ่ายระดับหน่วยงาน) — ไม่ต้องเขียน code แค่ router เลือกถูก
+  2. **Orchestrator:** แตกคำถามเป็นคำถามย่อยต่อ context → รันแยก → LLM รวมคำตอบ (ไม่ JOIN ข้าม source ใน SQL เพราะ key ของแต่ละโดเมนไม่ตรงกัน)
+- **Exit:** ชุดคำถามข้ามโดเมน 10 ข้อ เทียบตัวเลขกับ dashboard ถูก ≥ 8 ข้อ; ข้อที่ตอบไม่ได้ต้องบอกว่าไม่ได้ ไม่เดาตัวเลข
+
+### Phase 6 — ช่องทางใช้งาน (2–3 วัน)
+- MCP server แบบ SSE + API key (= Plan 1B-C ที่ deferred ไว้)
+- (ตัวเลือก) embeddable chat widget ที่ client ฝังเองได้ — ทำเมื่อมี client ที่ 2 ต้องการ; NT-Report ใช้ panel ของตัวเองผ่าน PB proxy อยู่แล้ว
+
+### Phase 7 — เปิดให้ภายนอก (อนาคต)
+- เงื่อนไขเริ่ม: มีผู้ใช้จริงนอก NT-Report อย่างน้อย 1 ราย
+- ส่วนที่เหลือของ Plan 6: self-service, usage quota/billing, config DB ต่อ tenant
+
+## 6. Security & Access Model (ห้ามตัด)
+
+### 6.1 หลักการ
+**เจ้าของข้อมูล (หรือแอปของเขา) เป็นคนตัดสินว่าใครเห็นอะไร — AI เป็นคนบังคับใช้ทางเทคนิค และไม่มีวันขยายสิทธิเกินที่ได้รับ**
+AI ไม่เก็บสำเนาทะเบียนผู้ใช้/สิทธิของลูกค้าแยกเอง (สองชุด = drift) — ยกเว้นกรณีผู้ใช้เข้าผ่าน web chat ของ AI ตรง (§6.5 แบบ B)
+
+### 6.2 ห้าชั้นของสิทธิ (กว้าง → แคบ)
+
+| ชั้น | ใครตัดสิน / บังคับ | คุมอะไร | อยู่ที่ไหน |
+|---|---|---|---|
+| **1. แหล่งข้อมูล** | เจ้าของข้อมูล | account/folder ที่ AI ใช้ **read-only** และเห็นเฉพาะตาราง/view/ไฟล์ที่ตั้งใจเปิด; คอลัมน์อ่อนไหวตัดหรือ mask ตั้งแต่ต้นทาง | credential / DB grant / file permission |
+| **2. แอปที่เรียก** | AI | API key ผูก workspace + **allowlist ของ context/คอลัมน์** + rate limit = เพดาน ต่อให้ key หลุดก็ได้แค่นี้ | `APIKey.workspace_id / allowed_contexts` (Phase 4) |
+| **3. ผู้ใช้** | แอปผู้เรียก (เช่น PocketBase) ตัดสิน | คนนี้มีสิทธิอะไร → แปลงเป็น **entitlement** (contexts + scope) แนบไปกับการเรียก | ฝั่งผู้เรียก |
+| **4. แถว/คอลัมน์** | AI บังคับ | `scope` ห่อ view ด้วย WHERE ก่อน LLM เห็น; คอลัมน์ต้องห้ามไม่อยู่ใน view — **ไม่พึ่ง prompt** | scope enforcer (Phase 3) |
+| **5. Audit** | ทั้งสองฝั่ง | ผู้เรียกบันทึก "ใครถามจากสิทธิอะไร"; AI บันทึก key / scope / SQL / คอลัมน์ / จำนวนแถวที่คืน | audit log / query log |
+
+**กฎ:** สิทธิที่ใช้จริง = **เพดานของ key ∩ entitlement ที่ผู้เรียกส่งมา** — scope แคบลงได้อย่างเดียว; ขอ context นอก allowlist = 403 (ไม่ตัดทิ้งเงียบ ๆ)
+
+### 6.3 ความน่าเชื่อถือของ entitlement
+- **v1 (server-to-server):** key อยู่ฝั่ง server ของผู้เรียกเท่านั้น browser ไม่เรียก AI ตรง → เชื่อ scope ใน body ได้ (NT-Report ทำแบบนี้อยู่แล้ว)
+- **v2 (ผู้เรียกหลายราย / ภายนอก):** ผู้เรียกเซ็น **entitlement token อายุสั้น (~5 นาที)** มี `sub` (user), `resource` (เช่น report_id), `contexts`, `scope`; AI ตรวจลายเซ็นด้วย public key ที่ลงทะเบียนไว้ต่อ workspace → scope ปลอมไม่ได้แม้ key หลุด, audit ของ AI เห็นตัวคนจริง, revoke ผู้ใช้มีผลทันที
+
+### 6.4 กรณี NT-Report
+- สิทธิปัจจุบันเป็นระดับ "รายงาน" (`canAccessReport`: role / `allowed_users` / `allowed_groups` / published) — ไม่มีสิทธิระดับแถว
+- หลัก: **ถามได้เท่ากับข้อมูลของรายงานที่เปิดได้**
+- เพิ่ม "assistant config" ต่อรายงานหรือ report_type: `contexts` + scope template
+  - รายงานทั้งองค์กร: `contexts=[feed_revenue]`, `scope={year_month: <period ของรายงาน>}`
+  - รายงานจำกัดกลุ่ม/หน่วยงาน (เช่น `grp_mcgroup`, variant พิเศษ): scope เพิ่ม `org_code`
+  - variant admin: contexts/คอลัมน์มากกว่า — กำหนดชัดต่อรายงาน
+  - ไม่มี config = ไม่แสดงปุ่ม (default deny)
+- disable ผู้ใช้ใน PB มีผลทันที เพราะ PB ตรวจทุกครั้งและ AI ไม่ถือ session ผู้ใช้
+
+### 6.5 กรณีลูกค้าภายนอก (ตัวอย่าง: ลูกค้ามี MSSQL)
+
+**ชั้น 1 — ฝั่งฐานข้อมูลลูกค้า (ลูกค้าคุมเอง, แนะนำให้ทำเป็นเงื่อนไขการ onboard):**
+```sql
+-- สร้าง login เฉพาะ AI, เห็นแค่ schema ของ view ที่ตั้งใจเปิด
+CREATE LOGIN ai_reader WITH PASSWORD = '...';
+CREATE USER ai_reader FOR LOGIN ai_reader;
+CREATE SCHEMA ai;                       -- view ที่เลือกคอลัมน์/รวมยอดแล้ว
+GRANT SELECT ON SCHEMA::ai TO ai_reader;
+DENY SELECT ON SCHEMA::dbo TO ai_reader; -- ตารางจริงห้ามแตะ
+```
+- ถ้าลูกค้ามี **Row-Level Security** อยู่แล้ว: AI ส่ง scope ของผู้ใช้ผ่าน `sp_set_session_context` ก่อนรันทุก query → **policy ของลูกค้าเองทำงาน** (ลูกค้าไม่ต้องไว้ใจ scope enforcer ของเราอย่างเดียว — defense in depth)
+- คอลัมน์อ่อนไหว: ตัดออกจาก view หรือใช้ Dynamic Data Masking
+- ชี้ **read replica** ไม่ใช่ production (กัน query หนักกระทบระบบลูกค้า) + timeout/row cap/cost limit ฝั่ง AI
+
+**การเชื่อมต่อ (เลือกตามระดับความเข้มงวดของลูกค้า):**
+
+| แบบ | ลักษณะ | เหมาะกับ |
+|---|---|---|
+| Direct | AI ต่อ MSSQL ตรง, TLS (`Encrypt=yes`), ลูกค้า allowlist IP ของ AI | ลูกค้าที่เปิด port ได้ |
+| Connector agent | ติดตัว agent เล็ก ๆ ในเครือข่ายลูกค้า ต่อ **ขาออก** มาที่ AI (ไม่ต้องเปิด inbound) รันเฉพาะ SELECT ที่ผ่าน validator | enterprise ที่ห้ามเปิด port |
+| Private deployment | ติดตั้ง AI ทั้งชุดในเครือข่ายลูกค้า + LLM ที่ลูกค้าอนุมัติ | ข้อมูลออกนอกองค์กรไม่ได้เลย (การเงิน/ราชการ) |
+
+**ชั้น 2–4 — ใครตัดสินสิทธิผู้ใช้:**
+- **แบบ A — ลูกค้าเรียกผ่านแอปของตัวเอง** (เหมือน NT-Report): แอปลูกค้าตัดสิน → ส่ง entitlement (แนะนำ v2 token สำหรับลูกค้าภายนอก)
+- **แบบ B — ผู้ใช้ลูกค้าใช้ web chat ของ AI ตรง:** AI เป็นผู้ตัดสิน — login ผ่าน IdP ของลูกค้า (OIDC/SAML/Entra ID) แล้ว map **กลุ่มจาก IdP → policy** (contexts, คอลัมน์, row filter) ที่ admin ของลูกค้าตั้งเองใน workspace; ไม่สร้าง user/รหัสผ่านแยกในระบบเรา
+
+**Credential ของลูกค้า:** เก็บเข้ารหัส (KMS/secret store), ไม่อยู่ใน log/prompt/API response, rotate ได้, ลูกค้า revoke ได้ทันทีด้วยการ disable login ฝั่งตัวเอง
+
+### 6.6 ข้อมูลอ่อนไหว (PDPA / ข้อมูลการเงินของลูกค้า)
+
+**สถานะปัจจุบันของ AI Project (ตรวจ code 2026-09-18):**
+
+| เรื่อง | สถานะ | หลักฐาน |
+|---|---|---|
+| ลบ PII ออกจาก log (email, เบอร์ 10 หลัก, เลขบัตร 13 หลัก, password/token/otp) | ✅ | `app/core/logging.py` `PIIRedactingFormatter` (regex — ไม่ครอบคลุมชื่อคน/ที่อยู่/เลขบัญชี) |
+| API key เก็บเป็น hash | ✅ | `api_key_service.py` (sha256) |
+| ไฟล์ export หมดอายุ | ✅ | `report_service.py` 7 วัน |
+| **ส่งแถวผลลัพธ์ให้ LLM ภายนอก** | ⚠️ ส่งจริง | `explain_result(question, sql, data, ...)` ส่ง `data` ไป provider (Gemini/Claude); onboarding ส่ง `sample_values` / `all_distinct` ของคอลัมน์ |
+| **เก็บผลลัพธ์ในประวัติแชท** | ⚠️ ไม่มีวันหมดอายุ | `chat_history.question / generated_sql / result_data` — retention job มีแค่ comment ใน `app/models/chat.py` |
+| จัดชั้นความลับของข้อมูล (classification) | ❌ ไม่มี | — |
+| mask/aggregate ข้อมูลส่วนบุคคลในผลลัพธ์ | ❌ ไม่มี | — |
+| ลบข้อมูลตามคำขอ (DSR), ROPA, DPA template, breach process | ❌ ไม่มี | — |
+
+**มาตรการที่ต้องเพิ่ม:**
+
+1. **Data classification ต่อคอลัมน์** (ใน contract หรือ onboarding, admin ลูกค้ายืนยัน): `public / internal / confidential / personal / sensitive_personal` (ข้อมูลอ่อนไหวตาม PDPA ม.26 เช่น สุขภาพ ศาสนา ประวัติอาชญากรรม) — **ไม่ระบุ = confidential**
+2. **Policy ตามชั้น (บังคับที่ view ไม่ใช่ prompt):**
+   - `sensitive_personal` → ไม่อยู่ใน view เลย เว้นแต่เปิดชัดแจ้ง
+   - `personal` → ตอบได้เฉพาะแบบรวมยอด + **กลุ่มขั้นต่ำ (k ≥ 5)** กันระบุตัวตนย้อนกลับ; ไม่คืนค่าดิบ
+   - `confidential` (เช่น ข้อมูลการเงินรายลูกค้า) → คืนได้ตามสิทธิ แต่ไม่ส่งค่าให้ LLM ภายนอก (ข้อ 3)
+3. **LLM data policy ต่อ source** — `llm_data_policy`:
+   - `schema_only`: LLM เห็นแค่ schema + คำถาม เพื่อสร้าง SQL; คำอธิบายผลใช้ template หรือ LLM ภายใน → **ตัวเลขไม่ออกนอกระบบ**
+   - `aggregated_only`: ส่งเฉพาะผลที่รวมยอดแล้ว
+   - `full`: ส่งผลลัพธ์ได้ (ข้อมูล public/internal)
+   - ควบคู่ `llm_provider_allowlist` ต่อ source + ใช้ enterprise terms แบบ zero data retention / ไม่นำไป train; onboarding ต้องเคารพ policy เดียวกัน (ไม่ส่ง sample values ของคอลัมน์ personal/confidential)
+4. **Retention ตั้งค่าได้ต่อ workspace:** purge `result_data` หลัง N วัน หรือโหมด "ไม่เก็บผลลัพธ์เลย" (เก็บแค่ SQL + metadata); Vanna/golden ห้ามมีค่าจริงจาก scope ที่จำกัด; cache key ต้องรวม scope
+5. **แยกข้ามลูกค้าเด็ดขาด:** vector store / golden / feedback ต่อ workspace — ไม่เอาคำถาม/SQL ของลูกค้า A ไปเป็นตัวอย่างให้ B
+6. **Encryption:** TLS ทุกเส้นทาง, credential เข้ารหัส, app DB เข้ารหัส at-rest
+7. **Audit สำหรับข้อมูลการเงิน:** ใคร / ถามอะไร / คอลัมน์ไหน / กี่แถว / scope อะไร — ค้นและ export ให้ลูกค้าตรวจได้
+8. **ฝั่งสัญญา/กระบวนการ (PDPA):** ลูกค้า = ผู้ควบคุมข้อมูล (controller), เรา = ผู้ประมวลผลข้อมูล (processor) → ต้องมี DPA, บันทึกกิจกรรมการประมวลผล (ม.40), แจ้งเหตุละเมิดภายใน 72 ชม. (ม.37(4)), การส่งข้อมูลไป LLM provider ต่างประเทศ (ม.28–29) ต้องมีมาตรการคุ้มครองเพียงพอ หรือเลือก region/LLM ในประเทศ
+   - DSR (ขอลบ/ขอเข้าถึง): เพราะ zero-import ข้อมูลหลักอยู่ที่ลูกค้า — ฝั่งเราต้องลบได้แค่ history/log/cache ของผู้ใช้นั้น → ทำ endpoint ลบตาม user
+   - ⚖️ ประเด็นกฎหมายข้างต้นเป็นกรอบทางเทคนิค ต้องให้ DPO/ฝ่ายกฎหมายทบทวนก่อนเปิดให้ลูกค้าภายนอก
+
+### 6.7 มาตรการพื้นฐาน (ทุก source)
+
+| ความเสี่ยง | มาตรการ |
+|---|---|
+| เขียน/ลบข้อมูลต้นทาง | connection read-only + SQL validator (F4) + DuckDB ไม่ attach แบบเขียนได้ |
+| SSRF / อ่านไฟล์อื่นในเครื่อง | allowlist root path/host ต่อ source; DuckDB จำกัด path + lock config หลัง setup (ตรวจ option ของเวอร์ชันที่ใช้ใน Phase 1) |
+| query หนักทำระบบลูกค้าล่ม | timeout, row cap, ชี้ replica |
+| ผลลัพธ์รั่วเกิน | `max_rows` ฝั่ง server, audit ทุกคำถาม |
+| ต้นทางล่ม/ช้า | timeout ต่อ source + ข้อความชัด (ไม่ตอบจาก cache เก่าเงียบ ๆ) |
+
+### 6.8 Phase ที่เพิ่ม/เปลี่ยนเพราะหัวข้อนี้
+- Phase 3 (scope) เพิ่ม: column allowlist + classification policy ที่ view
+- Phase 4 (workspace) เพิ่ม: entitlement token v2, IdP group → policy mapping (แบบ B)
+- **Phase 4.5 (ใหม่, 3–4 วัน) — Data protection:** `llm_data_policy` + provider allowlist, retention/purge job ของ `chat_history.result_data`, ลบตาม user (DSR), audit export, onboarding ไม่ส่ง sample ของคอลัมน์ต้องห้าม
+  - **Exit:** source ที่ตั้ง `schema_only` → ตรวจ request ที่ออกไปยัง provider ไม่มีค่าจากผลลัพธ์เลย (test ดักที่ provider layer); purge job ลบ `result_data` เกินกำหนดจริง
+- Phase 7 (ภายนอก) ต้องมีก่อนเปิด: DPA template, ROPA, breach runbook, connector agent หรือ private deployment
+
+## 7. Risks / trade-offs
+
+| เรื่อง | ผลกระทบ | ทางออก |
+|---|---|---|
+| CSV scan ทุก query ช้า | latency | Phase 1 วัดจริงก่อน; ถ้าเกินเกณฑ์ → cache เป็น Parquet ต่อ manifest sha256 (ยังนับเป็น zero-import เพราะ invalidate อัตโนมัติ) |
+| ต้นทางไม่มี contract | knowledge ต่ำ ตอบผิด | fallback เป็น auto-onboarding (context_onboarding ผ่าน adapter) + ติดป้ายว่า "ความแม่นยำยังไม่ผ่าน eval" |
+| AI server เข้าถึงที่เก็บข้อมูลไม่ได้ | ใช้ไม่ได้เลย | Phase 0 ต้องตัดสินเรื่องที่ตั้งข้อมูลก่อน |
+| คำถามข้ามโดเมนตอบผิดแบบมั่นใจ | ความน่าเชื่อถือ | Phase 5 เริ่มจาก context ที่รวมมาแล้ว; orchestrator ต้องแสดงที่มาของแต่ละตัวเลข |
+| สองโหมด (import + file) อยู่คู่กัน | ดูแลยาก | ตั้งเกณฑ์เลิกโหมด import หลัง Phase 2 ผ่าน 2 รอบปิดงวด |
+
+## 8. ผลต่อ NT-Report (ผู้เรียกรายแรก)
+
+NT-Report ไม่ต้อง import อะไรเข้า AI อีก หน้าที่เหลือแค่:
+1. publish DataFeed ไปที่ที่ AI อ่านได้ (ตาม Phase 0) — `run_all --feed` ทำอยู่แล้ว
+2. ลงทะเบียน 4 source + contract ครั้งเดียว, ได้ API key ที่เห็นเฉพาะ `feed_*`
+3. เพิ่ม **assistant config ต่อรายงาน/report_type** (contexts + scope template, ดู §6.4) — ไม่มี config = ไม่แสดงปุ่ม; แทนที่ `ASSISTANT_CONTEXT_MAP` ใน env ที่ map ได้แค่ report_type → context เดียว
+4. PB hook (`pocketbase_0/pb_hooks/assistant.pb.js`) สร้าง entitlement จาก `canAccessReport` + config ข้อ 3 → ส่ง `contexts` + `scope` (อย่างน้อย `year_month` = งวดรายงาน, เพิ่ม `org_code` สำหรับรายงานจำกัดหน่วยงาน) แล้วแสดง `data_as_of`; ภายหลังเปลี่ยนเป็น entitlement token v2 (§6.3)
+5. งานค้างฝั่ง portal ที่แก้ได้เลยโดยไม่รอแผนนี้: audit action `assistant_ask` ยังไม่อยู่ใน select values ของ `audit_logs.action` (เขียน audit ไม่ติด), field `period` ≠ `year_month`
+
+## 9. ความสัมพันธ์กับ Plan 6 (SaaS)
+
+| Plan 6 | ในแผนนี้ |
+|---|---|
+| Model A (API as a Service) | = Phase 1–4 (ทำจริง) |
+| Model B (Upload CSV → SQLite) | **ไม่ทำเป็นค่าเริ่มต้น** — ขัดกับหลัก zero-import; file source ครอบคลุมกรณีนี้โดยชี้ไปที่ไฟล์แทน |
+| Model C (Connect DB) | = SQL source ใน Phase 1 (adapter มีแล้ว) |
+| Model D (MCP) | = Phase 6 |
+| Config DB ต่อ tenant, billing, quota | เลื่อนไป Phase 7 — ตอนนี้ใช้ `workspace_id` ใน config DB เดียว พอสำหรับผู้ใช้ภายใน |
+
+## 10. ไฟล์ที่ต้องอ่านก่อนเริ่ม
+- `app/db/session.py`, `app/config.py` — business engine global
+- `app/services/database_adapter.py`, `app/services/business_db.py` — adapter ที่มีอยู่
+- `app/services/query_engine.py`, `app/services/context_router.py` — query path
+- `app/services/context_onboarding.py` — onboarding (sqlite-only)
+- `app/api/v1/query.py` — `SimpleQueryRequest` (`pinned_filters`, `source`)
+- `scripts/datafeed/*` + `docs/DATAFEED_INTEGRATION.md` — contract → knowledge
+- `docs/PORTAL_INTEGRATION.md`, `plan/archive/PLAN_F11_DASHBOARD_EMBED.md`
+- NT-Report: `DataFeed/README.md`, `DataFeed/SPEC.md`, `DataFeed/contracts/*.yaml`

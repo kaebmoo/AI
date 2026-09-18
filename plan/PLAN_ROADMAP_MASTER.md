@@ -22,6 +22,7 @@
 | **Plan 4B** | ✅ DONE | 95% | 13 tests | Query endpoint ทำงาน, mock-heavy tests |
 | **Plan 5** | ✅ DONE | 100% | 7 tests | 3-DB live, ConfigBase แยก, business_engine ครบทุก call path |
 | **Plan 6** | ⬜ DESIGN | 0% | 0 | ยังไม่เริ่ม code |
+| **Plan 7** | ⬜ DESIGN | 0% | 0 | Data Source as a Service (zero-import) — ต่อยอด Plan 6 Model A/C/D, ดู PLAN_7_DATA_SOURCE_SERVICE.md |
 | **Plan 1B-C** | ⬜ DEFERRED | 0% | 0 | ทำตอน Plan 6 |
 
 **Current verification note:** `pytest -q` on this workspace = `363 passed, 3 skipped`.
