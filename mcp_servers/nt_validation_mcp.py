@@ -15,12 +15,10 @@ Environment Variables:
     METADATA_DB_URL: Database connection string
 """
 
-import os
 import re
 import json
 import logging
-from typing import Dict, List, Any, Optional
-from dataclasses import dataclass
+from typing import Dict, List, Any
 
 from mcp.server.fastmcp import FastMCP
 
@@ -32,100 +30,6 @@ logger = logging.getLogger("nt_validation_mcp")
 # Database Configuration (Reused from other MCP servers)
 # =========================================================
 
-@dataclass
-class DatabaseConfig:
-    """Database connection configuration"""
-    engine: str
-    connection_string: str
-
-    @classmethod
-    def from_env(cls) -> "DatabaseConfig":
-        db_url = os.getenv(
-            "METADATA_DB_URL",
-            f"sqlite:///{os.path.join(os.path.dirname(os.path.dirname(__file__)), 'nt_fi_report.sqlite')}"
-        )
-
-        if db_url.startswith("sqlite"):
-            engine = "sqlite"
-        elif "postgresql" in db_url or "postgres" in db_url:
-            engine = "postgresql"
-        elif "mssql" in db_url or "sqlserver" in db_url:
-            engine = "mssql"
-        else:
-            engine = os.getenv("DB_ENGINE", "sqlite")
-
-        return cls(engine=engine, connection_string=db_url)
-
-
-class ValidationDatabaseAdapter:
-    """Database adapter for validation queries"""
-
-    def __init__(self, config: DatabaseConfig):
-        self.config = config
-        self.engine = config.engine
-
-    def _get_connection(self):
-        if self.engine == "sqlite":
-            import sqlite3
-            path = self.config.connection_string.replace("sqlite:///", "").replace("sqlite://", "")
-            conn = sqlite3.connect(path)
-            conn.row_factory = sqlite3.Row
-            return conn
-
-        elif self.engine == "postgresql":
-            import psycopg2
-            return psycopg2.connect(self.config.connection_string)
-
-        elif self.engine == "mssql":
-            import pyodbc
-            return pyodbc.connect(self.config.connection_string)
-
-        raise ValueError(f"Unsupported engine: {self.engine}")
-
-    def execute_query(self, sql: str, params: tuple = None) -> List[Dict]:
-        conn = self._get_connection()
-        try:
-            if self.engine == "sqlite":
-                cursor = conn.cursor()
-                cursor.execute(sql, params or ())
-                if cursor.description:
-                    columns = [col[0] for col in cursor.description]
-                    return [dict(zip(columns, row)) for row in cursor.fetchall()]
-                return []
-
-            elif self.engine == "postgresql":
-                import psycopg2.extras
-                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-                cursor.execute(sql, params or ())
-                if cursor.description:
-                    return [dict(row) for row in cursor.fetchall()]
-                return []
-
-            elif self.engine == "mssql":
-                cursor = conn.cursor()
-                cursor.execute(sql, params or ())
-                if cursor.description:
-                    columns = [col[0] for col in cursor.description]
-                    return [dict(zip(columns, row)) for row in cursor.fetchall()]
-                return []
-        finally:
-            conn.close()
-        return []
-
-
-# =========================================================
-# Initialize Database
-# =========================================================
-
-_db_instance: Optional[ValidationDatabaseAdapter] = None
-
-def get_db() -> ValidationDatabaseAdapter:
-    global _db_instance
-    if _db_instance is None:
-        config = DatabaseConfig.from_env()
-        _db_instance = ValidationDatabaseAdapter(config)
-        logger.info(f"Connected to {config.engine} database")
-    return _db_instance
 
 
 # =========================================================
@@ -183,8 +87,8 @@ def check_business_rules(
 
     try:
         from app.services.validation_service import ValidationService
-        from app.db.session import SessionLocal
-        _db = SessionLocal()
+        from app.db.session import ConfigSessionLocal  # rules are in the config DB (REMAIN-9.8)
+        _db = ConfigSessionLocal()
         try:
             vs = ValidationService(db=_db)
             result = vs.check_business_rules(sql, context_name=context_name)

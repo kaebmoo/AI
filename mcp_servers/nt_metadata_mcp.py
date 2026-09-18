@@ -47,8 +47,13 @@ class DatabaseConfig:
 
     @classmethod
     def from_env(cls) -> "DatabaseConfig":
-        """Create config from environment variables"""
-        db_url = os.getenv(
+        """Create config from environment variables.
+
+        Every tool here reads config tables (schema_contexts, schema_metadata, mappings, rules,
+        golden_examples), which live in the config DB — CONFIG_DB_URL first (REMAIN-9.8: they
+        were queried on the business DB and failed); METADATA_DB_URL for single-DB setups.
+        """
+        db_url = os.getenv("CONFIG_DB_URL") or os.getenv(
             "METADATA_DB_URL",
             f"sqlite:///{os.path.join(os.path.dirname(os.path.dirname(__file__)), 'nt_fi_report.sqlite')}"
         )
@@ -101,7 +106,7 @@ class MCPDatabaseAdapter:
         path = self.config.connection_string.replace("sqlite:///", "").replace("sqlite://", "")
         resolved = Path(path).resolve()
         if not resolved.exists():
-            raise FileNotFoundError(f"Business DB not found at {resolved} (from METADATA_DB_URL)")
+            raise FileNotFoundError(f"Config DB not found at {resolved} (from CONFIG_DB_URL / METADATA_DB_URL)")
         conn = sqlite3.connect(f"{resolved.as_uri()}?mode=ro", uri=True)
         conn.row_factory = sqlite3.Row
         return conn

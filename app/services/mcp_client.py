@@ -49,6 +49,9 @@ class MCPClientService:
                     env['METADATA_DB_URL'] = bp
                 elif settings.DATABASE_URL:
                     env['METADATA_DB_URL'] = settings.DATABASE_URL
+            # nt-metadata's tools read config tables (REMAIN-9.8)
+            if 'CONFIG_DB_URL' not in env and settings.CONFIG_DB_URL.startswith("sqlite:///"):
+                env['CONFIG_DB_URL'] = f"sqlite:///{os.path.abspath(settings.CONFIG_DB_URL[len('sqlite:///'):])}"
         except ImportError:
             pass
 
