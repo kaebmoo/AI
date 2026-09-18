@@ -16,6 +16,7 @@ from app.models.chat import ChatHistory
 from app.models.conversation import Conversation
 from app.schemas.chat import ChatRequest, ChatResponse, DataWarning, TrainingRequest
 from app.services.ai_service import AIService
+from app.services.data_sources import SourceBoundMCPClient, source_resolver
 from app.services.schema_service import SchemaService
 from app.services.query_engine import QueryEngine, QueryEngineResult, detect_context_from_question
 from app.services.intent_classifier import classify_intent
@@ -855,12 +856,18 @@ async def train_model(
     """
     try:
         mcp_client = deps.get_mcp_client(current_request)
+        # REMAIN-9.2: run the SQL on the context's own source (a file source in-process), and read
+        # the payload — call_tool returns it as JSON text, so a dict check never saw a failure
+        source = source_resolver.for_context(request.context)
+        client = SourceBoundMCPClient(mcp_client, source) if source.adapter is not None else mcp_client
         try:
-            check_res = await mcp_client.call_tool("execute_query", {"sql": request.sql, "limit": 1})
-            if isinstance(check_res, dict) and check_res.get('error'):
-                raise ValueError(f"Invalid SQL: {check_res['error']}")
+            raw = await client.call_tool("execute_query", {"sql": request.sql, "limit": 1})
+            check_res = json.loads(raw) if isinstance(raw, str) else raw
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Invalid SQL: {str(e)}")
+        if not isinstance(check_res, dict) or not check_res.get("success"):
+            error = check_res.get("error") or check_res.get("issues") if isinstance(check_res, dict) else check_res
+            raise HTTPException(status_code=400, detail=f"Invalid SQL: {error}")
 
         is_admin = getattr(current_user, 'is_superuser', False) or getattr(current_user, 'role', '') == 'admin'
 
