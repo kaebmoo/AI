@@ -379,6 +379,16 @@ Deferred (ทำตอน Plan 6 SaaS)
 ### ทดสอบ
 ผลของ `search_db_for_keyword` เท่าเดิมบน golden 63 ข้อ (deterministic, ไม่เรียก LLM) + latency ของ expense #6/17/34/36 ก่อน/หลัง
 
+### สถานะ (2026-09-18)
+- ✅ **ข้อ 1 เสร็จ** — probe `MAX(CASE WHEN col LIKE … )` ครั้งเดียวต่อ keyword แล้ว DISTINCT (query เดิมทุกตัวอักษร) เฉพาะคอลัมน์ที่เจอ;
+  บน SQLite probe ใช้ `LIKE` อย่างเดียว (upper() กับ LIKE ของ SQLite พับตัวพิมพ์แค่ ASCII เหมือนกัน → คอลัมน์ที่เจอเท่าเดิม, ครึ่ง UPPER กินเวลา ~2/3);
+  DuckDB: คอลัมน์ที่ LIKE ไม่ได้ (non-text) ถูกตัดออกเหมือนที่ query รายคอลัมน์เคย error แล้วข้าม
+  - ผลเท่าเดิม: golden 75 ข้อ (63 + feed_expense 12) ผ่าน value lookup จริง + ค้นตรง 15 keyword × 6 context (รวม `%`, `_`, `'`, ตัวเลข, ไทย) = 165 ครั้ง —
+    SQLite เท่ากันทุก byte; DuckDB เท่ากันที่ชุดคอลัมน์ + จำนวน (code เดิมเองให้ค่าต่างกันทุกครั้งที่เรียก: `DISTINCT … LIMIT` ไม่มี ORDER BY)
+  - latency value lookup: expense #6 2.72 → **0.61 s**, #17 1.37 → **0.31 s**, #34 1.41 → **0.33 s**, #36 1.42 → **0.32 s**; ทุก golden รวม 13.1 → 7.8 s
+  - แย่ลงได้กรณีเดียว: keyword ที่ตรงทุกคอลัมน์ (+1 scan) — เช่น `%`/`_`; คำจริงที่ตก fallback ส่วนใหญ่ไม่ตรงเลย
+- ⬜ ข้อ 2 (rebuild index จริง, ไม่ index คอลัมน์ตัวเลข) — ยังไม่ทำ
+
 ---
 
 ## REMAIN-11: DataFeed sales / ebt — contract ขาดความหมายที่ AI ต้องใช้ (Plan 7 Phase 2)

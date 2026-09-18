@@ -160,3 +160,9 @@
 - schema เปลี่ยนแบบเพิ่ม/ลบคอลัมน์: knowledge re-sync เอง แต่ view ใช้ชุดคอลัมน์ตอนลงทะเบียน → ต้องรัน `register_file_source` ใหม่ (ไม่ได้ทำอัตโนมัติ — การลงทะเบียนมี gate row count/control totals ที่ไม่ควรข้าม)
 - value lookup บน file source: fallback scan ทีละคอลัมน์ = อ่าน CSV ทั้งไฟล์ต่อคอลัมน์ (REMAIN-10) — expense eval P50 7.07 s vs revenue 6.68 s
 - ruff: unused import เดิม 2 จุด (`app/api/v1/query.py` `HTTPException`, `app/services/query_engine.py` `uuid`) — มีก่อนงานนี้ ไม่แก้
+
+## จาก REMAIN-10 ข้อ 1 — value lookup scan ครั้งเดียว (2026-09-18)
+
+- ⚠️ **DuckDB: `SELECT DISTINCT col … LIMIT n` ไม่ deterministic** (ไม่มี ORDER BY, aggregate แบบขนาน) → "Actual Values Found" ของ context file source อาจได้ค่าคนละชุดระหว่าง request เมื่อคอลัมน์มีค่าตรงเกิน limit
+  (เรียก code เดิมซ้ำ 4 ครั้ง = 4 ผลต่างกัน) — ไม่แก้ (เพิ่ม ORDER BY = เปลี่ยนผลของ legacy ด้วย); ถ้าต้องการ prompt ที่ reproducible ให้ ORDER BY เฉพาะ dialect duckdb
+- probe บน SQLite ตัดครึ่ง `UPPER(x) LIKE UPPER(kw)` ออก — เท่ากันก็ต่อเมื่อไม่มี `PRAGMA case_sensitive_like=ON` (ไม่มีที่ไหนตั้ง)

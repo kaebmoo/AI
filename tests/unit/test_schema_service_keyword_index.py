@@ -181,3 +181,69 @@ def test_rebuild_endpoint_scans_each_context_on_its_own_source(tmp_path, monkeyp
     assert result["failed_contexts"] == ["broken"]
     assert result["total_entries"] > 0
     assert _index_values(config) == {"Trunk Radio", "บริการ Cloud Connect"}
+
+
+class TestSearchDbSingleProbe:
+    """REMAIN-10: one scan finds the columns holding a match; results stay those of the
+    per-column search (the pre-REMAIN-10 loop is the oracle), on SQLite and on DuckDB."""
+
+    KEYWORDS = ["radio", "RADIO", "cloud", "2025", "%", "_", "'", "zzz", "บริการ", "enter"]
+
+    @staticmethod
+    def _oracle(engine, table, cols, keyword, limit):
+        out = []
+        with engine.connect() as conn:
+            for col in cols:
+                try:
+                    rows = conn.execute(text(
+                        f'SELECT DISTINCT "{col}" FROM "{table}" WHERE "{col}" LIKE :kw '
+                        f'OR UPPER("{col}") LIKE UPPER(:kw) LIMIT :lim'), {"kw": f"%{keyword}%", "lim": limit}).fetchall()
+                except Exception:
+                    continue
+                out += [{"keyword": keyword, "column_name": col, "column_value": str(r[0]), "table_name": table}
+                        for r in rows if r[0]]
+        return out
+
+    def _config(self, tmp_path, table, cols):
+        config = create_engine(f"sqlite:///{tmp_path / 'config.db'}")
+        with config.begin() as conn:
+            conn.execute(text("CREATE TABLE schema_metadata (table_name TEXT, column_name TEXT, is_groupable INTEGER)"))
+            for c in cols:
+                conn.execute(text("INSERT INTO schema_metadata VALUES (:t, :c, 1)"), {"t": table, "c": c})
+        return config
+
+    def test_sqlite_same_results_one_scan_without_match(self, tmp_path):
+        biz = create_engine(f"sqlite:///{tmp_path / 'biz.db'}")
+        with biz.begin() as conn:
+            conn.execute(text("CREATE TABLE revenue_search (PRODUCT_NAME TEXT, BUSINESS_GROUP TEXT, YEAR INTEGER, NOTE TEXT)"))
+            conn.execute(text("INSERT INTO revenue_search VALUES ('Trunk Radio', 'Enterprise', 2025, NULL), "
+                              "('บริการ Cloud Connect', 'Digital', 2025, 'radio note'), (NULL, 'ENTERPRISE', 2024, 'it''s')"))
+        cols = ["PRODUCT_NAME", "BUSINESS_GROUP", "YEAR", "NOTE", "product_name"]  # case twin kept, like before
+        service = SchemaService(db_engine=self._config(tmp_path, "revenue_search", cols), business_engine=biz)
+        for kw in self.KEYWORDS:
+            assert service.search_db_for_keyword(kw, "revenue_search", "revenue", 5) == \
+                self._oracle(biz, "revenue_search", ["PRODUCT_NAME", "BUSINESS_GROUP", "YEAR", "NOTE", "PRODUCT_NAME"], kw, 5), kw
+
+        scans = []
+        event.listen(biz, "before_cursor_execute",
+                     lambda conn, cur, stmt, *a: scans.append(stmt) if stmt.startswith("SELECT") else None)
+        service.search_db_for_keyword("zzz", "revenue_search", "revenue", 5)
+        assert len(scans) == 1  # was one scan per column
+
+    def test_duckdb_non_text_column_skipped_as_before(self, tmp_path):
+        from app.services.database_adapter import DuckDBFileAdapter
+
+        root = tmp_path / "latest"
+        root.mkdir()
+        (root / "f.csv").write_text("year_month,bu,note\n202601,1.Hard Infrastructure,cloud\n202602,2.International,\n")
+        cols = [{"name": "year_month", "type": "BIGINT"}, {"name": "bu", "type": "VARCHAR"}, {"name": "note", "type": "VARCHAR"}]
+        adapter = DuckDBFileAdapter("k", str(root), [{"table_name": "v", "file_name": "f.csv", "columns": cols}],
+                                    str(tmp_path / "cache"))
+        names = [c["name"] for c in cols]
+        service = SchemaService(db_engine=self._config(tmp_path, "v", names), business_engine=adapter.engine)
+        for kw in self.KEYWORDS + ["2026", "hard", "INTER"]:
+            got = service.search_db_for_keyword(kw, "v", "feed_x", 10)
+            want = self._oracle(adapter.engine, "v", names, kw, 10)
+            key = lambda r: (r["column_name"], r["column_value"])
+            assert sorted(got, key=key) == sorted(want, key=key), kw  # DuckDB DISTINCT order varies
+        assert not service.search_db_for_keyword("2026", "v", "feed_x", 10)  # BIGINT can't LIKE on DuckDB — skipped

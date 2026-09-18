@@ -206,6 +206,52 @@ def search_keyword_index(service: "SchemaService", keyword: str, context_name: s
     return results
 
 
+def _like(column: str, dialect: str) -> str:
+    """The match condition of search_db_for_keyword's own query. On SQLite the UPPER half
+    adds nothing — upper() and LIKE's case folding are both ASCII-only — and costs ~2/3 of
+    the probe, so it is left out there (same columns hit, the per-column query is unchanged)."""
+    q = quote_identifier(column)
+    if dialect == "sqlite":
+        return f"{q} LIKE :kw"
+    return f"({q} LIKE :kw OR UPPER({q}) LIKE UPPER(:kw))"
+
+
+def _columns_with_match(conn, table_name: str, columns: List[str], pattern: str) -> List[str]:
+    """The columns (same order, duplicates kept) holding at least one match — ONE scan of the view.
+
+    search_db_for_keyword then runs its per-column DISTINCT only on these: a keyword
+    with no match costs 1 scan instead of 1 per column (v_expense_mart: ~0.1 s each).
+    A column the engine can't LIKE (DuckDB: non-text) fails the probe as it failed its
+    own query before — it is dropped; if the probe still can't run, every column is
+    returned and the per-column path behaves exactly as it always did.
+    """
+    if not columns:
+        return []
+    table = quote_identifier(table_name)
+    dialect = conn.dialect.name
+
+    def probe(cols):
+        flags = ", ".join(f"MAX(CASE WHEN {_like(c, dialect)} THEN 1 ELSE 0 END)" for c in cols)
+        return conn.execute(text(f"SELECT {flags} FROM {table}"), {"kw": pattern}).fetchone()
+
+    def binds(col):  # bind/plan only — LIMIT 0 reads no rows
+        try:
+            conn.execute(text(f"SELECT 1 FROM {table} WHERE {_like(col, dialect)} LIMIT 0"), {"kw": pattern}).fetchall()
+            return True
+        except SQLAlchemyError:
+            return False
+
+    try:
+        return [c for c, hit in zip(columns, probe(columns)) if hit]
+    except SQLAlchemyError:
+        pass
+    usable = [c for c in columns if binds(c)]
+    try:
+        return [c for c, hit in zip(usable, probe(usable)) if hit] if usable else []
+    except SQLAlchemyError:
+        return columns
+
+
 def search_db_for_keyword(
     service: "SchemaService",
     keyword: str,
@@ -225,11 +271,8 @@ def search_db_for_keyword(
         return results
 
     with service.business_engine.connect() as conn:
-        for column_name in columns:
-            matching_col = next((column for column in actual_columns if column.upper() == column_name.upper()), None)
-            if not matching_col:
-                continue
-
+        resolved = [next((c for c in actual_columns if c.upper() == name.upper()), None) for name in columns]
+        for matching_col in _columns_with_match(conn, table_name, [c for c in resolved if c], keyword_pattern):
             try:
                 rows = conn.execute(
                     text(
