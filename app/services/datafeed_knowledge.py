@@ -68,6 +68,9 @@ def register_context(conn, domain: str, contract: dict) -> str:
             "keywords, instruction_th) VALUES (:name, :display, :desc, :main_view, 1, :priority, :keywords, :instruction)"
         ), {**params, "display": f"DataFeed {domain}", "priority": FEED_PRIORITY,
             "keywords": json.dumps(keywords, ensure_ascii=False)})
+    if contract.get("scope_columns"):  # Phase 3: the owner declares what a caller's scope may filter on
+        conn.execute(text("UPDATE schema_contexts SET scope_columns=:scope WHERE name=:name"),
+                     {"scope": json.dumps(contract["scope_columns"], ensure_ascii=False), "name": context_name})
     return context_name
 
 

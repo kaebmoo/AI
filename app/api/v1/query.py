@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.api import deps
 from app.db.session import get_config_db
+from app.services.data_sources import ScopeError
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -33,7 +34,10 @@ class SimpleQueryRequest(BaseModel):
     max_rows: int = Field(20, description="Max data rows to return", ge=1, le=1000)
     # F11: portal integration — both optional so the contract never breaks
     pinned_filters: Optional[Dict[str, Any]] = Field(
-        None, description="Filters pinned by the caller (e.g. dashboard period). v1: logged only")
+        None, description="Filters pinned by the caller (e.g. dashboard period). Logged only — use scope")
+    # Plan 7 Phase 3 (D3=A): enforced at the SQL layer; a key the context doesn't declare = 400
+    scope: Optional[Dict[str, Any]] = Field(
+        None, description="Row scope enforced at the SQL layer, e.g. {\"year_month\": 202607}")
     source: Optional[str] = Field(None, description="Caller identifier for audit (e.g. 'portal')")
 
 
@@ -69,11 +73,10 @@ async def simple_query(
     """Execute a simple query — no conversation, no chart. Returns answer + optional SQL/data."""
     start_time = time.time()
 
-    if request_body.source or request_body.pinned_filters:
-        # ponytail: v1 records provenance only — injecting pinned_filters into the
-        # intent pipeline is deferred (see PLAN_F11 Phase A note in FIX_NOTES)
+    if request_body.source or request_body.pinned_filters or request_body.scope:
+        # pinned_filters: provenance only (D3=A — superseded by scope, kept during the transition)
         logger.info(
-            f"Query from source={request_body.source or '-'} "
+            f"Query from source={request_body.source or '-'} scope={request_body.scope or {}} "
             f"pinned_filters={request_body.pinned_filters or {}} user={current_user.id}"
         )
 
@@ -88,6 +91,7 @@ async def simple_query(
                 question=request_body.question,
                 context=request_body.context,
                 user_id=current_user.id,
+                scope=request_body.scope,
             )
         else:
             from app.services.mcp_client import MCPClientService
@@ -98,6 +102,7 @@ async def simple_query(
                     question=request_body.question,
                     context=request_body.context,
                     user_id=current_user.id,
+                    scope=request_body.scope,
                 )
 
         # QueryEngineResult has .query_result (QueryResult) + .context_name + .execution_time_ms
@@ -126,6 +131,8 @@ async def simple_query(
             data_as_of=result.data_as_of,
         )
 
+    except ScopeError as e:  # never answered unscoped — the caller asked for a scope we can't enforce
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         execution_time_ms = (time.time() - start_time) * 1000
         logger.error(f"Simple query failed: {e}")

@@ -10,6 +10,7 @@ Usage:
 """
 
 import hashlib
+import json
 import os
 import time
 import uuid
@@ -25,7 +26,7 @@ from app.providers.registry import provider_registry
 from app.services.ai_service import AIService
 from app.services.mcp_client import MCPClientService
 from app.services.admin_config_service import AdminConfigService
-from app.services.data_sources import SourceBoundMCPClient, source_resolver
+from app.services.data_sources import SourceBoundMCPClient, request_scope, source_resolver
 from app.services.schema_service import SchemaService
 from app.services.warning_detector import WarningDetector
 from app.services.query_classifier import query_classifier
@@ -360,9 +361,13 @@ class QueryEngine:
         provider_kwargs: Dict = None,
         on_status: Callable = None,
         user_id: Optional[int] = None,
+        scope: Optional[Dict[str, Any]] = None,
     ) -> QueryEngineResult:
         """
         Main entry point.
+
+        scope (Plan 7 Phase 3): row filter enforced at the SQL layer for this request,
+        e.g. {"year_month": 202607} — every source resolution sees it (ScopeError = 400).
 
         Args:
             question: User's natural language question
@@ -377,6 +382,16 @@ class QueryEngine:
         Returns:
             QueryEngineResult with query_result + warnings + context
         """
+        token = request_scope.set(scope or None)
+        try:
+            return await self._query(question, provider, context, mode, history, max_retries,
+                                     conversation_id, provider_kwargs, on_status, user_id, scope)
+        finally:
+            request_scope.reset(token)
+
+    async def _query(self, question, provider, context, mode, history, max_retries,
+                     conversation_id, provider_kwargs, on_status, user_id, scope) -> QueryEngineResult:
+        """Body of query() — runs with request_scope set."""
         start_time = time.time()
         provider_kwargs = provider_kwargs or {}
 
@@ -390,6 +405,10 @@ class QueryEngine:
         use_cache = not history
         selected_provider_name = provider or ai_config.get("default_provider", settings.AI_PROVIDER)
         context_name_for_cache = context or "auto"
+        # scope in the key: the same question under another scope is another answer (unscoped keys unchanged)
+        scope_key = json.dumps(scope, sort_keys=True, default=str) if scope else ""
+        if scope_key:
+            context_name_for_cache += "|" + scope_key
         qcache_key = _cache_key(question, selected_provider_name, context_name_for_cache)
         if use_cache:
             cached = _cache_get(qcache_key)
@@ -410,7 +429,7 @@ class QueryEngine:
                 return replace(cached, execution_time_ms=(time.time() - start_time) * 1000)
 
         # --- Request dedup: block identical requests within N seconds ---
-        dedup_key = _dedup_mark(question, selected_provider_name, user_id)
+        dedup_key = _dedup_mark(question + scope_key, selected_provider_name, user_id)
         if dedup_key is None:
             logger.warning(f"QueryEngine: Dedup — duplicate request blocked: {question[:50]}…")
             return QueryEngineResult(
@@ -526,6 +545,7 @@ class QueryEngine:
             context_name=context_name,
             rag_enabled=True,
         )
+        system_prompt += getattr(source.adapter, "scope_note", "")  # Phase 3: rows are pre-filtered
 
         # 4. Execute query
 

@@ -11,6 +11,11 @@ A context with no source_id (or a config DB not yet migrated) is legacy, so ever
 context that existed before Plan 7 behaves exactly as before.
 A file-source context never falls back to legacy: an unusable source raises —
 a silent fallback would answer from the stale imported copy.
+
+Scope (Phase 3): while ``request_scope`` holds a caller's scope (set per request by
+QueryEngine), every resolution returns the source seen through it — ScopedDuckDB /
+ScopedSQLite — so the LLM's SQL, the prompt's data range and the value lookup all read
+the same filtered rows. A scope the context can't enforce raises ScopeError (HTTP 400).
 """
 
 import asyncio
@@ -19,13 +24,14 @@ import json
 import logging
 import os
 import threading
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError, ProgrammingError
 
-from app.services.database_adapter import DuckDBFileAdapter, execute_select
+from app.services.database_adapter import DuckDBFileAdapter, ScopedDuckDB, ScopedSQLite, execute_select
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +74,68 @@ class ResolvedSource:
 
 LEGACY_SOURCE = ResolvedSource(name=LEGACY, source_type=LEGACY)
 
+# The caller's scope for the current request, e.g. {"year_month": 202607} — None = unscoped
+request_scope: ContextVar[Optional[Dict[str, Any]]] = ContextVar("request_scope", default=None)
+
+
+class ScopeError(ValueError):
+    """The scope can't be enforced on this context (undeclared key, bad value) → HTTP 400, never ignored."""
+
+
+def _literal(value: Any) -> str:
+    # Rendered into TEMP view DDL (no bind parameters there): ints and strings only
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise ScopeError(f"ค่า scope ต้องเป็นตัวเลขจำนวนเต็มหรือข้อความ: {value!r}")
+    if isinstance(value, int):
+        return str(value)
+    if "\x00" in value:
+        raise ScopeError("ค่า scope มีอักขระที่ไม่อนุญาต")
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _predicate(column: str, value: Any) -> str:
+    col = '"' + column.replace('"', '""') + '"'
+    if isinstance(value, list):
+        if not value or len(value) > 1000:
+            raise ScopeError("รายการค่า scope ต้องมี 1–1000 ค่า")
+        return f"{col} IN ({', '.join(_literal(v) for v in value)})"
+    return f"{col} = {_literal(value)}"
+
+
+def scope_filters(scope: Dict[str, Any], mapping: Dict[str, str], table_columns: Dict[str, Optional[List[str]]]) -> Dict[str, str]:
+    """{table: predicate} for every table carrying all the scoped columns.
+
+    mapping: scope key → column (schema_contexts.scope_columns); table_columns: table →
+    its columns, or None to trust the mapping (legacy main view). A table missing a scoped
+    column is left out — under the scope it can't be queried at all.
+    """
+    unknown = sorted(set(scope) - set(mapping))
+    if unknown:
+        raise ScopeError(f"scope ไม่รู้จัก {unknown} — context นี้รองรับ {sorted(mapping) or 'ไม่มี'}")
+    where = " AND ".join(_predicate(mapping[key], scope[key]) for key in sorted(scope))
+    needed = {mapping[key].lower() for key in scope}
+    filters = {t: where for t, cols in table_columns.items()
+               if cols is None or needed <= {c.lower() for c in cols}}
+    if not filters:
+        raise ScopeError(f"ไม่มีตารางใดของ context นี้ที่มีคอลัมน์ {sorted(needed)} ให้บังคับ scope")
+    return filters
+
+
+def _scope_note(scope: Dict[str, Any], tables: List[str], main_view: str) -> str:
+    """System-prompt note: the LLM must know the rows are pre-filtered and which tables exist —
+    and, when the scope can't filter the context's main view, that it must use another table."""
+    note = (
+        "\n\n**ขอบเขตข้อมูล (scope) ที่ผู้เรียกกำหนด — บังคับที่ระบบแล้ว:** "
+        + ", ".join(f"{k} = {v}" for k, v in sorted(scope.items()))
+        + "\n- ข้อมูลทุกแถวที่ query ได้ถูกกรองตาม scope นี้แล้ว — \"ล่าสุด\" / \"ทั้งหมด\" / \"หน่วยงานเรา\" หมายถึงภายใน scope นี้"
+        + f"\n- query ได้เฉพาะตาราง: {', '.join(sorted(tables))} (อ้างชื่อตรง ๆ ห้ามมี schema นำหน้า)"
+    )
+    if main_view and main_view.lower() not in {t.lower() for t in tables}:
+        note += (f"\n- ⚠️ ตารางหลัก {main_view} และตารางอื่นนอกรายการข้างบน **ใช้ไม่ได้** ภายใต้ scope นี้ "
+                 f"(ระบบจะปฏิเสธ) — ต้องเลือกตารางจากรายการข้างบนแทน แม้คำถามจะไม่ได้ระบุ; "
+                 f"ถ้าคำถามต้องใช้ข้อมูลนอก scope ให้ตอบว่าอยู่นอกขอบเขตข้อมูลที่ได้รับสิทธิ์")
+    return note
+
 
 def _not_migrated(exc: Exception) -> bool:
     msg = str(exc).lower()
@@ -94,22 +162,54 @@ class SourceResolver:
         return self._config_engine
 
     def for_context(self, context_name: Optional[str]) -> ResolvedSource:
+        source = self._resolve(context_name)
+        scope = request_scope.get()
+        return self._scoped(context_name, source, scope) if scope else source
+
+    def _context_row(self, conn, context_name: str, select: str):
+        # Same row, same order as context_store.get_context_info (exact, '_'→' ',
+        # ' '→'_', active only) — the prompt and the data must come from one context
+        for name in dict.fromkeys([context_name, context_name.replace("_", " "), context_name.replace(" ", "_")]):
+            row = conn.execute(text(f"{select} WHERE sc.name = :ctx AND sc.is_active = 1"), {"ctx": name}).mappings().first()
+            if row is not None:
+                return row
+        return None
+
+    def _scoped(self, context_name: Optional[str], source: ResolvedSource, scope: Dict[str, Any]) -> ResolvedSource:
+        if not isinstance(scope, dict):
+            raise ScopeError("scope ต้องเป็น object เช่น {\"year_month\": 202607}")
+        try:
+            with self._engine().connect() as conn:
+                row = self._context_row(conn, context_name or "", "SELECT sc.main_view, sc.scope_columns FROM schema_contexts sc")
+        except (OperationalError, ProgrammingError) as exc:
+            if _not_migrated(exc):
+                raise ScopeError("config DB ยังไม่รองรับ scope — รัน scripts/migrate_data_sources.py") from exc
+            raise
+        if row is None:
+            raise ScopeError(f"ไม่พบ context '{context_name}' สำหรับบังคับ scope")
+        try:
+            mapping = json.loads(row["scope_columns"] or "{}")
+        except ValueError as exc:
+            raise ScopeError(f"scope_columns ของ context '{context_name}' ไม่ใช่ JSON") from exc
+        if not isinstance(mapping, dict) or not all(isinstance(v, str) for v in mapping.values()):
+            raise ScopeError(f"scope_columns ของ context '{context_name}' ต้องเป็น {{key: column}}")
+        if source.adapter is None:  # legacy business DB: the context's main view is the only table
+            from app.db.session import business_engine
+            filters = scope_filters(scope, mapping, {row["main_view"]: None})
+            adapter = ScopedSQLite(business_engine.url.database, filters, _scope_note(scope, list(filters), row["main_view"]))
+        else:
+            filters = scope_filters(scope, mapping, source.adapter.view_columns)
+            adapter = ScopedDuckDB(source.adapter, filters, _scope_note(scope, list(filters), row["main_view"]))
+        return ResolvedSource(source.name, source.source_type, adapter)
+
+    def _resolve(self, context_name: Optional[str]) -> ResolvedSource:
         if not context_name:
             return LEGACY_SOURCE
         try:
             with self._engine().connect() as conn:
-                row = None
-                # Same row, same order as context_store.get_context_info (exact, '_'→' ',
-                # ' '→'_', active only) — the prompt and the data must come from one context
-                for name in dict.fromkeys([context_name, context_name.replace("_", " "),
-                                           context_name.replace(" ", "_")]):
-                    row = conn.execute(text(
-                        "SELECT sc.source_id, ds.* "
-                        "FROM schema_contexts sc LEFT JOIN data_sources ds ON ds.id = sc.source_id "
-                        "WHERE sc.name = :ctx AND sc.is_active = 1"
-                    ), {"ctx": name}).mappings().first()
-                    if row is not None:
-                        break
+                row = self._context_row(conn, context_name, (
+                    "SELECT sc.source_id, ds.* "
+                    "FROM schema_contexts sc LEFT JOIN data_sources ds ON ds.id = sc.source_id"))
                 if row is None or row["source_id"] is None:
                     return LEGACY_SOURCE
                 if row["id"] is None:

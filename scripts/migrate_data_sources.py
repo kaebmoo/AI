@@ -4,6 +4,7 @@ Migration script (Plan 7 Phase 1): data source registry in the config DB.
 - data_sources   — where a context's data lives ('legacy' = BUSINESS_DB_PATH, 'duckdb_file' = files under root_path)
 - source_tables  — per-source allowlist: view name → file (relative to root) + column types
 - schema_contexts.source_id — every existing context is bound to 'legacy' → behavior unchanged
+- schema_contexts.scope_columns (Phase 3) — JSON {"scope key": "column"}; NULL = the context accepts no scope
 
 Safe to run multiple times (idempotent).
 
@@ -70,6 +71,9 @@ def migrate(config_engine=None):
 
     existing = {c["name"] for c in inspect(config_engine).get_columns("schema_contexts")}
     with config_engine.begin() as conn:
+        if "scope_columns" not in existing:  # Phase 3: {"scope key": "column"} the caller's scope may filter on
+            conn.execute(text("ALTER TABLE schema_contexts ADD COLUMN scope_columns TEXT"))
+            print("Added schema_contexts.scope_columns")
         if "source_id" not in existing:
             conn.execute(text("ALTER TABLE schema_contexts ADD COLUMN source_id INTEGER REFERENCES data_sources(id)"))
             print("Added schema_contexts.source_id")

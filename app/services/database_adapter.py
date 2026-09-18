@@ -423,6 +423,80 @@ def _sql_ident(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
+_parser_lock = threading.Lock()
+_parser_conn = None
+
+
+def check_select(sql: str, allowed: set, qualified_ok: bool = True, cur=None) -> None:
+    """Allowlist gate, parsed by DuckDB: one SELECT reading only `allowed` tables or its own CTEs.
+
+    qualified_ok=False (a scoped query, Phase 3): every reference must be unqualified so it
+    resolves to the per-query TEMP view that applies the scope — `main.<view>` reads around it.
+    cur: a DuckDB cursor to parse with; None = a private in-memory DuckDB (legacy SQLite SQL
+    parses with DuckDB's parser — what doesn't parse is refused, fail closed).
+    """
+    global _parser_conn
+    if cur is None:
+        import duckdb
+        with _parser_lock:
+            if _parser_conn is None:
+                _parser_conn = duckdb.connect()
+            cur = _parser_conn.cursor()
+    tree = json.loads(cur.execute("SELECT json_serialize_sql(?)", [sql]).fetchone()[0])
+    if tree.get("error") or len(tree.get("statements", [])) != 1:
+        raise PermissionError("Only a single SELECT statement is allowed on a file source")
+    refs, ctes = [], set()
+
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get("type") == "TABLE_FUNCTION":
+                fn = (node.get("function") or {}).get("function_name")
+                raise PermissionError(f"Table function not allowed on a file source: {fn}")
+            if node.get("type") == "BASE_TABLE":
+                refs.append(node)
+            cte_map = node.get("cte_map")
+            if isinstance(cte_map, dict):
+                ctes.update(str(e.get("key", "")).lower() for e in cte_map.get("map", []) if isinstance(e, dict))
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(tree["statements"])
+    for ref in refs:
+        name = str(ref.get("table_name") or "").lower()
+        schema = ref.get("schema_name") or ""
+        if not qualified_ok and (ref.get("catalog_name") or schema):
+            raise PermissionError(f"ภายใต้ scope ห้ามอ้างตารางแบบมี schema/catalog นำหน้า: {schema}.{name}")
+        if ref.get("catalog_name") or schema not in ("", "main") or name not in allowed | ctes:
+            if not qualified_ok:
+                raise PermissionError(f"ภายใต้ scope ใช้ได้เฉพาะตาราง {sorted(allowed)}: {name}")
+            raise PermissionError(f"Only registered views can be queried on a file source: {name}")
+
+
+def _shadow(execute, name: str, where: str, schema: str = "main") -> None:
+    """TEMP view named like the real one: unqualified references read only `where` rows.
+
+    schema = where the real one lives: SQLite `main`; DuckDB `"<db catalog>".main` — its TEMP
+    objects sit in catalog temp, schema main, so a bare `main.<view>` would bind to itself.
+    """
+    execute(f"CREATE TEMP VIEW {_sql_ident(name)} AS SELECT * FROM {schema}.{_sql_ident(name)} WHERE {where}")
+
+
+def _scope_hash(filters: Dict[str, str]) -> str:
+    return hashlib.sha256(json.dumps(filters, sort_keys=True).encode()).hexdigest()[:8]
+
+
+def _duckdb_engine(cursor_fn):
+    """SQLAlchemy engine (duckdb_engine) over fresh cursors — for SchemaService inspection."""
+    from duckdb_engine import ConnectionWrapper
+    from sqlalchemy import create_engine
+    from sqlalchemy.pool import NullPool
+
+    return create_engine("duckdb://", creator=lambda: ConnectionWrapper(cursor_fn()), poolclass=NullPool)
+
+
 class SourceUnavailable(Exception):
     """The file source is not in a verified, consistent state (e.g. mid-publish).
 
@@ -487,7 +561,8 @@ class DuckDBFileAdapter(DatabaseAdapter):
             views.append((t["table_name"], path, t["columns"]))
             by_name[t["file_name"]] = path
         self.files = sorted(by_name.values())
-        self._views = {t.lower() for t, _, _ in views}
+        self.view_columns = {t: [c["name"] for c in cols] for t, _, cols in views}  # scope: which views can be filtered
+        self._views = {t.lower() for t in self.view_columns}
         self._watched = self.files + ([os.path.join(self.root, manifest_file)] if manifest_file else [])
 
         # Verify once per build, then only stat per query (publish race — PLAN_7 §11.7)
@@ -511,6 +586,7 @@ class DuckDBFileAdapter(DatabaseAdapter):
         self._conn.execute("SET allowed_paths = ?", [self.files])
         self._conn.execute("SET enable_external_access = false")
         self._conn.execute("SET lock_configuration = true")
+        self._catalog = _sql_ident(self._conn.execute("SELECT current_database()").fetchone()[0]) + ".main"
         self._cursor_lock = threading.Lock()
         self._sa_engine = None
 
@@ -590,64 +666,45 @@ class DuckDBFileAdapter(DatabaseAdapter):
     def engine_name(self) -> str:
         return "duckdb"
 
-    def cursor(self):
-        """Fresh DuckDB cursor on the locked instance (TEMP objects die with it)."""
+    def cursor(self, shadows: Optional[Dict[str, str]] = None):
+        """Fresh DuckDB cursor on the locked instance (TEMP objects die with it).
+
+        shadows (a scope, Phase 3): TEMP views over every registered view — the listed ones
+        filtered by their predicate, all others empty — so unqualified names read scoped rows only.
+        """
         with self._cursor_lock:
-            return self._conn.cursor()
+            cur = self._conn.cursor()
+        for name in self.view_columns if shadows is not None else ():
+            _shadow(cur.execute, name, shadows.get(name, "false"), self._catalog)
+        return cur
 
     @property
     def engine(self):
         """SQLAlchemy engine (duckdb_engine) so SchemaService can inspect the views."""
         if self._sa_engine is None:
-            from duckdb_engine import ConnectionWrapper
-            from sqlalchemy import create_engine
-            from sqlalchemy.pool import NullPool
-
-            self._sa_engine = create_engine(
-                "duckdb://", creator=lambda: ConnectionWrapper(self.cursor()), poolclass=NullPool,
-            )
+            self._sa_engine = _duckdb_engine(self.cursor)
         return self._sa_engine
 
     def _check_select_over_views(self, cur, sql: str) -> None:
-        """Allowlist gate, parsed by DuckDB: one SELECT reading only registered views or its own CTEs."""
-        tree = json.loads(cur.execute("SELECT json_serialize_sql(?)", [sql]).fetchone()[0])
-        if tree.get("error") or len(tree.get("statements", [])) != 1:
-            raise PermissionError("Only a single SELECT statement is allowed on a file source")
-        refs, ctes = [], set()
-
-        def walk(node):
-            if isinstance(node, dict):
-                if node.get("type") == "TABLE_FUNCTION":
-                    fn = (node.get("function") or {}).get("function_name")
-                    raise PermissionError(f"Table function not allowed on a file source: {fn}")
-                if node.get("type") == "BASE_TABLE":
-                    refs.append(node)
-                cte_map = node.get("cte_map")
-                if isinstance(cte_map, dict):
-                    ctes.update(str(e.get("key", "")).lower() for e in cte_map.get("map", []) if isinstance(e, dict))
-                for value in node.values():
-                    walk(value)
-            elif isinstance(node, list):
-                for value in node:
-                    walk(value)
-
-        walk(tree["statements"])
-        for ref in refs:
-            name = str(ref.get("table_name") or "").lower()
-            if ref.get("catalog_name") or (ref.get("schema_name") or "") not in ("", "main") \
-                    or name not in self._views | ctes:
-                raise PermissionError(f"Only registered views can be queried on a file source: {name}")
+        check_select(sql, self._views, cur=cur)
 
     def execute_query(self, sql: str, params: Optional[tuple] = None, max_rows: Optional[int] = None) -> List[Dict]:
         return self.query(sql, params, max_rows)[0]
 
-    def query(self, sql: str, params: Optional[tuple] = None, max_rows: Optional[int] = None):
-        """(rows, column names) — column names survive a zero-row result (xlsx export header)."""
+    def query(self, sql: str, params: Optional[tuple] = None, max_rows: Optional[int] = None,
+              scope: Optional[Dict[str, str]] = None):
+        """(rows, column names) — column names survive a zero-row result (xlsx export header).
+
+        scope: {view: predicate} — only those views, filtered, unqualified (see ScopedDuckDB).
+        """
         self._ensure_current()
-        cur = self.cursor()
+        cur = self.cursor(scope)
         try:
             sql = _sqlite_like(sql)
-            self._check_select_over_views(cur, sql)
+            if scope is None:
+                self._check_select_over_views(cur, sql)
+            else:
+                check_select(sql, {t.lower() for t in scope}, qualified_ok=False, cur=cur)
             try:
                 cur.execute(sql, params) if params else cur.execute(sql)
                 if not cur.description:
@@ -680,6 +737,93 @@ class DuckDBFileAdapter(DatabaseAdapter):
         except Exception as e:
             logger.error(f"DuckDB connection test failed ({self.name}): {e}")
             return False
+
+
+class ScopedDuckDB:
+    """A file source seen through a caller's scope (Plan 7 Phase 3) — the adapter's interface.
+
+    Every query and every SchemaService connection gets a fresh cursor whose TEMP views
+    shadow ALL registered views: scoped ones filtered, the rest empty. Untrusted SQL may
+    name only the scoped views, unqualified — so neither the LLM's SQL nor the prompt's
+    data range/samples/value lookup can see rows outside the scope.
+    """
+
+    engine_name = "duckdb"
+
+    def __init__(self, adapter: "DuckDBFileAdapter", filters: Dict[str, str], note: str = ""):
+        self._adapter, self.filters, self.scope_note = adapter, filters, note
+        self.manifest = adapter.manifest
+        self.version = f"{adapter.version}-{_scope_hash(filters)}"
+        self._sa_engine = None
+
+    def is_current(self) -> bool:
+        return self._adapter.is_current()
+
+    def cursor(self):
+        return self._adapter.cursor(self.filters)
+
+    def query(self, sql: str, params: Optional[tuple] = None, max_rows: Optional[int] = None):
+        return self._adapter.query(sql, params, max_rows, scope=self.filters)
+
+    def execute_query(self, sql: str, params: Optional[tuple] = None, max_rows: Optional[int] = None) -> List[Dict]:
+        return self.query(sql, params, max_rows)[0]
+
+    @property
+    def engine(self):
+        if self._sa_engine is None:
+            self._sa_engine = _duckdb_engine(self.cursor)
+        return self._sa_engine
+
+
+class ScopedSQLite:
+    """The legacy business DB seen through a caller's scope (Plan 7 Phase 3).
+
+    Scoped legacy SQL runs in-process (not via the nt_query MCP server) on a fresh
+    read-only connection whose TEMP views shadow the scoped tables; untrusted SQL may
+    name only those, unqualified — raw tables and other views are refused.
+    """
+
+    engine_name = "sqlite"
+    manifest = None
+
+    def __init__(self, db_path: str, filters: Dict[str, str], note: str = ""):
+        from pathlib import Path
+
+        self._uri = Path(db_path).resolve().as_uri() + "?mode=ro"
+        self.filters, self.scope_note = filters, note
+        self.version = f"legacy-{_scope_hash(filters)}"
+        self._sa_engine = None
+
+    def _connect(self):
+        conn = sqlite3.connect(self._uri, uri=True, check_same_thread=False)
+        for name, where in self.filters.items():
+            _shadow(conn.execute, name, where)
+        return conn
+
+    def query(self, sql: str, params: Optional[tuple] = None, max_rows: Optional[int] = None):
+        check_select(sql, {t.lower() for t in self.filters}, qualified_ok=False)
+        conn = self._connect()
+        try:
+            cur = conn.execute(sql, params or ())
+            if not cur.description:
+                return [], []
+            columns = [d[0] for d in cur.description]
+            rows = cur.fetchmany(max_rows) if max_rows else cur.fetchall()
+        finally:
+            conn.close()
+        return [dict(zip(columns, row)) for row in rows], columns
+
+    def execute_query(self, sql: str, params: Optional[tuple] = None, max_rows: Optional[int] = None) -> List[Dict]:
+        return self.query(sql, params, max_rows)[0]
+
+    @property
+    def engine(self):
+        if self._sa_engine is None:
+            from sqlalchemy import create_engine
+            from sqlalchemy.pool import NullPool
+
+            self._sa_engine = create_engine("sqlite://", creator=self._connect, poolclass=NullPool)
+        return self._sa_engine
 
 
 def execute_select(db, sql: str, limit: int = 100, validate_first: bool = True) -> Dict[str, Any]:

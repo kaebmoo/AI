@@ -99,6 +99,24 @@ class TestSimpleQueryEndpoint:
             resp = query_client.post("/api/v1/query/", json={"question": "q"})
         assert resp.json()["data_as_of"] is None
 
+    def test_scope_passed_and_unenforceable_scope_is_400(self, query_client):
+        """Plan 7 Phase 3: scope is enforced or refused — never silently dropped."""
+        from app.services.data_sources import ScopeError
+
+        with patch("app.services.query_engine.QueryEngine") as MockEngine:
+            MockEngine.return_value.query = AsyncMock(side_effect=ScopeError("scope ไม่รู้จัก ['division']"))
+            resp = query_client.post("/api/v1/query/", json={
+                "question": "q", "context": "feed_revenue", "scope": {"division": "x"}})
+        assert resp.status_code == 400
+        assert MockEngine.return_value.query.call_args.kwargs["scope"] == {"division": "x"}
+
+    def test_pinned_filters_stay_log_only(self, query_client):
+        with patch("app.services.query_engine.QueryEngine") as MockEngine:
+            MockEngine.return_value.query = AsyncMock(return_value=_mock_query_engine_result())
+            resp = query_client.post("/api/v1/query/", json={"question": "q", "pinned_filters": {"year_month": 202607}})
+        assert resp.status_code == 200
+        assert MockEngine.return_value.query.call_args.kwargs["scope"] is None
+
     def test_query_with_include_sql(self, query_client):
         """POST /query/ with include_sql=true → SQL included."""
         mock_result = _mock_query_engine_result(sql="SELECT 1 FROM revenue")
