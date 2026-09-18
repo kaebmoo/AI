@@ -369,7 +369,7 @@ NT-Report ไม่ต้อง import อะไรเข้า AI อีก ห
 - [ ] merge branch `plan7-phase1` เข้า main (ยังไม่ push ตามคำสั่ง)
 - [ ] ยืนยัน D1–D3 ที่ใช้ค่า default (§11.1) + การเพิ่ม `duckdb-engine`
 - [ ] ⚠️ **publish race (ต้องตัดสิน):** publisher ของ NT-Report (`tools/feed/feed.py` บรรทัด ~552 `shutil.rmtree(latest)` → เขียน CSV ทับที่เดิม → `manifest.json` เขียนท้ายสุด บรรทัด ~590) — คำถามที่เข้ามาระหว่าง publish (หลายสิบวินาที) อ่านไฟล์ครึ่งไฟล์ได้ → **ตอบงวดล่าสุดเป็นงวดเก่า / ยอด NULL โดย success=True** (reviewer reproduce ได้) — ทางเลือก: (ก) NT-Report publish แบบ atomic: build ลง dir ใหม่แล้วสลับ symlink `latest` (AI ตาม re-point ได้แล้ว มี test) (ข) AI ตรวจ `manifest.json` ทุก query (มีไฟล์ + ขนาดไฟล์ตรง `bytes`) ไม่ตรง = ปฏิเสธชัด ๆ แทนตอบผิดเงียบ (ดึงงาน Phase 2 มาก่อน) (ค) ลงทะเบียน snapshot `dist/revenue/<period>/` แทน `latest/` แล้ว register ใหม่ทุกงวด — **แนะนำ (ก)+(ข)**; ระหว่างนี้ อย่ารัน `run_all --feed` ช่วงที่มีคนใช้ หรือ `--legacy` ก่อน publish
-- [ ] ⚠️ bug เดิม: `POST /admin/config/rebuild-keyword-index` ลบ keyword index ทิ้งหมด (reproduce แล้ว) — แยกเป็นงานต่างหาก (ไม่อยู่ในขอบเขต Phase 1)
+- [x] ⚠️ bug เดิม: `POST /admin/config/rebuild-keyword-index` ลบ keyword index ทิ้งหมด — แก้ในงานแยก `0f3aaa7` ซึ่ง commit อยู่บน branch `plan7-phase1` (ไม่ใช่งาน Plan 7) — ทำให้ value lookup ของ legacy context คืนค่าจริงแล้ว = พฤติกรรม legacy เปลี่ยน ตัดสินตอน merge ว่าจะแยก merge หรือไม่
 
 **ส่งต่อ Phase 2+:**
 - [ ] runtime ตรวจ manifest (reconcile/schema_version/sha) + `data_as_of`; query cache ผูกกับ manifest version (ตอนนี้ publish งวดใหม่ คำตอบเดิม cache ได้ถึง 30 นาที)

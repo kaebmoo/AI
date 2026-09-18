@@ -20,6 +20,7 @@ context อื่นทั้งหมด (revenue, expense, transfer price, pl_
 ## Eval (`python -m scripts.eval.run_eval --context feed_revenue`, 14 golden จาก F10 ไม่ได้ regen)
 
 golden SQL รันกับ source ของ context (file source → DuckDB) ส่วน SQL ที่โมเดลสร้างรันผ่าน QueryEngine ตามปกติ
+ทุกรอบวัด**ก่อน** commit `0f3aaa7` (แก้ keyword index — งานแยกที่ commit ลง branch นี้ภายหลัง และทำให้ value lookup คืนค่าจริง) — ถ้าจะใช้ตัวเลขหลัง merge ควรรัน eval ซ้ำ
 P50 = median, P95 = nearest-rank; ทุกรอบ strict exact_match = 0 เพราะ alias ภาษาไทยไม่ตรง golden (เหมือน F10)
 
 | รอบ | ไฟล์ผล (`eval_results/`, gitignored) | Source | โค้ด | value_match | ข้อที่ตก | P50 | P95 |
