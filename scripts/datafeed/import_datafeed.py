@@ -29,7 +29,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 CHUNK = 50_000
-DTYPE_SQL = {"integer": "INTEGER", "double": "REAL", "string": "TEXT"}
+DTYPE_SQL = {"integer": "INTEGER", "Int64": "INTEGER", "double": "REAL", "string": "TEXT", "boolean": "INTEGER"}
 
 
 def sha256_file(path: Path) -> str:
@@ -55,10 +55,11 @@ def load_bundle(source: Path, domain: str):
     return latest, manifest, contract
 
 
-def check_integrity_pre(latest: Path, manifest: dict, datasets: list) -> None:
+def check_integrity_pre(latest: Path, manifest: dict, datasets: list, with_controls: bool = True) -> None:
     if not manifest.get("reconcile", {}).get("ok"):
         raise SystemExit("ABORT: manifest reconcile.ok != true — feed ไม่ผ่าน gate ของตัวเอง")
-    files_to_check = [f"{d['name']}.csv" for d in datasets] + ["control_totals.csv"]
+    # a contract without control_totals (e.g. ebt) ships no control_totals.csv
+    files_to_check = [f"{d['name']}.csv" for d in datasets] + (["control_totals.csv"] if with_controls else [])
     for fname in files_to_check:
         expected = manifest["files"].get(fname, {}).get("sha256")
         if not expected:
@@ -132,29 +133,41 @@ def import_datasets(conn, latest: Path, domain: str, contract: dict, manifest: d
 
 
 def check_control_totals(conn, latest: Path, domain: str, contract: dict) -> None:
-    """Gate 4: re-verify control totals against the freshly imported DB rows."""
-    spec = contract["control_totals"]
+    """Gate 4: re-verify every control_totals.csv row against the actual rows (tables or views).
+
+    One GROUP BY per measure (not one scan per row — fact_expense is ~150 MB of CSV).
+    ``__ALL__`` rows: the grand-total dataset when the contract has one, else the source summed.
+    """
+    spec = contract.get("control_totals")
+    if not spec:
+        print("Control totals: none in contract — gate skipped")
+        return
+    grand = spec.get("grand_total") or {}
     source_table = f"feed_{domain}_{spec['source']}"
-    grand_table = f"feed_{domain}_{spec['grand_total']['source']}"
+    grand_table = f"feed_{domain}_{grand['source']}" if grand else source_table
     period_key = spec.get("period_key", "year_month")
     bg_key = spec.get("bg_key", "bu")
-    tol_rel = spec["grand_total"].get("tolerance_rel", 1e-4)
-    tol_abs = spec["grand_total"].get("tolerance_abs", 1.0)
+    tol_rel = grand.get("tolerance_rel", spec.get("tolerance_rel", 1e-4))
+    tol_abs = grand.get("tolerance_abs", spec.get("tolerance_abs", 1.0))
 
     controls = pd.read_csv(latest / "control_totals.csv", dtype={bg_key: str})
+    actual = {}
+    for measure in controls["measure"].unique():
+        for bu, period, value in conn.execute(
+            f'SELECT "{bg_key}", "{period_key}", SUM("{measure}") FROM "{source_table}" GROUP BY 1, 2'
+        ).fetchall():
+            if period is not None:
+                actual[(measure, str(bu), int(period))] = value
+        for period, value in conn.execute(
+            f'SELECT "{period_key}", SUM("{measure}") FROM "{grand_table}" GROUP BY 1'
+        ).fetchall():
+            if period is not None:
+                actual[(measure, "__ALL__", int(period))] = value
+
     failures = []
     for _, row in controls.iterrows():
         measure, expected, period, bu = row["measure"], float(row["value"]), row[period_key], row[bg_key]
-        if bu == "__ALL__":
-            got = conn.execute(
-                f'SELECT SUM("{measure}") FROM "{grand_table}" WHERE "{period_key}" = ?', (int(period),)
-            ).fetchone()[0]
-        else:
-            got = conn.execute(
-                f'SELECT SUM("{measure}") FROM "{source_table}" WHERE "{bg_key}" = ? AND "{period_key}" = ?',
-                (bu, int(period)),
-            ).fetchone()[0]
-        got = got or 0.0
+        got = actual.get((measure, str(bu), int(period))) or 0.0
         if abs(got - expected) > max(tol_abs, tol_rel * abs(expected)):
             failures.append(f"{bu} {period} {measure}: db={got} expected={expected}")
 
@@ -184,7 +197,7 @@ def main():
     latest, manifest, contract = load_bundle(Path(args.source), args.domain)
     print(f"Domain {args.domain}: schema {manifest['schema_version']}, period {manifest['period']}")
 
-    check_integrity_pre(latest, manifest, contract["datasets"])
+    check_integrity_pre(latest, manifest, contract["datasets"], bool(contract.get("control_totals")))
 
     conn = sqlite3.connect(db_path, timeout=60)
     try:

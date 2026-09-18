@@ -188,3 +188,35 @@ class TestResolverResync:
         source = resolver.for_context("feed_x")  # the request still gets its source
         assert source.adapter.execute_query("SELECT COUNT(*) AS n FROM feed_x_fact_bu_monthly") == [{"n": 1}]
         assert "กฎหนึ่ง" in self._instruction(config_engine)
+
+
+class TestRouterDefaults:
+    """Feed contexts win only with a feed marker; plain questions keep their legacy context."""
+
+    LEGACY = [  # live config.db 2026-09-18, ORDER BY priority DESC, id (get_all_contexts order)
+        {"name": "revenue", "priority": 10,
+         "keywords": ["รายได้", "revenue", "sales", "ยอดขาย", "income", "profit", "กำไร"]},
+        {"name": "expense", "priority": 9,
+         "keywords": ["ค่า", "ค่าใช้จ่าย", "ค่าเสื่อม", "expense", "cost", "ต้นทุน", "งบประมาณ", "spending", "pay", "จ่าย"]},
+        {"name": "transfer price", "priority": 9, "keywords": ["ราคาโอน", "transfer price", "ฝ่าย", "หน่วยงาน"]},
+        {"name": "pl_costtype", "priority": 5,
+         "keywords": ["ผลดำเนินงาน", "กำไร", "ขาดทุน", "EBT", "กำไรขั้นต้น", "gross profit", "product", "service"]},
+    ]
+
+    @pytest.mark.parametrize("question,expected", [
+        ("รายได้รวมเดือนล่าสุด", "revenue"), ("ค่าใช้จ่ายรวมเดือนล่าสุด", "expense"),
+        ("ยอดขายเดือนนี้", "revenue"), ("EBT ของส่วนงาน", "pl_costtype"),
+        ("รายได้ feed เดือนล่าสุด", "feed_revenue"), ("ข้อมูล feed ล่าสุด", "feed_revenue"),
+        ("ค่าใช้จ่ายรวมจาก datafeed", "feed_expense"), ("ค่าเสื่อมราคาใน dashboard", "feed_expense"),
+        ("ยอดขาย feed เดือนล่าสุด", "feed_sales"), ("EBT feed เดือนล่าสุด", "feed_ebt"),
+        ("กำไร feed กรกฎาคม 2569", "feed_ebt"),
+    ])
+    def test_routes(self, question, expected):
+        from unittest.mock import MagicMock
+        from app.services.query_engine import detect_context_from_question
+
+        feeds = [{"name": f"feed_{d}", "priority": dk.FEED_PRIORITY,
+                  "keywords": dk.DOMAIN_KEYWORDS[d] + dk.FEED_MARKERS} for d in ("revenue", "expense", "sales", "ebt")]
+        svc = MagicMock()
+        svc.get_all_contexts.return_value = self.LEGACY + feeds
+        assert detect_context_from_question(question, svc) == expected

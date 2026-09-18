@@ -536,11 +536,15 @@ class DuckDBFileAdapter(DatabaseAdapter):
                         raise ValueError(f"Unsupported column type {c['type']!r} in {table}.{c['name']}")
                     col_defs.append(f"{_sql_str(c['name'])}: {_sql_str(col_type)}")
                 # types= binds by header NAME (columns= would bind by position: a reordered
-                # publish would silently swap values); a missing column fails loudly
+                # publish would silently swap values); a missing column fails loudly.
+                # Dialect pinned (RFC 4180 as pandas writes it): the sniffer samples the first
+                # ~20k rows, so a file whose first quoted field comes later (fact_sales.csv)
+                # was sniffed as quote='' and failed on "2G, 3G, 4G"
                 select_list = ", ".join(_sql_ident(c["name"]) for c in columns)
                 con.execute(
                     f"CREATE VIEW {_sql_ident(table)} AS SELECT {select_list} FROM read_csv("
-                    f"{_sql_str(path)}, header=true, types={{{', '.join(col_defs)}}})"
+                    f"{_sql_str(path)}, header=true, delim=',', quote='\"', escape='\"', "
+                    f"types={{{', '.join(col_defs)}}})"
                 )
         finally:
             con.close()

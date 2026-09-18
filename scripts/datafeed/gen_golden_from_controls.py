@@ -5,6 +5,11 @@ Generates ~15-25 Thai golden examples from the feed's control totals so the
 eval harness (F3-B) can measure the feed_<domain> context. Deterministic
 period selection (latest + 3 evenly spaced back) — reproducible regen.
 
+Everything about the data comes from the contract's control_totals (Plan 7 Phase 2):
+source / grand_total datasets, period_key, bg_key, group_keys and measures
+(agg 'sum' → monthly questions, 'point_in_time' → YTD questions). A contract
+without control_totals (ebt) gets no golden — there is nothing to check against.
+
 Marker: category = 'feed_<domain>' — delete-and-regen is clean.
 
 Usage:
@@ -25,6 +30,14 @@ sys.path.insert(0, str(PROJECT_ROOT))
 THAI_MONTHS = ["", "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
                "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"]
 
+# Wording of the generated questions: (what is measured, what a bg_key value is called).
+# Default only — an unknown domain falls back to its contract title.
+QUESTION_WORDS = {
+    "revenue": ("รายได้", "กลุ่มธุรกิจ"),
+    "expense": ("ค่าใช้จ่าย", "กลุ่ม"),
+    "sales": ("ยอดขาย", "กลุ่มธุรกิจ"),
+}
+
 
 def thai_period(year_month: int) -> str:
     year, month = divmod(int(year_month), 100)
@@ -41,50 +54,65 @@ def pick_periods(periods: list) -> list:
     return sorted(set(picked))
 
 
-def build_examples(controls: pd.DataFrame, domain: str) -> list:
-    total_table = f"feed_{domain}_fact_total_monthly"
-    bu_table = f"feed_{domain}_fact_bu_monthly"
+def _is_thai(s: str) -> bool:
+    return any("฀" <= ch <= "๿" for ch in s)
+
+
+def build_examples(controls: pd.DataFrame, domain: str, contract: dict) -> list:
+    spec = contract.get("control_totals")
+    if not spec:
+        return []
+    period_key, bg_key = spec.get("period_key", "year_month"), spec.get("bg_key", "bu")
+    group_keys = spec.get("group_keys", [bg_key, period_key])
+    source = f"feed_{domain}_{spec['source']}"
+    grand = spec.get("grand_total") or {}
+    total_table = f"feed_{domain}_{grand['source']}" if grand else None
+    # a source already at (bg × period) grain answers with its row; a finer one needs SUM
+    source_keys = next(d.get("keys", []) for d in contract["datasets"] if d["name"] == spec["source"])
+    one_row = set(source_keys) <= set(group_keys)
+    # how a group is named in the question: its *_name key when there is one (expense_group_code
+    # → expense_group_name), else the bg_key value itself (revenue bu, sales business_group)
+    label_key = next((k for k in group_keys if k.endswith("_name") and k in controls.columns), bg_key)
+    noun, group_noun = QUESTION_WORDS.get(domain, (contract.get("title", domain), "กลุ่ม"))
+    measures = spec.get("measures", [])
+    monthly = next((m["name"] for m in measures if m.get("agg", "sum") == "sum"), None)
+    ytd = next((m["name"] for m in measures if m.get("agg") == "point_in_time"), None)
+
+    def total_sql(measure, ym):
+        if total_table:
+            return f"SELECT {measure} FROM {total_table} WHERE {period_key} = {ym}"
+        return f"SELECT SUM({measure}) FROM {source} WHERE {period_key} = {ym}"
+
+    def group_sql(measure, bg, ym):
+        value = measure if one_row else f"SUM({measure})"
+        bg_lit = "'" + str(bg).replace("'", "''") + "'"
+        return f"SELECT {value} FROM {source} WHERE {bg_key} = {bg_lit} AND {period_key} = {ym}"
+
     examples = []
+    periods = pick_periods(controls[period_key].tolist())
+    rows = controls[(controls["measure"] == monthly) & (controls[bg_key] != "__ALL__")] if monthly else controls[:0]
 
-    periods = pick_periods(controls["year_month"].tolist())
-    monthly = controls[controls["measure"] == "revenue"]
-
-    for ym in periods:
+    for ym in periods if monthly else []:
         thai = thai_period(ym)
         # (ก) grand total per period
-        examples.append((
-            f"รายได้รวมทั้งบริษัทเดือน{thai} เท่าไร",
-            f'SELECT revenue FROM {total_table} WHERE year_month = {ym}',
-        ))
-        # (ข) per-BG — first, middle, and a Thai-named BG for string matching
-        bgs = monthly[(monthly["year_month"] == ym) & (monthly["bu"] != "__ALL__")]["bu"].tolist()
-        chosen = []
-        if bgs:
-            chosen.append(bgs[0])
-            thai_named = [b for b in bgs if any("฀" <= ch <= "๿" for ch in b)]
-            if thai_named:
-                chosen.append(thai_named[0])
-        for bu in chosen[:2]:
-            examples.append((
-                f"รายได้ของกลุ่มธุรกิจ {bu} เดือน{thai} เท่าไร",
-                f"SELECT revenue FROM {bu_table} WHERE bu = '{bu}' AND year_month = {ym}",
-            ))
+        examples.append((f"{noun}รวมทั้งบริษัทเดือน{thai} เท่าไร", total_sql(monthly, ym)))
+        # (ข) per group — the first, and another Thai-named one for string matching
+        groups = rows[rows[period_key] == ym][[bg_key, label_key]].values.tolist()
+        chosen = groups[:1] + [g for g in groups[1:] if _is_thai(str(g[1]))][:1]
+        for bg, label in chosen:
+            examples.append((f"{noun}ของ{group_noun} {label} เดือน{thai} เท่าไร", group_sql(monthly, bg, ym)))
 
-    # (ค) YTD questions — must use revenue_ytd (tests the bg8 business rule directly)
-    latest = periods[-1]
-    thai = thai_period(latest)
-    ytd_bgs = controls[(controls["measure"] == "revenue_ytd") & (controls["year_month"] == latest)
-                       & (controls["bu"] != "__ALL__")]["bu"].tolist()
-    bg8 = next((b for b in ytd_bgs if b.startswith("8")), ytd_bgs[0] if ytd_bgs else None)
-    if bg8:
-        examples.append((
-            f"รายได้สะสม (YTD) ของกลุ่มธุรกิจ {bg8} ณ เดือน{thai} เท่าไร",
-            f"SELECT revenue_ytd FROM {bu_table} WHERE bu = '{bg8}' AND year_month = {latest}",
-        ))
-    examples.append((
-        f"รายได้สะสมทั้งบริษัทตั้งแต่ต้นปีถึงเดือน{thai} เท่าไร",
-        f"SELECT revenue_ytd FROM {total_table} WHERE year_month = {latest}",
-    ))
+    # (ค) YTD questions — must use the point-in-time measure (tests the ytd rule directly)
+    if ytd:
+        latest = periods[-1]
+        thai = thai_period(latest)
+        ytd_groups = controls[(controls["measure"] == ytd) & (controls[period_key] == latest)
+                              & (controls[bg_key] != "__ALL__")][bg_key].tolist()
+        bg8 = next((b for b in ytd_groups if b.startswith("8")), ytd_groups[0] if ytd_groups else None)
+        if bg8:
+            examples.append((f"{noun}สะสม (YTD) ของ{group_noun} {bg8} ณ เดือน{thai} เท่าไร",
+                             group_sql(ytd, bg8, latest)))
+        examples.append((f"{noun}สะสมทั้งบริษัทตั้งแต่ต้นปีถึงเดือน{thai} เท่าไร", total_sql(ytd, latest)))
 
     return examples
 
@@ -95,10 +123,15 @@ def main():
     parser.add_argument("--source", required=True, help="Path to DataFeed/dist")
     args = parser.parse_args()
 
-    controls = pd.read_csv(
-        Path(args.source) / args.domain / "latest" / "control_totals.csv", dtype={"bu": str}
-    )
-    examples = build_examples(controls, args.domain)
+    from scripts.datafeed.import_datafeed import load_bundle
+
+    latest, _, contract = load_bundle(Path(args.source), args.domain)
+    if not contract.get("control_totals"):
+        print(f"{args.domain}: contract has no control_totals — no golden generated (existing ones kept)")
+        return
+    bg_key = contract["control_totals"].get("bg_key", "bu")
+    controls = pd.read_csv(latest / "control_totals.csv", dtype={bg_key: str})
+    examples = build_examples(controls, args.domain, contract)
 
     from app.config import settings
     conn = sqlite3.connect(settings.CONFIG_DB_URL.replace("sqlite:///", ""), timeout=60)

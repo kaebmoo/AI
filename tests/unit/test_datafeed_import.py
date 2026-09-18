@@ -174,3 +174,50 @@ class TestDataFeedImport:
         with pytest.raises(SystemExit, match="schema_version"):
             _run_import(source, db)
         _run_import(source, db, allow_schema_change=True)  # flag allows it
+
+
+class TestContractDrivenControls:
+    """Plan 7 Phase 2: expense/sales have no grand-total dataset, ebt has no control totals."""
+
+    NO_GRAND = {**CONTRACT, "control_totals": {**CONTRACT["control_totals"], "grand_total": None,
+                                               "tolerance_rel": 0.0001, "tolerance_abs": 1.0}}
+
+    def _db(self, tmp_path):
+        source = _write_bundle(tmp_path)
+        latest, manifest, _ = imp.load_bundle(source, "rev")
+        conn = sqlite3.connect(":memory:")
+        imp.import_datasets(conn, latest, "rev", CONTRACT, manifest)
+        return conn, latest
+
+    def test_all_row_sums_the_source_without_grand_total(self, tmp_path, capsys):
+        conn, latest = self._db(tmp_path)
+        imp.check_control_totals(conn, latest, "rev", self.NO_GRAND)  # __ALL__ 300.5 = A 100.5 + B 200
+        assert "5 rows within tolerance" in capsys.readouterr().out
+        conn.execute("UPDATE feed_rev_fact_bu SET revenue = 0 WHERE bu = 'B'")
+        with pytest.raises(SystemExit):  # B and __ALL__ of 202401 now off
+            imp.check_control_totals(conn, latest, "rev", self.NO_GRAND)
+
+    def test_contract_without_control_totals(self, tmp_path, capsys):
+        conn, latest = self._db(tmp_path)
+        (latest / "control_totals.csv").unlink()  # ebt ships none
+        no_controls = {k: v for k, v in CONTRACT.items() if k != "control_totals"}
+        manifest = json.loads((latest / "manifest.json").read_text())
+        del manifest["files"]["control_totals.csv"]
+        imp.check_integrity_pre(latest, manifest, no_controls["datasets"], with_controls=False)
+        imp.check_control_totals(conn, latest, "rev", no_controls)
+        assert "gate skipped" in capsys.readouterr().out
+
+    def test_golden_follows_the_contract(self):
+        import pandas as pd
+        from scripts.datafeed.gen_golden_from_controls import build_examples
+
+        controls = pd.DataFrame({"bu": ["A", "__ALL__"], "year_month": [202401, 202401],
+                                 "measure": ["revenue", "revenue"], "value": [100.5, 300.5]})
+        with_grand = [sql for _, sql in build_examples(controls, "rev", CONTRACT)]
+        assert with_grand == ["SELECT revenue FROM feed_rev_fact_total WHERE year_month = 202401",
+                              "SELECT revenue FROM feed_rev_fact_bu WHERE bu = 'A' AND year_month = 202401"]
+        finer = {**self.NO_GRAND, "datasets": [{**CONTRACT["datasets"][0], "keys": ["year_month", "bu", "bu_code"]}]}
+        assert [sql for _, sql in build_examples(controls, "rev", finer)] == [
+            "SELECT SUM(revenue) FROM feed_rev_fact_bu WHERE year_month = 202401",
+            "SELECT SUM(revenue) FROM feed_rev_fact_bu WHERE bu = 'A' AND year_month = 202401"]
+        assert build_examples(None, "ebt", {"datasets": []}) == []

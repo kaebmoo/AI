@@ -61,6 +61,15 @@ class TestViews:
         assert reordered.execute_query("SELECT * FROM feed_x_fact_bu_monthly") == [
             {"year_month": 7, "bu": "202608", "revenue": 10.5}]
 
+    def test_quoted_field_after_the_sniffer_sample(self, source_root, tmp_path):
+        # fact_sales.csv: first quoted field at line ~43k → the sniffer guessed quote='' and failed
+        rows = "".join(f"202608,01.A,{i}\n" for i in range(30_000))
+        (source_root / "fact_bu_monthly.csv").write_text(
+            f'year_month,bu,revenue\n{rows}202608,"2G, 3G ""4G""",1.5\n')
+        a = DuckDBFileAdapter("q", str(source_root), TABLES, str(tmp_path / "cache"))
+        assert a.execute_query("SELECT bu, revenue FROM feed_x_fact_bu_monthly WHERE revenue = 1.5") == [
+            {"bu": '2G, 3G "4G"', "revenue": 1.5}]
+
     def test_division_by_zero_is_null_like_sqlite(self, adapter):
         row = adapter.execute_query("SELECT 1.0 / 0 AS a, 0.0 / 0 AS b, 2.5 AS c")[0]
         assert row == {"a": None, "b": None, "c": 2.5}  # inf/nan would be invalid JSON

@@ -9,7 +9,7 @@ knowledge/golden keep working.
 Same gates as import_datafeed.py, but against the files in place — the registry
 is only written after all of them pass:
 1. manifest reconcile.ok, 2. sha256 of every file used (allowlist = manifest files),
-3. row counts through the views, 4. control totals through the views.
+3. row counts through the views, 4. control totals through the views (if the contract has them).
 
 Registry, context knowledge (from the contract — app/services/datafeed_knowledge.py) and
 the contract pointer are written in one transaction; afterwards the knowledge re-syncs
@@ -37,7 +37,8 @@ from scripts.datafeed.import_datafeed import (  # noqa: E402
     check_control_totals, check_integrity_pre, contract_file, load_bundle,
 )
 
-DTYPE_DUCKDB = {"integer": "BIGINT", "double": "DOUBLE", "string": "VARCHAR"}
+DTYPE_DUCKDB = {"integer": "BIGINT", "Int64": "BIGINT", "double": "DOUBLE", "string": "VARCHAR",
+                "boolean": "BOOLEAN"}
 
 
 def source_name(domain: str) -> str:
@@ -143,7 +144,7 @@ def main():
     root = latest.absolute()  # not resolve(): a symlinked latest/ must keep following re-points
     print(f"Domain {args.domain}: schema {manifest['schema_version']}, period {manifest['period']}, root {root}")
 
-    check_integrity_pre(latest, manifest, contract["datasets"])
+    check_integrity_pre(latest, manifest, contract["datasets"], bool(contract.get("control_totals")))
     tables = build_tables(args.domain, contract, manifest)
     verify_in_place(root, args.domain, contract, manifest, tables)
     context, n_meta, n_docs = register(config_engine, args.domain, root, tables,
