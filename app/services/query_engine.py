@@ -212,6 +212,7 @@ class QueryEngineResult:
     warnings: List[DataWarning] = field(default_factory=list)
     execution_time_ms: float = 0.0
     provider_used: str = ""
+    source_name: str = ""  # Plan 7: data source the answer was read from
 
 
 # ---------------------------------------------------------------------------
@@ -391,6 +392,9 @@ class QueryEngine:
         qcache_key = _cache_key(question, selected_provider_name, context_name_for_cache)
         if use_cache:
             cached = _cache_get(qcache_key)
+            # Plan 7: an answer read from a source the context no longer points at is a miss
+            if cached is not None and cached.source_name != source_resolver.for_context(cached.context_name).name:
+                cached = None
             if cached is not None:
                 from dataclasses import replace
                 from app.services.ai.trace import emit, new_trace
@@ -586,6 +590,7 @@ class QueryEngine:
             warnings=warnings,
             execution_time_ms=execution_time,
             provider_used=selected_provider,
+            source_name=source.name,
         )
 
         # --- Query Result Cache: store successful result ---

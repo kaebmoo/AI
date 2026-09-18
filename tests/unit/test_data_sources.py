@@ -213,3 +213,48 @@ class TestQueryEngineWiring:
         assert wd_cls.call_args.kwargs["mcp_client"] is bound
         qe._query_cache.clear()
         qe._dedup_store.clear()
+
+
+class TestQueryCacheFollowsSource:
+    def test_cached_answer_from_previous_source_is_a_miss(self):
+        from app.providers.base import QueryResult
+        from app.services import query_engine as qe
+        from app.services.data_sources import ResolvedSource
+
+        qe._query_cache.clear()
+        qe._dedup_store.clear()
+        admin_config = MagicMock()
+        admin_config.get_ai_config.return_value = {"default_provider": "matcha"}
+        admin_config.get_feature_flags.return_value = {}
+        admin_config.get_provider_record.return_value = None
+        engine = qe.QueryEngine(mcp_client=MagicMock(), admin_config=admin_config)
+        engine._schema_service = MagicMock()
+        engine._schema_service.build_system_prompt.return_value = "prompt"
+        provider = MagicMock()
+        provider.is_configured.return_value = True
+        provider.get_model.return_value = None
+        ai_service = MagicMock()
+        ai_service.query_hybrid = AsyncMock(return_value=QueryResult(
+            question="q", sql_query="SELECT 1", data=[{"n": 1}], explanation="", tokens_used=0, provider="matcha"))
+        warning_detector = MagicMock()
+        warning_detector.detect = AsyncMock(return_value=[])
+        resolver = MagicMock()
+        resolver.for_context.return_value = LEGACY_SOURCE
+
+        def ask():
+            with patch.object(qe, "source_resolver", resolver), \
+                 patch.object(qe.provider_registry, "create_provider", return_value=provider), \
+                 patch.object(qe, "AIService", return_value=ai_service), \
+                 patch.object(qe, "WarningDetector", return_value=warning_detector):
+                qe._dedup_store.clear()
+                return asyncio.run(engine.query("q", context="revenue"))
+
+        ask()
+        ask()
+        assert ai_service.query_hybrid.await_count == 1  # same source → cache hit, as before
+        # context re-pointed (register_file_source / --legacy) → old answer must not be served
+        resolver.for_context.return_value = ResolvedSource(name="datafeed_x", source_type="duckdb_file")
+        ask()
+        assert ai_service.query_hybrid.await_count == 2
+        qe._query_cache.clear()
+        qe._dedup_store.clear()
