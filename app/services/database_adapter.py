@@ -14,6 +14,7 @@ Usage:
 """
 
 import json
+import math
 import os
 import re
 import sqlite3
@@ -403,6 +404,16 @@ def _sqlite_like(sql: str) -> str:
     return _LIKE_OR_QUOTED.sub(lambda m: "ILIKE" if m.group(0).upper() == "LIKE" else m.group(0), sql)
 
 
+def _sqlite_value(v):
+    """Result values shaped like the SQLite path: DECIMAL → float, and x/0 → None
+    (DuckDB gives inf/nan, which is not valid JSON and breaks the SSE answer)."""
+    if isinstance(v, Decimal):
+        v = float(v)
+    if isinstance(v, float) and not math.isfinite(v):
+        return None
+    return v
+
+
 def _sql_str(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
@@ -487,9 +498,12 @@ class DuckDBFileAdapter(DatabaseAdapter):
                     if col_type not in DUCKDB_COLUMN_TYPES:
                         raise ValueError(f"Unsupported column type {c['type']!r} in {table}.{c['name']}")
                     col_defs.append(f"{_sql_str(c['name'])}: {_sql_str(col_type)}")
+                # types= binds by header NAME (columns= would bind by position: a reordered
+                # publish would silently swap values); a missing column fails loudly
+                select_list = ", ".join(_sql_ident(c["name"]) for c in columns)
                 con.execute(
-                    f"CREATE VIEW {_sql_ident(table)} AS SELECT * FROM read_csv("
-                    f"{_sql_str(path)}, header=true, columns={{{', '.join(col_defs)}}})"
+                    f"CREATE VIEW {_sql_ident(table)} AS SELECT {select_list} FROM read_csv("
+                    f"{_sql_str(path)}, header=true, types={{{', '.join(col_defs)}}})"
                 )
         finally:
             con.close()
@@ -558,11 +572,7 @@ class DuckDBFileAdapter(DatabaseAdapter):
                 return []
             columns = [d[0] for d in cur.description]
             rows = cur.fetchmany(max_rows) if max_rows else cur.fetchall()
-            # DECIMAL (e.g. from literal arithmetic) → float, same shape the SQLite path returns
-            return [
-                {c: float(v) if isinstance(v, Decimal) else v for c, v in zip(columns, row)}
-                for row in rows
-            ]
+            return [{c: _sqlite_value(v) for c, v in zip(columns, row)} for row in rows]
         finally:
             cur.close()
 

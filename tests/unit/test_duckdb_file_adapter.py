@@ -54,6 +54,17 @@ class TestViews:
         # a LIKE inside a string literal is data, not the operator
         assert adapter.execute_query("SELECT 'x LIKE y' AS w")[0]["w"] == "x LIKE y"
 
+    def test_columns_bound_by_header_name_not_position(self, source_root, tmp_path):
+        # a publish that reorders columns must not swap values (importer selected by name too)
+        (source_root / "fact_bu_monthly.csv").write_text("revenue,bu,year_month\n10.5,202608,7\n")
+        reordered = DuckDBFileAdapter("r", str(source_root), TABLES, str(tmp_path / "cache"))
+        assert reordered.execute_query("SELECT * FROM feed_x_fact_bu_monthly") == [
+            {"year_month": 7, "bu": "202608", "revenue": 10.5}]
+
+    def test_division_by_zero_is_null_like_sqlite(self, adapter):
+        row = adapter.execute_query("SELECT 1.0 / 0 AS a, 0.0 / 0 AS b, 2.5 AS c")[0]
+        assert row == {"a": None, "b": None, "c": 2.5}  # inf/nan would be invalid JSON
+
     def test_row_cap_and_truncated_flag(self, adapter):
         result = execute_select(adapter, "SELECT * FROM feed_x_fact_bu_monthly", limit=2)
         assert result["row_count"] == 2 and result["truncated"] is True
