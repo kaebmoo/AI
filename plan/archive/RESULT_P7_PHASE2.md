@@ -108,6 +108,8 @@ after publish : data_as_of={'period': 202609, 'build_id': '202609-B', ...} answe
 - **C — ปิด Phase 2 ที่ 2 โดเมน** (revenue + expense) ไป Phase 3 ก่อน; sales/ebt ปิดไว้จน A เสร็จ
 
 ### Prompt สำหรับ repo NT-Report (ทางเลือก A)
+> ⚠️ ฉบับร่าง — ใช้ `plan/PROMPT_NT_REPORT_P7.md` แทน (รวม scope + นิยาม EBT ที่เจ้าของยืนยัน 2026-09-19: "ยอดขาย" = รายได้ฐานยอดขายใน fact_ebt ≠ รายได้ในรายงานรายได้)
+
 ```
 ใน repo NT-Report (tools/feed/domains.py → gen_contract → contracts/*.yaml) — AI assistant อ่าน DataFeed ตรง
 และสร้าง knowledge จาก contract อัตโนมัติ แต่ 2 โดเมนขาดข้อมูลความหมาย ทำให้ AI ตอบเลขผิด:

@@ -1,7 +1,7 @@
 # Prompt สำหรับ repo NT-Report — งานฝั่ง DataFeed/portal ที่ Plan 7 Phase 2–3 ของ AI ต้องใช้ (2026-09-19)
 
 > ส่งทั้งไฟล์นี้ให้ session ที่ทำงานใน repo NT-Report — ฝั่ง AI เสร็จแล้วทั้ง re-sync knowledge อัตโนมัติ (Phase 2) และ `scope` (Phase 3)
-> ที่มา: `plan/archive/RESULT_P7_PHASE2.md` (sales/ebt), `plan/archive/RESULT_P7_PHASE3.md` (scope), เจ้าของตัดสิน 2026-09-19: ทางเลือก A + "EBT = ยอดขาย − ค่าใช้จ่าย"
+> ที่มา: `plan/archive/RESULT_P7_PHASE2.md` (sales/ebt), `plan/archive/RESULT_P7_PHASE3.md` (scope), เจ้าของตัดสิน 2026-09-19: ทางเลือก A + "EBT = ยอดขาย − ค่าใช้จ่าย" โดย "ยอดขาย" = กลุ่มรายได้ใน fact_ebt (รายได้ฐานยอดขาย ≠ รายได้ในรายงานรายได้)
 
 ```
 ทำงานใน repo NT-Report (branch ตามปกติ, commit เป็นก้อนต่อข้อ, ยังไม่ push)
@@ -17,11 +17,17 @@ AI assistant อ่าน DataFeed/dist/<domain>/latest/ ตรง และส�
      (AI จะรองรับ field นี้ใน gate + golden: WHERE <col> = <value> ก่อน aggregate) และ build control_totals.csv ใหม่ตามนั้น
 
 2) ebt — AI ตอบ "กำไร ก.ค. 69" = +7,201 M (บวกรายได้กับค่าใช้จ่าย) และไม่มี control_totals
-   - เจ้าของกำหนด: **EBT = ยอดขาย − ค่าใช้จ่าย** — เขียนเป็น business_rule ที่ระบุแถวชัด ๆ ว่า "ยอดขาย" และ "ค่าใช้จ่าย" คือแถวไหนใน fact_ebt
-     (group_0/group_1 + measure_type='ADDITIVE'; ค่าใช้จ่ายเก็บเป็นค่าบวก) — ตอนนี้ fact_ebt มี group_0 = 01.รายได้ / 02.ค่าใช้จ่าย /
-     03.กำไร (ขาดทุน) / 04.Revenue Per Head — ถ้า "ยอดขาย" ≠ 01.รายได้ ให้บอกว่าต่างกันอย่างไร และแถว COMPUTED
-     '3.1 กำไร (ขาดทุน) ของส่วนงาน (1)-(2)' ใช้/ห้ามใช้เมื่อไร
-   - แนะนำ: เพิ่ม dataset ยอดรวมรายงวด เช่น fact_ebt_total_monthly (time_key, ยอดขาย, ค่าใช้จ่าย, ebt) เหมือน revenue มี
+   - เจ้าของกำหนด: **EBT = ยอดขาย − ค่าใช้จ่าย** โดย "ยอดขาย" คือกลุ่มรายได้ใน fact_ebt (group_0 = '01.รายได้') →
+       EBT = SUM(amount | measure_type='ADDITIVE', group_0='01.รายได้') − SUM(amount | measure_type='ADDITIVE', group_0='02.ค่าใช้จ่าย')
+       (ค่าใช้จ่ายเก็บเป็นค่าบวก) — ค่าที่ควรได้ ก.ค. 69 ทั้งบริษัท: 3,056,678,601.50 − 4,144,812,053.53 = −1,088,133,452.03
+   - business_rule ใหม่ (สำคัญ): **รายได้ใน fact_ebt ไม่เท่ากับรายได้ในรายงานรายได้ (revenue feed)** — เป็นรายได้ฐานยอดขาย
+     ที่มีการปรับ เช่น นำยอดขายบัตร prepaid มารวม ไม่ได้คิดจาก usage อย่างเดียว → ห้ามรวม/เทียบตรงกับ revenue feed
+     (ทำนองเดียวกับกฎ sales_is_not_revenue) และตอนตอบให้เรียกว่า "รายได้ (ฐานยอดขาย)" ไม่ใช่ "รายได้" เฉย ๆ
+     - ระบุด้วยว่าถ้าผู้ใช้ถาม "รายได้" ทั่วไป (ไม่ได้พูดถึง EBT/กำไร) ควรใช้ revenue feed หรือไม่
+     - ระบุด้วยว่ารายได้ฐานยอดขายนี้เทียบกับ sales feed (Sales DW) ได้หรือไม่ — AI จะไม่เดาเอง
+   - description ของคอลัมน์ group_0/group_1/amount ให้สะท้อนความหมายข้างบน และบอกว่าแถว COMPUTED
+     '3.1 กำไร (ขาดทุน) ของส่วนงาน (1)-(2)' ใช้/ห้ามใช้เมื่อไร (ตอนนี้ SUM ทั้งบริษัท ก.ค. 69 = 340.7 M ≠ −1,088 M)
+   - แนะนำ: เพิ่ม dataset ยอดรวมรายงวด เช่น fact_ebt_total_monthly (time_key, รายได้ฐานยอดขาย, ค่าใช้จ่าย, ebt) เหมือน revenue มี
      fact_total_monthly แล้วประกาศ control_totals (source + grand_total) — AI จะสร้าง golden/เทียบยอดจากนี้ได้โดยไม่ต้องรู้สูตรเอง
      (ถ้าไม่ทำ: อย่างน้อย control_totals ต่อ group_0 ด้วย filter measure_type=ADDITIVE)
 

@@ -400,7 +400,7 @@ Deferred (ทำตอน Plan 6 SaaS)
 | sales | `metric` = actual + target ไม่มีกฎห้ามรวม; `control_totals.csv` รวมทั้งสอง; ไม่ชัดว่ายอดรวมบริษัทนับ BG 8/โครงการภาครัฐไหม | "ยอดขายรวม ก.ค. 69" ตอบ 6,978 M (actual จริง 3,290 M) |
 | ebt | ไม่มี control_totals; ไม่มีกฎ EBT = รายได้ − ค่าใช้จ่าย | "กำไร ก.ค. 69" ตอบ +7,201 M (ที่ถูก −1,088 M) |
 
-สถานะ: source + knowledge ลงทะเบียนแล้ว, context `feed_sales`/`feed_ebt` ปิดไว้ (`is_active=0`) — ✅ ตัดสิน 2026-09-19: **ทางเลือก A** (NT-Report แก้ contract; EBT = ยอดขาย − ค่าใช้จ่าย) → prompt `plan/PROMPT_NT_REPORT_P7.md`
+สถานะ: source + knowledge ลงทะเบียนแล้ว, context `feed_sales`/`feed_ebt` ปิดไว้ (`is_active=0`) — ✅ ตัดสิน 2026-09-19: **ทางเลือก A** (NT-Report แก้ contract; EBT = ยอดขาย − ค่าใช้จ่าย โดยยอดขาย = กลุ่ม 01.รายได้ ใน fact_ebt ซึ่งเป็นรายได้ฐานยอดขาย ≠ รายได้ในรายงานรายได้ เช่น รวมยอดขายบัตร prepaid) → prompt `plan/PROMPT_NT_REPORT_P7.md`
 หลังแก้ contract (ทางเลือก A): knowledge re-sync เอง → เปิด context → `gen_golden_from_controls` → eval ≥ 90%
 
 ---
