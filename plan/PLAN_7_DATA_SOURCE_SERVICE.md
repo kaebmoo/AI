@@ -1,6 +1,6 @@
 # Plan 7: Data Source as a Service — ถามข้อมูลจากแหล่งที่ผู้ใช้กำหนด โดยไม่ต้อง import
 
-**สถานะ:** ⬜ DESIGN (2026-09-18) — ยังไม่เริ่ม code
+**สถานะ:** 🟡 Phase 1 ✅ DONE (2026-09-18, branch `plan7-phase1`) — Phase 2–7 ยังไม่เริ่ม | ผล: `plan/archive/RESULT_P7_PHASE1.md`
 **ความสัมพันธ์กับแผนเดิม:** ต่อยอด/แทนที่บางส่วนของ `PLAN_6_SAAS.md` (ดู §9), รวม Plan 1B-C (MCP SSE + API key) ไว้ใน Phase 6
 **ผู้ใช้รายแรก:** NT-Report portal (F11 dashboard Q&A) — ปัจจุบันถูก disable เพราะยังไม่ได้ตั้ง key และข้อมูลใน AI ค้างที่ revenue 202605
 
@@ -126,11 +126,16 @@ Response เพิ่ม `data_as_of` ต่อ context ที่ใช้ (จ�
 แต่ละ phase ต้องผ่าน exit criteria ก่อนไป phase ถัดไป
 
 ### Phase 0 — ตัดสินใจ (0.5 วัน)
+> Phase 1 ทำไปก่อนด้วยค่า default (ดู §11.1) — ข้อด้านล่างยังรอเจ้าของโครงการยืนยัน
 - [ ] **ข้อมูลของ NT-Report จะอยู่ที่ไหนที่ AI server อ่านถึง:** (ก) AI รันเครื่องเดียวกัน → local path, (ข) shared folder/NFS, (ค) object storage (S3/MinIO), (ง) HTTPS ที่มี token — ขึ้นกับว่า AI deploy ที่ไหน
 - [ ] ยืนยันใช้ DuckDB (เพิ่ม dependency 1 ตัว) สำหรับ file source
 - [ ] ยืนยันชื่อ field: `scope` แทน `pinned_filters` (หรือเก็บ `pinned_filters` เป็น alias ช่วงเปลี่ยนผ่าน)
 
-### Phase 1 — Source registry + DuckDB file source (3–4 วัน)
+### Phase 1 — Source registry + DuckDB file source (3–4 วัน) — ✅ DONE 2026-09-18
+> ผล (รายละเอียด `plan/archive/RESULT_P7_PHASE1.md`): `feed_revenue` อ่าน `DataFeed/dist/revenue/latest/` ตรง (0 แถว import) —
+> ตอบงวดล่าสุด **202608** ตรง `control_totals.csv` ขณะที่สำเนาที่ import ไว้ค้าง 202605;
+> eval file source **13/14 value_match เท่ากับ legacy วันเดียวกันทุกรอบ** (ข้อที่ตก #64 ตกเหมือนกันทั้งสอง source = โมเดลเปลี่ยนพฤติกรรม ไม่ใช่ source — **ยังไม่ถึง 14/14 ตาม exit criterion รอเจ้าของตัดสิน §11.7**);
+> latency P50 ≈ 6.1–6.3 s (legacy วันเดียวกัน 6.2–6.3 s, F10 10.5 s); pytest 635 → 694 passed (+59, ไม่มี test เดิมพัง)
 - ตาราง `data_sources`, `source_tables`; `schema_contexts.source_id` (context เดิมทั้งหมด → source "legacy" = business DB เดิม → ไม่มีอะไรพัง)
 - `DuckDBFileAdapter` + `SourceResolver` ต่อ request
 - ลงทะเบียน `feed_revenue` ใหม่เป็น file source ชี้ `DataFeed/dist/revenue/latest/`
@@ -332,6 +337,11 @@ NT-Report ไม่ต้อง import อะไรเข้า AI อีก ห
 | D6 | เกณฑ์เลิกโหมด import (`import_datafeed.py`) — เสนอ: หลัง Phase 2 ผ่าน 2 รอบปิดงวด | เจ้าของโครงการ | §7 |
 | D7 | จังหวะเปลี่ยนไป entitlement token v2 — เสนอ: เมื่อมีผู้เรียกรายที่ 2 หรือก่อน Phase 7 | เจ้าของโครงการ | §6.3 |
 
+**ค่า default ที่ Phase 1 ใช้แทน D1–D3 (2026-09-18 — ยังรอเจ้าของยืนยัน):**
+- D1 → file source = **local path ต่อ source** (`data_sources.root_path`) — ยังไม่ทำ S3/HTTPS; interface (`source_type` + adapter ต่อชนิด) เพิ่ม scheme อื่นได้ภายหลังโดยไม่มี code ล่วงหน้า
+- D2 → **DuckDB** (`duckdb>=1.5`) + `duckdb-engine` (SQLAlchemy dialect ให้ SchemaService inspect view ได้)
+- D3 → **ไม่แตะ** `pinned_filters` / `scope` (Phase 3)
+
 ### 11.2 งานฝั่ง NT-Report ที่ทำได้เลย (ไม่รอแผนนี้)
 - [x] migration เพิ่ม `assistant_ask` ใน select values ของ `audit_logs.action` — ตอนนี้ `writeAudit` fail validation แบบเงียบ ไม่มี audit ของคำถามเลย — ✅ NT-Report `1440672`
 - [x] `assistant.pb.js` ส่ง `pinned_filters.period` แต่ฝั่ง AI คาด `year_month` — แก้ชื่อให้ตรง — ✅ NT-Report `1440672`
@@ -345,12 +355,28 @@ NT-Report ไม่ต้อง import อะไรเข้า AI อีก ห
 
 ### 11.4 สถานะข้อมูล ณ วันที่เขียนแผน
 - business DB ของ AI มีแค่ `feed_revenue` 202605 (import 2026-07-11) ขณะที่ DataFeed มี revenue/expense 202608, sales/ebt 202607 — ถ้าต้องการเปิดใช้ก่อน Phase 1 เสร็จ ต้อง import ด้วยมือ (โหมดเดิม) ไปก่อน
+- **อัปเดต 2026-09-18 (Phase 1):** `feed_revenue` ผูกกับ source `datafeed_revenue` (DuckDB file) แล้ว → เห็น revenue **202608** โดยไม่ import (schema 2.0.0); ตาราง `feed_revenue_*` ใน `nt_fi_report.sqlite` ยังอยู่เป็น fallback (`register_file_source --legacy`) — expense/sales/ebt ยังไม่ลงทะเบียน (Phase 2)
 
 ### 11.5 ต้องตรวจทางเทคนิคระหว่างทำ
-- [ ] option ของ DuckDB สำหรับจำกัด path/ปิด external access และ lock config — ยืนยันกับเวอร์ชันที่ใช้จริง (Phase 1)
-- [ ] latency ของ CSV scan เทียบ F10 (10.5s P50) — ถ้าเกิน 20% ทำ Parquet cache (Phase 1)
+- [x] option ของ DuckDB สำหรับจำกัด path/ปิด external access และ lock config — ยืนยันกับ **1.5.5**: `allowed_paths` (ต้อง SET หลัง connect และก่อนปิด external access) + `enable_external_access=false` + `lock_configuration=true` ใช้ได้; **แต่ lock ไม่กัน table function `enable_logging()`** (ทำ process ล่ม/อ่าน SQL ผู้อื่นได้) → เพิ่ม query gate ที่ parse ด้วย DuckDB เอง (รายละเอียด `FIX_NOTES.md` Plan 7 Phase 1) ✅ Phase 1
+- [x] latency ของ CSV scan เทียบ F10 (10.5s P50) — P50 6.1–6.3 s ไม่เกินเกณฑ์ → **ไม่ทำ Parquet cache** (ถ้าต้องการ: bundle มี `.parquet` + sha256 ใน manifest อยู่แล้ว อ่านตรงได้เลย เร็วกว่า CSV 50–100×) ✅ Phase 1
 - [ ] `PIIRedactingFormatter` เป็น regex — ไม่ครอบคลุมชื่อคน/ที่อยู่/เลขบัญชี; ประเมินว่าต้องเพิ่มหรือพึ่ง classification แทน (Phase 4.5)
 - [ ] ทุกจุดที่ส่งข้อมูลให้ provider (ไม่ใช่แค่ `explain_result` และ onboarding) — ต้องไล่ให้ครบก่อนเขียน test ดัก `schema_only` (Phase 4.5)
+
+### 11.7 ข้อค้างใหม่จาก Phase 1 (2026-09-18)
+**รอเจ้าของตัดสิน:**
+- [ ] **Exit criterion value match 14/14 ยังไม่ถึง** — file source ได้ 13/14 **เท่ากับ legacy วันเดียวกันทุกรอบ** (ข้อ #64 "รายได้สะสมทั้งบริษัท… พ.ค. 2569": โมเดลเขียน `SUM(revenue_ytd) … month <= 5` ทั้งสอง source; F10 ก.ค. เขียน `= 5`) → ทางเลือก: (ก) ยอมรับ Phase 1 ด้วยเกณฑ์ "เท่ากับ legacy" (ข) เพิ่มกฎ "ห้าม SUM `revenue_ytd` ข้ามงวด" ใน contract/knowledge แล้ววัดใหม่ทั้งสอง source (ค) ถือเป็นงาน Phase 2 (contract-driven knowledge)
+- [ ] merge branch `plan7-phase1` เข้า main (ยังไม่ push ตามคำสั่ง)
+- [ ] ยืนยัน D1–D3 ที่ใช้ค่า default (§11.1) + การเพิ่ม `duckdb-engine`
+- [ ] ⚠️ bug เดิม: `POST /admin/config/rebuild-keyword-index` ลบ keyword index ทิ้งหมด (reproduce แล้ว) — แยกเป็นงานต่างหาก (ไม่อยู่ในขอบเขต Phase 1)
+
+**ส่งต่อ Phase 2+:**
+- [ ] runtime ตรวจ manifest (reconcile/schema_version/sha) + `data_as_of`; query cache ผูกกับ manifest version (ตอนนี้ publish งวดใหม่ คำตอบเดิม cache ได้ถึง 30 นาที)
+- [ ] ลงทะเบียน expense/sales/ebt (script รองรับ `--domain` แล้ว ต้องมี context จาก `gen_docs_from_contract` ก่อน)
+- [ ] tool-loop `get_sample_values`/`get_table_stats` บน DuckDB (ตอนนี้ fail closed)
+- [ ] admin UI/endpoint (schema browser, onboarding, keyword index, sync-brain) ให้เห็น file source — ตอนนี้เห็นแค่ business DB เดิม (สำหรับ `feed_*` = สำเนาเก่า)
+- [ ] `/chat/train` validate SQL ตาม source ของ context
+- [ ] ลบ `.source_cache/*.duckdb` ของ fingerprint เก่า
 
 ### 11.6 ต้องทบทวนโดยฝ่ายอื่น
 - [ ] DPO / ฝ่ายกฎหมาย ทบทวน §6.6 ข้อ 8 (controller/processor, DPA, ROPA ม.40, แจ้งเหตุ ม.37(4), ส่งข้อมูลต่างประเทศ ม.28–29) — **บังคับก่อน Phase 7**

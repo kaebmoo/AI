@@ -78,6 +78,78 @@ python -m scripts.datafeed.import_datafeed --domain revenue \
 Importer เปิด write connection ของตัวเอง ไม่ผ่าน MCP —
 ห้ามให้โค้ดอื่นใดเขียน/แก้ตาราง `feed_*`
 
+## File source (DuckDB) — zero-import (Plan 7 Phase 1)
+
+ตั้งแต่ Plan 7 Phase 1 context `feed_revenue` **อ่านไฟล์ CSV ใน `DataFeed/dist/revenue/latest/` ตรง**
+ผ่าน DuckDB — ไม่ต้อง import อีก NT-Report publish งวดใหม่ลง `latest/` เมื่อไร คำถามถัดไปเห็นทันที
+(ตาราง `feed_revenue_*` ใน `nt_fi_report.sqlite` ยังอยู่เป็น fallback แต่ context ไม่ได้อ่านมันแล้ว)
+
+### วิธีลงทะเบียน source
+
+```bash
+python scripts/migrate_data_sources.py            # ครั้งเดียว (idempotent) — register script เรียกให้เองด้วย
+python -m scripts.datafeed.gen_docs_from_contract --domain revenue \
+    --contract /path/to/DataFeed/contracts/revenue.yaml   # ถ้ายังไม่มี context feed_<domain>
+python -m scripts.datafeed.register_file_source --domain revenue \
+    --source /path/to/DataFeed/dist
+```
+
+`register_file_source` ผ่าน gate ชุดเดียวกับ importer แต่ตรวจ **ไฟล์ในที่เดิม** และเขียน registry
+เฉพาะเมื่อผ่านทุกข้อ (ไม่ผ่าน = registry ไม่เปลี่ยน):
+
+1. `manifest.reconcile.ok` = true
+2. sha256 ของทุกไฟล์ที่ใช้ตรง manifest — **allowlist = dataset ใน contract ที่ CSV อยู่ใน `manifest.files`**
+3. row count ผ่าน view (DuckDB) ตรง `manifest.row_counts`
+4. control totals ผ่าน view ตรง `control_totals.csv` ทุกแถว
+
+แล้วเขียน `data_sources` (`datafeed_<domain>`, `duckdb_file`, `root_path` = `.../latest`),
+`source_tables` (ชื่อ view `feed_<domain>_<dataset>` → ไฟล์ + ชนิดคอลัมน์จาก contract)
+และผูก `schema_contexts.source_id` ของ `feed_<domain>` — server ที่รันอยู่เห็นผลใน request ถัดไป
+(ไม่ต้อง restart; คำตอบที่ cache ไว้จาก source เดิมจะไม่ถูกใช้ต่อ)
+
+**ย้อนกลับไปใช้ข้อมูลที่ import ไว้ (fallback):**
+`python -m scripts.datafeed.register_file_source --domain revenue --legacy` แล้วรัน
+`import_datafeed.py` ตามปกติ — importer ยังทำงานเหมือนเดิมทุกอย่าง
+
+### ทำงานอย่างไร
+
+- Context → `schema_contexts.source_id` → `data_sources` (`SourceResolver`, `app/services/data_sources.py`)
+  — context ที่ไม่มี `source_id` หรือผูกกับ `legacy` = business DB เดิมผ่าน MCP เหมือนก่อน Plan 7
+- `DuckDBFileAdapter` (`app/services/database_adapter.py`) สร้าง view ชื่อเดิมของ F10
+  (`feed_revenue_fact_bu_monthly` ฯลฯ) บน `read_csv(<root>/<file>, columns={...})` ชนิดคอลัมน์จาก
+  contract → คอลัมน์ string (เช่น `service_group_seq` "3.10", `*_code`) ไม่ถูกเดาเป็นตัวเลข —
+  knowledge/golden ของ F10 จึงใช้ต่อได้โดยไม่ต้อง regen
+- view definition (ไม่ใช่ข้อมูล) อยู่ในไฟล์เล็ก `DATA_SOURCE_CACHE_DIR/<source>-<fingerprint>.duckdb`
+  (default `./.source_cache/`) สร้างใหม่ต่อ process
+- SQL ที่ LLM สร้างสำหรับ context นี้รัน in-process บน DuckDB (ไม่ผ่าน MCP) — ผ่าน F4 validator เสมอ
+  และ prompt ได้กฎ syntax ของ DuckDB (`//` หารจำนวนเต็ม, `ILIKE`, `current_date`)
+- export xlsx ของคำตอบจาก context นี้รันกับ source เดียวกัน; eval harness รัน golden SQL กับ source ของ context
+
+### ความปลอดภัย (บังคับที่ engine ไม่ใช่แค่ regex)
+
+ตรวจกับ DuckDB 1.5.5 จริง — `lock_configuration` **ไม่ได้**กัน table function อย่าง `enable_logging()`
+(แบบ file ทำ process ล่ม, แบบ memory เปิดให้อ่าน SQL ของผู้ใช้คนอื่นผ่าน `duckdb_logs`) จึงมี query gate เป็นอีกชั้น:
+
+| มาตรการ | ผล |
+|---|---|
+| view DB เปิด `read_only` | `CREATE`/`DROP`/`INSERT` ล้ม |
+| `allowed_paths` = เฉพาะไฟล์ที่ลงทะเบียน แล้ว `enable_external_access=false` | อ่านไฟล์อื่น (รวมไฟล์อื่นใน root เช่น `control_totals.csv`), `glob`, `COPY TO`, `ATTACH`, `EXPORT`, http, `INSTALL`/`LOAD` ล้มหมด (ยกเว้น temp directory ของ DuckDB เอง — จึงต้องมี query gate) |
+| `lock_configuration=true` | `SET` ค่ากลับไม่ได้ |
+| cursor ใหม่ทุก query | `CREATE TEMP VIEW` ทับชื่อ view ไม่ติดไปถึง query ถัดไป |
+| query gate (DuckDB parser, `json_serialize_sql`) ทุก SQL ที่มาจากภายนอก | ต้องเป็น SELECT เดียว อ่านได้เฉพาะ view ที่ลงทะเบียน/CTE ของตัวเอง — ห้าม table function ทุกตัว (`read_*`, `query()`, `enable_logging()` …) และห้าม system view (`duckdb_logs`, `information_schema`) |
+| F4 validator | ปฏิเสธ non-SELECT, หลาย statement และการเรียก `read_*`/`*_scan`/`glob` ตรง ๆ |
+| registry | `file_name` ที่หลุด root (`..`, symlink) หรือชนิดคอลัมน์นอก allowlist = ปฏิเสธตอนสร้าง view |
+
+### ข้อจำกัด (Phase 1)
+
+- file source = **local path เท่านั้น** (D1 default) — S3/HTTPS ยังไม่ทำ
+- อ่าน **CSV** เท่านั้น — Parquet ที่ bundle มีอยู่แล้วยังไม่ใช้ (ดูผล latency ใน `plan/archive/RESULT_P7_PHASE1.md`)
+- runtime ยังไม่ตรวจ `manifest.json` ซ้ำ (reconcile/schema_version เปลี่ยน) — ตรวจตอนลงทะเบียนเท่านั้น → Phase 2
+- MCP tool `get_sample_values` / `get_table_stats` (ใช้เฉพาะ tool-loop mode) ตอบ error สำหรับ file source
+  แทนการอ่าน DB เดิมเงียบ ๆ
+- หน้า admin (schema browser, onboarding, keyword index rebuild, sync-brain DDL) ยังเห็นแค่ business DB เดิม
+- query result cache (30 นาที): เปลี่ยน source แล้ว cache เดิมเป็น miss เอง แต่ publish งวดใหม่ลง `latest/` คำตอบเดิมยังถูก cache ได้ถึง 30 นาที — เรียก `refresh-cache` หลัง publish (Phase 2 จะผูกกับ manifest)
+
 ## Generate docs + golden จาก contract (Phase B, C)
 
 ```bash

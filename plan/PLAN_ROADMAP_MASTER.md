@@ -6,7 +6,7 @@
 
 ---
 
-## สถานะรวม (Updated 2026-07-12)
+## สถานะรวม (Updated 2026-09-18)
 
 > **โครงสร้างโฟลเดอร์ (2026-07-12):** แผนที่ทำเสร็จแล้วทั้งหมด (Plans 0-5, F1-F11, refactoring plans) ย้ายไป `plan/archive/` — โฟลเดอร์ `plan/` ชั้นบนเหลือเฉพาะเอกสาร reference ที่ยังมีผล และแผนที่ยังไม่เริ่ม/รอตัดสินใจ ดู `plan/README.md`
 
@@ -22,10 +22,10 @@
 | **Plan 4B** | ✅ DONE | 95% | 13 tests | Query endpoint ทำงาน, mock-heavy tests |
 | **Plan 5** | ✅ DONE | 100% | 7 tests | 3-DB live, ConfigBase แยก, business_engine ครบทุก call path |
 | **Plan 6** | ⬜ DESIGN | 0% | 0 | ยังไม่เริ่ม code |
-| **Plan 7** | ⬜ DESIGN | 0% | 0 | Data Source as a Service (zero-import) — ต่อยอด Plan 6 Model A/C/D, ดู PLAN_7_DATA_SOURCE_SERVICE.md |
+| **Plan 7** | 🟡 Phase 1 ✅ | 1/7 phases | +59 tests | Data Source as a Service (zero-import) — Phase 1 (source registry + DuckDB file source) เสร็จ 2026-09-18: `feed_revenue` อ่าน DataFeed `latest/` ตรง ไม่ import; ดู PLAN_7_DATA_SOURCE_SERVICE.md, archive/RESULT_P7_PHASE1.md |
 | **Plan 1B-C** | ⬜ DEFERRED | 0% | 0 | ทำตอน Plan 6 |
 
-**Current verification note:** `pytest -q` on this workspace = `363 passed, 3 skipped`.
+**Current verification note:** `pytest -q` on this workspace = `694 passed, 3 skipped` (2026-09-18, branch `plan7-phase1`; ก่อน Plan 7 = 635).
 
 ### ข้อจำกัดที่ยังมี (honest assessment)
 - End-to-end tests ส่วนใหญ่ mock-heavy — ยืนยัน contract แต่ไม่ยืนยัน behavior ครบ

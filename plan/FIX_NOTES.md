@@ -63,3 +63,41 @@
 - **Phase B/C commit แล้วใน repo NT-Report** (`c340d70`) — `$http.send` มีจริงใน PB v0.38 JSVM
 - **ค้าง manual (บังคับก่อนเปิดใช้จริง):** (1) ออก API key จริงให้ portal (ดู docs/PORTAL_INTEGRATION.md), (2) E2E ผ่าน local PB — user ไม่มีสิทธิ์ → 403 ไม่มี call ออก, audit ครบ, rate limit จริง, (3) ตารางเทียบเลข 10 คำถาม vs dashboard ลง `plan/archive/RESULT_F11.md`
 - Phase D (postMessage filter state, streaming) = deferred ตามแผน
+
+## จาก Plan 7 Phase 1 — Source registry + DuckDB file source (2026-09-18)
+
+ผลลัพธ์/ตัวเลข: `plan/archive/RESULT_P7_PHASE1.md`
+
+**ค่า default ที่ใช้แทนการตัดสินใจ Phase 0** (บันทึกใน PLAN_7 §11.1 ด้วย): D1 = local path ต่อ source (ไม่ทำ S3/HTTPS), D2 = DuckDB, D3 = ไม่แตะ `pinned_filters`/scope
+
+**Decision ที่ทำระหว่างทาง (ตรวจ/กลับได้):**
+- **เพิ่ม `duckdb-engine` นอกจาก `duckdb`** — `SchemaService` ทั้งก้อนเป็น SQLAlchemy (`inspect()`, `text()`) ต้องมี dialect ถึงจะ inspect view ของ DuckDB ได้ (DATA_RANGE ใน prompt, dimension families) โดยไม่แก้ SchemaService
+- **LIKE → ILIKE บน file source** (`_sqlite_like` ใน `database_adapter.py`) — SQLite LIKE ไม่สนตัวพิมพ์ DuckDB สน; prompt/golden/ValueVerifier/WarningDetector สร้างบนพฤติกรรม SQLite → eval รอบแรกตก 3 ข้อ (`bu LIKE '%HARD INFRA%'` ได้ 0 แถว) — SQL ที่แสดง/บันทึกยังเป็น `LIKE` ตามที่ LLM เขียน แต่รันเป็น `ILIKE`
+- **อ่าน CSV ไม่ใช่ Parquet** ตามแผน แม้ bundle มี `.parquet` (sha256 ใน manifest) อยู่แล้ว — latency ผ่านเกณฑ์ จึงไม่ทำ Parquet cache (ถ้าอนาคตถามตารางใหญ่บ่อย: อ่าน `.parquet` ที่ publish มาเลยง่ายกว่าสร้าง cache เอง — CSV 186MB scan ~350ms, Parquet ~7ms)
+- **SQL ของ file source รัน in-process** (ไม่ผ่าน MCP subprocess) ผ่าน `SourceBoundMCPClient` — จุดเดียวที่ครอบ hybrid execute, ValueVerifier, WarningDetector และ tool loop; `execute_select` เป็น definition เดียวที่ MCP tool ใช้ร่วม
+
+**DuckDB 1.5.5 — option ที่ตรวจจริง (PLAN_7 §11.5):**
+- `allowed_paths` ตั้งผ่าน `config=` ตอน connect **ไม่ได้** ("Cannot change/set allowed_paths before the database is started") ต้อง `SET` หลัง connect และต้องก่อน `enable_external_access=false` ("Cannot change allowed_paths when enable_external_access is disabled") แล้วค่อย `lock_configuration=true`
+- read_only DB ยังให้ `CREATE TEMP VIEW` ได้ → view ชื่อเดียวกันทับของจริงได้ใน connection นั้น — แก้ด้วย cursor ใหม่ทุก query (มี test)
+- ⚠️ **`lock_configuration` ไม่ได้กัน table function `enable_logging()`** (พบโดย security review, reproduce แล้ว): `SELECT * FROM enable_logging(storage='file', storage_path='/x')` ผ่าน validator แล้ว query ถัดไป **ทำ process ล่ม** (libc++abi terminate); แบบ `enable_logging('QueryLog')` ทำให้อ่าน SQL ของผู้ใช้อื่นได้ผ่าน `duckdb_logs` — แก้ด้วย query gate ใน `DuckDBFileAdapter.execute_query`: parse ด้วย `json_serialize_sql` ของ DuckDB เอง อนุญาต SELECT เดียวที่อ้าง view ที่ลงทะเบียน/CTE เท่านั้น ห้าม table function ทุกตัวและ system view (ตรวจกับ SQL จริง 58 แบบจาก eval/chat_history: ไม่ปฏิเสธผิดเลย) — `duckdb_settings()` / `duckdb_logs` ที่เคยเปิดเผย path ก็ถูกปิดด้วย gate นี้
+- DuckDB ใส่ temp directory ของตัวเองใน `allowed_directories` อัตโนมัติ → SQL ที่ข้าม gate (มีแต่ code ภายในที่ใช้ `cursor()` ตรง) ยัง `COPY TO` ลง temp dir ได้ — untrusted SQL ทุกเส้นผ่าน gate จึงไม่มีทางถึง
+- `allowed_paths` ถูกตรึงกับ realpath ตอน `SET` → ถ้า `latest/` เป็น symlink แล้วถูกชี้ใหม่ adapter เดิมจะอ่านไม่ได้ — resolver ใส่ realpath ของ root ใน fingerprint จึงสร้าง adapter ใหม่ให้เอง (มี test)
+
+**Bug เดิมที่พบระหว่างไล่ query path (ไม่แก้ — พฤติกรรม legacy ต้องไม่เปลี่ยน):**
+- ⚠️ `keyword_index.build_keyword_index` (admin `POST /admin/config/rebuild-keyword-index`) inspect column บน business DB แต่ `SELECT DISTINCT` บน **config DB** → SELECT ล้มทุกคอลัมน์ แต่ `DELETE` ใน transaction เดียวกัน commit → **กด rebuild = ลบ keyword index ทิ้งหมด (revenue 1679, expense 2155, pl_costtype 1271, transfer price 285 แถว) แล้วใส่ 0** (reproduce แล้วบนสำเนา config.db: revenue 1679 → 0) — `search_db_for_keyword` (value lookup ใน query path) มีรูปแบบเดียวกัน → คืน `[]` เสมอ
+- `hierarchy_service` (`detect_changes`, `bootstrap_from_view`, `get_available_views`) query view ธุรกิจบน config DB → ผลว่างเสมอ; `scripts/extract_hierarchy.py` เขียน `master_hierarchy*` ลง **business DB** (ของจริงอยู่ config DB)
+- `context_onboarding` ส่ง business DB path ให้ `ConfigApplicator`/`ConfigValidator` → apply ลงผิด DB (ล้มเงียบ), validate 500; `onboarding_tools` (admin agent) เรียก method ที่ไม่มี (`inspect_view`, `onboard`) → fail ทุกครั้ง
+- `vanna_service._sync_ddl` หา DDL ใน config DB → ไม่เคย train DDL เลย
+- `POST /chat/train` เช็ค `isinstance(check_res, dict)` แต่ `call_tool` คืน str → SQL ผิดไม่เคยถูกปฏิเสธ
+- `nt_metadata_mcp` tools query ตาราง config บน business DB → ล้มทุกตัว (ใช้แค่ tool-loop mode); `nt_validation_mcp.check_business_rules` อ่าน `schema_business_rules` จาก app.db (ไม่มีตาราง) → rules ผ่านเงียบเสมอ; `nt_validation_mcp.get_db` ไม่ได้เปิด `mode=ro` (dead code)
+- `QueryEngine` ผล dedup-blocked ไม่มี `context_name` → default `"revenue"` ถูกบันทึกใน chat_history และใช้เลือก context ของ follow-up
+- `prompt_builder.get_syntax_rules` อ่าน dialect จาก **config** engine (แก้เฉพาะเส้น DuckDB; legacy คงเดิม)
+
+**ข้อค้าง/ข้อจำกัดใหม่ (ส่งต่อ Phase 2+):**
+- query result cache (30 นาที): เปลี่ยน source ของ context แล้ว cache เดิมกลายเป็น miss เอง (แก้แล้ว `e4b2f69`) แต่ **publish งวดใหม่ลง `latest/` (registration เดิม)** คำตอบเดิมยังอยู่ได้ถึง 30 นาที — ต้องมี manifest version ใน key (Phase 2) หรือ `POST /admin/refresh-cache`
+- runtime ยังไม่ตรวจ manifest ซ้ำ (reconcile/schema_version) — ตรวจตอน register เท่านั้น (Phase 2)
+- tool-loop (`mode='mcp'`, `escalation_tool_loop_enabled`): `get_sample_values`/`get_table_stats` ตอบ error สำหรับ file source (fail closed) — ยังไม่มี implementation บน DuckDB
+- หน้า admin (schema browser, onboarding, dimension families, keyword index, sync-brain DDL) เห็นแค่ business DB เดิม → สำหรับ `feed_*` จะเห็น **สำเนาเก่าที่ import ไว้** ไม่ใช่ไฟล์
+- `/chat/train` validate SQL กับ legacy DB เสมอ (ไม่ route ตาม context)
+- `.source_cache/<source>-<fingerprint>.duckdb` ของ fingerprint เก่าไม่ถูกลบ (ไฟล์ ~270KB ต่อครั้งที่ลงทะเบียนใหม่)
+- eval ข้อ YTD (#64 `revenue_ytd` ทั้งบริษัท) ตกทั้ง legacy และ file source วันนี้ — โมเดล (matcha gpt-4.1) เขียน `month <= 5` แล้ว SUM(revenue_ytd) (F10 เดือน ก.ค. เขียน `= 5`) — กฎ `bg8_ytd_not_summable` ใน contract ห้ามแค่ "sum revenue รายเดือน" ไม่ได้ห้าม sum `revenue_ytd` ข้ามงวดตรง ๆ → ควรเพิ่มกฎใน contract/knowledge (Phase 2) — ไม่ใช่ผลของ file source

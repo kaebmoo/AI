@@ -138,7 +138,6 @@ def main():
     register(config_engine, args.domain, root, tables)
     print(f"Registered source '{source_name(args.domain)}' ({len(tables)} views) → feed_{args.domain} "
           f"in {time.time() - t0:.1f}s — no rows imported")
-    print("Running server: POST /api/v1/admin/refresh-cache to drop cached answers from the old source")
 
 
 if __name__ == "__main__":
