@@ -93,6 +93,12 @@ class TestEngineLock:
             adapter.cursor().execute(sql.format(root=source_root))
         assert not (source_root / "pwn.csv").exists() and not (source_root / "pwn.duckdb").exists()
 
+    def test_no_shared_spill_directory(self, adapter):
+        # all processes open the same view DB file; a shared <db>.tmp spill dir corrupts
+        cur = adapter.cursor()
+        assert cur.execute("SELECT current_setting('temp_directory')").fetchone()[0] == ""
+        assert cur.execute("SELECT current_setting('allowed_directories')").fetchone()[0] == []
+
     def test_config_cannot_be_unlocked(self, adapter):
         with pytest.raises(Exception, match="locked"):
             adapter.cursor().execute("SET enable_external_access = true")

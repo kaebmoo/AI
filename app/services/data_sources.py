@@ -70,7 +70,7 @@ class SourceResolver:
     def __init__(self, config_engine=None, cache_dir: Optional[str] = None):
         self._config_engine = config_engine
         self._cache_dir = cache_dir
-        self._adapters: Dict[str, DuckDBFileAdapter] = {}
+        self._adapters: Dict[str, tuple] = {}  # source name → (fingerprint, adapter)
         self._lock = threading.Lock()
 
     def _engine(self):
@@ -127,15 +127,18 @@ class SourceResolver:
         key = [name, root, os.path.realpath(root) if root else None, tables]
         fp = hashlib.sha256(json.dumps(key, sort_keys=True).encode()).hexdigest()[:12]
         with self._lock:
-            adapter = self._adapters.get(fp)
-            if adapter is None:
-                cache_dir = self._cache_dir
-                if cache_dir is None:
-                    from app.config import settings
-                    cache_dir = settings.DATA_SOURCE_CACHE_DIR
-                adapter = DuckDBFileAdapter(f"{name}-{fp}", root, tables, cache_dir)
-                self._adapters[fp] = adapter
-                logger.info(f"Data source '{name}' ready: {len(tables)} views over {adapter.root}")
+            cached = self._adapters.get(name)
+            if cached and cached[0] == fp:
+                return cached[1]
+            cache_dir = self._cache_dir
+            if cache_dir is None:
+                from app.config import settings
+                cache_dir = settings.DATA_SOURCE_CACHE_DIR
+            adapter = DuckDBFileAdapter(f"{name}-{fp}", root, tables, cache_dir)
+            # One adapter per source: a superseded one is dropped (not closed — in-flight
+            # requests may still hold it) and its DuckDB instance is freed once they finish
+            self._adapters[name] = (fp, adapter)
+            logger.info(f"Data source '{name}' ready: {len(tables)} views over {adapter.root}")
             return adapter
 
 

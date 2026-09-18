@@ -103,6 +103,7 @@ class TestResolver:
         a2 = resolver.for_context("feed_x").adapter
         assert a2 is not a1
         assert a2.execute_query("SELECT COUNT(*) AS n FROM feed_x_renamed")[0]["n"] == 3
+        assert len(resolver._adapters) == 1  # superseded adapter released, not leaked
 
     def test_symlinked_root_repoint_is_followed(self, tmp_path, config_engine, resolver):
         # NT-Report may publish latest/ as a symlink; DuckDB pins allowed_paths to the

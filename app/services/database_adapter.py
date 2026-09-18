@@ -471,6 +471,11 @@ class DuckDBFileAdapter(DatabaseAdapter):
         db_path = self._build_view_db(views, cache_dir)
         self._conn = duckdb.connect(db_path, read_only=True, config={
             "autoload_known_extensions": False, "autoinstall_known_extensions": False,
+            # every process opens this same file; DuckDB's default spill dir (<db>.tmp, fixed
+            # file names) would then be shared and concurrent spills corrupt each other (SIGSEGV).
+            # No spill dir also leaves allowed_directories empty. ponytail: no spilling — a
+            # query bigger than memory_limit fails loudly; per-process temp dirs if that bites
+            "temp_directory": "",
         })
         # Order matters: allowed_paths can't be set after external access is off,
         # and nothing can be set after the lock
