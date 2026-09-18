@@ -14,7 +14,6 @@ This script:
 4. Preserves 'manual' entries (from admin/master data files)
 """
 
-import os
 import sqlite3
 import json
 import argparse
@@ -24,7 +23,6 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-DB_PATH = os.environ.get("BUSINESS_DB_PATH", "nt_fi_report.sqlite")
 
 # --------------------------------------------------------------------------
 # Hierarchy definitions per context
@@ -193,14 +191,16 @@ def extract_hierarchy_levels(conn: sqlite3.Connection, context_name: str, defini
         """, (context_name, level, level_def["label_th"], level_def["label_en"], columns_json, keywords_json))
 
 
-def extract_hierarchy_values(conn: sqlite3.Connection, context_name: str, definition: dict, dry_run: bool = False):
-    """Extract actual parent-child values from data."""
-    view = definition["view"]
-    cur = conn.cursor()
+def extract_hierarchy_values(conn: sqlite3.Connection, data_engine, context_name: str, definition: dict,
+                             dry_run: bool = False):
+    """Extract actual parent-child values from data (read on data_engine, written on conn = config DB)."""
+    from sqlalchemy import text
 
-    # Check if view/table exists
-    cur.execute(f"SELECT COUNT(*) FROM sqlite_master WHERE name = ?", (view,))
-    if cur.fetchone()[0] == 0:
+    view = definition["view"]
+    try:  # the view must exist in the context's own source
+        with data_engine.connect() as dc:
+            dc.execute(text(f'SELECT 1 FROM "{view}" LIMIT 0')).fetchall()
+    except Exception:
         print(f"    Warning: {view} not found, skipping value extraction")
         return
 
@@ -215,7 +215,8 @@ def extract_hierarchy_values(conn: sqlite3.Connection, context_name: str, defini
             query = f'SELECT DISTINCT "{col}" FROM "{view}" WHERE "{col}" IS NOT NULL AND "{col}" != \'\' ORDER BY "{col}"'
 
         try:
-            rows = cur.execute(query).fetchall()
+            with data_engine.connect() as dc:
+                rows = dc.execute(text(query)).fetchall()
         except Exception as e:
             print(f"    Error extracting level {level} from {view}: {e}")
             continue
@@ -317,10 +318,14 @@ def main():
     parser = argparse.ArgumentParser(description="Extract hierarchy from data")
     parser.add_argument("--context", help="Specific context to extract (default: all)")
     parser.add_argument("--dry-run", action="store_true", help="Show what would be extracted")
-    parser.add_argument("--db", default=DB_PATH, help=f"Database path (default: {DB_PATH})")
     args = parser.parse_args()
 
-    conn = sqlite3.connect(args.db)
+    from app.config import settings
+    from app.services.data_sources import source_resolver
+
+    # REMAIN-9.5: master_hierarchy* live in the config DB; values are read from each context's
+    # own source (legacy business DB or a file source) — this used to read and write the business DB
+    conn = sqlite3.connect(settings.CONFIG_DB_URL.replace("sqlite:///", ""))
 
     if not args.dry_run:
         run_migration(conn)
@@ -340,7 +345,8 @@ def main():
         print(f"{'='*60}")
 
         extract_hierarchy_levels(conn, ctx_name, ctx_def, dry_run=args.dry_run)
-        extract_hierarchy_values(conn, ctx_name, ctx_def, dry_run=args.dry_run)
+        extract_hierarchy_values(conn, source_resolver.for_context(ctx_name).engine, ctx_name, ctx_def,
+                                 dry_run=args.dry_run)
 
     if not args.dry_run:
         conn.commit()

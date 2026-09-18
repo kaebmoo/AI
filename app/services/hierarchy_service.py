@@ -30,6 +30,19 @@ def _get_conn() -> sqlite3.Connection:
     return sqlite3.connect(_get_db_path())
 
 
+def _data_engine(context_name: str):
+    """Where a context's data lives (legacy business DB or a file source) — never the config DB.
+    REMAIN-9.5: detect_changes / bootstrap / available views used to query views on config.db."""
+    from app.services.data_sources import source_resolver
+    return source_resolver.for_context(context_name).engine
+
+
+def _data_rows(engine, sql: str) -> list:
+    from sqlalchemy import text
+    with engine.connect() as conn:
+        return conn.execute(text(sql)).fetchall()
+
+
 class HierarchyService:
     """Service for master hierarchy CRUD, search, and automation."""
 
@@ -331,14 +344,15 @@ class HierarchyService:
             new_values = []
             missing_values = []
             unchanged = 0
+            data = _data_engine(context_name)
 
             for level_info in levels:
                 col = level_info["level_columns"][0]
                 try:
                     data_values = set(
-                        r[0] for r in conn.execute(
-                            f'SELECT DISTINCT "{col}" FROM "{view}" WHERE "{col}" IS NOT NULL AND "{col}" != \'\''
-                        ).fetchall()
+                        r[0] for r in _data_rows(
+                            data, f'SELECT DISTINCT "{col}" FROM "{view}" WHERE "{col}" IS NOT NULL AND "{col}" != \'\''
+                        )
                     )
                 except Exception:
                     continue
@@ -384,12 +398,14 @@ class HierarchyService:
 
         Heuristic: looks for columns with low-to-medium cardinality that form parent-child patterns.
         """
-        conn = _get_conn()
+        from sqlalchemy import inspect as sa_inspect
+
+        conn = _get_conn()  # config DB: master_hierarchy is written here
+        data = _data_engine(context_name)
         try:
-            # 1. Get all columns from the view
-            cur = conn.cursor()
+            # 1. Get all columns from the view (in the context's own source)
             try:
-                cols_info = cur.execute(f'PRAGMA table_info("{view_name}")').fetchall()
+                cols_info = sa_inspect(data).get_columns(view_name)
             except Exception as e:
                 return {"error": f"View '{view_name}' not found: {e}"}
 
@@ -399,8 +415,8 @@ class HierarchyService:
             # 2. Analyze columns: get distinct counts to find hierarchy candidates
             text_cols = []
             for col in cols_info:
-                col_name = col[1]
-                col_type = (col[2] or "").upper()
+                col_name = col["name"]
+                col_type = str(col.get("type") or "").upper()
                 # Skip numeric, date, and ID columns
                 if any(k in col_name.lower() for k in ["year", "month", "date", "value", "amount", "price",
                                                          "quantity", "revenue", "expense", "cost_center",
@@ -409,16 +425,16 @@ class HierarchyService:
                 if any(k in col_type for k in ["INT", "REAL", "FLOAT", "DOUBLE", "NUMERIC"]):
                     # Allow integer columns only if they have very few distinct values (might be codes)
                     try:
-                        cnt = cur.execute(f'SELECT COUNT(DISTINCT "{col_name}") FROM "{view_name}"').fetchone()[0]
+                        cnt = _data_rows(data, f'SELECT COUNT(DISTINCT "{col_name}") FROM "{view_name}"')[0][0]
                         if cnt > 50:
                             continue
                     except Exception:
                         continue
 
                 try:
-                    cnt = cur.execute(
-                        f'SELECT COUNT(DISTINCT "{col_name}") FROM "{view_name}" WHERE "{col_name}" IS NOT NULL AND "{col_name}" != \'\''
-                    ).fetchone()[0]
+                    cnt = _data_rows(
+                        data, f'SELECT COUNT(DISTINCT "{col_name}") FROM "{view_name}" WHERE "{col_name}" IS NOT NULL AND "{col_name}" != \'\''
+                    )[0][0]
                     if 1 < cnt <= 1000:  # reasonable hierarchy cardinality
                         text_cols.append({"name": col_name, "distinct": cnt})
                 except Exception:
@@ -447,14 +463,14 @@ class HierarchyService:
                     # Check if prev_col is a valid parent
                     try:
                         # Each value of current col should have <= 1 parent
-                        check = cur.execute(f'''
+                        check = _data_rows(data, f'''
                             SELECT "{col}", COUNT(DISTINCT "{prev_col}") as parent_count
                             FROM "{view_name}"
                             WHERE "{col}" IS NOT NULL AND "{col}" != ''
                             GROUP BY "{col}"
                             HAVING parent_count > 1
                             LIMIT 1
-                        ''').fetchone()
+                        ''')
                         if not check:  # no multi-parent → valid hierarchy
                             parent_col = prev_col
                     except Exception:
@@ -533,15 +549,15 @@ class HierarchyService:
             except Exception:
                 pass
 
-            # Also list all views in DB
+            # Also list all views in the business DB (not the config DB)
             try:
-                db_views = conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='view' ORDER BY name"
-                ).fetchall()
+                from sqlalchemy import inspect as sa_inspect
+                from app.db.session import business_engine
+                db_views = sorted(sa_inspect(business_engine).get_view_names())
                 existing_view_names = {v["view_name"] for v in views}
-                for r in db_views:
-                    if r[0] not in existing_view_names:
-                        views.append({"context_name": r[0], "view_name": r[0], "display_name": r[0], "source": "database"})
+                for name in db_views:
+                    if name not in existing_view_names:
+                        views.append({"context_name": name, "view_name": name, "display_name": name, "source": "database"})
             except Exception:
                 pass
 
