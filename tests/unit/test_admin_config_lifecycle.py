@@ -106,3 +106,17 @@ class TestDedupRelease:
             self._run(engine, "รายได้รวม", exc=RuntimeError("boom"))
         r2 = self._run(engine, "รายได้รวม")
         assert r2.query_result.error is None
+
+
+def test_dedup_blocked_result_keeps_the_request_context():
+    """REMAIN-9.3: a duplicate request must not be recorded under the default 'revenue' context."""
+    qe = qe_module
+    admin_config = MagicMock()
+    admin_config.get_ai_config.return_value = {"default_provider": "matcha"}
+    admin_config.get_feature_flags.return_value = {}
+    engine = qe.QueryEngine(mcp_client=MagicMock(), admin_config=admin_config)
+    qe._dedup_store.clear()
+    qe._dedup_mark("ค่าใช้จ่าย feed", "matcha", 7)  # the same request is already in flight
+    blocked = asyncio.run(engine.query("ค่าใช้จ่าย feed", context="feed_expense", user_id=7))
+    assert blocked.query_result.error == "duplicate_request" and blocked.context_name == "feed_expense"
+    qe._dedup_store.clear()

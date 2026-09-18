@@ -439,6 +439,9 @@ class QueryEngine:
                     tokens_used=0, provider=selected_provider_name,
                     error="duplicate_request"
                 ),
+                # REMAIN-9.3: the dataclass default "revenue" would be saved to chat history and
+                # steer the follow-up into the wrong context
+                context_name=self._resolve_context(question, context, history),
                 execution_time_ms=(time.time() - start_time) * 1000,
                 provider_used=selected_provider_name,
             )

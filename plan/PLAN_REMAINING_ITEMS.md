@@ -354,7 +354,7 @@ Deferred (ทำตอน Plan 6 SaaS)
 |---|---|---|---|---|
 | 9.1 | ✅ 2026-09-19 — onboarding facade ส่ง business DB path ให้ `ConfigApplicator`/`ConfigValidator` → แก้: facade รับ `config_db_path` (default = CONFIG_DB_URL); inspect ยังอ่าน business DB | `app/services/context_onboarding.py` | onboard context ผ่าน UI: apply เขียนผิด DB (ล้มเงียบ), validate 500 | ⚡ High |
 | 9.2 | ✅ 2026-09-19 — `/chat/train` เช็ค `isinstance(check_res, dict)` แต่ `call_tool` คืน str + validate กับ legacy DB เสมอ → แก้: parse JSON, ไม่ success = 400, รันบน source ของ context | `app/api/v1/chat.py` (~L859) | SQL ผิดไม่เคยถูกปฏิเสธก่อนบันทึกเป็น golden | Medium |
-| 9.3 | dedup-blocked result ไม่มี `context_name` → `"revenue"` ถูกบันทึก | `app/services/query_engine.py` (~L410) | follow-up ถูกส่งไป context ผิด | Medium |
+| 9.3 | ✅ 2026-09-19 — dedup-blocked result ไม่มี `context_name` → `"revenue"` ถูกบันทึก → แก้: ใส่ context ที่ resolve จาก request | `app/services/query_engine.py` (~L410) | follow-up ถูกส่งไป context ผิด | Medium |
 | 9.4 | `vanna_service._sync_ddl` หา DDL ใน config DB | `app/services/vanna_service.py` (~L116) | sync-brain ไม่เคย train DDL | Medium |
 | 9.5 | `hierarchy_service` (detect_changes / bootstrap_from_view / get_available_views) query view บน config DB; `scripts/extract_hierarchy.py` เขียน `master_hierarchy*` ลง business DB | `app/services/hierarchy_service.py`, `scripts/extract_hierarchy.py` | admin hierarchy ได้ผลว่าง / extract ลงผิด DB | Medium |
 | 9.6 | admin schema browser, dimension families, onboarding, sync-brain เห็นแค่ business DB เดิม | `app/api/v1/admin/*` | สำหรับ `feed_*` เห็นสำเนาเก่า ไม่ใช่ไฟล์ — ต้องผูกกับ source ของ context (ทำพร้อม Plan 7 Phase 4 admin) | Medium |
