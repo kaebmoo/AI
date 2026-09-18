@@ -142,6 +142,8 @@ python -m scripts.datafeed.register_file_source --domain revenue \
 
 ### ข้อจำกัด (Phase 1)
 
+- ⚠️ **ห้าม publish ทับ `latest/` ขณะมีคนถาม:** publisher ปัจจุบันลบ `latest/` แล้วเขียน CSV ทับทีละไฟล์ — คำถามช่วงนั้นอาจได้ข้อมูลครึ่งไฟล์ (งวดล่าสุดผิด) โดยไม่ error — ให้ publish นอกเวลาใช้งาน หรือ `register_file_source --legacy` ก่อนแล้วลงทะเบียนกลับหลัง publish (ทางแก้ถาวรรอตัดสิน — PLAN_7 §11.7)
+- ไม่มี spill ลงดิสก์ (`temp_directory=''` — กัน process แย่ง spill dir กัน) → query ที่ใช้หน่วยความจำเกิน memory_limit จะ error แทน
 - file source = **local path เท่านั้น** (D1 default) — S3/HTTPS ยังไม่ทำ
 - อ่าน **CSV** เท่านั้น — Parquet ที่ bundle มีอยู่แล้วยังไม่ใช้ (ดูผล latency ใน `plan/archive/RESULT_P7_PHASE1.md`)
 - runtime ยังไม่ตรวจ `manifest.json` ซ้ำ (reconcile/schema_version เปลี่ยน) — ตรวจตอนลงทะเบียนเท่านั้น → Phase 2

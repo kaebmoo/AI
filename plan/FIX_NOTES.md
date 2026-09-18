@@ -93,7 +93,10 @@
 - `QueryEngine` ผล dedup-blocked ไม่มี `context_name` → default `"revenue"` ถูกบันทึกใน chat_history และใช้เลือก context ของ follow-up
 - `prompt_builder.get_syntax_rules` อ่าน dialect จาก **config** engine (แก้เฉพาะเส้น DuckDB; legacy คงเดิม)
 
+- Concurrency review: ทุก process เปิด view DB ไฟล์เดียวกัน → ใช้ spill dir ของ DuckDB (`<db>.tmp`, ชื่อไฟล์ตายตัว) ร่วมกัน → spill พร้อมกันทำไฟล์กันเสีย (SIGSEGV) — แก้แล้ว `temp_directory=''` (ไม่ spill; query ใหญ่เกิน memory_limit จะ error ชัด ๆ) และ resolver เก็บ adapter เดียวต่อ source (ไม่รั่ว instance ทุกครั้งที่ re-register/re-point) — `65f9ed1`
+
 **ข้อค้าง/ข้อจำกัดใหม่ (ส่งต่อ Phase 2+):**
+- ⚠️ **publish race (ต้องตัดสิน):** publisher ของ NT-Report (`tools/feed/feed.py` บรรทัด ~552 `shutil.rmtree(latest)` → เขียน CSV ทับที่เดิม → `manifest.json` เขียนท้ายสุด บรรทัด ~590) — คำถามที่เข้ามาระหว่าง publish (หลายสิบวินาที) อ่านไฟล์ครึ่งไฟล์ได้ → **ตอบงวดล่าสุดเป็นงวดเก่า / ยอด NULL โดย success=True** (reviewer reproduce ได้) — ทางเลือก: (ก) NT-Report publish แบบ atomic: build ลง dir ใหม่แล้วสลับ symlink `latest` (AI ตาม re-point ได้แล้ว มี test) (ข) AI ตรวจ `manifest.json` ทุก query (มีไฟล์ + ขนาดไฟล์ตรง `bytes`) ไม่ตรง = ปฏิเสธชัด ๆ แทนตอบผิดเงียบ (ดึงงาน Phase 2 มาก่อน) (ค) ลงทะเบียน snapshot `dist/revenue/<period>/` แทน `latest/` แล้ว register ใหม่ทุกงวด — **แนะนำ (ก)+(ข)**; ระหว่างนี้ อย่ารัน `run_all --feed` ช่วงที่มีคนใช้ หรือ `--legacy` ก่อน publish
 - query result cache (30 นาที): เปลี่ยน source ของ context แล้ว cache เดิมกลายเป็น miss เอง (แก้แล้ว `e4b2f69`) แต่ **publish งวดใหม่ลง `latest/` (registration เดิม)** คำตอบเดิมยังอยู่ได้ถึง 30 นาที — ต้องมี manifest version ใน key (Phase 2) หรือ `POST /admin/refresh-cache`
 - runtime ยังไม่ตรวจ manifest ซ้ำ (reconcile/schema_version) — ตรวจตอน register เท่านั้น (Phase 2)
 - tool-loop (`mode='mcp'`, `escalation_tool_loop_enabled`): `get_sample_values`/`get_table_stats` ตอบ error สำหรับ file source (fail closed) — ยังไม่มี implementation บน DuckDB

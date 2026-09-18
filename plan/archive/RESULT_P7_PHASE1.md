@@ -11,7 +11,7 @@ context อื่นทั้งหมด (revenue, expense, transfer price, pl_
 
 | Exit criterion | ผล | ผ่าน? |
 |---|---|---|
-| pytest ไม่มี test เดิมพัง | 635 passed → **694 passed**, 3 skipped (+59 test ใหม่, test เดิมไม่ถูกแก้) | ✅ |
+| pytest ไม่มี test เดิมพัง | 635 passed → **695 passed**, 3 skipped (+60 test ใหม่, test เดิมไม่ถูกแก้) | ✅ |
 | eval `feed_revenue` จาก file source value match 14/14 เท่า F10 | **13/14** — เท่ากับ legacy วันเดียวกันทุกรอบ; ข้อที่ตก (#64) ตกเหมือนกันทั้ง 2 source | ⚠️ ไม่ถึง 14/14 (ไม่ใช่ผลของ source — ดูด้านล่าง) |
 | latency P50 ไม่แย่กว่า 10.5 s เกิน 20% (≤ 12.6 s) | **5.88–6.27 s** (legacy วันเดียวกัน 6.16–6.26 s) | ✅ |
 | test: resolver เลือก engine ถูก / legacy ใช้ DB เดิม / อ่านนอก root ไม่ได้ / SQL เขียนถูกปฏิเสธ | มีครบ (`tests/unit/test_data_sources.py`, `tests/unit/test_duckdb_file_adapter.py`) | ✅ |
@@ -85,6 +85,8 @@ gate ตรวจกับ SQL จริง 58 แบบ (SQL ที่โมเ
 
 ## Review อิสระ (workflow 5 มิติ: security / legacy regression / correctness / concurrency / silent-wrong-DB + ผู้พยายามหักล้างต่อ finding)
 
+ทุก finding มี repro จริงจาก reviewer; high/medium ที่แก้แล้ว reproduce ซ้ำเองก่อนแก้
+
 | Finding | ความรุนแรง | ผล |
 |---|---|---|
 | `enable_logging()` ข้าม lock → process ล่ม / log รั่ว | high | แก้ — query gate (`6f42841`) |
@@ -96,6 +98,9 @@ gate ตรวจกับ SQL จริง 58 แบบ (SQL ที่โมเ
 | COPY/EXPORT ลง temp dir ของ DuckDB ได้ถ้า SQL ข้าม validator | low | ปิดด้วย query gate |
 | กฎ file access ใน validator กระทบ SQLite `glob()` ของ legacy | low | แก้ — ใช้เฉพาะ file source (`b2e7ac7`) |
 | export 0 แถวไม่มีหัวคอลัมน์ | low | แก้ (`d9f7443`) |
+| ทุก process ใช้ spill dir ของ DuckDB ร่วมกัน → spill พร้อมกันทำ worker ล่ม (SIGSEGV) | medium | แก้ — `temp_directory=''` (`65f9ed1`) |
+| re-register/re-point แล้ว adapter เก่าไม่ถูกปล่อย (thread/memory รั่วต่อ publish) | low | แก้ — adapter เดียวต่อ source (`65f9ed1`) |
+| **publish ของ NT-Report ลบ `latest/` แล้วเขียนทับ → คำถามช่วง publish ได้งวดเก่า/ยอด NULL แบบ success** | medium | **ยังไม่แก้ — ขัดกับสมมติฐานของแผน (§3.2) รอตัดสิน** (PLAN_7 §11.7) |
 
 ## Commits (branch `plan7-phase1`)
 
@@ -108,6 +113,8 @@ e4b2f69 fix(P7-1): query cache hit must come from the context's current source
 6f42841 fix(P7-1): parser-based query gate on file sources; follow symlinked roots
 7084f3e fix(P7-1): bind CSV columns by header name; x/0 returns NULL like SQLite
 d9f7443 fix(P7-1): zero-row file-source export keeps its header row
+d8d887a docs(P7-1): Phase 1 results, file source guide, plan + roadmap status
+65f9ed1 fix(P7-1): no shared DuckDB spill dir; release superseded adapters
 ```
 
 ## สถานะ DB หลังจบงาน (local — ไม่อยู่ใน git)

@@ -135,7 +135,7 @@ Response เพิ่ม `data_as_of` ต่อ context ที่ใช้ (จ�
 > ผล (รายละเอียด `plan/archive/RESULT_P7_PHASE1.md`): `feed_revenue` อ่าน `DataFeed/dist/revenue/latest/` ตรง (0 แถว import) —
 > ตอบงวดล่าสุด **202608** ตรง `control_totals.csv` ขณะที่สำเนาที่ import ไว้ค้าง 202605;
 > eval file source **13/14 value_match เท่ากับ legacy วันเดียวกันทุกรอบ** (ข้อที่ตก #64 ตกเหมือนกันทั้งสอง source = โมเดลเปลี่ยนพฤติกรรม ไม่ใช่ source — **ยังไม่ถึง 14/14 ตาม exit criterion รอเจ้าของตัดสิน §11.7**);
-> latency P50 ≈ 6.1–6.3 s (legacy วันเดียวกัน 6.2–6.3 s, F10 10.5 s); pytest 635 → 694 passed (+59, ไม่มี test เดิมพัง)
+> latency P50 ≈ 6.1–6.3 s (legacy วันเดียวกัน 6.2–6.3 s, F10 10.5 s); pytest 635 → 695 passed (+60, ไม่มี test เดิมพัง)
 - ตาราง `data_sources`, `source_tables`; `schema_contexts.source_id` (context เดิมทั้งหมด → source "legacy" = business DB เดิม → ไม่มีอะไรพัง)
 - `DuckDBFileAdapter` + `SourceResolver` ต่อ request
 - ลงทะเบียน `feed_revenue` ใหม่เป็น file source ชี้ `DataFeed/dist/revenue/latest/`
@@ -368,6 +368,7 @@ NT-Report ไม่ต้อง import อะไรเข้า AI อีก ห
 - [ ] **Exit criterion value match 14/14 ยังไม่ถึง** — file source ได้ 13/14 **เท่ากับ legacy วันเดียวกันทุกรอบ** (ข้อ #64 "รายได้สะสมทั้งบริษัท… พ.ค. 2569": โมเดลเขียน `SUM(revenue_ytd) … month <= 5` ทั้งสอง source; F10 ก.ค. เขียน `= 5`) → ทางเลือก: (ก) ยอมรับ Phase 1 ด้วยเกณฑ์ "เท่ากับ legacy" (ข) เพิ่มกฎ "ห้าม SUM `revenue_ytd` ข้ามงวด" ใน contract/knowledge แล้ววัดใหม่ทั้งสอง source (ค) ถือเป็นงาน Phase 2 (contract-driven knowledge)
 - [ ] merge branch `plan7-phase1` เข้า main (ยังไม่ push ตามคำสั่ง)
 - [ ] ยืนยัน D1–D3 ที่ใช้ค่า default (§11.1) + การเพิ่ม `duckdb-engine`
+- [ ] ⚠️ **publish race (ต้องตัดสิน):** publisher ของ NT-Report (`tools/feed/feed.py` บรรทัด ~552 `shutil.rmtree(latest)` → เขียน CSV ทับที่เดิม → `manifest.json` เขียนท้ายสุด บรรทัด ~590) — คำถามที่เข้ามาระหว่าง publish (หลายสิบวินาที) อ่านไฟล์ครึ่งไฟล์ได้ → **ตอบงวดล่าสุดเป็นงวดเก่า / ยอด NULL โดย success=True** (reviewer reproduce ได้) — ทางเลือก: (ก) NT-Report publish แบบ atomic: build ลง dir ใหม่แล้วสลับ symlink `latest` (AI ตาม re-point ได้แล้ว มี test) (ข) AI ตรวจ `manifest.json` ทุก query (มีไฟล์ + ขนาดไฟล์ตรง `bytes`) ไม่ตรง = ปฏิเสธชัด ๆ แทนตอบผิดเงียบ (ดึงงาน Phase 2 มาก่อน) (ค) ลงทะเบียน snapshot `dist/revenue/<period>/` แทน `latest/` แล้ว register ใหม่ทุกงวด — **แนะนำ (ก)+(ข)**; ระหว่างนี้ อย่ารัน `run_all --feed` ช่วงที่มีคนใช้ หรือ `--legacy` ก่อน publish
 - [ ] ⚠️ bug เดิม: `POST /admin/config/rebuild-keyword-index` ลบ keyword index ทิ้งหมด (reproduce แล้ว) — แยกเป็นงานต่างหาก (ไม่อยู่ในขอบเขต Phase 1)
 
 **ส่งต่อ Phase 2+:**
