@@ -221,3 +221,66 @@ class TestContractDrivenControls:
             "SELECT SUM(revenue) FROM feed_rev_fact_bu WHERE year_month = 202401",
             "SELECT SUM(revenue) FROM feed_rev_fact_bu WHERE bu = 'A' AND year_month = 202401"]
         assert build_examples(None, "ebt", {"datasets": []}) == []
+
+
+class TestControlTotalsFilterAndTotalOnly:
+    """NT-Report sales 1.2.0 (control_totals.filter) and ebt 1.2.0 (total-only source, no bg_key)."""
+
+    SALES = {"domain": "s", "control_totals": {
+        "source": "fact_sales", "grand_total": None, "period_key": "year_month", "bg_key": "bg",
+        "group_keys": ["bg", "year_month"], "filter": {"metric": "actual"},
+        "measures": [{"name": "amount", "agg": "sum"}]},
+        "datasets": [{"name": "fact_sales", "keys": ["year_month", "bg", "metric", "cost_center"], "columns": []}]}
+    EBT = {"domain": "e", "control_totals": {
+        "source": "fact_total", "grand_total": {"source": "fact_total"}, "period_key": "time_key",
+        "group_keys": ["time_key"],
+        "measures": [{"name": "sales_base_revenue", "agg": "sum"}, {"name": "expense", "agg": "sum"},
+                     {"name": "ebt", "agg": "sum"}]},
+        "datasets": [{"name": "fact_total", "keys": ["time_key"], "columns": []}]}
+
+    def test_filter_applies_before_aggregate(self, tmp_path, capsys):
+        conn = sqlite3.connect(":memory:")
+        conn.execute("CREATE TABLE feed_s_fact_sales (year_month INTEGER, bg TEXT, metric TEXT, amount REAL)")
+        conn.executemany("INSERT INTO feed_s_fact_sales VALUES (?,?,?,?)", [
+            (202607, "A", "actual", 100.0), (202607, "A", "target", 900.0), (202607, "B", "actual", 50.0)])
+        (tmp_path / "control_totals.csv").write_text(
+            "bg,year_month,measure,value\nA,202607,amount,100.0\nB,202607,amount,50.0\n__ALL__,202607,amount,150.0\n")
+        imp.check_control_totals(conn, tmp_path, "s", self.SALES)  # target rows must not count
+        assert "3 rows within tolerance" in capsys.readouterr().out
+        conn.execute("UPDATE feed_s_fact_sales SET amount = 0 WHERE bg = 'B'")
+        with pytest.raises(SystemExit):
+            imp.check_control_totals(conn, tmp_path, "s", self.SALES)
+
+    def test_total_only_source_without_bg_key(self, tmp_path, capsys):
+        conn = sqlite3.connect(":memory:")
+        conn.execute("CREATE TABLE feed_e_fact_total (time_key INTEGER, sales_base_revenue REAL, expense REAL, ebt REAL)")
+        conn.execute("INSERT INTO feed_e_fact_total VALUES (202607, 300.0, 400.0, -100.0)")
+        (tmp_path / "control_totals.csv").write_text(
+            "time_key,measure,value\n202607,ebt,-100.0\n202607,expense,400.0\n202607,sales_base_revenue,300.0\n")
+        imp.check_control_totals(conn, tmp_path, "e", self.EBT)
+        assert "3 rows within tolerance" in capsys.readouterr().out
+        conn.execute("UPDATE feed_e_fact_total SET ebt = 100.0")  # a sign flip is the bug this guards
+        with pytest.raises(SystemExit):
+            imp.check_control_totals(conn, tmp_path, "e", self.EBT)
+
+    def test_golden_carries_the_filter(self):
+        import pandas as pd
+        from scripts.datafeed.gen_golden_from_controls import build_examples
+
+        controls = pd.DataFrame({"bg": ["A", "__ALL__"], "year_month": [202607, 202607],
+                                 "measure": ["amount", "amount"], "value": [100.0, 150.0]})
+        assert [sql for _, sql in build_examples(controls, "s", self.SALES)] == [
+            "SELECT SUM(amount) FROM feed_s_fact_sales WHERE year_month = 202607 AND metric = 'actual'",
+            "SELECT SUM(amount) FROM feed_s_fact_sales WHERE bg = 'A' AND year_month = 202607 AND metric = 'actual'"]
+
+    def test_golden_of_total_only_source_asks_every_measure(self):
+        import pandas as pd
+        from scripts.datafeed.gen_golden_from_controls import build_examples
+
+        controls = pd.DataFrame({"time_key": [202607] * 3, "measure": ["ebt", "expense", "sales_base_revenue"],
+                                 "value": [-100.0, 400.0, 300.0]})
+        examples = build_examples(controls, "e", self.EBT)
+        assert [sql for _, sql in examples] == [
+            f"SELECT {m} FROM feed_e_fact_total WHERE time_key = 202607"
+            for m in ("sales_base_revenue", "expense", "ebt")]
+        assert len({q for q, _ in examples}) == 3  # one distinct question per measure

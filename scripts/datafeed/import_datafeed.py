@@ -137,6 +137,8 @@ def check_control_totals(conn, latest: Path, domain: str, contract: dict) -> Non
 
     One GROUP BY per measure (not one scan per row — fact_expense is ~150 MB of CSV).
     ``__ALL__`` rows: the grand-total dataset when the contract has one, else the source summed.
+    ``filter`` ({column: value}, sales metric='actual') narrows the source before aggregating.
+    No ``bg_key`` (ebt) = a total-only source: every control row is that period's total.
     """
     spec = contract.get("control_totals")
     if not spec:
@@ -146,27 +148,35 @@ def check_control_totals(conn, latest: Path, domain: str, contract: dict) -> Non
     source_table = f"feed_{domain}_{spec['source']}"
     grand_table = f"feed_{domain}_{grand['source']}" if grand else source_table
     period_key = spec.get("period_key", "year_month")
-    bg_key = spec.get("bg_key", "bu")
+    bg_key = spec.get("bg_key")
     tol_rel = grand.get("tolerance_rel", spec.get("tolerance_rel", 1e-4))
     tol_abs = grand.get("tolerance_abs", spec.get("tolerance_abs", 1.0))
+    filters = spec.get("filter") or {}
+    where = " WHERE " + " AND ".join(f'"{c}" = ?' for c in filters) if filters else ""
+    params = list(filters.values())
 
-    controls = pd.read_csv(latest / "control_totals.csv", dtype={bg_key: str})
+    controls = pd.read_csv(latest / "control_totals.csv", dtype={bg_key: str} if bg_key else None)
     actual = {}
     for measure in controls["measure"].unique():
-        for bu, period, value in conn.execute(
-            f'SELECT "{bg_key}", "{period_key}", SUM("{measure}") FROM "{source_table}" GROUP BY 1, 2'
-        ).fetchall():
-            if period is not None:
-                actual[(measure, str(bu), int(period))] = value
+        if bg_key:
+            for bu, period, value in conn.execute(
+                f'SELECT "{bg_key}", "{period_key}", SUM("{measure}") FROM "{source_table}"{where} GROUP BY 1, 2',
+                params,
+            ).fetchall():
+                if period is not None:
+                    actual[(measure, str(bu), int(period))] = value
+        # the filter names columns of the source — a separate grand-total dataset is already the total
+        grand_where, grand_params = (where, params) if grand_table == source_table else ("", [])
         for period, value in conn.execute(
-            f'SELECT "{period_key}", SUM("{measure}") FROM "{grand_table}" GROUP BY 1'
+            f'SELECT "{period_key}", SUM("{measure}") FROM "{grand_table}"{grand_where} GROUP BY 1', grand_params
         ).fetchall():
             if period is not None:
                 actual[(measure, "__ALL__", int(period))] = value
 
     failures = []
     for _, row in controls.iterrows():
-        measure, expected, period, bu = row["measure"], float(row["value"]), row[period_key], row[bg_key]
+        measure, expected, period = row["measure"], float(row["value"]), row[period_key]
+        bu = row[bg_key] if bg_key else "__ALL__"
         got = actual.get((measure, str(bu), int(period))) or 0.0
         if abs(got - expected) > max(tol_abs, tol_rel * abs(expected)):
             failures.append(f"{bu} {period} {measure}: db={got} expected={expected}")

@@ -7,8 +7,10 @@ period selection (latest + 3 evenly spaced back) — reproducible regen.
 
 Everything about the data comes from the contract's control_totals (Plan 7 Phase 2):
 source / grand_total datasets, period_key, bg_key, group_keys and measures
-(agg 'sum' → monthly questions, 'point_in_time' → YTD questions). A contract
-without control_totals (ebt) gets no golden — there is nothing to check against.
+(agg 'sum' → monthly questions, 'point_in_time' → YTD questions), plus `filter`
+({column: value} → AND column = value in every SQL). A source without bg_key (ebt's
+fact_ebt_total_monthly) is total-only: one question per measure per period.
+A contract without control_totals gets no golden — there is nothing to check against.
 
 Marker: category = 'feed_<domain>' — delete-and-regen is clean.
 
@@ -37,6 +39,13 @@ QUESTION_WORDS = {
     "expense": ("ค่าใช้จ่าย", "กลุ่ม"),
     "sales": ("ยอดขาย", "กลุ่มธุรกิจ"),
 }
+# Total-only sources ask once per measure: measure name → what the question calls it.
+# Default only — an unknown measure is asked by its contract note.
+MEASURE_WORDS = {
+    "sales_base_revenue": "รายได้ (ฐานยอดขาย) ในรายงาน EBT",
+    "expense": "ค่าใช้จ่ายในรายงาน EBT",
+    "ebt": "กำไร (ขาดทุน) ก่อนภาษี EBT",
+}
 
 
 def thai_period(year_month: int) -> str:
@@ -62,8 +71,11 @@ def build_examples(controls: pd.DataFrame, domain: str, contract: dict) -> list:
     spec = contract.get("control_totals")
     if not spec:
         return []
-    period_key, bg_key = spec.get("period_key", "year_month"), spec.get("bg_key", "bu")
+    period_key, bg_key = spec.get("period_key", "year_month"), spec.get("bg_key")
     group_keys = spec.get("group_keys", [bg_key, period_key])
+    and_filter = "".join(f" AND {c} = " + (str(v) if isinstance(v, (int, float)) and not isinstance(v, bool)
+                                           else "'" + str(v).replace("'", "''") + "'")
+                         for c, v in (spec.get("filter") or {}).items())
     source = f"feed_{domain}_{spec['source']}"
     grand = spec.get("grand_total") or {}
     total_table = f"feed_{domain}_{grand['source']}" if grand else None
@@ -81,15 +93,19 @@ def build_examples(controls: pd.DataFrame, domain: str, contract: dict) -> list:
     def total_sql(measure, ym):
         if total_table:
             return f"SELECT {measure} FROM {total_table} WHERE {period_key} = {ym}"
-        return f"SELECT SUM({measure}) FROM {source} WHERE {period_key} = {ym}"
+        return f"SELECT SUM({measure}) FROM {source} WHERE {period_key} = {ym}{and_filter}"
 
     def group_sql(measure, bg, ym):
         value = measure if one_row else f"SUM({measure})"
         bg_lit = "'" + str(bg).replace("'", "''") + "'"
-        return f"SELECT {value} FROM {source} WHERE {bg_key} = {bg_lit} AND {period_key} = {ym}"
+        return f"SELECT {value} FROM {source} WHERE {bg_key} = {bg_lit} AND {period_key} = {ym}{and_filter}"
 
     examples = []
     periods = pick_periods(controls[period_key].tolist())
+    if not bg_key:  # total-only source: every sum measure, per period
+        return [(f"{MEASURE_WORDS.get(m['name'], m.get('note') or m['name'])} รวมทั้งบริษัทเดือน{thai_period(ym)} เท่าไร",
+                 total_sql(m["name"], ym))
+                for ym in periods for m in measures if m.get("agg", "sum") == "sum"]
     rows = controls[(controls["measure"] == monthly) & (controls[bg_key] != "__ALL__")] if monthly else controls[:0]
 
     for ym in periods if monthly else []:
@@ -129,8 +145,8 @@ def main():
     if not contract.get("control_totals"):
         print(f"{args.domain}: contract has no control_totals — no golden generated (existing ones kept)")
         return
-    bg_key = contract["control_totals"].get("bg_key", "bu")
-    controls = pd.read_csv(latest / "control_totals.csv", dtype={bg_key: str})
+    bg_key = contract["control_totals"].get("bg_key")
+    controls = pd.read_csv(latest / "control_totals.csv", dtype={bg_key: str} if bg_key else None)
     examples = build_examples(controls, args.domain, contract)
 
     from app.config import settings
