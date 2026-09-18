@@ -126,10 +126,10 @@ Response เพิ่ม `data_as_of` ต่อ context ที่ใช้ (จ�
 แต่ละ phase ต้องผ่าน exit criteria ก่อนไป phase ถัดไป
 
 ### Phase 0 — ตัดสินใจ (0.5 วัน)
-> Phase 1 ทำไปก่อนด้วยค่า default (ดู §11.1) — ข้อด้านล่างยังรอเจ้าของโครงการยืนยัน
-- [ ] **ข้อมูลของ NT-Report จะอยู่ที่ไหนที่ AI server อ่านถึง:** (ก) AI รันเครื่องเดียวกัน → local path, (ข) shared folder/NFS, (ค) object storage (S3/MinIO), (ง) HTTPS ที่มี token — ขึ้นกับว่า AI deploy ที่ไหน
-- [ ] ยืนยันใช้ DuckDB (เพิ่ม dependency 1 ตัว) สำหรับ file source
-- [ ] ยืนยันชื่อ field: `scope` แทน `pinned_filters` (หรือเก็บ `pinned_filters` เป็น alias ช่วงเปลี่ยนผ่าน)
+> ตัดสินครบแล้ว 2026-09-18 (ดู §11.1)
+- [x] D1 ที่อยู่ของข้อมูล: (ก) **เครื่องเดียวกัน — local path** (ใช้อยู่แล้ว) และ**ต้องออกแบบให้เพิ่มได้**: (ค) object storage S3/MinIO และ (ง) HTTPS + token สำหรับลูกค้าที่ไม่มี (ค) — ไม่เขียน code ล่วงหน้า (ดู §13)
+- [x] D2 ใช้ DuckDB (+ `duckdb-engine` สำหรับ SchemaService) สำหรับ file source
+- [x] D3 ชื่อ field: **A** — field ใหม่ `scope` = บังคับจริงที่ชั้น SQL (Phase 3), `pinned_filters` รับต่อแบบ log อย่างเดียวช่วงเปลี่ยนผ่าน แล้วค่อยเลิก; NT-Report เปลี่ยนไปส่ง `scope` เมื่อ Phase 3 พร้อม
 
 ### Phase 1 — Source registry + DuckDB file source (3–4 วัน) — ✅ DONE 2026-09-18
 > ผล (รายละเอียด `plan/archive/RESULT_P7_PHASE1.md`): `feed_revenue` อ่าน `DataFeed/dist/revenue/latest/` ตรง (0 แถว import) —
@@ -333,16 +333,16 @@ NT-Report ไม่ต้อง import อะไรเข้า AI อีก ห
 ### 11.1 ต้องตัดสินใจก่อนเริ่ม (Phase 0)
 | # | ประเด็น | ผู้ตัดสิน | ผลต่อแผน |
 |---|---|---|---|
-| D1 | AI server รันที่ไหน และอ่าน DataFeed ของ NT-Report ทางใด (local path / shared folder / S3-MinIO / HTTPS+token) | เจ้าของโครงการ + IT | กำหนดชนิด file source และ security ของ §6.7 |
-| D2 | ใช้ DuckDB เป็น engine ของ file source | ทีมพัฒนา | Phase 1 |
-| D3 | ชื่อ field `scope` แทน `pinned_filters` (หรือคง alias ช่วงเปลี่ยนผ่าน) | ทีมพัฒนา | API contract กับ NT-Report |
+| D1 | AI server รันที่ไหน และอ่าน DataFeed ของ NT-Report ทางใด — ✅ **ตัดสิน 2026-09-18:** (ก) **เครื่องเดียวกัน — local path** (ใช้อยู่แล้ว) และ**ต้องออกแบบให้เพิ่มได้**: (ค) object storage S3/MinIO และ (ง) HTTPS + token สำหรับลูกค้าที่ไม่มี (ค) — ไม่เขียน code ล่วงหน้า (ดู §13) | เจ้าของโครงการ | §6.7, §13 |
+| D2 | ใช้ DuckDB เป็น engine ของ file source — ✅ ใช้แล้ว (Phase 1; `duckdb==1.5.5`, `duckdb-engine==0.17.0` ติดตั้งทั้ง python3.10 และ 3.14) | ทีมพัฒนา | Phase 1 |
+| D3 | ชื่อ field ขอบเขตข้อมูลใน `/api/v1/query` — ✅ **ตัดสิน 2026-09-18:** **A** — field ใหม่ `scope` = บังคับจริงที่ชั้น SQL (Phase 3), `pinned_filters` รับต่อแบบ log อย่างเดียวช่วงเปลี่ยนผ่าน แล้วค่อยเลิก; NT-Report เปลี่ยนไปส่ง `scope` เมื่อ Phase 3 พร้อม | ทีมพัฒนา | Phase 3, API contract กับ NT-Report |
 | D4 | LLM ที่อนุญาตสำหรับข้อมูล confidential/personal — มี LLM ภายในหรือ endpoint ในประเทศที่ใช้ได้หรือไม่ | เจ้าของโครงการ + DPO | ถ้าไม่มี: source อ่อนไหวต้องใช้ `schema_only` เท่านั้น |
 | D5 | ใครเป็นคนกำหนด data classification ต่อคอลัมน์ (เจ้าของข้อมูลผ่าน contract / admin ลูกค้าตอน onboard) | เจ้าของโครงการ | Phase 3 / 4.5 |
 | D6 | เกณฑ์เลิกโหมด import (`import_datafeed.py`) — เสนอ: หลัง Phase 2 ผ่าน 2 รอบปิดงวด | เจ้าของโครงการ | §7 |
 | D7 | จังหวะเปลี่ยนไป entitlement token v2 — เสนอ: เมื่อมีผู้เรียกรายที่ 2 หรือก่อน Phase 7 | เจ้าของโครงการ | §6.3 |
 | D8 | รูปแบบให้บริการ: private deployment ต่อลูกค้า vs multi-tenant (API ร่วม) — ✅ **ตัดสินแล้ว 2026-09-18: แบบผสม** | เจ้าของโครงการ | §12 — Phase 4, Phase 7, Plan 6 |
 
-**ค่า default ที่ Phase 1 ใช้แทน D1–D3 (2026-09-18 — ยังรอเจ้าของยืนยัน):**
+**ค่า default ที่ Phase 1 ใช้ระหว่างรอ D1–D3 (2026-09-18 — ตอนนี้ตัดสินแล้ว ตรงกับที่ใช้):**
 - D1 → file source = **local path ต่อ source** (`data_sources.root_path`) — ยังไม่ทำ S3/HTTPS; interface (`source_type` + adapter ต่อชนิด) เพิ่ม scheme อื่นได้ภายหลังโดยไม่มี code ล่วงหน้า
 - D2 → **DuckDB** (`duckdb>=1.5`) + `duckdb-engine` (SQLAlchemy dialect ให้ SchemaService inspect view ได้)
 - D3 → **ไม่แตะ** `pinned_filters` / `scope` (Phase 3)
@@ -414,3 +414,21 @@ NT-Report ไม่ต้อง import อะไรเข้า AI อีก ห
 - [ ] ตัวเลือก Postgres สำหรับ app/config DB เมื่อใช้งานหนัก
 - [ ] monitoring รวมศูนย์ (เฉพาะ health/latency/error) + ทะเบียน deployment (ลูกค้า, version, ผู้ติดต่อ, วันหมดสัญญา)
 - [ ] 2b on-prem: runbook ติดตั้งในเครือข่ายลูกค้า + วิธีส่ง update แบบ offline
+
+## 13. แหล่งไฟล์ชนิดอื่น (D1: ต้องเพิ่มได้ภายหลัง — ยังไม่ทำ)
+
+ตอนนี้มีแค่ `duckdb_file` = local path (D1 ก) — เมื่อมีลูกค้า/deployment ที่ต้องการ ให้เพิ่มเป็น `source_type` ใหม่
+ข้างเคียงกัน (ไม่แก้ของเดิม) โดยคงสัญญาเดียวกับ local: **อ่านเฉพาะ build ที่ตรวจแล้ว, pin ต่อ build, ปฏิเสธชัด ๆ ระหว่าง publish**
+
+| | (ก) local path — มีแล้ว | (ค) S3 / MinIO | (ง) HTTPS + token |
+|---|---|---|---|
+| ชี้ build ล่าสุด | symlink `latest` → `builds/<id>` (NT-Report `7d639b0`) | ไม่มี symlink → pointer object เช่น `latest.json` = `{build_id}` เขียนหลัง build ครบ | pointer เดียวกันผ่าน URL |
+| pin ต่อ build | realpath ใน fingerprint ของ resolver | build_id จาก pointer ใน fingerprint | เหมือน (ค) |
+| ตรวจ build | manifest + sha256 ทุกไฟล์ (~1 วินาที/publish) | manifest + ขนาด/ETag ต่อ object (hash ทั้งก้อนแพงกว่าเพราะต้องดาวน์โหลด) | เหมือน (ค) — ต้องมี endpoint ให้ขนาด/ETag |
+| ตรวจต่อ query | stat inode/size/mtime | ไม่ต้อง — prefix ของ build immutable; อ่าน pointer เป็นระยะ | เหมือน (ค) |
+| DuckDB | ปิด extension ทั้งหมด | ต้องโหลด `httpfs` + secret (credential) **ก่อน** `lock_configuration`; `allowed_paths`/`allowed_directories` เป็น prefix `s3://bucket/<build>/` | `httpfs` + header token; allow เฉพาะ prefix ของ build |
+| รูปแบบไฟล์ | CSV (ผ่านเกณฑ์) | **Parquet** (CSV ผ่านเครือข่ายช้า; bundle มี `.parquet` + sha อยู่แล้ว) | Parquet |
+| ฝั่ง NT-Report/ลูกค้า | — | publish ขึ้น bucket + เขียน pointer ท้ายสุด; key read-only ต่อ prefix | ให้บริการไฟล์ผ่าน HTTPS + token + range request |
+
+จุดที่ code ต้องแยกเมื่อทำจริง: การหา root/build (symlink vs pointer), การตรวจ build (sha vs ETag), การตั้งค่า DuckDB ก่อน lock —
+ส่วน view/query gate/validator/resolver/cache ใช้ร่วมกันได้ทั้งหมด
