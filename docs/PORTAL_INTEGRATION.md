@@ -15,6 +15,17 @@ Request เพิ่มเติมสำหรับ portal (optional ทั้
  "pinned_filters": {"year_month": 202605}}
 ```
 
+Response มี `data_as_of` (Plan 7 Phase 2) — ความสดของข้อมูลที่ใช้ตอบ มาจาก `manifest.json` ของ build ที่ AI ตรวจแล้ว
+(reconcile.ok + sha256) และเป็น build เดียวกับที่ SQL อ่านจริง (คำตอบจาก cache ก็เป็น build เดียวกัน เพราะ cache ผูก build):
+```json
+"data_as_of": {"period": 202608, "built_at": "2026-09-11T01:37:35+00:00", "build_id": null}
+```
+- `period` = งวดล่าสุดใน bundle (YYYYMM ค.ศ.), `built_at` = เวลา build (UTC), `build_id` = id ของ build
+  (มีเมื่อ NT-Report publish แบบ atomic — `builds/<id>` + symlink `latest`; ก่อนหน้านั้นเป็น `null`)
+- `null` = context ที่อ่าน business DB เดิม (legacy) หรือ error ก่อนอ่านข้อมูล
+- portal ควรแสดงให้ผู้ใช้เห็น และเตือนเองเมื่อ `period` ไม่ตรงงวดของรายงานที่เปิดอยู่
+- ระหว่าง publish (แบบเดิมที่ไม่ atomic) คำถามได้ `error` "ข้อมูลกำลังถูก publish — กรุณาถามใหม่" ไม่ใช่คำตอบจากไฟล์ครึ่งไฟล์
+
 ## ออก API key ให้ portal
 
 ```python

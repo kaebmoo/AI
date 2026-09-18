@@ -23,6 +23,7 @@ def _mock_query_engine_result(explanation="test", error=None, data=None, sql="SE
     result.query_result = qr
     result.context_name = context
     result.execution_time_ms = 123.4
+    result.data_as_of = None
     return result
 
 
@@ -81,6 +82,22 @@ class TestSimpleQueryEndpoint:
         data = resp.json()
         assert "answer" in data
         assert data["answer"] != ""
+
+    def test_data_as_of_passed_through(self, query_client):
+        """Plan 7: file-source answers carry the build they were read from; legacy = null."""
+        as_of = {"period": 202608, "built_at": "2026-09-11T01:37:35+00:00", "build_id": None}
+        file_result = _mock_query_engine_result(context="feed_revenue")
+        file_result.data_as_of = as_of
+
+        with patch("app.services.query_engine.QueryEngine") as MockEngine:
+            MockEngine.return_value.query = AsyncMock(return_value=file_result)
+            resp = query_client.post("/api/v1/query/", json={"question": "q", "context": "feed_revenue"})
+        assert resp.json()["data_as_of"] == as_of
+
+        with patch("app.services.query_engine.QueryEngine") as MockEngine:
+            MockEngine.return_value.query = AsyncMock(return_value=_mock_query_engine_result())
+            resp = query_client.post("/api/v1/query/", json={"question": "q"})
+        assert resp.json()["data_as_of"] is None
 
     def test_query_with_include_sql(self, query_client):
         """POST /query/ with include_sql=true → SQL included."""

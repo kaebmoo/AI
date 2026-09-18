@@ -45,6 +45,9 @@ class SimpleQueryResponse(BaseModel):
     row_count: Optional[int] = Field(None, description="Total row count")
     execution_time_ms: float = Field(0, description="Total execution time in ms")
     error: Optional[str] = Field(None, description="Error message if query failed")
+    # Plan 7: freshness of the file-source build the answer came from; null = legacy business DB
+    data_as_of: Optional[Dict[str, Any]] = Field(
+        None, description="{period, built_at, build_id} from the verified manifest (file source only)")
 
 
 class ContextInfo(BaseModel):
@@ -120,6 +123,7 @@ async def simple_query(
             row_count=row_count,
             execution_time_ms=round(result.execution_time_ms, 1),
             error=qr.error if qr.error else None,
+            data_as_of=result.data_as_of,
         )
 
     except Exception as e:

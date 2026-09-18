@@ -49,6 +49,15 @@ class ResolvedSource:
         return self.adapter.version if self.adapter else self.name
 
     @property
+    def data_as_of(self) -> Optional[Dict[str, Any]]:
+        """Freshness of the verified build answers are read from; None = legacy / no manifest."""
+        manifest = self.adapter.manifest if self.adapter else None
+        if not manifest:
+            return None
+        return {"period": manifest.get("period"), "built_at": manifest.get("built_at"),
+                "build_id": manifest.get("build_id")}
+
+    @property
     def engine(self):
         """SQLAlchemy engine for schema inspection of this source."""
         if self.adapter is None:

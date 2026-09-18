@@ -213,6 +213,7 @@ class QueryEngineResult:
     execution_time_ms: float = 0.0
     provider_used: str = ""
     source_version: str = ""  # Plan 7: source + verified build the answer was read from
+    data_as_of: Optional[Dict[str, Any]] = None  # Plan 7: manifest period/built_at/build_id; None = legacy
 
 
 # ---------------------------------------------------------------------------
@@ -591,6 +592,7 @@ class QueryEngine:
             execution_time_ms=execution_time,
             provider_used=selected_provider,
             source_version=source.version,
+            data_as_of=source.data_as_of,
         )
 
         # --- Query Result Cache: store successful result ---

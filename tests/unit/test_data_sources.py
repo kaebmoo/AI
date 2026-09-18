@@ -72,6 +72,10 @@ class TestMigration:
 
 
 class TestResolver:
+    def test_no_manifest_no_data_as_of(self, resolver):
+        assert resolver.for_context("feed_x").data_as_of is None
+        assert LEGACY_SOURCE.data_as_of is None
+
     def test_file_source_context_gets_duckdb_engine(self, resolver):
         src = resolver.for_context("feed_x")
         assert src.source_type == "duckdb_file"
@@ -267,8 +271,10 @@ class TestQueryCacheFollowsSource:
                 qe._dedup_store.clear()
                 return asyncio.run(engine.query("q", context="revenue"))
 
-        ask()
-        ask()
+        as_of = {"period": 202608, "built_at": "t", "build_id": "b"}
+        resolver.for_context.return_value = MagicMock(adapter=None, version=LEGACY_SOURCE.version, data_as_of=as_of)
+        assert ask().data_as_of == as_of
+        assert ask().data_as_of == as_of  # the cached answer keeps the build it was read from
         assert ai_service.query_hybrid.await_count == 1  # same source → cache hit, as before
         # context re-pointed (register_file_source / --legacy) → old answer must not be served
         resolver.for_context.return_value = ResolvedSource(name="datafeed_x", source_type="duckdb_file")
@@ -325,6 +331,15 @@ class TestPublishRaceResolver:
         self._publish(source_root, 202608, manifest=False)
         with pytest.raises(SourceUnavailable):
             asyncio.run(client.call_tool("execute_query", {"sql": self.Q}))
+
+    def test_data_as_of_comes_from_the_verified_build(self, verified, source_root, resolver):
+        assert verified.for_context("feed_x").data_as_of == {"period": 202607, "built_at": None, "build_id": None}
+        manifest = json.loads((source_root / "manifest.json").read_text())
+        manifest.update(period=202608, built_at="2026-09-18T01:00:00+00:00", build_id="20260918T010000Z")
+        (source_root / "manifest.json").write_text(json.dumps(manifest))  # new build (atomic layout)
+        assert verified.for_context("feed_x").data_as_of == {
+            "period": 202608, "built_at": "2026-09-18T01:00:00+00:00", "build_id": "20260918T010000Z"}
+        assert resolver.for_context("revenue").data_as_of is None  # legacy has no manifest
 
     def test_migration_adds_manifest_column(self, config_engine):
         from sqlalchemy import inspect as sa_inspect
