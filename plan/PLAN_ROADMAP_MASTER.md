@@ -21,7 +21,7 @@
 | **Plan 4** | ✅ DONE | 90% | 25 tests | Telegram integration tests ผ่าน |
 | **Plan 4B** | ✅ DONE | 95% | 13 tests | Query endpoint ทำงาน, mock-heavy tests |
 | **Plan 5** | ✅ DONE | 100% | 7 tests | 3-DB live, ConfigBase แยก, business_engine ครบทุก call path |
-| **Plan 6** | ⬜ DESIGN | 0% | 0 | ยังไม่เริ่ม code |
+| **Plan 6** | ⏸ DEFERRED | 0% | 0 | multi-tenant เลื่อนเป็น Tier 3 — ตัดสิน 2026-09-18 ใช้แบบผสม (ภายใน NT หลาย workspace / ลูกค้าภายนอก private deployment) ดู PLAN_7 §12 |
 | **Plan 7** | 🟡 Phase 1 ✅ | 1/7 phases | +60 tests | Data Source as a Service (zero-import) — Phase 1 (source registry + DuckDB file source) เสร็จ 2026-09-18: `feed_revenue` อ่าน DataFeed `latest/` ตรง ไม่ import; ดู PLAN_7_DATA_SOURCE_SERVICE.md, archive/RESULT_P7_PHASE1.md |
 | **Plan 1B-C** | ⬜ DEFERRED | 0% | 0 | ทำตอน Plan 6 |
 

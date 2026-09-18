@@ -1,6 +1,7 @@
 # Plan 6: Multi-tenant / SaaS Architecture
 
 **Priority:** 6 (ระยะยาว)  
+**สถานะ (2026-09-18):** ⏸ เลื่อน — ตัดสินใช้รูปแบบ**แบบผสม** (`PLAN_7_DATA_SOURCE_SERVICE.md` §12, D8): ภายใน NT = deployment เดียวหลาย workspace, ลูกค้าภายนอก = private deployment ต่อราย — โมเดล multi-tenant (API ร่วม + DB ต่อ tenant) ในแผนนี้ = **Tier 3** ทำเมื่อมีลูกค้าภายนอกรายเล็กจำนวนมาก (~10–20 ราย) เท่านั้น  
 **ประมาณเวลา:** Design 3 วัน, Implement 2-4 สัปดาห์  
 **Prerequisite:** Plan 5 (DB Separation)  
 **อ้างอิง:** Plan 1 (Admin Agent), Plan 4 (Telegram), Plan 5 (DB Separation)

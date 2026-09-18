@@ -157,6 +157,7 @@ Response เพิ่ม `data_as_of` ต่อ context ที่ใช้ (จ�
 - `workspaces`, `APIKey.workspace_id/allowed_contexts`, Chroma แยกต่อ workspace
 - Admin API/UI: ลงทะเบียน source, ทดสอบการเชื่อมต่อ, ดู freshness, ออก key
 - **Exit:** key ของ workspace A เรียก context ของ B ไม่ได้ (403) — มี test คุม
+- ตาม D8 (§12): workspace = การแบ่ง**ภายใน deployment เดียว** (หน่วยงานของ NT / หน่วยงานของลูกค้าหนึ่งราย) ไม่ใช่การแยกลูกค้าต่างองค์กร — query worker นอก process จึง**ไม่บังคับ** (ความเสียหายจำกัดใน deployment เดียว)
 
 ### Phase 5 — ถามข้ามหลาย context (4–5 วัน)
 - ทางเลือกตามลำดับความง่าย:
@@ -168,9 +169,10 @@ Response เพิ่ม `data_as_of` ต่อ context ที่ใช้ (จ�
 - MCP server แบบ SSE + API key (= Plan 1B-C ที่ deferred ไว้)
 - (ตัวเลือก) embeddable chat widget ที่ client ฝังเองได้ — ทำเมื่อมี client ที่ 2 ต้องการ; NT-Report ใช้ panel ของตัวเองผ่าน PB proxy อยู่แล้ว
 
-### Phase 7 — เปิดให้ภายนอก (อนาคต)
-- เงื่อนไขเริ่ม: มีผู้ใช้จริงนอก NT-Report อย่างน้อย 1 ราย
-- ส่วนที่เหลือของ Plan 6: self-service, usage quota/billing, config DB ต่อ tenant
+### Phase 7 — เปิดให้ภายนอก = private deployment ต่อลูกค้า (อนาคต — ปรับตาม D8 2026-09-18)
+- เงื่อนไขเริ่ม: มีลูกค้าจริงนอก NT อย่างน้อย 1 ราย
+- **ไม่ใช่ multi-tenant** — เป็นงาน packaging ให้ติดตั้งระบบทั้งชุดแยกต่อลูกค้าได้ซ้ำ ๆ (รายการใน §12)
+- ส่วน multi-tenant ของ Plan 6 (self-service, quota/billing, config DB ต่อ tenant) = Tier 3 — ทำเมื่อถึง trigger ใน §12 เท่านั้น
 
 ## 6. Security & Access Model (ห้ามตัด)
 
@@ -336,6 +338,7 @@ NT-Report ไม่ต้อง import อะไรเข้า AI อีก ห
 | D5 | ใครเป็นคนกำหนด data classification ต่อคอลัมน์ (เจ้าของข้อมูลผ่าน contract / admin ลูกค้าตอน onboard) | เจ้าของโครงการ | Phase 3 / 4.5 |
 | D6 | เกณฑ์เลิกโหมด import (`import_datafeed.py`) — เสนอ: หลัง Phase 2 ผ่าน 2 รอบปิดงวด | เจ้าของโครงการ | §7 |
 | D7 | จังหวะเปลี่ยนไป entitlement token v2 — เสนอ: เมื่อมีผู้เรียกรายที่ 2 หรือก่อน Phase 7 | เจ้าของโครงการ | §6.3 |
+| D8 | รูปแบบให้บริการ: private deployment ต่อลูกค้า vs multi-tenant (API ร่วม) — ✅ **ตัดสินแล้ว 2026-09-18: แบบผสม** | เจ้าของโครงการ | §12 — Phase 4, Phase 7, Plan 6 |
 
 **ค่า default ที่ Phase 1 ใช้แทน D1–D3 (2026-09-18 — ยังรอเจ้าของยืนยัน):**
 - D1 → file source = **local path ต่อ source** (`data_sources.root_path`) — ยังไม่ทำ S3/HTTPS; interface (`source_type` + adapter ต่อชนิด) เพิ่ม scheme อื่นได้ภายหลังโดยไม่มี code ล่วงหน้า
@@ -374,7 +377,7 @@ NT-Report ไม่ต้อง import อะไรเข้า AI อีก ห
 **ส่งต่อ Phase 2+:**
 - [ ] runtime ตรวจ manifest (reconcile/schema_version/sha) + `data_as_of`; query cache ผูกกับ manifest version (ตอนนี้ publish งวดใหม่ คำตอบเดิม cache ได้ถึง 30 นาที)
 - [ ] ลงทะเบียน expense/sales/ebt (script รองรับ `--domain` แล้ว ต้องมี context จาก `gen_docs_from_contract` ก่อน)
-- [ ] พิจารณารัน SQL ของ file source **นอก process** (แบบ MCP subprocess ของ legacy) — DuckDB รันใน API process: bug/abort ของ DuckDB ในอนาคต (แบบ `enable_logging` ที่ปิดด้วย query gate แล้ว) จะล้มทั้ง API; gate ตรวจแล้วกับทุก vector ที่ reviewer เสนอ (`query()`, `json_execute_serialized_sql`, `FROM '/path'`, comment/quote tricks, subquery) — เหลือ scalar ที่ผ่านได้แค่ตัวอ่านอย่างเดียว/no-op (`current_setting`, `getvariable`, `write_log` ขณะ logging ปิด)
+- [ ] (ภายใต้ D8 แบบผสม: ไม่บังคับ — พิจารณาเมื่อ workspace ใน deployment เดียวมีความลับต่างระดับกันมาก หรือถ้าไปถึง Tier 3) พิจารณารัน SQL ของ file source **นอก process** (แบบ MCP subprocess ของ legacy) — DuckDB รันใน API process: bug/abort ของ DuckDB ในอนาคต (แบบ `enable_logging` ที่ปิดด้วย query gate แล้ว) จะล้มทั้ง API; gate ตรวจแล้วกับทุก vector ที่ reviewer เสนอ (`query()`, `json_execute_serialized_sql`, `FROM '/path'`, comment/quote tricks, subquery) — เหลือ scalar ที่ผ่านได้แค่ตัวอ่านอย่างเดียว/no-op (`current_setting`, `getvariable`, `write_log` ขณะ logging ปิด)
 - [ ] tool-loop `get_sample_values`/`get_table_stats` บน DuckDB (ตอนนี้ fail closed)
 - [ ] admin UI/endpoint (schema browser, onboarding, keyword index, sync-brain) ให้เห็น file source — ตอนนี้เห็นแค่ business DB เดิม (สำหรับ `feed_*` = สำเนาเก่า)
 - [ ] `/chat/train` validate SQL ตาม source ของ context
@@ -383,3 +386,29 @@ NT-Report ไม่ต้อง import อะไรเข้า AI อีก ห
 ### 11.6 ต้องทบทวนโดยฝ่ายอื่น
 - [ ] DPO / ฝ่ายกฎหมาย ทบทวน §6.6 ข้อ 8 (controller/processor, DPA, ROPA ม.40, แจ้งเหตุ ม.37(4), ส่งข้อมูลต่างประเทศ ม.28–29) — **บังคับก่อน Phase 7**
 - [ ] IT/security ทบทวนรูปแบบการเชื่อมต่อลูกค้า (§6.5) และ connector agent
+
+## 12. รูปแบบการให้บริการ (Deployment model) — ตัดสิน 2026-09-18: แบบผสม (D8)
+
+| กลุ่ม | รูปแบบ | ใครดูแล | แยกกันด้วยอะไร |
+|---|---|---|---|
+| **Tier 1 — หน่วยงานภายใน NT** | deployment เดียวของ NT แบ่งเป็นหลาย **workspace** (เช่น `nt-report`, `finance`) | NT | workspace_id + API key ที่จำกัด context + Chroma ต่อ workspace (Phase 4) — process/DB ใช้ร่วม เพราะอยู่ในองค์กรเดียวกัน |
+| **Tier 2 — ลูกค้าภายนอก** | **private deployment ต่อราย** — ระบบทั้งชุดแยก (API, web, MCP, app/config DB, Chroma, cache) | 2a: NT host ให้ (VM/namespace แยกต่อราย) · 2b: ติดตั้งในเครือข่ายลูกค้า (ข้อมูลออกนอกองค์กรไม่ได้) | แยกทุกอย่าง: ข้อมูล, ประวัติคำถาม, knowledge/golden, key, credential, LLM |
+| **Tier 3 — multi-tenant ใช้ API ร่วม (Plan 6)** | ยังไม่ทำ | — | **trigger:** มีลูกค้าภายนอกรายเล็กจำนวนมาก (~10–20 ราย) ที่ต้องการสมัครใช้เอง จนการดูแลหลาย deployment เป็นคอขวด |
+
+**หลักการ**
+- **โค้ดชุดเดียว image เดียว** ทุก deployment — ต่างกันแค่ config (env + config.db); ห้ามมี branch/โค้ดเฉพาะลูกค้า
+- ข้าม deployment ใช้ร่วมได้เฉพาะ: image, release, migration script, เอกสาร/runbook และ metrics สุขภาพระบบ (latency/error) — **ห้ามมีคำถาม, SQL หรือข้อมูลของลูกค้าออกมานอก deployment**
+- ใน deployment ของลูกค้าเองก็แบ่ง workspace ได้ (หน่วยงานของลูกค้า) ด้วยกลไก Phase 4 เดียวกัน
+- LLM เลือกต่อ deployment ตามสัญญา/D4 (LLM ในประเทศ, gateway ของลูกค้า หรือ provider แบบ zero data retention)
+- เอกสาร PDPA ต่อราย (DPA, ROPA, breach process — §6.6 ข้อ 8) ขอบเขตอยู่ที่ deployment ของลูกค้านั้น
+
+**ผลต่อ phase:** Phase 1–3 ไม่เปลี่ยน · Phase 4 = workspace ภายใน deployment (query worker ไม่บังคับ) · Phase 4.5 = policy ต่อ deployment + ต่อ workspace · Phase 7 = packaging ด้านล่าง · Plan 6 = Tier 3 (เลื่อนจนถึง trigger)
+
+**งาน packaging สำหรับ Tier 2 (Phase 7) — ยังไม่มีใน repo (ไม่มี Dockerfile/compose)**
+- [ ] Docker image เดียว (API + frontend + MCP servers) มี version + docker-compose (หรือ Helm) ต่อ deployment
+- [ ] env template + secrets (LLM keys, credential ของ source ลูกค้า) — ไม่ฝังใน image
+- [ ] bootstrap deployment ใหม่: init DB + `scripts/migrate_*.py` (รันซ้ำได้อยู่แล้ว) + สร้าง admin + context แรก + ลงทะเบียน source
+- [ ] backup/restore ต่อ deployment, upgrade หนึ่งคำสั่งต่อราย + rollback
+- [ ] ตัวเลือก Postgres สำหรับ app/config DB เมื่อใช้งานหนัก
+- [ ] monitoring รวมศูนย์ (เฉพาะ health/latency/error) + ทะเบียน deployment (ลูกค้า, version, ผู้ติดต่อ, วันหมดสัญญา)
+- [ ] 2b on-prem: runbook ติดตั้งในเครือข่ายลูกค้า + วิธีส่ง update แบบ offline
