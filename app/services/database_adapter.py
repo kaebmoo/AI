@@ -563,16 +563,20 @@ class DuckDBFileAdapter(DatabaseAdapter):
                 raise PermissionError(f"Only registered views can be queried on a file source: {name}")
 
     def execute_query(self, sql: str, params: Optional[tuple] = None, max_rows: Optional[int] = None) -> List[Dict]:
+        return self.query(sql, params, max_rows)[0]
+
+    def query(self, sql: str, params: Optional[tuple] = None, max_rows: Optional[int] = None):
+        """(rows, column names) — column names survive a zero-row result (xlsx export header)."""
         cur = self.cursor()
         try:
             sql = _sqlite_like(sql)
             self._check_select_over_views(cur, sql)
             cur.execute(sql, params) if params else cur.execute(sql)
             if not cur.description:
-                return []
+                return [], []
             columns = [d[0] for d in cur.description]
             rows = cur.fetchmany(max_rows) if max_rows else cur.fetchall()
-            return [{c: _sqlite_value(v) for c, v in zip(columns, row)} for row in rows]
+            return [{c: _sqlite_value(v) for c, v in zip(columns, row)} for row in rows], columns
         finally:
             cur.close()
 

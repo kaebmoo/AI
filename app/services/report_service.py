@@ -94,8 +94,7 @@ def _run_export_sql(sql: str, max_rows: int, context_name: str = None):
 
     source = source_resolver.for_context(context_name)
     if source.adapter is not None:
-        rows = source.adapter.execute_query(sql, max_rows=max_rows)
-        return rows, list(rows[0].keys()) if rows else []
+        return source.adapter.query(sql, max_rows=max_rows)
 
     # SQLite = a sqlite:// URL or a bare file path (no URL scheme) — never guess
     # from the filename extension (.sqlite3 / extensionless files are valid SQLite)

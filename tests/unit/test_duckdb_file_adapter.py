@@ -65,6 +65,9 @@ class TestViews:
         row = adapter.execute_query("SELECT 1.0 / 0 AS a, 0.0 / 0 AS b, 2.5 AS c")[0]
         assert row == {"a": None, "b": None, "c": 2.5}  # inf/nan would be invalid JSON
 
+    def test_zero_rows_keep_column_names(self, adapter):  # xlsx export header
+        assert adapter.query("SELECT bu, revenue FROM feed_x_fact_bu_monthly WHERE year_month = 1") == ([], ["bu", "revenue"])
+
     def test_row_cap_and_truncated_flag(self, adapter):
         result = execute_select(adapter, "SELECT * FROM feed_x_fact_bu_monthly", limit=2)
         assert result["row_count"] == 2 and result["truncated"] is True
