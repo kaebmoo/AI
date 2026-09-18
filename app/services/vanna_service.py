@@ -111,29 +111,28 @@ class VannaService(ChromaDB_VectorStore, VannaBase):
         logger.info("Vanna Brain Sync Complete.")
 
     def _sync_ddl(self, service: SchemaService):
-        """Train DDL from Schema Metadata"""
-        # We construct DDLs for all tables managed by SchemaService
-        tables = service.get_all_tables()
-        
-        for table in tables:
-            # generating "Enhanced DDL" using metadata
-            ddl = None
-            try:
-                with service.engine.connect() as conn:
-                    res = conn.execute(
-                        text("SELECT sql FROM sqlite_master WHERE type='table' AND name = :table_name"),
-                        {"table_name": table},
-                    )
-                    row = res.fetchone()
-                    if row:
-                        ddl = row[0]
-            except Exception as e:
-                logger.warning(f"Error getting DDL for {table}: {e}")
-            
-            if ddl:
-                # Add metadata context to DDL training
-                self.train(ddl=ddl)
-                logger.info(f"Trained DDL: {table}")
+        """Train the DDL of each active context's main view — the views the LLM should query;
+        raw tables stay out (they would pull SQL toward them).
+
+        DDL is read from the business DB: the config DB's sqlite_master never had these
+        objects, so no DDL was ever trained (REMAIN-9.4).
+        """
+        with service.engine.connect() as conn:
+            views = sorted({row[0] for row in conn.execute(text(
+                "SELECT main_view FROM schema_contexts WHERE is_active = 1 AND main_view IS NOT NULL"))})
+        with service.business_engine.connect() as conn:
+            for name in views:
+                try:
+                    row = conn.execute(
+                        text("SELECT sql FROM sqlite_master WHERE type IN ('table', 'view') AND name = :name"),
+                        {"name": name},
+                    ).fetchone()
+                except Exception as e:
+                    logger.warning(f"Error getting DDL for {name}: {e}")
+                    continue
+                if row and row[0]:
+                    self.train(ddl=row[0])
+                    logger.info(f"Trained DDL: {name}")
 
     def _sync_documentation(self, service: SchemaService):
         """Train Documentation — DB-driven, no static files."""

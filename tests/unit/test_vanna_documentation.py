@@ -753,3 +753,27 @@ class TestMarkBrainDirtyRouteIntegration:
                 f"{module_path} imports mark_brain_dirty but never calls it "
                 f"(found {count} references, need >= 2)"
             )
+
+
+def test_sync_ddl_trains_context_main_views_from_the_business_db(tmp_path):
+    """REMAIN-9.4: DDL comes from the business DB (config DB never had it); raw tables stay out."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+    from sqlalchemy import create_engine, text
+    from app.services.vanna_service import VannaService
+
+    config = create_engine(f"sqlite:///{tmp_path / 'config.db'}")
+    business = create_engine(f"sqlite:///{tmp_path / 'biz.db'}")
+    with config.begin() as conn:
+        conn.execute(text("CREATE TABLE schema_contexts (name TEXT, main_view TEXT, is_active INTEGER)"))
+        conn.execute(text("INSERT INTO schema_contexts VALUES ('revenue', 'revenue_search', 1), ('old', 'v_old', 0)"))
+    with business.begin() as conn:
+        conn.execute(text("CREATE TABLE revenue (YEAR INT, V REAL)"))
+        conn.execute(text("CREATE VIEW revenue_search AS SELECT YEAR AS year, V AS revenue FROM revenue"))
+        conn.execute(text("CREATE VIEW v_old AS SELECT * FROM revenue"))
+
+    vanna = VannaService.__new__(VannaService)
+    vanna.train = MagicMock()
+    vanna._sync_ddl(SimpleNamespace(engine=config, business_engine=business))
+    trained = [c.kwargs["ddl"] for c in vanna.train.call_args_list]
+    assert len(trained) == 1 and "CREATE VIEW revenue_search" in trained[0]
