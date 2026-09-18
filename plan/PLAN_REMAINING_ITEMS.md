@@ -346,6 +346,41 @@ Deferred (ทำตอน Plan 6 SaaS)
 
 ---
 
+## REMAIN-9: Wrong-DB / broken paths ที่พบระหว่าง Plan 7 Phase 1 (2026-09-18)
+
+**Plan:** 7 (พบระหว่างไล่ query path) | **Priority:** ต่อข้อ | **Effort:** ต่อข้อ | รายละเอียด: `plan/FIX_NOTES.md` หัวข้อ Plan 7 Phase 1
+
+| # | ปัญหา | ไฟล์ | ผลกระทบ | Priority |
+|---|---|---|---|---|
+| 9.1 | onboarding facade ส่ง business DB path ให้ `ConfigApplicator`/`ConfigValidator` | `app/services/context_onboarding.py` (~L1156–1161) | onboard context ผ่าน UI: apply เขียนผิด DB (ล้มเงียบ), validate 500 | ⚡ High |
+| 9.2 | `/chat/train` เช็ค `isinstance(check_res, dict)` แต่ `call_tool` คืน str + validate กับ legacy DB เสมอ | `app/api/v1/chat.py` (~L859) | SQL ผิดไม่เคยถูกปฏิเสธก่อนบันทึกเป็น golden | Medium |
+| 9.3 | dedup-blocked result ไม่มี `context_name` → `"revenue"` ถูกบันทึก | `app/services/query_engine.py` (~L410) | follow-up ถูกส่งไป context ผิด | Medium |
+| 9.4 | `vanna_service._sync_ddl` หา DDL ใน config DB | `app/services/vanna_service.py` (~L116) | sync-brain ไม่เคย train DDL | Medium |
+| 9.5 | `hierarchy_service` (detect_changes / bootstrap_from_view / get_available_views) query view บน config DB; `scripts/extract_hierarchy.py` เขียน `master_hierarchy*` ลง business DB | `app/services/hierarchy_service.py`, `scripts/extract_hierarchy.py` | admin hierarchy ได้ผลว่าง / extract ลงผิด DB | Medium |
+| 9.6 | admin schema browser, dimension families, onboarding, sync-brain เห็นแค่ business DB เดิม | `app/api/v1/admin/*` | สำหรับ `feed_*` เห็นสำเนาเก่า ไม่ใช่ไฟล์ — ต้องผูกกับ source ของ context (ทำพร้อม Plan 7 Phase 4 admin) | Medium |
+| 9.7 | admin agent `onboarding_tools` เรียก method ที่ไม่มี (`inspect_view`, `onboard`) | `app/tools/admin/onboarding_tools.py` | tool fail ทุกครั้ง | Low |
+| 9.8 | `nt_metadata_mcp` query ตาราง config บน business DB (ล้มทุก tool — tool-loop เท่านั้น); `nt_validation` อ่าน rules จาก app.db (ผ่านเงียบ); `nt_validation.get_db` ไม่ `mode=ro` (dead) | `mcp_servers/` | tool-loop mode ได้ข้อมูล schema ไม่ได้ | Low |
+| 9.9 | dead code ชี้ DB ผิด: `matcha_examples.py`, `business_db.py`, `create_adapter`/`get_adapter_for_settings` | `app/services/` | ไม่มีผลตอนนี้ — cleanup | Low |
+
+---
+
+## REMAIN-10: Keyword index — fallback scan ช้า + rebuild ของจริง
+
+**Plan:** keyword-index fix (`0f3aaa7`) | **Priority:** Medium | **Effort:** 0.5–1 วัน
+
+### ปัญหา
+1. หลัง `0f3aaa7` value lookup ค้นข้อมูลจริงแล้ว แต่ fallback scan ทีละคอลัมน์ — `v_expense_mart` (333k แถว) ~2.2 วินาทีต่อ keyword ที่ไม่อยู่ใน index → คำถาม expense บางข้อช้าลง 2–5 วินาที
+2. keyword index ใน `config.db` จริงยังไม่ได้ rebuild — ถ้า rebuild ตอนนี้ คอลัมน์ตัวเลขเพิ่มคำสั้น ~479 คำ และ prompt ของ golden เปลี่ยน 37/63 ข้อ
+
+### วิธีแก้ (ข้อเสนอ)
+1. `search_db_for_keyword`: scan ครั้งเดียวหาว่าคอลัมน์ไหนมีค่าตรง (`SELECT MAX(c1 LIKE :kw ...), MAX(c2 LIKE :kw ...) FROM view`) แล้วค่อย `SELECT DISTINCT` เฉพาะคอลัมน์ที่เจอ — ผลเหมือนเดิมทุกกรณี, keyword ที่ไม่เจอเหลือ 1 scan
+2. rebuild: ไม่ index คอลัมน์ตัวเลข → rebuild บนสำเนา `config.db` → eval เทียบ → ทำของจริงพร้อม backup
+
+### ทดสอบ
+ผลของ `search_db_for_keyword` เท่าเดิมบน golden 63 ข้อ (deterministic, ไม่เรียก LLM) + latency ของ expense #6/17/34/36 ก่อน/หลัง
+
+---
+
 ## Backlog / Nice-to-Have
 
 | Item | Plan | Detail |

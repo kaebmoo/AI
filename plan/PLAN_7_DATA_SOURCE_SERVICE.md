@@ -142,6 +142,8 @@ Response เพิ่ม `data_as_of` ต่อ context ที่ใช้ (จ�
 - **Exit:** eval `feed_revenue` จาก file source ได้ value match เท่า F10 (14/14) โดยไม่ import; latency P50 ไม่แย่กว่า F10 (10.5s) เกิน 20%; context เดิม (non-feed) ยังผ่าน test suite เดิมทั้งหมด
 
 ### Phase 2 — Contract-driven knowledge + freshness (2–3 วัน)
+> ทำไปแล้วบางส่วนตอนแก้ publish race (2026-09-18, `820052e`): ตรวจ manifest ต่อ build (reconcile.ok + sha256) + ปฏิเสธเมื่อไม่ตรง + query cache ผูก build
+> เพิ่มจาก Phase 1: regen knowledge ด้วย contract 2.0.0 (ตอนนี้ยังเป็น 1.0.0) + กฎ `revenue_ytd` ห้าม SUM ข้ามงวด (#64 — รอ NT-Report แก้ contract) แล้ววัด eval ใหม่
 - ลงทะเบียน source พร้อม contract → gen knowledge + golden อัตโนมัติ (ยกจาก `gen_docs_from_contract` / `gen_golden_from_controls`)
 - ตรวจ `manifest.json` ทุก query (หรือ cache ตาม mtime/sha): ถ้า contract/schema_version เปลี่ยน → re-sync knowledge + `mark_brain_dirty()`
 - ถ้า `manifest.reconcile.ok = false` → ปฏิเสธตอบพร้อมเหตุผล (ไม่ตอบจากข้อมูลที่ไม่ผ่านการกระทบยอด)
@@ -371,11 +373,11 @@ NT-Report ไม่ต้อง import อะไรเข้า AI อีก ห
 - [ ] **Exit criterion value match 14/14 ยังไม่ถึง** — file source ได้ 13/14 **เท่ากับ legacy วันเดียวกันทุกรอบ** (ข้อ #64 "รายได้สะสมทั้งบริษัท… พ.ค. 2569": โมเดลเขียน `SUM(revenue_ytd) … month <= 5` ทั้งสอง source; F10 ก.ค. เขียน `= 5`) → ทางเลือก: (ก) ยอมรับ Phase 1 ด้วยเกณฑ์ "เท่ากับ legacy" (ข) เพิ่มกฎ "ห้าม SUM `revenue_ytd` ข้ามงวด" ใน contract/knowledge แล้ววัดใหม่ทั้งสอง source (ค) ถือเป็นงาน Phase 2 (contract-driven knowledge)
 - [ ] merge branch `plan7-phase1` เข้า main (ยังไม่ push ตามคำสั่ง)
 - [ ] ยืนยัน D1–D3 ที่ใช้ค่า default (§11.1) + การเพิ่ม `duckdb-engine`
-- [ ] ⚠️ **publish race (ต้องตัดสิน):** publisher ของ NT-Report (`tools/feed/feed.py` บรรทัด ~552 `shutil.rmtree(latest)` → เขียน CSV ทับที่เดิม → `manifest.json` เขียนท้ายสุด บรรทัด ~590) — คำถามที่เข้ามาระหว่าง publish (หลายสิบวินาที) อ่านไฟล์ครึ่งไฟล์ได้ → **ตอบงวดล่าสุดเป็นงวดเก่า / ยอด NULL โดย success=True** (reviewer reproduce ได้) — ทางเลือก: (ก) NT-Report publish แบบ atomic: build ลง dir ใหม่แล้วสลับ symlink `latest` (AI ตาม re-point ได้แล้ว มี test) (ข) AI ตรวจ `manifest.json` ทุก query (มีไฟล์ + ขนาดไฟล์ตรง `bytes`) ไม่ตรง = ปฏิเสธชัด ๆ แทนตอบผิดเงียบ (ดึงงาน Phase 2 มาก่อน) (ค) ลงทะเบียน snapshot `dist/revenue/<period>/` แทน `latest/` แล้ว register ใหม่ทุกงวด — **แนะนำ (ก)+(ข)**; ระหว่างนี้ อย่ารัน `run_all --feed` ช่วงที่มีคนใช้ หรือ `--legacy` ก่อน publish
+- [ ] **publish race** — ตัดสินแล้ว: แก้ทั้งสองฝั่ง | ✅ ฝั่ง AI เสร็จ `820052e` (ตรวจ manifest ต่อ build + stat ก่อน/หลังทุก query + cache ผูก build — replay: เดิมตอบผิดเงียบ 181 ครั้ง/20 วินาที → 0) | ⬜ ฝั่ง NT-Report: publish แบบ atomic (versioned build + สลับ symlink `latest`) — prompt ส่งแล้ว; ระหว่างนี้คำถามช่วง publish ได้ error ชัด ๆ แทนคำตอบ
 - [x] ⚠️ bug เดิม: `POST /admin/config/rebuild-keyword-index` ลบ keyword index ทิ้งหมด — แก้ในงานแยก `0f3aaa7` ซึ่ง commit อยู่บน branch `plan7-phase1` (ไม่ใช่งาน Plan 7) — ทำให้ value lookup ของ legacy context คืนค่าจริงแล้ว = พฤติกรรม legacy เปลี่ยน ตัดสินตอน merge ว่าจะแยก merge หรือไม่
 
 **ส่งต่อ Phase 2+:**
-- [ ] runtime ตรวจ manifest (reconcile/schema_version/sha) + `data_as_of`; query cache ผูกกับ manifest version (ตอนนี้ publish งวดใหม่ คำตอบเดิม cache ได้ถึง 30 นาที)
+- [x] runtime ตรวจ manifest ต่อ build (reconcile + sha256) + query cache ผูก build — `820052e` | [ ] ที่เหลือของ Phase 2: re-sync knowledge อัตโนมัติเมื่อ contract/schema_version เปลี่ยน + `data_as_of` ใน response
 - [ ] ลงทะเบียน expense/sales/ebt (script รองรับ `--domain` แล้ว ต้องมี context จาก `gen_docs_from_contract` ก่อน)
 - [ ] (ภายใต้ D8 แบบผสม: ไม่บังคับ — พิจารณาเมื่อ workspace ใน deployment เดียวมีความลับต่างระดับกันมาก หรือถ้าไปถึง Tier 3) พิจารณารัน SQL ของ file source **นอก process** (แบบ MCP subprocess ของ legacy) — DuckDB รันใน API process: bug/abort ของ DuckDB ในอนาคต (แบบ `enable_logging` ที่ปิดด้วย query gate แล้ว) จะล้มทั้ง API; gate ตรวจแล้วกับทุก vector ที่ reviewer เสนอ (`query()`, `json_execute_serialized_sql`, `FROM '/path'`, comment/quote tricks, subquery) — เหลือ scalar ที่ผ่านได้แค่ตัวอ่านอย่างเดียว/no-op (`current_setting`, `getvariable`, `write_log` ขณะ logging ปิด)
 - [ ] tool-loop `get_sample_values`/`get_table_stats` บน DuckDB (ตอนนี้ fail closed)

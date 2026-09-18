@@ -142,15 +142,15 @@ python -m scripts.datafeed.register_file_source --domain revenue \
 
 ### ข้อจำกัด (Phase 1)
 
-- ⚠️ **ห้าม publish ทับ `latest/` ขณะมีคนถาม:** publisher ปัจจุบันลบ `latest/` แล้วเขียน CSV ทับทีละไฟล์ — คำถามช่วงนั้นอาจได้ข้อมูลครึ่งไฟล์ (งวดล่าสุดผิด) โดยไม่ error — ให้ publish นอกเวลาใช้งาน หรือ `register_file_source --legacy` ก่อนแล้วลงทะเบียนกลับหลัง publish (ทางแก้ถาวรรอตัดสิน — PLAN_7 §11.7)
+- **ระหว่าง NT-Report publish:** publisher ปัจจุบันลบ `latest/` แล้วเขียน CSV ทับทีละไฟล์ — AI ตรวจ `manifest.json` (reconcile.ok + sha256 ทุกไฟล์) ครั้งเดียวต่อ build และ stat ไฟล์ก่อน/หลังทุก query → คำถามช่วง publish ได้ข้อความ "ข้อมูลกำลังถูก publish — กรุณาถามใหม่" **ไม่มีทางได้คำตอบจากไฟล์ครึ่งไฟล์** (replay จริง: 0 คำตอบผิด) — ช่วงนั้นถามไม่ได้จนกว่า publish เสร็จ จนกว่า NT-Report จะ publish แบบ atomic (สลับ symlink — PLAN_7 §11.7)
 - ไม่มี spill ลงดิสก์ (`temp_directory=''` — กัน process แย่ง spill dir กัน) → query ที่ใช้หน่วยความจำเกิน memory_limit จะ error แทน
 - file source = **local path เท่านั้น** (D1 default) — S3/HTTPS ยังไม่ทำ
 - อ่าน **CSV** เท่านั้น — Parquet ที่ bundle มีอยู่แล้วยังไม่ใช้ (ดูผล latency ใน `plan/archive/RESULT_P7_PHASE1.md`)
-- runtime ยังไม่ตรวจ `manifest.json` ซ้ำ (reconcile/schema_version เปลี่ยน) — ตรวจตอนลงทะเบียนเท่านั้น → Phase 2
+- ตรวจ manifest ต่อ build เฉพาะ source ที่มี `data_sources.manifest_file` (`register_file_source` ตั้งให้) — ยังไม่ re-sync knowledge อัตโนมัติเมื่อ contract/schema_version เปลี่ยน และยังไม่มี `data_as_of` ใน response → Phase 2
 - MCP tool `get_sample_values` / `get_table_stats` (ใช้เฉพาะ tool-loop mode) ตอบ error สำหรับ file source
   แทนการอ่าน DB เดิมเงียบ ๆ
 - หน้า admin (schema browser, onboarding, keyword index rebuild, sync-brain DDL) ยังเห็นแค่ business DB เดิม
-- query result cache (30 นาที): เปลี่ยน source แล้ว cache เดิมเป็น miss เอง แต่ publish งวดใหม่ลง `latest/` คำตอบเดิมยังถูก cache ได้ถึง 30 นาที — เรียก `refresh-cache` หลัง publish (Phase 2 จะผูกกับ manifest)
+- query result cache (30 นาที) ผูกกับ build: publish งวดใหม่หรือเปลี่ยน source แล้ว คำตอบเดิมไม่ถูกใช้ต่อ (ไม่ต้อง `refresh-cache`)
 
 ## Generate docs + golden จาก contract (Phase B, C)
 

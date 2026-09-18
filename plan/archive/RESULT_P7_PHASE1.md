@@ -101,7 +101,7 @@ gate ตรวจกับ SQL จริง 58 แบบ (SQL ที่โมเ
 | export 0 แถวไม่มีหัวคอลัมน์ | low | แก้ (`d9f7443`) |
 | ทุก process ใช้ spill dir ของ DuckDB ร่วมกัน → spill พร้อมกันทำ worker ล่ม (SIGSEGV) | medium | แก้ — `temp_directory=''` (`65f9ed1`) |
 | re-register/re-point แล้ว adapter เก่าไม่ถูกปล่อย (thread/memory รั่วต่อ publish) | low | แก้ — adapter เดียวต่อ source (`65f9ed1`) |
-| **publish ของ NT-Report ลบ `latest/` แล้วเขียนทับ → คำถามช่วง publish ได้งวดเก่า/ยอด NULL แบบ success** | medium | **ยังไม่แก้ — ขัดกับสมมติฐานของแผน (§3.2) รอตัดสิน** (PLAN_7 §11.7) |
+| **publish ของ NT-Report ลบ `latest/` แล้วเขียนทับ → คำถามช่วง publish ได้งวดเก่า/ยอด NULL แบบ success** | medium | ฝั่ง AI แก้แล้ว `820052e` (ตรวจ manifest ต่อ build — replay: ตอบผิดเงียบ 181 → 0) · ฝั่ง NT-Report (publish แบบ atomic) รอ |
 
 ## Commits (branch `plan7-phase1`)
 
