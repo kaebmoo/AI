@@ -240,3 +240,43 @@ def test_contract_scope_columns_are_synced(tmp_path):
         sync_knowledge(conn, "x", contract)
     with config.connect() as conn:
         assert json.loads(conn.execute(text("SELECT scope_columns FROM schema_contexts")).scalar()) == {"year_month": "time_key"}
+
+
+class TestCteScoping:
+    """Review finding (HIGH): a CTE inside a subquery legitimised an outer reference of the same
+    name — scoped legacy SQL could read raw tables / sqlite_master. CTEs are lexically scoped now."""
+
+    @pytest.mark.parametrize("sql", [
+        "SELECT SUM(V) AS s FROM revenue WHERE 1 IN (WITH revenue AS (SELECT 1) SELECT * FROM revenue)",
+        "SELECT SUM(V) AS s FROM v_other WHERE 1 IN (WITH v_other AS (SELECT 1) SELECT * FROM v_other)",
+        "SELECT name, sql FROM sqlite_master WHERE 1 IN (WITH sqlite_master AS (SELECT 1) SELECT * FROM sqlite_master)",
+        "SELECT * FROM (SELECT SUM(V) AS s FROM revenue) q, (WITH revenue AS (SELECT 1 AS x) SELECT x FROM revenue) r",
+        "SELECT year FROM revenue_search GROUP BY year HAVING year IN "
+        "(SELECT YEAR FROM revenue WHERE 1 IN (WITH revenue AS (SELECT 1) SELECT * FROM revenue))",
+        "WITH x AS (SELECT * FROM revenue) SELECT SUM(V) FROM x",       # CTE body reads a raw table
+        "WITH revenue AS (SELECT * FROM revenue) SELECT SUM(V) FROM revenue",  # non-recursive self-reference
+        "WITH a AS (SELECT * FROM b), b AS (SELECT 1 AS x) SELECT * FROM a",   # a body can't see a later CTE
+    ])
+    def test_legacy_bypasses_refused(self, env, sql):
+        from app.services.database_adapter import execute_select
+        out = execute_select(resolve(env, "revenue", {"year": 2025}).adapter, sql)
+        assert out["success"] is False and not out["data"]
+
+    def test_file_source_bypass_refused(self, env):
+        with pytest.raises(PermissionError):
+            resolve(env, "feed_x", {"org_code": "A"}).adapter.execute_query(
+                "SELECT SUM(revenue) FROM feed_x_fact_bu WHERE 1 IN (WITH feed_x_fact_bu AS (SELECT 1) SELECT * FROM feed_x_fact_bu)")
+        with pytest.raises(PermissionError):  # unscoped gate had the same flaw (system views)
+            env.for_context("feed_x").adapter.execute_query(
+                "SELECT * FROM duckdb_settings WHERE 1 IN (WITH duckdb_settings AS (SELECT 1) SELECT * FROM duckdb_settings)")
+
+    @pytest.mark.parametrize("sql,expected", [
+        ("WITH a AS (SELECT year, revenue FROM revenue_search), b AS (SELECT SUM(revenue) AS s FROM a) SELECT s FROM b",
+         [{"s": 6.0}]),
+        ("WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r WHERE n < 3) SELECT COUNT(*) AS c FROM r",
+         [{"c": 3}]),
+        ("SELECT (WITH t AS (SELECT revenue FROM revenue_search) SELECT SUM(revenue) FROM t) AS s", [{"s": 6.0}]),
+        ("SELECT year FROM revenue_search UNION SELECT year FROM revenue_search", [{"year": 2025}]),
+    ])
+    def test_legit_ctes_still_work(self, env, sql, expected):
+        assert resolve(env, "revenue", {"year": 2025}).adapter.execute_query(sql) == expected

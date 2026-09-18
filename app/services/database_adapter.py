@@ -443,36 +443,48 @@ def check_select(sql: str, allowed: set, qualified_ok: bool = True, cur=None) ->
                 _parser_conn = duckdb.connect()
             cur = _parser_conn.cursor()
     tree = json.loads(cur.execute("SELECT json_serialize_sql(?)", [sql]).fetchone()[0])
-    if tree.get("error") or len(tree.get("statements", [])) != 1:
+    if tree.get("error") or len(tree.get("statements", [])) != 1 \
+            or ((tree["statements"][0] or {}).get("node") or {}).get("type") not in ("SELECT_NODE", "SET_OPERATION_NODE"):
         raise PermissionError("Only a single SELECT statement is allowed on a file source")
-    refs, ctes = [], set()
 
-    def walk(node):
-        if isinstance(node, dict):
-            if node.get("type") == "TABLE_FUNCTION":
-                fn = (node.get("function") or {}).get("function_name")
-                raise PermissionError(f"Table function not allowed on a file source: {fn}")
-            if node.get("type") == "BASE_TABLE":
-                refs.append(node)
-            cte_map = node.get("cte_map")
-            if isinstance(cte_map, dict):
-                ctes.update(str(e.get("key", "")).lower() for e in cte_map.get("map", []) if isinstance(e, dict))
-            for value in node.values():
-                walk(value)
-        elif isinstance(node, list):
-            for value in node:
-                walk(value)
-
-    walk(tree["statements"])
-    for ref in refs:
+    def check(ref, visible):
         name = str(ref.get("table_name") or "").lower()
         schema = ref.get("schema_name") or ""
         if not qualified_ok and (ref.get("catalog_name") or schema):
             raise PermissionError(f"ภายใต้ scope ห้ามอ้างตารางแบบมี schema/catalog นำหน้า: {schema}.{name}")
-        if ref.get("catalog_name") or schema not in ("", "main") or name not in allowed | ctes:
+        if ref.get("catalog_name") or schema not in ("", "main") or name not in allowed | visible:
             if not qualified_ok:
                 raise PermissionError(f"ภายใต้ scope ใช้ได้เฉพาะตาราง {sorted(allowed)}: {name}")
             raise PermissionError(f"Only registered views can be queried on a file source: {name}")
+
+    def walk(node, visible: frozenset):
+        # CTE names are lexically scoped: a CTE body sees the CTEs before it (itself only when
+        # recursive), the statement body sees all of its WITH, and nothing leaks outward — a
+        # CTE inside a subquery must not legitimise an outer reference of the same name
+        if isinstance(node, list):
+            for value in node:
+                walk(value, visible)
+            return
+        if not isinstance(node, dict):
+            return
+        if node.get("type") == "TABLE_FUNCTION":
+            fn = (node.get("function") or {}).get("function_name")
+            raise PermissionError(f"Table function not allowed on a file source: {fn}")
+        if node.get("type") == "BASE_TABLE":
+            check(node, visible)
+        cte_map = node.get("cte_map")
+        entries = [e for e in (cte_map.get("map") or []) if isinstance(e, dict)] if isinstance(cte_map, dict) else []
+        names = [str(e.get("key", "")).lower() for e in entries]
+        for i, entry in enumerate(entries):
+            body = entry.get("value") or {}
+            recursive = ((body.get("query") or {}).get("node") or {}).get("type") == "RECURSIVE_CTE_NODE"
+            walk(body, visible | frozenset(names[:i + 1] if recursive else names[:i]))
+        inner = visible | frozenset(names)
+        for key, value in node.items():
+            if key != "cte_map":
+                walk(value, inner)
+
+    walk(tree["statements"], frozenset())
 
 
 def _shadow(execute, name: str, where: str, schema: str = "main") -> None:
