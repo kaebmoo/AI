@@ -374,6 +374,7 @@ NT-Report ไม่ต้อง import อะไรเข้า AI อีก ห
 **ส่งต่อ Phase 2+:**
 - [ ] runtime ตรวจ manifest (reconcile/schema_version/sha) + `data_as_of`; query cache ผูกกับ manifest version (ตอนนี้ publish งวดใหม่ คำตอบเดิม cache ได้ถึง 30 นาที)
 - [ ] ลงทะเบียน expense/sales/ebt (script รองรับ `--domain` แล้ว ต้องมี context จาก `gen_docs_from_contract` ก่อน)
+- [ ] พิจารณารัน SQL ของ file source **นอก process** (แบบ MCP subprocess ของ legacy) — DuckDB รันใน API process: bug/abort ของ DuckDB ในอนาคต (แบบ `enable_logging` ที่ปิดด้วย query gate แล้ว) จะล้มทั้ง API; gate ตรวจแล้วกับทุก vector ที่ reviewer เสนอ (`query()`, `json_execute_serialized_sql`, `FROM '/path'`, comment/quote tricks, subquery) — เหลือ scalar ที่ผ่านได้แค่ตัวอ่านอย่างเดียว/no-op (`current_setting`, `getvariable`, `write_log` ขณะ logging ปิด)
 - [ ] tool-loop `get_sample_values`/`get_table_stats` บน DuckDB (ตอนนี้ fail closed)
 - [ ] admin UI/endpoint (schema browser, onboarding, keyword index, sync-brain) ให้เห็น file source — ตอนนี้เห็นแค่ business DB เดิม (สำหรับ `feed_*` = สำเนาเก่า)
 - [ ] `/chat/train` validate SQL ตาม source ของ context
