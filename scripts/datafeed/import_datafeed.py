@@ -40,14 +40,18 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+def contract_file(source: Path, domain: str) -> Path:
+    path = source.parent / "contracts" / f"{domain}.yaml"
+    if not path.exists():
+        # allow --source pointing at an extracted handoff with contract alongside
+        path = source / domain / "latest" / f"{domain}.yaml"
+    return path
+
+
 def load_bundle(source: Path, domain: str):
     latest = source / domain / "latest"
     manifest = json.loads((latest / "manifest.json").read_text())
-    contract_path = source.parent / "contracts" / f"{domain}.yaml"
-    if not contract_path.exists():
-        # allow --source pointing at an extracted handoff with contract alongside
-        contract_path = latest / f"{domain}.yaml"
-    contract = yaml.safe_load(contract_path.read_text())
+    contract = yaml.safe_load(contract_file(source, domain).read_text())
     return latest, manifest, contract
 
 

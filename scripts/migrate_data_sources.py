@@ -32,6 +32,8 @@ def migrate(config_engine=None):
                 source_type TEXT NOT NULL,          -- 'legacy' | 'duckdb_file'
                 root_path TEXT,                     -- duckdb_file: directory the files live in
                 manifest_file TEXT,                 -- e.g. manifest.json: verified per build (reconcile + sha256)
+                contract_file TEXT,                 -- DataFeed contract yaml the context knowledge is generated from
+                knowledge_sha TEXT,                 -- contract sha + schema_version of the last knowledge sync
                 description TEXT,
                 is_active BOOLEAN DEFAULT 1,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -56,11 +58,15 @@ def migrate(config_engine=None):
             "VALUES (:name, 'legacy', 'business DB เดิม (BUSINESS_DB_PATH)') ON CONFLICT(name) DO NOTHING"
         ), {"name": LEGACY})
 
+    # Columns added after the first registries were created
     ds_columns = {c["name"] for c in inspect(config_engine).get_columns("data_sources")}
-    if "manifest_file" not in ds_columns:  # registries created before the manifest check
-        with config_engine.begin() as conn:
-            conn.execute(text("ALTER TABLE data_sources ADD COLUMN manifest_file TEXT"))
-        print("Added data_sources.manifest_file")
+    for column in ("manifest_file",   # verified per build (publish race)
+                   "contract_file",   # Phase 2: knowledge re-syncs when this file changes
+                   "knowledge_sha"):  # Phase 2: contract sha + schema_version the knowledge came from
+        if column not in ds_columns:
+            with config_engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE data_sources ADD COLUMN {column} TEXT"))
+            print(f"Added data_sources.{column}")
 
     existing = {c["name"] for c in inspect(config_engine).get_columns("schema_contexts")}
     with config_engine.begin() as conn:

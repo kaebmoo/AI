@@ -135,6 +135,9 @@ class SourceResolver:
             t["columns"] = json.loads(t["columns"])
         # .get: a registry migrated before manifest_file existed simply has no manifest check
         adapter = self._adapter(row["name"], row["root_path"], tables, row.get("manifest_file"))
+        if row.get("contract_file"):  # Phase 2: knowledge follows the contract (one stat per request)
+            from app.services.datafeed_knowledge import ensure_current
+            ensure_current(self._engine(), row, adapter.manifest)
         return ResolvedSource(row["name"], DUCKDB_FILE, adapter)
 
     def _adapter(self, name: str, root: str, tables: List[Dict], manifest_file: Optional[str]) -> DuckDBFileAdapter:

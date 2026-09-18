@@ -11,6 +11,10 @@ is only written after all of them pass:
 1. manifest reconcile.ok, 2. sha256 of every file used (allowlist = manifest files),
 3. row counts through the views, 4. control totals through the views.
 
+Registry, context knowledge (from the contract — app/services/datafeed_knowledge.py) and
+the contract pointer are written in one transaction; afterwards the knowledge re-syncs
+itself whenever the contract or the build's schema_version changes (Phase 2).
+
 Rollback to the imported copy (import_datafeed.py stays the fallback): --legacy
 
 Usage:
@@ -29,7 +33,9 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from scripts.datafeed.import_datafeed import check_control_totals, check_integrity_pre, load_bundle  # noqa: E402
+from scripts.datafeed.import_datafeed import (  # noqa: E402
+    check_control_totals, check_integrity_pre, contract_file, load_bundle,
+)
 
 DTYPE_DUCKDB = {"integer": "BIGINT", "double": "DOUBLE", "string": "VARCHAR"}
 
@@ -71,17 +77,23 @@ def verify_in_place(latest: Path, domain: str, contract: dict, manifest: dict, t
         check_control_totals(adapter.cursor(), latest, domain, contract)
 
 
-def register(config_engine, domain: str, root: Path, tables: list) -> None:
+def register(config_engine, domain: str, root: Path, tables: list, contract_path: Path, schema_version) -> tuple:
+    """Registry + knowledge in one transaction → (context, metadata rows, docs)."""
     from sqlalchemy import text
+    from app.services.datafeed_knowledge import knowledge_key, load_contract, sync_knowledge
 
+    # knowledge and its key from the same bytes — a contract edited mid-run can't be recorded as synced
+    contract, raw = load_contract(str(contract_path))
     with config_engine.begin() as conn:
         conn.execute(text(
-            "INSERT INTO data_sources (name, source_type, root_path, manifest_file, description) "
-            "VALUES (:name, 'duckdb_file', :root, 'manifest.json', :desc) "
+            "INSERT INTO data_sources (name, source_type, root_path, manifest_file, contract_file, knowledge_sha, "
+            "description) VALUES (:name, 'duckdb_file', :root, 'manifest.json', :contract, :key, :desc) "
             "ON CONFLICT(name) DO UPDATE SET source_type='duckdb_file', root_path=excluded.root_path, "
-            "manifest_file=excluded.manifest_file, description=excluded.description, is_active=1, "
+            "manifest_file=excluded.manifest_file, contract_file=excluded.contract_file, "
+            "knowledge_sha=excluded.knowledge_sha, description=excluded.description, is_active=1, "
             "updated_at=CURRENT_TIMESTAMP"
-        ), {"name": source_name(domain), "root": str(root), "desc": f"DataFeed {domain} (zero-import)"})
+        ), {"name": source_name(domain), "root": str(root), "contract": str(contract_path),
+            "key": knowledge_key(raw, schema_version), "desc": f"DataFeed {domain} (zero-import)"})
         source_id = conn.execute(
             text("SELECT id FROM data_sources WHERE name = :name"), {"name": source_name(domain)}
         ).scalar_one()
@@ -91,14 +103,11 @@ def register(config_engine, domain: str, root: Path, tables: list) -> None:
                 "INSERT INTO source_tables (source_id, table_name, file_name, columns, sha256) "
                 "VALUES (:sid, :table_name, :file_name, :columns, :sha256)"
             ), {"sid": source_id, **t, "columns": json.dumps(t["columns"])})
-        bound = conn.execute(text(
+        synced = sync_knowledge(conn, domain, contract)  # creates feed_<domain> when missing
+        conn.execute(text(
             "UPDATE schema_contexts SET source_id = :sid WHERE name = :ctx"
-        ), {"sid": source_id, "ctx": f"feed_{domain}"}).rowcount
-        if not bound:
-            raise SystemExit(
-                f"ABORT: context feed_{domain} ไม่มีใน schema_contexts — "
-                f"รัน gen_docs_from_contract ก่อน (rollback แล้ว)"
-            )
+        ), {"sid": source_id, "ctx": synced[0]})
+    return synced
 
 
 def bind_legacy(config_engine, domain: str) -> None:
@@ -137,8 +146,13 @@ def main():
     check_integrity_pre(latest, manifest, contract["datasets"])
     tables = build_tables(args.domain, contract, manifest)
     verify_in_place(root, args.domain, contract, manifest, tables)
-    register(config_engine, args.domain, root, tables)
-    print(f"Registered source '{source_name(args.domain)}' ({len(tables)} views) → feed_{args.domain} "
+    context, n_meta, n_docs = register(config_engine, args.domain, root, tables,
+                                       contract_file(Path(args.source), args.domain).absolute(),
+                                       manifest.get("schema_version"))
+    from app.services.datafeed_knowledge import mark_brain_dirty
+    mark_brain_dirty()
+    print(f"Knowledge: {context} ({n_meta} metadata rows, {n_docs} docs) — brain marked dirty")
+    print(f"Registered source '{source_name(args.domain)}' ({len(tables)} views) → {context} "
           f"in {time.time() - t0:.1f}s — no rows imported")
 
 
