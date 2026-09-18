@@ -96,7 +96,7 @@
 - Concurrency review: ทุก process เปิด view DB ไฟล์เดียวกัน → ใช้ spill dir ของ DuckDB (`<db>.tmp`, ชื่อไฟล์ตายตัว) ร่วมกัน → spill พร้อมกันทำไฟล์กันเสีย (SIGSEGV) — แก้แล้ว `temp_directory=''` (ไม่ spill; query ใหญ่เกิน memory_limit จะ error ชัด ๆ) และ resolver เก็บ adapter เดียวต่อ source (ไม่รั่ว instance ทุกครั้งที่ re-register/re-point) — `65f9ed1`
 
 **ข้อค้าง/ข้อจำกัดใหม่ (ส่งต่อ Phase 2+):**
-- **publish race** (ตัดสิน 2026-09-18: แก้สองฝั่ง): ✅ ฝั่ง AI `820052e` — ตรวจ manifest ต่อ build, stat ก่อน/หลังทุก query, `SourceUnavailable` (ไม่ใช่ SQL error → ไม่ส่งให้ LLM แก้ SQL), cache ผูก build; replay publisher แบบ NT-Report วน 20 วินาที: เดิมตอบผิดเงียบ **181** ครั้ง → **0** (ที่เหลือเป็นคำตอบถูก หรือ error "กำลัง publish") — ⬜ ฝั่ง NT-Report: publish แบบ atomic (prompt ส่งแล้ว)
+- **publish race** (ตัดสิน 2026-09-18: แก้สองฝั่ง): ✅ ฝั่ง AI `820052e` — ตรวจ manifest ต่อ build, stat ก่อน/หลังทุก query, `SourceUnavailable` (ไม่ใช่ SQL error → ไม่ส่งให้ LLM แก้ SQL), cache ผูก build; replay publisher แบบ NT-Report วน 20 วินาที: เดิมตอบผิดเงียบ **181** ครั้ง → **0** (ที่เหลือเป็นคำตอบถูก หรือ error "กำลัง publish") — ✅ ฝั่ง NT-Report code `7d639b0` (build ใหม่ทั้งชุด → สลับ symlink `latest`); replay layout ใหม่: 2,978 ถูก / 0 error / 0 ผิด — รอ NT-Report publish จริงครั้งแรก
 - query result cache (30 นาที) ผูกกับ source + build แล้ว (`e4b2f69`, `820052e`) — publish งวดใหม่ไม่ต้อง `refresh-cache`
 - runtime ตรวจ manifest ต่อ build แล้ว (`820052e`) — ที่เหลือ: re-sync knowledge อัตโนมัติเมื่อ contract เปลี่ยน + `data_as_of` (Phase 2)
 - พิจารณารัน SQL ของ file source **นอก process** (แบบ MCP subprocess ของ legacy) — DuckDB รันใน API process: bug/abort ของ DuckDB ในอนาคต (แบบ `enable_logging` ที่ปิดด้วย query gate แล้ว) จะล้มทั้ง API; gate ตรวจแล้วกับทุก vector ที่ reviewer เสนอ (`query()`, `json_execute_serialized_sql`, `FROM '/path'`, comment/quote tricks, subquery) — เหลือ scalar ที่ผ่านได้แค่ตัวอ่านอย่างเดียว/no-op (`current_setting`, `getvariable`, `write_log` ขณะ logging ปิด)
@@ -104,7 +104,7 @@
 - หน้า admin (schema browser, onboarding, dimension families, sync-brain DDL) เห็นแค่ business DB เดิม → สำหรับ `feed_*` จะเห็น **สำเนาเก่าที่ import ไว้** ไม่ใช่ไฟล์ (keyword index rebuild แก้แล้ว — scan source ของแต่ละ context, `0f3aaa7`)
 - `/chat/train` validate SQL กับ legacy DB เสมอ (ไม่ route ตาม context)
 - `.source_cache/<source>-<fingerprint>.duckdb` ของ fingerprint เก่าไม่ถูกลบ (ไฟล์ ~270KB ต่อครั้งที่ลงทะเบียนใหม่)
-- eval ข้อ YTD (#64 `revenue_ytd` ทั้งบริษัท) ตกทั้ง legacy และ file source วันนี้ — โมเดล (matcha gpt-4.1) เขียน `month <= 5` แล้ว SUM(revenue_ytd) (F10 เดือน ก.ค. เขียน `= 5`) — กฎ `bg8_ytd_not_summable` ใน contract ห้ามแค่ "sum revenue รายเดือน" ไม่ได้ห้าม sum `revenue_ytd` ข้ามงวดตรง ๆ → ควรเพิ่มกฎใน contract/knowledge (Phase 2) — ไม่ใช่ผลของ file source
+- ✅ eval ข้อ YTD (#64) แก้แล้ว 2026-09-18: NT-Report เพิ่มกฎ `ytd_point_in_time` (contract 2.0.1) → `gen_docs_from_contract` → eval file source 14/14 สองรอบ (เดิมโมเดลเขียน `month <= 5` แล้ว SUM `revenue_ytd` = 47,015,616,686.55 บาท แทน 15,749,891,371.23)
 
 ## จาก Keyword index engine fix (2026-09-18)
 

@@ -134,7 +134,7 @@ Response เพิ่ม `data_as_of` ต่อ context ที่ใช้ (จ�
 ### Phase 1 — Source registry + DuckDB file source (3–4 วัน) — ✅ DONE 2026-09-18
 > ผล (รายละเอียด `plan/archive/RESULT_P7_PHASE1.md`): `feed_revenue` อ่าน `DataFeed/dist/revenue/latest/` ตรง (0 แถว import) —
 > ตอบงวดล่าสุด **202608** ตรง `control_totals.csv` ขณะที่สำเนาที่ import ไว้ค้าง 202605;
-> eval file source **13/14 value_match เท่ากับ legacy วันเดียวกันทุกรอบ** (ข้อที่ตก #64 ตกเหมือนกันทั้งสอง source = โมเดลเปลี่ยนพฤติกรรม ไม่ใช่ source — **ยังไม่ถึง 14/14 ตาม exit criterion รอเจ้าของตัดสิน §11.7**);
+> eval file source **14/14 value_match** (2 รอบ, P50 6.7–6.8 s) หลัง NT-Report เพิ่มกฎ `ytd_point_in_time` ใน contract 2.0.1 และ regen knowledge (2026-09-18) — ก่อนหน้านั้น 13/14 เท่ากับ legacy (ข้อ #64 โมเดล SUM `revenue_ytd` ข้ามเดือน) → **exit criterion ครบ**;
 > latency P50 ≈ 6.1–6.3 s (legacy วันเดียวกัน 6.2–6.3 s, F10 10.5 s); pytest 635 → 695 passed (+60, ไม่มี test เดิมพัง)
 - ตาราง `data_sources`, `source_tables`; `schema_contexts.source_id` (context เดิมทั้งหมด → source "legacy" = business DB เดิม → ไม่มีอะไรพัง)
 - `DuckDBFileAdapter` + `SourceResolver` ต่อ request
@@ -143,7 +143,7 @@ Response เพิ่ม `data_as_of` ต่อ context ที่ใช้ (จ�
 
 ### Phase 2 — Contract-driven knowledge + freshness (2–3 วัน)
 > ทำไปแล้วบางส่วนตอนแก้ publish race (2026-09-18, `820052e`): ตรวจ manifest ต่อ build (reconcile.ok + sha256) + ปฏิเสธเมื่อไม่ตรง + query cache ผูก build
-> เพิ่มจาก Phase 1: regen knowledge ด้วย contract 2.0.0 (ตอนนี้ยังเป็น 1.0.0) + กฎ `revenue_ytd` ห้าม SUM ข้ามงวด (#64 — รอ NT-Report แก้ contract) แล้ววัด eval ใหม่
+> เพิ่มจาก Phase 1 (✅ ทำแล้ว 2026-09-18): regen knowledge ด้วย contract 2.0.1 + กฎ `revenue_ytd` ห้าม SUM ข้ามงวด → eval 14/14
 - ลงทะเบียน source พร้อม contract → gen knowledge + golden อัตโนมัติ (ยกจาก `gen_docs_from_contract` / `gen_golden_from_controls`)
 - ตรวจ `manifest.json` ทุก query (หรือ cache ตาม mtime/sha): ถ้า contract/schema_version เปลี่ยน → re-sync knowledge + `mark_brain_dirty()`
 - ถ้า `manifest.reconcile.ok = false` → ปฏิเสธตอบพร้อมเหตุผล (ไม่ตอบจากข้อมูลที่ไม่ผ่านการกระทบยอด)
@@ -370,10 +370,10 @@ NT-Report ไม่ต้อง import อะไรเข้า AI อีก ห
 
 ### 11.7 ข้อค้างใหม่จาก Phase 1 (2026-09-18)
 **รอเจ้าของตัดสิน:**
-- [ ] **Exit criterion value match 14/14 ยังไม่ถึง** — file source ได้ 13/14 **เท่ากับ legacy วันเดียวกันทุกรอบ** (ข้อ #64 "รายได้สะสมทั้งบริษัท… พ.ค. 2569": โมเดลเขียน `SUM(revenue_ytd) … month <= 5` ทั้งสอง source; F10 ก.ค. เขียน `= 5`) → ทางเลือก: (ก) ยอมรับ Phase 1 ด้วยเกณฑ์ "เท่ากับ legacy" (ข) เพิ่มกฎ "ห้าม SUM `revenue_ytd` ข้ามงวด" ใน contract/knowledge แล้ววัดใหม่ทั้งสอง source (ค) ถือเป็นงาน Phase 2 (contract-driven knowledge)
+- [x] **Exit criterion value match 14/14** — ✅ ครบ 2026-09-18: NT-Report เพิ่มกฎ `ytd_point_in_time` (contract 2.0.1, `2b64841`) + AI regen knowledge → eval file source 14/14 สองรอบ (#64 เขียน `month = 5` แล้ว)
 - [ ] merge branch `plan7-phase1` เข้า main (ยังไม่ push ตามคำสั่ง)
 - [ ] ยืนยัน D1–D3 ที่ใช้ค่า default (§11.1) + การเพิ่ม `duckdb-engine`
-- [ ] **publish race** — ตัดสินแล้ว: แก้ทั้งสองฝั่ง | ✅ ฝั่ง AI เสร็จ `820052e` (ตรวจ manifest ต่อ build + stat ก่อน/หลังทุก query + cache ผูก build — replay: เดิมตอบผิดเงียบ 181 ครั้ง/20 วินาที → 0) | ⬜ ฝั่ง NT-Report: publish แบบ atomic (versioned build + สลับ symlink `latest`) — prompt ส่งแล้ว; ระหว่างนี้คำถามช่วง publish ได้ error ชัด ๆ แทนคำตอบ
+- [ ] **publish race** — ✅ ฝั่ง AI `820052e` (replay: ตอบผิดเงียบ 181 → 0) · ✅ ฝั่ง NT-Report code แล้ว (`7d639b0` versioned build + symlink `latest`) — replay layout ใหม่กับฝั่ง AI: 2,978 คำตอบถูก, **0 error, 0 ผิด** ระหว่างสลับ build ต่อเนื่อง · ⬜ เหลือ: NT-Report รัน publish จริงครั้งแรก (ย้าย `latest/` เข้า `builds/` + สร้าง symlink) — ฝั่ง AI ไม่ต้องลงทะเบียนใหม่ (resolver ตาม realpath เอง)
 - [x] ⚠️ bug เดิม: `POST /admin/config/rebuild-keyword-index` ลบ keyword index ทิ้งหมด — แก้ในงานแยก `0f3aaa7` ซึ่ง commit อยู่บน branch `plan7-phase1` (ไม่ใช่งาน Plan 7) — ทำให้ value lookup ของ legacy context คืนค่าจริงแล้ว = พฤติกรรม legacy เปลี่ยน ตัดสินตอน merge ว่าจะแยก merge หรือไม่
 
 **ส่งต่อ Phase 2+:**

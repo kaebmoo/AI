@@ -12,7 +12,7 @@ context อื่นทั้งหมด (revenue, expense, transfer price, pl_
 | Exit criterion | ผล | ผ่าน? |
 |---|---|---|
 | pytest ไม่มี test เดิมพัง | 635 passed → **695 passed**, 3 skipped (+60 test ใหม่, test เดิมไม่ถูกแก้) | ✅ |
-| eval `feed_revenue` จาก file source value match 14/14 เท่า F10 | **13/14** — เท่ากับ legacy วันเดียวกันทุกรอบ; ข้อที่ตก (#64) ตกเหมือนกันทั้ง 2 source | ⚠️ ไม่ถึง 14/14 (ไม่ใช่ผลของ source — ดูด้านล่าง) |
+| eval `feed_revenue` จาก file source value match 14/14 เท่า F10 | **14/14** (2 รอบ) หลัง contract 2.0.1 + regen knowledge — ก่อนหน้านั้น 13/14 เท่ากับ legacy วันเดียวกัน (#64 = พฤติกรรมโมเดล ไม่ใช่ source) | ✅ |
 | latency P50 ไม่แย่กว่า 10.5 s เกิน 20% (≤ 12.6 s) | **5.88–6.27 s** (legacy วันเดียวกัน 6.16–6.26 s) | ✅ |
 | test: resolver เลือก engine ถูก / legacy ใช้ DB เดิม / อ่านนอก root ไม่ได้ / SQL เขียนถูกปฏิเสธ | มีครบ (`tests/unit/test_data_sources.py`, `tests/unit/test_duckdb_file_adapter.py`) | ✅ |
 | พิสูจน์ zero-import: งวดล่าสุด = งวดของไฟล์ ตรง control_totals | ตอบ **202608** = 3,434,072,699.62 บาท ตรง `control_totals.csv` (`__ALL__`) — สำเนาที่ import ค้าง 202605 | ✅ |
@@ -34,6 +34,8 @@ P50 = median, P95 = nearest-rank; ทุกรอบ strict exact_match = 0 เ�
 | หลัง #3 | `eval_20260918_1315` | **file** | เดียวกับหลัง #2 | 13/14 | #64 | 6.06 s | 7.36 s |
 | **หลัง final** | `eval_20260918_1323` | **file** | final (query gate, bind by name) | **13/14** | #64 | **5.88 s** | **8.27 s** |
 | หลัง manifest check | `eval_20260918_2108` | **file** | + ตรวจ manifest (`820052e`) + keyword-index fix (`0f3aaa7`) | 13/14 | #64 | 6.57 s | 9.07 s |
+| **หลัง contract 2.0.1** | `eval_20260918_2125` | **file** | + knowledge จาก contract 2.0.1 (กฎ `ytd_point_in_time`) | **14/14** | — | 6.81 s | 11.61 s |
+| หลัง contract 2.0.1 (ซ้ำ) | `eval_20260918_2127` | **file** | เดียวกัน | **14/14** | — | 6.67 s | 10.37 s |
 
 **สิ่งที่พบ:**
 - **หลัง #1 ตก 3 ข้อเพราะ source จริง:** โมเดลเขียน `bu LIKE '%HARD INFRA%'` — SQLite LIKE ไม่สนตัวพิมพ์ (ได้ค่า) แต่ DuckDB สน (0 แถว) → แก้ให้ file source รัน `LIKE` เป็น `ILIKE` (นอก literal) = พฤติกรรม SQLite → หายทั้ง 3 ข้อ

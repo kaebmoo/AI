@@ -142,7 +142,7 @@ python -m scripts.datafeed.register_file_source --domain revenue \
 
 ### ข้อจำกัด (Phase 1)
 
-- **ระหว่าง NT-Report publish:** publisher ปัจจุบันลบ `latest/` แล้วเขียน CSV ทับทีละไฟล์ — AI ตรวจ `manifest.json` (reconcile.ok + sha256 ทุกไฟล์) ครั้งเดียวต่อ build และ stat ไฟล์ก่อน/หลังทุก query → คำถามช่วง publish ได้ข้อความ "ข้อมูลกำลังถูก publish — กรุณาถามใหม่" **ไม่มีทางได้คำตอบจากไฟล์ครึ่งไฟล์** (replay จริง: 0 คำตอบผิด) — ช่วงนั้นถามไม่ได้จนกว่า publish เสร็จ จนกว่า NT-Report จะ publish แบบ atomic (สลับ symlink — PLAN_7 §11.7)
+- **ระหว่าง NT-Report publish:** publisher ปัจจุบันลบ `latest/` แล้วเขียน CSV ทับทีละไฟล์ — AI ตรวจ `manifest.json` (reconcile.ok + sha256 ทุกไฟล์) ครั้งเดียวต่อ build และ stat ไฟล์ก่อน/หลังทุก query → คำถามช่วง publish ได้ข้อความ "ข้อมูลกำลังถูก publish — กรุณาถามใหม่" **ไม่มีทางได้คำตอบจากไฟล์ครึ่งไฟล์** (replay จริง: 0 คำตอบผิด) — เมื่อ NT-Report publish ด้วยโค้ดใหม่ (`7d639b0`: build ใหม่ทั้งชุดแล้วสลับ symlink `latest`) จะไม่มีช่วงที่ถามไม่ได้เลย (replay: 2,978 คำตอบถูก 0 error ระหว่างสลับ build) — ฝั่ง AI ไม่ต้องลงทะเบียนใหม่
 - ไม่มี spill ลงดิสก์ (`temp_directory=''` — กัน process แย่ง spill dir กัน) → query ที่ใช้หน่วยความจำเกิน memory_limit จะ error แทน
 - file source = **local path เท่านั้น** (D1 default) — S3/HTTPS ยังไม่ทำ
 - อ่าน **CSV** เท่านั้น — Parquet ที่ bundle มีอยู่แล้วยังไม่ใช้ (ดูผล latency ใน `plan/archive/RESULT_P7_PHASE1.md`)
