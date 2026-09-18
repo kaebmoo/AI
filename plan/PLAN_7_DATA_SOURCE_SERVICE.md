@@ -333,8 +333,8 @@ NT-Report ไม่ต้อง import อะไรเข้า AI อีก ห
 | D7 | จังหวะเปลี่ยนไป entitlement token v2 — เสนอ: เมื่อมีผู้เรียกรายที่ 2 หรือก่อน Phase 7 | เจ้าของโครงการ | §6.3 |
 
 ### 11.2 งานฝั่ง NT-Report ที่ทำได้เลย (ไม่รอแผนนี้)
-- [ ] migration เพิ่ม `assistant_ask` ใน select values ของ `audit_logs.action` — ตอนนี้ `writeAudit` fail validation แบบเงียบ ไม่มี audit ของคำถามเลย
-- [ ] `assistant.pb.js` ส่ง `pinned_filters.period` แต่ฝั่ง AI คาด `year_month` — แก้ชื่อให้ตรง
+- [x] migration เพิ่ม `assistant_ask` ใน select values ของ `audit_logs.action` — ตอนนี้ `writeAudit` fail validation แบบเงียบ ไม่มี audit ของคำถามเลย — ✅ NT-Report `1440672`
+- [x] `assistant.pb.js` ส่ง `pinned_filters.period` แต่ฝั่ง AI คาด `year_month` — แก้ชื่อให้ตรง — ✅ NT-Report `1440672`
 - [ ] เอกสารรวมของ assistant ฝั่ง portal (ตอนนี้กระจายอยู่ใน `.env.example`, `DEPLOY_NOTES.md`, `CHANGELOG.md`)
 - [ ] (หลัง Phase 3) assistant config ต่อรายงาน แทน `ASSISTANT_CONTEXT_MAP` — §8 ข้อ 3–4
 
