@@ -1,6 +1,9 @@
 import json
+from types import SimpleNamespace
 
-from sqlalchemy import create_engine, text
+import pytest
+from sqlalchemy import create_engine, event, text
+from sqlalchemy.exc import OperationalError
 
 from app.services.schema import SchemaService as PackageSchemaService
 from app.services.schema_service import SchemaService
@@ -100,3 +103,81 @@ def test_build_keyword_index_rejects_malicious_table_name(tmp_path):
         remaining = conn.execute(text("SELECT COUNT(*) FROM schema_metadata")).scalar_one()
 
     assert remaining == 1
+
+
+def _split_dbs(tmp_path):
+    """Config DB (metadata + index) and business DB (the view) as separate files, like production."""
+    config = create_engine(f"sqlite:///{tmp_path / 'config.db'}")
+    business = create_engine(f"sqlite:///{tmp_path / 'business.sqlite'}")
+    with config.begin() as conn:
+        conn.execute(text("CREATE TABLE schema_metadata (id INTEGER PRIMARY KEY AUTOINCREMENT, table_name TEXT, column_name TEXT, is_groupable INTEGER)"))
+        conn.execute(text("CREATE TABLE keyword_value_index (id INTEGER PRIMARY KEY AUTOINCREMENT, keyword TEXT, column_name TEXT, column_value TEXT, table_name TEXT, context_name TEXT)"))
+        conn.execute(text("INSERT INTO schema_metadata (table_name, column_name, is_groupable) VALUES ('revenue', 'PRODUCT_NAME', 1)"))
+        conn.execute(text("INSERT INTO keyword_value_index (keyword, column_name, column_value, table_name, context_name) VALUES ('old', 'PRODUCT_NAME', 'Old Product', 'revenue_search', 'revenue')"))
+    with business.begin() as conn:
+        conn.execute(text("CREATE TABLE revenue_search (PRODUCT_NAME TEXT, YEAR INTEGER)"))
+        conn.execute(text("INSERT INTO revenue_search VALUES ('Trunk Radio', 2025), ('บริการ Cloud Connect', 2025)"))
+    return config, business
+
+
+def _index_values(config):
+    with config.connect() as conn:
+        return {row[0] for row in conn.execute(text("SELECT column_value FROM keyword_value_index"))}
+
+
+def test_rebuild_scans_business_db_and_replaces_index(tmp_path):
+    config, business = _split_dbs(tmp_path)
+    service = SchemaService(db_engine=config, business_engine=business)
+
+    count = service.build_keyword_index(context_name="revenue", table_name="revenue_search")
+
+    assert count > 0
+    assert _index_values(config) == {"Trunk Radio", "บริการ Cloud Connect"}
+    assert any(m["column_value"] == "Trunk Radio" for m in service.search_keyword_index("trunk", context_name="revenue"))
+
+
+@pytest.mark.parametrize("failure", ["select_raises", "no_values"])
+def test_failed_scan_keeps_existing_index(tmp_path, failure):
+    config, business = _split_dbs(tmp_path)
+    if failure == "no_values":
+        with business.begin() as conn:
+            conn.execute(text("DELETE FROM revenue_search"))
+    else:
+        @event.listens_for(business, "before_cursor_execute")
+        def _locked(conn, cursor, statement, *args):
+            if statement.startswith("SELECT DISTINCT"):
+                raise OperationalError(statement, None, Exception("database is locked"))
+
+    service = SchemaService(db_engine=config, business_engine=business)
+
+    assert service.build_keyword_index(context_name="revenue", table_name="revenue_search") == 0
+    assert _index_values(config) == {"Old Product"}
+
+
+def test_search_db_for_keyword_reads_business_db(tmp_path):
+    config, business = _split_dbs(tmp_path)
+    service = SchemaService(db_engine=config, business_engine=business)
+
+    matches = service.search_db_for_keyword("TRUNK", table_name="revenue_search", context_name="revenue")
+
+    assert [(m["column_name"], m["column_value"]) for m in matches] == [("PRODUCT_NAME", "Trunk Radio")]
+
+
+def test_rebuild_endpoint_scans_each_context_on_its_own_source(tmp_path, monkeypatch):
+    import app.services.data_sources as data_sources
+    from app.api.v1.admin.config import rebuild_keyword_index
+
+    config, business = _split_dbs(tmp_path)
+    # The injected service is bound to a DB without the view: only the resolver's engine has it
+    service = SchemaService(db_engine=config, business_engine=config)
+    monkeypatch.setattr(service, "get_all_contexts", lambda: [
+        {"name": "revenue", "main_view": "revenue_search"},
+        {"name": "broken", "main_view": "missing_view"},
+    ])
+    monkeypatch.setattr(data_sources, "source_resolver", SimpleNamespace(for_context=lambda name: SimpleNamespace(engine=business)))
+
+    result = rebuild_keyword_index(_current_user=None, schema_service=service)
+
+    assert result["failed_contexts"] == ["broken"]
+    assert result["total_entries"] > 0
+    assert _index_values(config) == {"Trunk Radio", "บริการ Cloud Connect"}

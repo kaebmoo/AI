@@ -166,23 +166,42 @@ def rebuild_keyword_index(
     _current_user: User = Depends(deps.require_admin),
     schema_service: SchemaService = Depends(deps.get_schema_service),
 ):
-    """Rebuild keyword value index for smart value lookup. Admin only."""
+    """Rebuild keyword value index for smart value lookup. Admin only.
+
+    A context whose scan fails or finds nothing keeps its existing index (failed_contexts).
+    """
+    from app.services.data_sources import source_resolver
+
     total = 0
+    failed = []
     try:
         contexts = schema_service.get_all_contexts()
         for context in contexts:
             ctx_name = context.get("name", "")
             main_view = context.get("main_view", "")
             if ctx_name and main_view:
+                count = 0
                 try:
-                    total += schema_service.build_keyword_index(ctx_name, main_view)
+                    # Plan 7: scan the context's own source, never the global business DB
+                    ctx_service = SchemaService(
+                        db_engine=schema_service.get_config_engine(),
+                        business_engine=source_resolver.for_context(ctx_name).engine,
+                    )
+                    count = ctx_service.build_keyword_index(ctx_name, main_view)
                 except Exception as exc:
                     logger.warning("Failed to build index for %s: %s", ctx_name, exc)
+                total += count
+                if not count:
+                    failed.append(ctx_name)
     except Exception as exc:
         logger.error("Failed to get contexts for index rebuild: %s", exc)
 
+    message = f"Keyword index rebuilt: {total} entries"
+    if failed:
+        message += f" (existing index kept for: {', '.join(failed)})"
     return {
         "status": "success",
-        "message": f"Keyword index rebuilt: {total} entries",
+        "message": message,
         "total_entries": total,
+        "failed_contexts": failed,
     }

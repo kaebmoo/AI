@@ -65,7 +65,11 @@ def get_searchable_columns(service: "SchemaService", context_name: str, table_na
 
 
 def build_keyword_index(service: "SchemaService", context_name: str = "revenue", table_name: str = "revenue_search") -> int:
-    """Scan searchable columns, extract keywords, and populate keyword_value_index table."""
+    """Scan searchable columns, extract keywords, and populate keyword_value_index table.
+
+    Reads the view on service.business_engine (the context's source), writes the index on the
+    config engine. Scans before deleting: a failed or empty scan keeps the existing index.
+    """
     columns = get_searchable_columns(service, context_name, table_name)
 
     inspector = inspect(service.business_engine)
@@ -77,12 +81,7 @@ def build_keyword_index(service: "SchemaService", context_name: str = "revenue",
 
     all_rows = []
 
-    with service.engine.begin() as conn:
-        conn.execute(
-            text("DELETE FROM keyword_value_index WHERE context_name = :ctx AND table_name = :tbl"),
-            {"ctx": context_name, "tbl": table_name},
-        )
-
+    with service.business_engine.connect() as conn:
         for column_name in columns:
             matching_col = next((column for column in actual_columns if column.upper() == column_name.upper()), None)
             if not matching_col:
@@ -98,8 +97,8 @@ def build_keyword_index(service: "SchemaService", context_name: str = "revenue",
                 )
                 values = [row[0] for row in result.fetchall() if row[0]]
             except SQLAlchemyError as exc:
-                logger.warning("Failed to scan %s: %s", matching_col, exc)
-                continue
+                logger.error("Failed to scan %s, existing keyword index kept: %s", matching_col, exc)
+                return 0
 
             for value in values:
                 value_str = str(value).strip()
@@ -119,16 +118,24 @@ def build_keyword_index(service: "SchemaService", context_name: str = "revenue",
                         }
                     )
 
-        if all_rows:
-            conn.execute(
-                text(
-                    """
-                        INSERT INTO keyword_value_index (keyword, column_name, column_value, table_name, context_name)
-                        VALUES (:keyword, :column_name, :column_value, :table_name, :context_name)
-                    """
-                ),
-                all_rows,
-            )
+    if not all_rows:
+        logger.error("Keyword index scan of %s found no values, existing index kept", table_name)
+        return 0
+
+    with service.engine.begin() as conn:
+        conn.execute(
+            text("DELETE FROM keyword_value_index WHERE context_name = :ctx AND table_name = :tbl"),
+            {"ctx": context_name, "tbl": table_name},
+        )
+        conn.execute(
+            text(
+                """
+                    INSERT INTO keyword_value_index (keyword, column_name, column_value, table_name, context_name)
+                    VALUES (:keyword, :column_name, :column_value, :table_name, :context_name)
+                """
+            ),
+            all_rows,
+        )
 
     logger.info("Keyword index built: %s entries for context=%s, table=%s", len(all_rows), context_name, table_name)
     clear_known_terms_cache()
@@ -217,7 +224,7 @@ def search_db_for_keyword(
     except SQLAlchemyError:
         return results
 
-    with service.engine.connect() as conn:
+    with service.business_engine.connect() as conn:
         for column_name in columns:
             matching_col = next((column for column in actual_columns if column.upper() == column_name.upper()), None)
             if not matching_col:
