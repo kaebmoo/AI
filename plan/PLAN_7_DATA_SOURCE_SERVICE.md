@@ -1,6 +1,6 @@
 # Plan 7: Data Source as a Service — ถามข้อมูลจากแหล่งที่ผู้ใช้กำหนด โดยไม่ต้อง import
 
-**สถานะ:** 🟡 Phase 1 ✅ DONE (2026-09-18) — Phase 2 🟡 code ครบ, exit ผ่าน 2/4 โดเมน (sales/ebt รอแก้ contract — §11.7) — Phase 3–7 ยังไม่เริ่ม | ผล: `plan/archive/RESULT_P7_PHASE1.md`, `plan/archive/RESULT_P7_PHASE2.md`
+**สถานะ:** 🟡 Phase 1 ✅ DONE (2026-09-18) — Phase 2 🟡 code ครบ, exit 2/4 โดเมน (sales/ebt รอ NT-Report แก้ contract — §11.7) — Phase 3 ✅ DONE (2026-09-19) — Phase 4–7 ยังไม่เริ่ม | ผล: `plan/archive/RESULT_P7_PHASE{1,2,3}.md` | งานฝั่ง NT-Report: `plan/PROMPT_NT_REPORT_P7.md`
 **ความสัมพันธ์กับแผนเดิม:** ต่อยอด/แทนที่บางส่วนของ `PLAN_6_SAAS.md` (ดู §9), รวม Plan 1B-C (MCP SSE + API key) ไว้ใน Phase 6
 **ผู้ใช้รายแรก:** NT-Report portal (F11 dashboard Q&A) — ปัจจุบันถูก disable เพราะยังไม่ได้ตั้ง key และข้อมูลใน AI ค้างที่ revenue 202605
 
@@ -155,7 +155,10 @@ Response เพิ่ม `data_as_of` ต่อ context ที่ใช้ (จ�
 - ขยายไป `feed_expense`, `feed_sales`, `feed_ebt`
 - **Exit:** 4 โดเมนตอบได้, eval แต่ละโดเมนเทียบ control_totals ผ่านเกณฑ์ value match ≥ 90%; publish รอบใหม่ของ NT-Report แล้ว AI เห็นงวดใหม่โดยไม่ต้องรันอะไร
 
-### Phase 3 — Scope enforcement (2 วัน)
+### Phase 3 — Scope enforcement (2 วัน) — ✅ DONE 2026-09-19
+> ผล (`plan/archive/RESULT_P7_PHASE3.md`): `scope` บังคับที่ชั้น SQL ทั้ง file source และ legacy (TEMP view shadow ทุกตาราง + gate อ้างได้เฉพาะตารางที่กรองแล้ว),
+> `schema_contexts.scope_columns` (จาก contract หรือ admin), key ที่ไม่ประกาศ = 400, cache/dedup รวม scope — ครบ 3 exit ทั้ง unit test และถามจริง;
+> review อิสระพบ bypass ระดับ high ใน gate (CTE scoping) — แก้แล้ว `525c5b6`. เหลือฝั่ง NT-Report: `scope_columns` ใน contract + PB hook ส่ง `scope`
 - `scope` → ห่อ view ด้วย WHERE; `scope_columns` ใน contract
 - **Exit:** test: scope `year_month=202607` แล้วถาม "เดือนล่าสุด" ได้ 202607 ไม่ใช่ 202608; scope หน่วยงาน A ถามถึงหน่วยงาน B ได้ 0 แถว/ปฏิเสธ; scope คอลัมน์ที่ไม่ประกาศ = 400
 
@@ -377,13 +380,13 @@ NT-Report ไม่ต้อง import อะไรเข้า AI อีก ห
 **รอเจ้าของตัดสิน:**
 - [x] **Exit criterion value match 14/14** — ✅ ครบ 2026-09-18: NT-Report เพิ่มกฎ `ytd_point_in_time` (contract 2.0.1, `2b64841`) + AI regen knowledge → eval file source 14/14 สองรอบ (#64 เขียน `month = 5` แล้ว)
 - [ ] merge branch `plan7-phase1` เข้า main (ยังไม่ push ตามคำสั่ง)
-- [ ] ยืนยัน D1–D3 ที่ใช้ค่า default (§11.1) + การเพิ่ม `duckdb-engine`
+- [x] ยืนยัน D1–D3 ที่ใช้ค่า default (§11.1) + การเพิ่ม `duckdb-engine` — ตัดสินแล้ว 2026-09-18
 - [x] **publish race** — ✅ ฝั่ง AI `820052e` (replay: ตอบผิดเงียบ 181 → 0) · ✅ ฝั่ง NT-Report code แล้ว (`7d639b0` versioned build + symlink `latest`) — replay layout ใหม่กับฝั่ง AI: 2,978 คำตอบถูก, **0 error, 0 ผิด** ระหว่างสลับ build ต่อเนื่อง · ⬜ เหลือ: NT-Report รัน publish จริงครั้งแรก (ย้าย `latest/` เข้า `builds/` + สร้าง symlink) — ฝั่ง AI ไม่ต้องลงทะเบียนใหม่ (resolver ตาม realpath เอง)
 - [x] ⚠️ bug เดิม: `POST /admin/config/rebuild-keyword-index` ลบ keyword index ทิ้งหมด — แก้ในงานแยก `0f3aaa7` ซึ่ง commit อยู่บน branch `plan7-phase1` (ไม่ใช่งาน Plan 7) — ทำให้ value lookup ของ legacy context คืนค่าจริงแล้ว = พฤติกรรม legacy เปลี่ยน ตัดสินตอน merge ว่าจะแยก merge หรือไม่
 
 **ส่งต่อ Phase 2+:**
 - [x] runtime ตรวจ manifest ต่อ build (reconcile + sha256) + query cache ผูก build — `820052e` | [x] re-sync knowledge อัตโนมัติ (`38ab63d`) + `data_as_of` (`deb0a7e`) — Phase 2
-- [x] ลงทะเบียน expense/sales/ebt (`a2b8568`) — [ ] **รอตัดสิน (Phase 2 exit):** sales/ebt ตอบเลขผิดความหมาย เพราะ contract ขาดกฎ — ทางเลือก A แก้ contract ที่ NT-Report (แนะนำ, มี prompt ใน RESULT_P7_PHASE2) / B กฎ+golden ฝั่ง AI / C ปิด Phase 2 ที่ 2 โดเมนแล้วไป Phase 3
+- [x] ลงทะเบียน expense/sales/ebt (`a2b8568`) — sales/ebt ตอบเลขผิดความหมาย เพราะ contract ขาดกฎ → ✅ **ตัดสิน 2026-09-19: ทางเลือก A** (แก้ contract ที่ NT-Report; เจ้าของกำหนด **EBT = ยอดขาย − ค่าใช้จ่าย**) และไป Phase 3 ได้เลย — [ ] รอ NT-Report ทำตาม `plan/PROMPT_NT_REPORT_P7.md` แล้วฝั่ง AI: `control_totals.filter` ใน gate/golden → เปิด context → eval
 - [ ] NT-Report ยังไม่ได้รัน publish แบบ atomic จริง (ตรวจ 2026-09-18: `latest/` ยังเป็นโฟลเดอร์, ไม่มี `build_id`) — ฝั่ง AI พร้อมแล้ว ไม่ต้องลงทะเบียนใหม่
 - [ ] schema เปลี่ยนแบบเพิ่ม/ลบคอลัมน์: knowledge re-sync เอง แต่ view (`source_tables`) ยังเป็นชุดคอลัมน์ตอนลงทะเบียน → ต้องรัน `register_file_source` ใหม่
 - [ ] (ภายใต้ D8 แบบผสม: ไม่บังคับ — พิจารณาเมื่อ workspace ใน deployment เดียวมีความลับต่างระดับกันมาก หรือถ้าไปถึง Tier 3) พิจารณารัน SQL ของ file source **นอก process** (แบบ MCP subprocess ของ legacy) — DuckDB รันใน API process: bug/abort ของ DuckDB ในอนาคต (แบบ `enable_logging` ที่ปิดด้วย query gate แล้ว) จะล้มทั้ง API; gate ตรวจแล้วกับทุก vector ที่ reviewer เสนอ (`query()`, `json_execute_serialized_sql`, `FROM '/path'`, comment/quote tricks, subquery) — เหลือ scalar ที่ผ่านได้แค่ตัวอ่านอย่างเดียว/no-op (`current_setting`, `getvariable`, `write_log` ขณะ logging ปิด)

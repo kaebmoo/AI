@@ -357,10 +357,10 @@ Deferred (ทำตอน Plan 6 SaaS)
 | 9.3 | ✅ 2026-09-19 — dedup-blocked result ไม่มี `context_name` → `"revenue"` ถูกบันทึก → แก้: ใส่ context ที่ resolve จาก request | `app/services/query_engine.py` (~L410) | follow-up ถูกส่งไป context ผิด | Medium |
 | 9.4 | ✅ 2026-09-19 — `vanna_service._sync_ddl` หา DDL ใน config DB → แก้: อ่านจาก business DB เฉพาะ main view ของ context ที่ active (ไม่ train ตาราง raw) — ผลต่อ accuracy ยังไม่ได้วัด (มีผลเมื่อ admin กด Sync Brain) | `app/services/vanna_service.py` (~L116) | sync-brain ไม่เคย train DDL | Medium |
 | 9.5 | ✅ 2026-09-19 — `hierarchy_service` (detect_changes / bootstrap_from_view / get_available_views) query view บน config DB; `scripts/extract_hierarchy.py` เขียน `master_hierarchy*` ลง business DB → แก้: อ่านข้อมูลผ่าน source ของ context (legacy/file), config อ่าน/เขียนที่ config DB; script เลิกใช้ `--db` | `app/services/hierarchy_service.py`, `scripts/extract_hierarchy.py` | admin hierarchy ได้ผลว่าง / extract ลงผิด DB | Medium |
-| 9.6 | admin schema browser, dimension families, onboarding, sync-brain เห็นแค่ business DB เดิม | `app/api/v1/admin/*` | สำหรับ `feed_*` เห็นสำเนาเก่า ไม่ใช่ไฟล์ — ต้องผูกกับ source ของ context (ทำพร้อม Plan 7 Phase 4 admin) | Medium |
+| 9.6 | (ยังไม่ทำ — ทำพร้อม Plan 7 Phase 4) admin schema browser, dimension families, onboarding, sync-brain เห็นแค่ business DB เดิม | `app/api/v1/admin/*` | สำหรับ `feed_*` เห็นสำเนาเก่า ไม่ใช่ไฟล์ — ต้องผูกกับ source ของ context (ทำพร้อม Plan 7 Phase 4 admin) | Medium |
 | 9.7 | ✅ 2026-09-19 — admin agent `onboarding_tools` เรียก method ที่ไม่มี (`inspect_view`, `onboard`) → แก้: ใช้ pipeline เดียวกับ admin API, ส่ง path ของ business DB (เดิมส่ง session), `validate_config` query config DB (model `SchemaContext` ไม่มีอยู่จริง) | `app/tools/admin/onboarding_tools.py` | tool fail ทุกครั้ง | Low |
 | 9.8 | ✅ 2026-09-19 — `nt_metadata_mcp` query ตาราง config บน business DB (ล้มทุก tool — tool-loop เท่านั้น); `nt_validation` อ่าน rules จาก app.db (ผ่านเงียบ); `nt_validation.get_db` ไม่ `mode=ro` (dead) → แก้: nt-metadata ต่อ `CONFIG_DB_URL` (client ส่ง path absolute), rules อ่านผ่าน `ConfigSessionLocal`, ลบ adapter ที่ไม่ได้ใช้ | `mcp_servers/` | tool-loop mode ได้ข้อมูล schema ไม่ได้ | Low |
-| 9.9 | dead code ชี้ DB ผิด: `matcha_examples.py`, `business_db.py`, `create_adapter`/`get_adapter_for_settings` | `app/services/` | ไม่มีผลตอนนี้ — cleanup | Low |
+| 9.9 | (รอตัดสิน — ไม่ลบเอง) dead code ชี้ DB ผิด: `matcha_examples.py` (ใช้แค่ `scripts/test_matcha_improvements.py`), `business_db.py` (มีแค่ test ของตัวเองใน `test_db_separation.py` — ลบ = ลบ test), `create_adapter`/`get_adapter_for_settings` + adapter SQLite/PostgreSQL/MSSQL (PLAN_7 §4/§9 นับเป็นฐานของ SQL source ในอนาคต) | `app/services/` | ไม่มีผลตอนนี้ — cleanup | Low |
 
 ---
 
@@ -400,7 +400,7 @@ Deferred (ทำตอน Plan 6 SaaS)
 | sales | `metric` = actual + target ไม่มีกฎห้ามรวม; `control_totals.csv` รวมทั้งสอง; ไม่ชัดว่ายอดรวมบริษัทนับ BG 8/โครงการภาครัฐไหม | "ยอดขายรวม ก.ค. 69" ตอบ 6,978 M (actual จริง 3,290 M) |
 | ebt | ไม่มี control_totals; ไม่มีกฎ EBT = รายได้ − ค่าใช้จ่าย | "กำไร ก.ค. 69" ตอบ +7,201 M (ที่ถูก −1,088 M) |
 
-สถานะ: source + knowledge ลงทะเบียนแล้ว, context `feed_sales`/`feed_ebt` ปิดไว้ (`is_active=0`) — **รอเจ้าของเลือกทางเลือก A/B/C** (RESULT_P7_PHASE2)
+สถานะ: source + knowledge ลงทะเบียนแล้ว, context `feed_sales`/`feed_ebt` ปิดไว้ (`is_active=0`) — ✅ ตัดสิน 2026-09-19: **ทางเลือก A** (NT-Report แก้ contract; EBT = ยอดขาย − ค่าใช้จ่าย) → prompt `plan/PROMPT_NT_REPORT_P7.md`
 หลังแก้ contract (ทางเลือก A): knowledge re-sync เอง → เปิด context → `gen_golden_from_controls` → eval ≥ 90%
 
 ---

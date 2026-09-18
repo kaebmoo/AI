@@ -128,6 +128,8 @@ logic อยู่ที่ `app/services/datafeed_knowledge.py` (`gen_docs_from
   (default: คำโดเมน + marker `feed`/`datafeed`/`dashboard`/`แดชบอร์ด`, priority 1 → router เลือก feed เฉพาะเมื่อคำถามมี marker;
   portal ส่ง `context` มาตรง ไม่ผ่าน router)
 - schema เพิ่ม/ลบคอลัมน์: knowledge ตามเอง แต่ view ยังเป็นชุดคอลัมน์ตอนลงทะเบียน → รัน `register_file_source` ใหม่
+- `scope_columns` ใน contract (`{scope key: column}`, Plan 7 Phase 3) → `schema_contexts.scope_columns` — กำหนดว่า portal
+  จำกัดขอบเขตด้วย `scope` ได้ด้วย key อะไร; dataset ที่ไม่มีคอลัมน์นั้นจะใช้ไม่ได้ภายใต้ scope (ดู `docs/PORTAL_INTEGRATION.md`)
 
 **ย้อนกลับไปใช้ข้อมูลที่ import ไว้ (fallback):**
 `python -m scripts.datafeed.register_file_source --domain revenue --legacy` แล้วรัน

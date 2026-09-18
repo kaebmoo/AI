@@ -166,3 +166,27 @@
 - ⚠️ **DuckDB: `SELECT DISTINCT col … LIMIT n` ไม่ deterministic** (ไม่มี ORDER BY, aggregate แบบขนาน) → "Actual Values Found" ของ context file source อาจได้ค่าคนละชุดระหว่าง request เมื่อคอลัมน์มีค่าตรงเกิน limit
   (เรียก code เดิมซ้ำ 4 ครั้ง = 4 ผลต่างกัน) — ไม่แก้ (เพิ่ม ORDER BY = เปลี่ยนผลของ legacy ด้วย); ถ้าต้องการ prompt ที่ reproducible ให้ ORDER BY เฉพาะ dialect duckdb
 - probe บน SQLite ตัดครึ่ง `UPPER(x) LIKE UPPER(kw)` ออก — เท่ากันก็ต่อเมื่อไม่มี `PRAGMA case_sensitive_like=ON` (ไม่มีที่ไหนตั้ง)
+
+## จาก Plan 7 Phase 3 — Scope enforcement (2026-09-19)
+
+ผลลัพธ์/ตัวเลข: `plan/archive/RESULT_P7_PHASE3.md`
+
+**Decision ที่ทำระหว่างทาง (ตรวจ/กลับได้):**
+- **scope ผ่าน ContextVar (`request_scope`) ไม่ใช่ส่ง parameter** — resolver ทุกจุดใน request (prompt, value lookup, verifier, warning detector) ได้ scope เองโดยไม่ต้องแก้ signature; ลืมส่งที่ไหน = รั่ว จึงเลือกแบบ default-on
+- **legacy ที่มี scope รัน in-process** (ไม่ผ่าน nt_query MCP) — TEMP view ต้องอยู่บน connection เดียวกับ query; legacy ไม่มี scope ไม่เปลี่ยน
+- **ใช้ parser ของ DuckDB ตรวจ SQL ของ SQLite** — parse ไม่ผ่าน = ปฏิเสธ (fail closed); SQL จริง 1,548 ชุดตัดสินเหมือนเดิมทุกชุด
+- **ตารางที่ไม่มีคอลัมน์ของ scope = ใช้ไม่ได้** (รวม dim) — ปลอดภัยไว้ก่อน รอเจ้าของประกาศ `scope_exempt`
+- **scope_columns ของ legacy = ชื่อคอลัมน์เท่านั้น** (ไม่รับ expression เช่น `year*100+month`) — กัน SQL จาก config; revenue legacy ใช้ key `year`/`month` แยก
+- ตั้ง `scope_columns` ใน config จริงเฉพาะ period (`feed_revenue`, `feed_expense`) — org ให้ contract เป็นคนประกาศ
+
+**พบระหว่างทาง:**
+- ⚠️ **gate ของ Phase 1 มี bypass (CTE scoping)** — review อิสระพบ; แก้แล้ว `525c5b6` (รายละเอียดใน RESULT_P7_PHASE3) — ไม่เคยถูกใช้จริงเท่าที่ตรวจได้จาก chat_history (1,548 SQL ตัดสินเหมือนเดิม)
+- DuckDB: TEMP object อยู่ใน catalog `temp` schema `main` → `main.<view>` ใน TEMP view ชี้กลับหาตัวเอง (infinite recursion) ต้องอ้าง `"<db catalog>".main.<view>`
+- SQLite: ชื่อตารางใน body ของ view ใน main resolve ภายใน main เสมอ → shadow ตาราง raw ด้วย TEMP view ว่างได้โดย view หลักยังอ่านข้อมูลจริง
+- ต้องบอกโมเดลใน prompt ว่าตารางหลักใช้ไม่ได้ภายใต้ scope — ไม่งั้นโมเดลวนใช้ main view จนหมดรอบ retry
+- `tests/unit/test_vanna_documentation.py` รันไฟล์เดี่ยว ๆ error 12 ข้อ (pandas circular import บน py3.14) — มีก่อนงานนี้, full suite ผ่าน
+
+## จาก REMAIN-9 (2026-09-19)
+- 9.4: DDL ที่ train เพิ่มจะมีผลเมื่อ admin กด Sync Brain — ยังไม่ได้วัดผลต่อ eval
+- 9.5: `extract_hierarchy.py` เลิกรับ `--db` (อ่านข้อมูลผ่าน source ของ context, config ผ่าน CONFIG_DB_URL) — ไม่มี caller ที่ส่ง `--db`
+- 9.8: `get_business_rules(revenue)` ของ nt-metadata คืน 0 rule — ตารางอ่านได้แล้ว แต่ filter ของ tool อาจไม่ตรงกับข้อมูล (ไม่ได้ไล่ต่อ — tool-loop เท่านั้น)
