@@ -318,3 +318,40 @@ NT-Report ไม่ต้อง import อะไรเข้า AI อีก ห
 - `scripts/datafeed/*` + `docs/DATAFEED_INTEGRATION.md` — contract → knowledge
 - `docs/PORTAL_INTEGRATION.md`, `plan/archive/PLAN_F11_DASHBOARD_EMBED.md`
 - NT-Report: `DataFeed/README.md`, `DataFeed/SPEC.md`, `DataFeed/contracts/*.yaml`
+
+## 11. ประเด็นค้าง (Open items — อัปเดต 2026-09-18)
+
+### 11.1 ต้องตัดสินใจก่อนเริ่ม (Phase 0)
+| # | ประเด็น | ผู้ตัดสิน | ผลต่อแผน |
+|---|---|---|---|
+| D1 | AI server รันที่ไหน และอ่าน DataFeed ของ NT-Report ทางใด (local path / shared folder / S3-MinIO / HTTPS+token) | เจ้าของโครงการ + IT | กำหนดชนิด file source และ security ของ §6.7 |
+| D2 | ใช้ DuckDB เป็น engine ของ file source | ทีมพัฒนา | Phase 1 |
+| D3 | ชื่อ field `scope` แทน `pinned_filters` (หรือคง alias ช่วงเปลี่ยนผ่าน) | ทีมพัฒนา | API contract กับ NT-Report |
+| D4 | LLM ที่อนุญาตสำหรับข้อมูล confidential/personal — มี LLM ภายในหรือ endpoint ในประเทศที่ใช้ได้หรือไม่ | เจ้าของโครงการ + DPO | ถ้าไม่มี: source อ่อนไหวต้องใช้ `schema_only` เท่านั้น |
+| D5 | ใครเป็นคนกำหนด data classification ต่อคอลัมน์ (เจ้าของข้อมูลผ่าน contract / admin ลูกค้าตอน onboard) | เจ้าของโครงการ | Phase 3 / 4.5 |
+| D6 | เกณฑ์เลิกโหมด import (`import_datafeed.py`) — เสนอ: หลัง Phase 2 ผ่าน 2 รอบปิดงวด | เจ้าของโครงการ | §7 |
+| D7 | จังหวะเปลี่ยนไป entitlement token v2 — เสนอ: เมื่อมีผู้เรียกรายที่ 2 หรือก่อน Phase 7 | เจ้าของโครงการ | §6.3 |
+
+### 11.2 งานฝั่ง NT-Report ที่ทำได้เลย (ไม่รอแผนนี้)
+- [ ] migration เพิ่ม `assistant_ask` ใน select values ของ `audit_logs.action` — ตอนนี้ `writeAudit` fail validation แบบเงียบ ไม่มี audit ของคำถามเลย
+- [ ] `assistant.pb.js` ส่ง `pinned_filters.period` แต่ฝั่ง AI คาด `year_month` — แก้ชื่อให้ตรง
+- [ ] เอกสารรวมของ assistant ฝั่ง portal (ตอนนี้กระจายอยู่ใน `.env.example`, `DEPLOY_NOTES.md`, `CHANGELOG.md`)
+- [ ] (หลัง Phase 3) assistant config ต่อรายงาน แทน `ASSISTANT_CONTEXT_MAP` — §8 ข้อ 3–4
+
+### 11.3 งานค้างจาก F11 (ยังต้องทำก่อนเปิดใช้จริง — จาก `FIX_NOTES.md`)
+- [ ] ออก API key จริงให้ portal (`docs/PORTAL_INTEGRATION.md`) — ควรออกหลัง Phase 4 เพื่อให้ผูก workspace/allowed_contexts ได้เลย
+- [ ] E2E ผ่าน PB: ผู้ใช้ไม่มีสิทธิ → 403 และไม่มี call ออก, audit ครบ, rate limit ทำงานจริง
+- [ ] เทียบตัวเลข 10 คำถาม vs dashboard → `plan/archive/RESULT_F11.md`
+
+### 11.4 สถานะข้อมูล ณ วันที่เขียนแผน
+- business DB ของ AI มีแค่ `feed_revenue` 202605 (import 2026-07-11) ขณะที่ DataFeed มี revenue/expense 202608, sales/ebt 202607 — ถ้าต้องการเปิดใช้ก่อน Phase 1 เสร็จ ต้อง import ด้วยมือ (โหมดเดิม) ไปก่อน
+
+### 11.5 ต้องตรวจทางเทคนิคระหว่างทำ
+- [ ] option ของ DuckDB สำหรับจำกัด path/ปิด external access และ lock config — ยืนยันกับเวอร์ชันที่ใช้จริง (Phase 1)
+- [ ] latency ของ CSV scan เทียบ F10 (10.5s P50) — ถ้าเกิน 20% ทำ Parquet cache (Phase 1)
+- [ ] `PIIRedactingFormatter` เป็น regex — ไม่ครอบคลุมชื่อคน/ที่อยู่/เลขบัญชี; ประเมินว่าต้องเพิ่มหรือพึ่ง classification แทน (Phase 4.5)
+- [ ] ทุกจุดที่ส่งข้อมูลให้ provider (ไม่ใช่แค่ `explain_result` และ onboarding) — ต้องไล่ให้ครบก่อนเขียน test ดัก `schema_only` (Phase 4.5)
+
+### 11.6 ต้องทบทวนโดยฝ่ายอื่น
+- [ ] DPO / ฝ่ายกฎหมาย ทบทวน §6.6 ข้อ 8 (controller/processor, DPA, ROPA ม.40, แจ้งเหตุ ม.37(4), ส่งข้อมูลต่างประเทศ ม.28–29) — **บังคับก่อน Phase 7**
+- [ ] IT/security ทบทวนรูปแบบการเชื่อมต่อลูกค้า (§6.5) และ connector agent
