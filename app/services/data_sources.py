@@ -17,6 +17,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import threading
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -121,7 +122,10 @@ class SourceResolver:
         return ResolvedSource(row["name"], DUCKDB_FILE, self._adapter(row["name"], row["root_path"], tables))
 
     def _adapter(self, name: str, root: str, tables: List[Dict]) -> DuckDBFileAdapter:
-        fp = hashlib.sha256(json.dumps([name, root, tables], sort_keys=True).encode()).hexdigest()[:12]
+        # realpath in the key: DuckDB pins allowed_paths to the real files at SET time, so a
+        # re-pointed symlinked root (latest/ → 202609/) needs a new adapter, not the old lock
+        key = [name, root, os.path.realpath(root) if root else None, tables]
+        fp = hashlib.sha256(json.dumps(key, sort_keys=True).encode()).hexdigest()[:12]
         with self._lock:
             adapter = self._adapters.get(fp)
             if adapter is None:

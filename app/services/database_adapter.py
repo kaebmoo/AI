@@ -13,6 +13,7 @@ Usage:
     result = adapter.execute_query("SELECT * FROM revenue_search LIMIT 10")
 """
 
+import json
 import os
 import re
 import sqlite3
@@ -424,6 +425,10 @@ class DuckDBFileAdapter(DatabaseAdapter):
         extension INSTALL/LOAD
       - ``lock_configuration=true`` → SQL cannot SET any of the above back
       - every query runs on a fresh cursor → TEMP objects die with it
+      - execute_query (the untrusted-SQL path) parses with DuckDB's own parser and
+        allows one SELECT over registered views/CTEs only — no table functions
+        (lock_configuration does not cover e.g. enable_logging(), which can abort
+        the process or log other users' SQL)
     """
 
     def __init__(self, name: str, root: str, tables: List[Dict], cache_dir: str):
@@ -450,6 +455,7 @@ class DuckDBFileAdapter(DatabaseAdapter):
                 raise FileNotFoundError(f"Source file not found: {path}")
             views.append((t["table_name"], path, t["columns"]))
         self.files = sorted({p for _, p, _ in views})
+        self._views = {t.lower() for t, _, _ in views}
 
         db_path = self._build_view_db(views, cache_dir)
         self._conn = duckdb.connect(db_path, read_only=True, config={
@@ -512,10 +518,41 @@ class DuckDBFileAdapter(DatabaseAdapter):
             )
         return self._sa_engine
 
+    def _check_select_over_views(self, cur, sql: str) -> None:
+        """Allowlist gate, parsed by DuckDB: one SELECT reading only registered views or its own CTEs."""
+        tree = json.loads(cur.execute("SELECT json_serialize_sql(?)", [sql]).fetchone()[0])
+        if tree.get("error") or len(tree.get("statements", [])) != 1:
+            raise PermissionError("Only a single SELECT statement is allowed on a file source")
+        refs, ctes = [], set()
+
+        def walk(node):
+            if isinstance(node, dict):
+                if node.get("type") == "TABLE_FUNCTION":
+                    fn = (node.get("function") or {}).get("function_name")
+                    raise PermissionError(f"Table function not allowed on a file source: {fn}")
+                if node.get("type") == "BASE_TABLE":
+                    refs.append(node)
+                cte_map = node.get("cte_map")
+                if isinstance(cte_map, dict):
+                    ctes.update(str(e.get("key", "")).lower() for e in cte_map.get("map", []) if isinstance(e, dict))
+                for value in node.values():
+                    walk(value)
+            elif isinstance(node, list):
+                for value in node:
+                    walk(value)
+
+        walk(tree["statements"])
+        for ref in refs:
+            name = str(ref.get("table_name") or "").lower()
+            if ref.get("catalog_name") or (ref.get("schema_name") or "") not in ("", "main") \
+                    or name not in self._views | ctes:
+                raise PermissionError(f"Only registered views can be queried on a file source: {name}")
+
     def execute_query(self, sql: str, params: Optional[tuple] = None, max_rows: Optional[int] = None) -> List[Dict]:
         cur = self.cursor()
         try:
             sql = _sqlite_like(sql)
+            self._check_select_over_views(cur, sql)
             cur.execute(sql, params) if params else cur.execute(sql)
             if not cur.description:
                 return []

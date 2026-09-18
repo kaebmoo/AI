@@ -104,6 +104,23 @@ class TestResolver:
         assert a2 is not a1
         assert a2.execute_query("SELECT COUNT(*) AS n FROM feed_x_renamed")[0]["n"] == 3
 
+    def test_symlinked_root_repoint_is_followed(self, tmp_path, config_engine, resolver):
+        # NT-Report may publish latest/ as a symlink; DuckDB pins allowed_paths to the
+        # real files, so a re-point must yield a fresh adapter (old one would be denied)
+        for period in ("202607", "202608"):
+            d = tmp_path / period
+            d.mkdir()
+            (d / "fact_bu_monthly.csv").write_text(f"year_month,bu,revenue\n{period},01.A,1\n")
+        link = tmp_path / "live"
+        link.symlink_to(tmp_path / "202607")
+        with config_engine.begin() as conn:
+            conn.execute(text("UPDATE data_sources SET root_path = :r WHERE name = 'df_x'"), {"r": str(link)})
+        q = "SELECT MAX(year_month) AS m FROM feed_x_fact_bu_monthly"
+        assert resolver.for_context("feed_x").adapter.execute_query(q)[0]["m"] == 202607
+        link.unlink()
+        link.symlink_to(tmp_path / "202608")
+        assert resolver.for_context("feed_x").adapter.execute_query(q)[0]["m"] == 202608
+
     def test_name_variants_resolve_like_get_context_info(self, resolver):
         # get_context_info accepts 'feed x' for 'feed_x' — the data must follow the same row,
         # not fall back to legacy while the prompt describes the file source

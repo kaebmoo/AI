@@ -2,7 +2,8 @@
 Plan 7 Phase 1: DuckDBFileAdapter — zero-import file source, read-only, root-sandboxed.
 
 - DuckDB can't read outside the source root / outside the registered files
-- write SQL (INSERT/CREATE/COPY/ATTACH) is rejected by the F4 validator AND the engine
+- write SQL (INSERT/CREATE/COPY/ATTACH) is rejected by the F4 validator, the query
+  gate and the engine — each layer tested on its own
 """
 
 import pytest
@@ -58,19 +59,83 @@ class TestViews:
         assert result["row_count"] == 2 and result["truncated"] is True
 
 
-class TestRootSandbox:
+class TestEngineLock:
+    """Engine layer, reached with a raw cursor — no query gate, no F4 validator."""
+
     @pytest.mark.parametrize("sql", [
         "SELECT * FROM read_csv('{outside}')",
         "SELECT * FROM read_csv('{root}/secret.csv')",
         "SELECT * FROM read_text('/etc/passwd')",
         "SELECT * FROM glob('{root}/*')",
     ])
-    def test_engine_blocks_files_outside_allowlist(self, adapter, source_root, sql):
+    def test_blocks_files_outside_allowlist(self, adapter, source_root, sql):
         sql = sql.format(root=source_root, outside=source_root.parent / "outside.csv")
         with pytest.raises(Exception, match="(?i)permission|disabled"):
-            adapter.execute_query(sql)  # bypasses the validator on purpose
+            adapter.cursor().execute(sql)
 
-    def test_validator_also_rejects_file_functions(self, adapter, source_root):
+    @pytest.mark.parametrize("sql", WRITE_SQL)
+    def test_rejects_writes(self, adapter, source_root, sql):
+        with pytest.raises(Exception):
+            adapter.cursor().execute(sql.format(root=source_root))
+        assert not (source_root / "pwn.csv").exists() and not (source_root / "pwn.duckdb").exists()
+
+    def test_config_cannot_be_unlocked(self, adapter):
+        with pytest.raises(Exception, match="locked"):
+            adapter.cursor().execute("SET enable_external_access = true")
+
+    def test_temp_view_cannot_poison_later_queries(self, adapter):
+        adapter.cursor().execute("CREATE TEMP VIEW feed_x_fact_bu_monthly AS SELECT 0 AS year_month")
+        assert adapter.execute_query("SELECT COUNT(*) AS n FROM feed_x_fact_bu_monthly")[0]["n"] == 3
+
+    def test_registry_path_escaping_root_rejected(self, source_root, tmp_path):
+        bad = [{**TABLES[0], "file_name": "../outside.csv"}]
+        with pytest.raises(ValueError, match="outside source root"):
+            DuckDBFileAdapter("t2", str(source_root), bad, str(tmp_path / "cache"))
+
+
+class TestQueryGate:
+    """execute_query = the untrusted-SQL path: one SELECT over registered views, parsed by DuckDB."""
+
+    @pytest.mark.parametrize("sql", [
+        # lock_configuration does NOT cover these: file logging aborts the process,
+        # in-memory logging exposes other users' SQL via duckdb_logs
+        "SELECT * FROM enable_logging(storage='file', storage_path='/x')",
+        "SELECT * FROM enable_logging('QueryLog')",
+        "SELECT message FROM duckdb_logs",
+        "SELECT * FROM duckdb_settings()",
+        "SELECT * FROM information_schema.tables",
+        "SELECT * FROM query('SELECT 1')",
+        "SELECT * FROM read_csv('{root}/fact_bu_monthly.csv')",  # even the registered file, directly
+        "SELECT * FROM feed_x_fact_bu_monthly WHERE bu IN (SELECT k FROM read_csv('{root}/secret.csv'))",
+        "SELECT 1; SELECT 2",
+        *WRITE_SQL,
+    ])
+    def test_rejected(self, adapter, source_root, sql):
+        with pytest.raises(PermissionError):
+            adapter.execute_query(sql.format(root=source_root))
+
+    def test_rejected_query_leaves_source_usable(self, adapter):
+        with pytest.raises(PermissionError):
+            adapter.execute_query("SELECT * FROM enable_logging(storage='file', storage_path='/x')")
+        assert adapter.execute_query("SELECT COUNT(*) AS n FROM feed_x_fact_bu_monthly")[0]["n"] == 3
+
+    @pytest.mark.parametrize("sql", [
+        "WITH t AS (SELECT bu, SUM(revenue) AS r FROM feed_x_fact_bu_monthly GROUP BY bu) "
+        "SELECT a.bu, a.r FROM t a JOIN (SELECT bu FROM feed_x_fact_bu_monthly) b USING (bu)",
+        "SELECT bu FROM FEED_X_FACT_BU_MONTHLY UNION SELECT bu FROM main.feed_x_fact_bu_monthly",
+        "SELECT MAX(year_month) AS m FROM feed_x_fact_bu_monthly",
+    ])
+    def test_allowed(self, adapter, sql):
+        assert adapter.execute_query(sql)
+
+
+class TestValidator:
+    @pytest.mark.parametrize("sql", WRITE_SQL)
+    def test_rejects_writes(self, adapter, source_root, sql):
+        result = execute_select(adapter, sql.format(root=source_root))
+        assert result["success"] is False and result["issues"]
+
+    def test_rejects_file_functions(self, adapter, source_root):
         result = execute_select(adapter, f"SELECT * FROM read_csv('{source_root}/secret.csv')")
         assert result["success"] is False and "SQL validation failed" in result["error"]
 
@@ -79,29 +144,3 @@ class TestRootSandbox:
         sql = "SELECT PRODUCT_NAME FROM revenue_search WHERE glob('*CLOUD*', PRODUCT_NAME)"  # SQLite glob()
         assert ValidationService().validate_sql(sql)["valid"] is True  # legacy unchanged
         assert ValidationService().validate_sql(sql, file_source=True)["valid"] is False
-
-    def test_registry_path_escaping_root_rejected(self, source_root, tmp_path):
-        bad = [{**TABLES[0], "file_name": "../outside.csv"}]
-        with pytest.raises(ValueError, match="outside source root"):
-            DuckDBFileAdapter("t2", str(source_root), bad, str(tmp_path / "cache"))
-
-    def test_config_cannot_be_unlocked(self, adapter):
-        with pytest.raises(Exception, match="locked"):
-            adapter.execute_query("SET enable_external_access = true")
-
-
-class TestWriteRejected:
-    @pytest.mark.parametrize("sql", WRITE_SQL)
-    def test_validator_rejects(self, adapter, source_root, sql):
-        result = execute_select(adapter, sql.format(root=source_root))
-        assert result["success"] is False and result["issues"]
-
-    @pytest.mark.parametrize("sql", WRITE_SQL)
-    def test_engine_rejects_even_without_validator(self, adapter, source_root, sql):
-        with pytest.raises(Exception):
-            adapter.execute_query(sql.format(root=source_root))
-        assert not (source_root / "pwn.csv").exists() and not (source_root / "pwn.duckdb").exists()
-
-    def test_temp_view_cannot_poison_later_queries(self, adapter):
-        adapter.execute_query("CREATE TEMP VIEW feed_x_fact_bu_monthly AS SELECT 0 AS year_month")
-        assert adapter.execute_query("SELECT COUNT(*) AS n FROM feed_x_fact_bu_monthly")[0]["n"] == 3
