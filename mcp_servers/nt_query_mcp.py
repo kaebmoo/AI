@@ -231,6 +231,7 @@ def safe_column(db: QueryDatabaseAdapter, table_name: str, column_name: str) -> 
 # Single source of truth for SQL validation — app/services/validation_service.py
 # (top-level imports there are stdlib-only, so no app.config chain is dragged in)
 from app.services.validation_service import ValidationService
+from app.services.database_adapter import execute_select
 
 _validator = ValidationService(db=None)
 
@@ -285,57 +286,9 @@ def execute_query(
     Example:
         execute_query("SELECT year, SUM(revenue) FROM revenue_search GROUP BY year", limit=10)
     """
-    # Enforce limit bounds
-    limit = min(max(1, limit), 1000)
-
-    # Validate first if requested
-    if validate_first:
-        validation = validate_sql(sql)
-        if not validation["valid"]:
-            return {
-                "success": False,
-                "error": "SQL validation failed",
-                "issues": validation["issues"],
-                "data": [],
-                "row_count": 0,
-                "columns": [],
-                "truncated": False
-            }
-
-    try:
-        db = get_db()
-
-        # Row cap via fetchmany (engine-agnostic — no LIMIT string appending,
-        # which breaks on MSSQL and misfires on subqueries containing LIMIT).
-        # +1 row to detect truncation; `truncated` flag semantics unchanged.
-        rows = db.execute_query(sql, max_rows=limit + 1)
-
-        truncated = len(rows) > limit
-        if truncated:
-            rows = rows[:limit]
-
-        # Get columns from first row or empty
-        columns = list(rows[0].keys()) if rows else []
-
-        return {
-            "success": True,
-            "data": rows,
-            "row_count": len(rows),
-            "columns": columns,
-            "truncated": truncated,
-            "error": None
-        }
-
-    except Exception as e:
-        logger.error(f"Query execution error: {e}")
-        return {
-            "success": False,
-            "error": str(e),
-            "data": [],
-            "row_count": 0,
-            "columns": [],
-            "truncated": False
-        }
+    # Shared with the in-process file-source path (Plan 7) — one definition of
+    # limit bounds, validation, fetchmany row cap and the `truncated` flag
+    return execute_select(get_db(), sql, limit, validate_first)
 
 
 @mcp.tool()

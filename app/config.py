@@ -110,6 +110,9 @@ class Settings(BaseSettings):
     # Points to the database with business data (revenue, expense, etc.)
     BUSINESS_DB_PATH: str = "./nt_fi_report.sqlite"
 
+    # Plan 7: DuckDB file sources keep their view definitions (not data) here
+    DATA_SOURCE_CACHE_DIR: str = "./.source_cache"
+
     
     # Allowed Domains
     # Comma-separated list of allowed email domains for OTP login

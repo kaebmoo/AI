@@ -25,6 +25,10 @@ anthropic
 tenacity
 mcp>=1.26.0
 
+# Plan 7: file sources read in place (allowed_paths/lock_configuration verified on 1.5.5)
+duckdb>=1.5
+duckdb-engine>=0.17
+
 # Integration
 vanna>=2.0.2
 chromadb>=1.4.1

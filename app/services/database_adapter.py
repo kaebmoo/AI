@@ -13,8 +13,12 @@ Usage:
     result = adapter.execute_query("SELECT * FROM revenue_search LIMIT 10")
 """
 
+import os
+import re
 import sqlite3
+import threading
 from abc import ABC, abstractmethod
+from decimal import Decimal
 from typing import Dict, List, Optional, Any
 import logging
 
@@ -363,6 +367,205 @@ class MSSQLAdapter(DatabaseAdapter):
         except Exception as e:
             logger.error(f"MSSQL connection test failed: {e}")
             return False
+
+
+# =========================================================
+# DuckDB file source (Plan 7 Phase 1 — zero-import)
+# =========================================================
+
+# Types a registry row may declare — anything else is rejected (the type string
+# is interpolated into the view DDL, so it must never come from free text)
+DUCKDB_COLUMN_TYPES = {"BIGINT", "INTEGER", "DOUBLE", "VARCHAR", "BOOLEAN", "DATE", "TIMESTAMP"}
+
+DUCKDB_SYNTAX_RULES = {
+    "thai": """   **. DuckDB Syntax (file source):**
+       - หารจำนวนเต็มใช้ `//` เช่น `year_month // 100` — `/` ให้ผลเป็นทศนิยมเสมอ (202608 / 100 = 2026.08)
+       - `LIKE` แยกตัวพิมพ์เล็ก/ใหญ่ — ค้นข้อความภาษาอังกฤษแบบไม่สนตัวพิมพ์ให้ใช้ `ILIKE`
+       - วันที่ปัจจุบันใช้ `current_date` (ห้ามใช้ `date('now')`)
+       - ต่อสตริงใช้ `a || b`, จำกัดแถวใช้ `LIMIT`""",
+    "english": """   **. DuckDB Syntax (file source):**
+       - Integer division: use `//` e.g. `year_month // 100` — `/` always returns a decimal (202608 / 100 = 2026.08)
+       - `LIKE` is case-sensitive — use `ILIKE` for case-insensitive English text search
+       - Current date: `current_date` (NO `date('now')`)
+       - Concatenate with `a || b`, restrict rows with `LIMIT`""",
+}
+
+
+def _sql_str(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _sql_ident(name: str) -> str:
+    return '"' + name.replace('"', '""') + '"'
+
+
+class DuckDBFileAdapter(DatabaseAdapter):
+    """Read-only DuckDB over CSV files under one source root — nothing is imported.
+
+    Each registered table becomes a view with the name the LLM/golden already
+    know (e.g. ``feed_revenue_fact_bu_monthly``) over ``read_csv(<root>/<file>)``,
+    typed from the registry (contract dtypes — code columns stay strings).
+
+    Engine-level lock, behind the F4 validator (verified on DuckDB 1.5.5):
+      - views live in a small DuckDB file reopened ``read_only`` → no CREATE/DROP/INSERT
+      - ``allowed_paths`` = exactly the registered files, then
+        ``enable_external_access=false`` → no other file, COPY TO, ATTACH, http,
+        extension INSTALL/LOAD
+      - ``lock_configuration=true`` → SQL cannot SET any of the above back
+      - every query runs on a fresh cursor → TEMP objects die with it
+    """
+
+    def __init__(self, name: str, root: str, tables: List[Dict], cache_dir: str):
+        import duckdb
+
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
+            raise ValueError(f"Invalid source name: {name!r}")
+        self.name = name
+        # Lexical path, not realpath: if <root> is a symlink (e.g. latest/ → 202608/)
+        # a re-point must reach the views without a rebuild
+        self.root = os.path.abspath(root)
+        if not os.path.isdir(self.root):
+            raise FileNotFoundError(f"Source root not found: {self.root}")
+        real_root = os.path.realpath(self.root)
+
+        views = []
+        for t in tables:
+            path = os.path.abspath(os.path.join(self.root, t["file_name"]))
+            # '..' (lexical) and symlinked files (real) must both stay under the root
+            if (os.path.commonpath([path, self.root]) != self.root
+                    or os.path.commonpath([os.path.realpath(path), real_root]) != real_root):
+                raise ValueError(f"File outside source root: {t['file_name']}")
+            if not os.path.isfile(path):
+                raise FileNotFoundError(f"Source file not found: {path}")
+            views.append((t["table_name"], path, t["columns"]))
+        self.files = sorted({p for _, p, _ in views})
+
+        db_path = self._build_view_db(views, cache_dir)
+        self._conn = duckdb.connect(db_path, read_only=True, config={
+            "autoload_known_extensions": False, "autoinstall_known_extensions": False,
+        })
+        # Order matters: allowed_paths can't be set after external access is off,
+        # and nothing can be set after the lock
+        self._conn.execute("SET allowed_paths = ?", [self.files])
+        self._conn.execute("SET enable_external_access = false")
+        self._conn.execute("SET lock_configuration = true")
+        self._cursor_lock = threading.Lock()
+        self._sa_engine = None
+
+    def _build_view_db(self, views, cache_dir: str) -> str:
+        """Write the view definitions to <cache_dir>/<name>.duckdb (tmp + atomic replace)."""
+        import duckdb
+
+        os.makedirs(cache_dir, exist_ok=True)
+        final = os.path.join(cache_dir, f"{self.name}.duckdb")
+        tmp = f"{final}.{os.getpid()}.tmp"
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        con = duckdb.connect(tmp)
+        try:
+            for table, path, columns in views:
+                col_defs = []
+                for c in columns:
+                    col_type = str(c["type"]).upper()
+                    if col_type not in DUCKDB_COLUMN_TYPES:
+                        raise ValueError(f"Unsupported column type {c['type']!r} in {table}.{c['name']}")
+                    col_defs.append(f"{_sql_str(c['name'])}: {_sql_str(col_type)}")
+                con.execute(
+                    f"CREATE VIEW {_sql_ident(table)} AS SELECT * FROM read_csv("
+                    f"{_sql_str(path)}, header=true, columns={{{', '.join(col_defs)}}})"
+                )
+        finally:
+            con.close()
+        os.replace(tmp, final)
+        return final
+
+    @property
+    def engine_name(self) -> str:
+        return "duckdb"
+
+    def cursor(self):
+        """Fresh DuckDB cursor on the locked instance (TEMP objects die with it)."""
+        with self._cursor_lock:
+            return self._conn.cursor()
+
+    @property
+    def engine(self):
+        """SQLAlchemy engine (duckdb_engine) so SchemaService can inspect the views."""
+        if self._sa_engine is None:
+            from duckdb_engine import ConnectionWrapper
+            from sqlalchemy import create_engine
+            from sqlalchemy.pool import NullPool
+
+            self._sa_engine = create_engine(
+                "duckdb://", creator=lambda: ConnectionWrapper(self.cursor()), poolclass=NullPool,
+            )
+        return self._sa_engine
+
+    def execute_query(self, sql: str, params: Optional[tuple] = None, max_rows: Optional[int] = None) -> List[Dict]:
+        cur = self.cursor()
+        try:
+            cur.execute(sql, params) if params else cur.execute(sql)
+            if not cur.description:
+                return []
+            columns = [d[0] for d in cur.description]
+            rows = cur.fetchmany(max_rows) if max_rows else cur.fetchall()
+            # DECIMAL (e.g. from literal arithmetic) → float, same shape the SQLite path returns
+            return [
+                {c: float(v) if isinstance(v, Decimal) else v for c, v in zip(columns, row)}
+                for row in rows
+            ]
+        finally:
+            cur.close()
+
+    def get_schema_info(self, table_name: str) -> List[Dict]:
+        rows = self.execute_query(f"DESCRIBE {_sql_ident(table_name)}")
+        return [
+            {"name": r["column_name"], "type": r["column_type"], "nullable": r["null"] == "YES"}
+            for r in rows
+        ]
+
+    def get_syntax_rules(self, language: str = "thai") -> str:
+        return DUCKDB_SYNTAX_RULES["thai" if language == "thai" else "english"]
+
+    def test_connection(self) -> bool:
+        try:
+            return self.execute_query("SELECT 1 AS ok")[0]["ok"] == 1
+        except Exception as e:
+            logger.error(f"DuckDB connection test failed ({self.name}): {e}")
+            return False
+
+
+def execute_select(db, sql: str, limit: int = 100, validate_first: bool = True) -> Dict[str, Any]:
+    """Validated, row-capped SELECT → the MCP ``execute_query`` payload.
+
+    Single definition shared by the nt_query MCP tool (legacy business DB) and
+    the in-process file-source path. ``db`` = anything with
+    ``execute_query(sql, max_rows=)``.
+    """
+    from app.services.validation_service import ValidationService
+
+    limit = min(max(1, limit), 1000)
+    if validate_first:
+        validation = ValidationService(db=None).validate_sql(sql)
+        if not validation["valid"]:
+            return {
+                "success": False, "error": "SQL validation failed", "issues": validation["issues"],
+                "data": [], "row_count": 0, "columns": [], "truncated": False,
+            }
+    try:
+        # Row cap via fetchmany (engine-agnostic — no LIMIT string appending);
+        # +1 row to detect truncation
+        rows = db.execute_query(sql, max_rows=limit + 1)
+        truncated = len(rows) > limit
+        if truncated:
+            rows = rows[:limit]
+        return {
+            "success": True, "data": rows, "row_count": len(rows),
+            "columns": list(rows[0].keys()) if rows else [], "truncated": truncated, "error": None,
+        }
+    except Exception as e:
+        logger.error(f"Query execution error: {e}")
+        return {"success": False, "error": str(e), "data": [], "row_count": 0, "columns": [], "truncated": False}
 
 
 # =========================================================
