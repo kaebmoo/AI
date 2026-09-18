@@ -461,7 +461,7 @@ class TestContextOnboardingService:
 
     def test_apply_sql_statements(self, business_db):
         """T5.4: apply_sql_statements() via service works."""
-        service = ContextOnboardingService(business_db)
+        service = ContextOnboardingService(business_db, config_db_path=business_db)  # single-file fixture
         bundle = service.generate_config(MOCK_ANALYSIS, view_name="test_revenue")
         result = service.apply_sql_statements(bundle.sql_statements)
         assert result["status"] == "applied"
@@ -499,3 +499,28 @@ class TestLLMAnalyzer:
         analyzer = LLMAnalyzer(business_db)
         with pytest.raises((ValueError, Exception)):
             analyzer._parse_response("this is not json at all!!!")
+
+
+class TestOnboardingWritesConfigDb:
+    """REMAIN-9.1: the facade inspects the business DB but applies/validates on the config DB."""
+
+    def test_default_targets_config_db_not_business_db(self, business_db):
+        from app.config import settings
+        service = ContextOnboardingService(business_db)
+        config_path = settings.CONFIG_DB_URL.replace("sqlite:///", "")
+        assert service.applicator.db_path == config_path != business_db
+        assert service.validator.db_path == config_path
+
+    @pytest.mark.asyncio
+    async def test_apply_and_validate_on_separate_config_db(self, business_db, tmp_path):
+        import shutil
+        config_db = str(tmp_path / "config.sqlite")
+        shutil.copy(business_db, config_db)  # same config tables, separate file
+        service = ContextOnboardingService(business_db, config_db_path=config_db)
+        bundle = service.generate_config(MOCK_ANALYSIS, view_name="test_revenue")
+        assert service.apply(bundle, dry_run=False)["errors"] == []
+
+        count = "SELECT COUNT(*) FROM schema_contexts WHERE main_view = 'test_revenue'"
+        assert sqlite3.connect(config_db).execute(count).fetchone()[0] == 1
+        assert sqlite3.connect(business_db).execute(count).fetchone()[0] == 0  # business DB untouched
+        assert (await service.validate("test_revenue")).passed is True

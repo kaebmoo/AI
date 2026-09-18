@@ -352,7 +352,7 @@ Deferred (ทำตอน Plan 6 SaaS)
 
 | # | ปัญหา | ไฟล์ | ผลกระทบ | Priority |
 |---|---|---|---|---|
-| 9.1 | onboarding facade ส่ง business DB path ให้ `ConfigApplicator`/`ConfigValidator` | `app/services/context_onboarding.py` (~L1156–1161) | onboard context ผ่าน UI: apply เขียนผิด DB (ล้มเงียบ), validate 500 | ⚡ High |
+| 9.1 | ✅ 2026-09-19 — onboarding facade ส่ง business DB path ให้ `ConfigApplicator`/`ConfigValidator` → แก้: facade รับ `config_db_path` (default = CONFIG_DB_URL); inspect ยังอ่าน business DB | `app/services/context_onboarding.py` | onboard context ผ่าน UI: apply เขียนผิด DB (ล้มเงียบ), validate 500 | ⚡ High |
 | 9.2 | `/chat/train` เช็ค `isinstance(check_res, dict)` แต่ `call_tool` คืน str + validate กับ legacy DB เสมอ | `app/api/v1/chat.py` (~L859) | SQL ผิดไม่เคยถูกปฏิเสธก่อนบันทึกเป็น golden | Medium |
 | 9.3 | dedup-blocked result ไม่มี `context_name` → `"revenue"` ถูกบันทึก | `app/services/query_engine.py` (~L410) | follow-up ถูกส่งไป context ผิด | Medium |
 | 9.4 | `vanna_service._sync_ddl` หา DDL ใน config DB | `app/services/vanna_service.py` (~L116) | sync-brain ไม่เคย train DDL | Medium |

@@ -1153,12 +1153,15 @@ class ContextOnboardingService:
         validation = await service.validate("v_new_view")
     """
 
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str, config_db_path: Optional[str] = None):
+        # db_path = the business DB the view lives in (inspect); config is written to and
+        # validated against the config DB (config_db_path, default CONFIG_DB_URL) — handing
+        # them the business DB made apply write to the wrong DB and validate fail (REMAIN-9.1)
         self.db_path = db_path
         self.inspector = DataInspector(db_path)
         self.llm_analyzer = LLMAnalyzer(db_path)
-        self.applicator = ConfigApplicator(db_path)
-        self.validator = ConfigValidator(db_path)
+        self.applicator = ConfigApplicator(config_db_path)
+        self.validator = ConfigValidator(config_db_path)
 
     def inspect(self, view_name: str) -> InspectionResult:
         """Phase 1: SQL-based data inspection."""
