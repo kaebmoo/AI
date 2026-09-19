@@ -61,7 +61,7 @@ float เทียบด้วย tolerance 1e-6, int/float ถือว่า�
 | สถานะ | เงื่อนไข |
 |---|---|
 | `exact_match` | **ค่าตรง และ ชื่อคอลัมน์ตรง** (case-insensitive) — นี่คือ headline accuracy (strict) |
-| `value_match` | ค่าตรงทุกแถว แต่ชื่อคอลัมน์ (alias) ไม่ตรง เช่น `revenue` vs `"รายได้รวม"` |
+| `value_match` | ค่าตรงทุกแถว แต่ชื่อคอลัมน์ (alias) ไม่ตรง เช่น `revenue` vs `"รายได้รวม"` — **หรือ** มีคอลัมน์ label ข้อความเพิ่มข้างค่าที่คาดหวัง เช่น `SELECT division, ebt …` (2026-09-19): วางไว้ข้างได้เฉพาะคอลัมน์ที่เป็นข้อความ/NULL ล้วนและชื่อไม่ตรงกับคอลัมน์ที่ golden คาดหวัง; ตัวเลขเกิน / คอลัมน์ขาด / จำนวนแถวต่าง ยังเป็น `mismatch` |
 | `mismatch` | ค่าไม่ตรง (จำนวนแถว/จำนวนคอลัมน์/ค่าต่างกัน) |
 | `generation_failed` | LLM generate SQL ไม่สำเร็จ |
 | `execution_failed` | SQL ที่ generate รันแล้ว exception / timeout |

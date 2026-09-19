@@ -237,7 +237,7 @@
 ## 9. api_keys
 
 **Model:** `app/models/api_key.py` — class `APIKey(Base)`
-**Migration:** `database/migrations/027_api_keys.sql`
+**Migration:** `database/migrations/027_api_keys.sql` + `scripts/migrate_workspaces.py` (คอลัมน์ Phase 4a — app เติมเองตอน lookup key ครั้งแรกถ้ายังไม่มี)
 **หน้าที่:** API key authentication สำหรับ external integrations (OpenMiniCrew, etc.)
 
 | Column | Type | Constraints | Default | Description |
@@ -248,6 +248,8 @@
 | name | String(200) | | '' | ชื่อ key |
 | user_id | Integer | NOT NULL | — | เจ้าของ |
 | scopes | String(100) | | 'query' | query / admin / full |
+| workspace_id | Integer | nullable | NULL | Plan 7 Phase 4a — `workspaces.id` ใน **config DB** (ไม่มี FK ข้าม DB); NULL = ไม่ผูก |
+| allowed_contexts | Text | nullable | NULL | JSON list ของชื่อ context — แคบลงจาก workspace; ทั้งสอง NULL = key ไม่ถูกจำกัด (`app/services/workspaces.py`) |
 | rate_limit_per_minute | Integer | | 30 | Rate limit/นาที |
 | rate_limit_per_day | Integer | | 1000 | Rate limit/วัน |
 | is_active | Boolean | | True | สามารถ revoke ได้ |

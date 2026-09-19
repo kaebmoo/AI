@@ -22,14 +22,14 @@ AI Query Assistant สำหรับ NT (National Telecom) — แปลงค�
 | [DATABASE_TABLES_GUIDE.md](DATABASE_TABLES_GUIDE.md) | คู่มือ config tables ใน 3-DB architecture |
 | [INTERNAL_SCHEMA.md](INTERNAL_SCHEMA.md) | Internal schema reference (config tables) |
 | [SEMANTIC_MAPPING_GUIDE.md](SEMANTIC_MAPPING_GUIDE.md) | Semantic mapping — keyword → column/value |
-| [DATAFEED_INTEGRATION.md](DATAFEED_INTEGRATION.md) | DataFeed integration (F10) — feed_* tables + importer + integrity gates |
+| [DATAFEED_INTEGRATION.md](DATAFEED_INTEGRATION.md) | DataFeed integration (F10 → Plan 7) — file source (DuckDB, zero-import), knowledge จาก contract, integrity gates, ลงทะเบียนผ่าน CLI / admin API |
 
 ## API & Integration
 
 | Doc | เนื้อหา |
 |-----|---------|
 | [API_REPORTS.md](API_REPORTS.md) | Reports/Export API — xlsx export ผ่าน Celery (F6) |
-| [PORTAL_INTEGRATION.md](PORTAL_INTEGRATION.md) | NT-Report portal embed — filters/source fields (F11) |
+| [PORTAL_INTEGRATION.md](PORTAL_INTEGRATION.md) | NT-Report portal — `/api/v1/query`: `scope` (บังคับที่ SQL), `data_as_of`, key ผูก workspace `nt-report` (403 นอกสิทธิ์) |
 | [DEPLOYMENT_SECURITY.md](DEPLOYMENT_SECURITY.md) | Production security checklist (read-only DB, rate limit, OTP guard) |
 
 ## Quality & Evaluation
@@ -81,6 +81,7 @@ AI Query Assistant สำหรับ NT (National Telecom) — แปลงค�
 | [DB_DRIVEN_HARDCODE_REMOVAL.md](changelogs/DB_DRIVEN_HARDCODE_REMOVAL.md) | ลบ hardcode → DB-driven (2026-03-08) |
 | [MASTER_DATA_HIERARCHY.md](changelogs/MASTER_DATA_HIERARCHY.md) | Master data & DB-driven hierarchy |
 | [CONTEXT_ONBOARDING_SYSTEM.md](changelogs/CONTEXT_ONBOARDING_SYSTEM.md) | Context onboarding + P&L quick fix |
+| [PLAN_7_DATA_SOURCE_SERVICE_P1_4.md](changelogs/PLAN_7_DATA_SOURCE_SERVICE_P1_4.md) | Plan 7 Phase 1–4 — file source (zero-import), scope, workspace + scoped API key, admin sources API |
 | [ADMIN_WORKSPACE_REFRESH_2026_03_23.md](changelogs/ADMIN_WORKSPACE_REFRESH_2026_03_23.md) | Admin workspace refresh + Vanna ops |
 | [CACHING_AND_CONTEXT_IMPROVEMENTS.md](changelogs/CACHING_AND_CONTEXT_IMPROVEMENTS.md) | Caching & context improvements |
 | [WEB_VISUALIZATION_ECHARTS.md](changelogs/WEB_VISUALIZATION_ECHARTS.md) | WebDataRocks + ECharts |

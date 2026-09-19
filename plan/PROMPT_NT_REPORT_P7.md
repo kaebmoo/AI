@@ -83,3 +83,27 @@ ebt 1.3.0 (bebc797) ฝั่ง AI eval ได้ 18/24: โมเดล SUM �
 ebt 1.3.1 (`73ddc96`) ทำครบ 4 ข้อของ "ebt PATCH" → ฝั่ง AI เปิด `feed_ebt` แล้ว eval 22/24 — **ไม่มีงานค้างที่บล็อก**. ข้อเสนอ (ไม่บังคับ):
 - control totals ราย `division` ของ ebt (เช่น dataset ยอดรายสายงานต่องวด + `bg_key: division`) → ฝั่ง AI จะสร้าง golden รายสายงานและวัดสูตรหัก `08.รายได้อื่น`/ER ได้ (ตอนนี้โมเดลลืมหัก 1 ใน 2 รอบ และไม่มีอะไรวัด)
 - description ของ `expense` ให้ขึ้นต้นด้วย "สะสม (YTD)" ชัดกว่านี้ หรือกฎว่า "ค่าใช้จ่ายของเดือน = `expense_month`" ตรง ๆ — โมเดลยังหยิบ `expense` ตอบคำถามรายเดือนเป็นครั้งคราว
+
+## งานถัดไปของ NT-Report — หลัง AI Plan 7 Phase 4 (2026-09-19) — เอกสาร + hook เล็กน้อย, ไม่มีงาน DataFeed
+```
+ทำงานใน repo NT-Report (commit เป็นก้อนต่อข้อ, ยังไม่ push). ฝั่ง AI เสร็จ Plan 7 Phase 4 แล้ว:
+API key ผูก "workspace" ได้ — config จริงของ AI มี workspace `nt-report` = context feed_revenue, feed_expense,
+feed_sales, feed_ebt. key ที่ผูก workspace: เรียก context นอก workspace ได้ HTTP 403, ใช้ได้เฉพาะ /api/v1/query*,
+ไม่ส่ง context = AI เลือกภายใน workspace ให้. รายละเอียด: AI/docs/PORTAL_INTEGRATION.md, AI/docs/manuals/manual_api_keys.md
+
+1) pocketbase_0/docs/ASSISTANT.md
+   - ขั้น "ออก API key ให้ portal": เปลี่ยนเป็น key ที่ผูก workspace `nt-report`
+     (POST /api/v1/admin/api-keys {"name":"nt-report-portal","workspace":"nt-report","rate_limit_per_minute":20,"rate_limit_per_day":2000}
+      หรือ snippet ใน AI/docs/PORTAL_INTEGRATION.md) — raw key แสดงครั้งเดียว
+   - ASSISTANT_CONTEXT_MAP ต้องชี้ไป context ใน workspace เท่านั้น (feed_revenue / feed_expense / feed_sales / feed_ebt);
+     ชี้ไป context อื่น (revenue, expense, ...) = AI ตอบ 403 ทุกคำถาม
+   - ตาราง error: เพิ่มแถว AI ตอบ 403 (context นอกสิทธิ์ของ key = config ผิด ไม่ใช่ปัญหาชั่วคราว)
+   - สถานะ AI: 4 โดเมนพร้อม (eval 2026-09-19: revenue 14/14, expense 12/12, sales 12/12, ebt 35/36);
+     contract เพิ่มตาราง/คอลัมน์ → ฝั่ง AI ลงทะเบียนซ้ำได้ทาง POST /api/v1/admin/sources/register {"domain": "<d>"} (หรือ CLI เดิม)
+2) pocketbase_0/pb_hooks/assistant.pb.js — upstream 403 ตอนนี้ตกไป branch "status ไม่ใช่ 2xx" → 502 "ลองใหม่ภายหลัง"
+   ซึ่งชวนให้ผู้ใช้ลองซ้ำทั้งที่เป็น config ผิด: แยก 403 → audit status `upstream_forbidden_context`, ตอบผู้ใช้ 502/503
+   ด้วยข้อความ "รายงานนี้ยังไม่เปิดให้ถามตอบ" (ไม่บอกรายละเอียด upstream), ห้าม retry ด้วย context อื่นหรือไม่ส่ง context
+   + เพิ่ม case ใน scripts/test_assistant_hook.js
+3) DataFeed/README.md ส่วนที่พูดถึง register_file_source: เพิ่มว่าทำผ่าน admin API ของ AI ได้แล้ว (ข้อ 1)
+ไม่ต้องแก้ contract / build ใหม่
+```

@@ -370,9 +370,21 @@ CREATE TABLE schema_contexts (
     keywords TEXT,                      -- JSON array ของ keywords สำหรับ auto-detection
     instruction_th TEXT,                -- Custom AI instruction ภาษาไทยสำหรับ context นี้
     instruction_en TEXT,                -- Custom AI instruction ภาษาอังกฤษ
-    updated_at TIMESTAMP
+    updated_at TIMESTAMP,
+    -- Plan 7 (scripts/migrate_data_sources.py, migrate_workspaces.py)
+    source_id INTEGER REFERENCES data_sources(id),   -- แหล่งข้อมูลของ context ('legacy' = business DB เดิม)
+    scope_columns TEXT,                 -- JSON {"scope key": "column"} ที่ผู้เรียกจำกัดขอบเขตได้; NULL = ไม่รับ scope
+    workspace_id INTEGER REFERENCES workspaces(id)    -- NULL = 'default'
 );
 ```
+
+**ตารางของ Plan 7 (config DB)** — รายละเอียด: `docs/DATAFEED_INTEGRATION.md`, `docs/manuals/manual_api_keys.md`
+
+| ตาราง | หน้าที่ | คอลัมน์หลัก |
+|---|---|---|
+| `data_sources` | ที่อยู่ของข้อมูลต่อ source | `name`, `source_type` (`legacy` / `duckdb_file`), `root_path`, `manifest_file`, `contract_file`, `knowledge_sha` (contract sha + schema_version ของ knowledge ล่าสุด), `is_active` |
+| `source_tables` | allowlist ของ view ต่อ file source (เขียนตอนลงทะเบียน) | `source_id`, `table_name`, `file_name`, `columns` (JSON ชื่อ+ชนิด), `sha256`, `is_active` |
+| `workspaces` | การแบ่ง context ภายใน deployment; API key ผูกกับ workspace ได้ | `name` (slug), `display_name`, `description`, `is_active` — `default` สร้างโดย migration |
 
 > **หมายเหตุ:** migration 004 เดิมกำหนดคอลัมน์ `database_url`, `default_instruction`,
 > `sample_queries`, `created_by`, `metadata` ไว้ด้วย แต่ตารางจริงใน config DB ปัจจุบัน

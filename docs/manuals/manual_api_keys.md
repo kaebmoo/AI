@@ -24,6 +24,32 @@
 6. กด **Create**
 7. **สำคัญ:** raw key จะแสดงครั้งเดียวเท่านั้น — คัดลอกเก็บไว้ทันที
 
+## Key ที่ผูก workspace / จำกัด context (Plan 7 Phase 4)
+
+Workspace = การแบ่ง context ภายใน deployment เดียว (เช่น `nt-report` = `feed_*`, `default` = context เดิม) — จัดการที่ `/api/v1/admin/workspaces`
+
+สร้าง key ผ่าน API พร้อม `workspace` และ/หรือ `allowed_contexts`:
+
+```json
+POST /api/v1/admin/api-keys
+{"name": "nt-report-portal", "workspace": "nt-report", "allowed_contexts": ["feed_revenue", "feed_sales"],
+ "rate_limit_per_minute": 20, "rate_limit_per_day": 2000}
+```
+
+| ตั้งค่า | key ใช้ได้ |
+|---|---|
+| ไม่ระบุทั้งสอง | ทุก context — เหมือน key ก่อน Phase 4 ทุกอย่าง |
+| `workspace` | context ที่ active ของ workspace นั้น (context ที่ย้ายออก/ปิด หายจากสิทธิ์ทันที) |
+| `workspace` + `allowed_contexts` | ส่วนที่ทับกัน — allowlist ทำให้แคบลงได้อย่างเดียว |
+| `allowed_contexts` อย่างเดียว | เฉพาะที่ระบุ |
+
+- binding ที่เป็นไปไม่ได้ (workspace ไม่มี/ปิด, context ไม่มี, context ของ workspace อื่น, list ว่าง) = **400 ตอนสร้าง key**
+- context นอกสิทธิ์ = **HTTP 403** ทั้งที่ระบุ `context` เองและที่ระบบเลือกให้ — ไม่มีการสลับไป context อื่นเงียบ ๆ; ไม่ส่ง `context` = ระบบเลือกภายในสิทธิ์ของ key
+- key แบบนี้ใช้ได้เฉพาะ `/api/v1/query` และ `/api/v1/query/contexts` (endpoint อื่น = 403 แม้เจ้าของ key เป็น admin)
+- context แบบ legacy (business DB เดิม) ของ key ที่ถูกจำกัด: SQL อ่านได้เฉพาะ main view ของ context นั้น — ตาราง/ view อื่นถูกปฏิเสธที่ชั้น SQL
+- อ่านค่าไม่ได้ (JSON เสีย, config DB ล่ม) = ใช้ context ใดไม่ได้เลย (fail closed)
+- หน้า admin UI ยังไม่มีช่อง workspace — ใช้ API หรือ `docs/PORTAL_INTEGRATION.md`
+
 ## ใช้งาน API Key
 
 ส่ง key ผ่าน HTTP header:
@@ -116,6 +142,9 @@ HTTP 429 Too Many Requests
 | GET | `/api/v1/admin/api-keys` | ดู keys ทั้งหมด |
 | DELETE | `/api/v1/admin/api-keys/{id}` | Revoke key |
 | GET | `/api/v1/admin/api-keys/{id}/usage` | ดูสถิติการใช้งาน |
+| GET / POST | `/api/v1/admin/workspaces` | ดู workspace + context ที่อยู่ในแต่ละตัว / สร้าง (ชื่อเป็น slug `a-z0-9_-`) |
+| PUT | `/api/v1/admin/workspaces/{id}/contexts` | ย้าย context เข้า workspace (context อยู่ได้ workspace เดียว — key ของ workspace เดิมเสียสิทธิ์ทันที) |
+| DELETE | `/api/v1/admin/workspaces/{id}` | ปิด workspace (soft) — key ที่ผูกอยู่ใช้อะไรไม่ได้จนกว่าจะเปิดคืน; ปิด `default` ไม่ได้ |
 
 ## Integration กับ OpenMiniCrew
 

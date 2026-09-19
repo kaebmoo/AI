@@ -179,7 +179,11 @@ See `memory/architecture.md` § Performance and `docs/planning/MASTER_DATA_PLAN.
 | Telegram bot | Done | `app/telegram/` — polling/webhook modes (mounted at `/telegram`) |
 | Excel (xlsx) export API | Done | `POST /api/v1/reports` + Celery `report_worker` |
 | Portal query API (filters/source fields) | Done | `POST /api/v1/query` — see `docs/PORTAL_INTEGRATION.md` |
-| DataFeed importer (feed_* tables) | Done | `scripts/datafeed/import_datafeed.py` |
+| DataFeed importer (feed_* tables) | Done (fallback) | `scripts/datafeed/import_datafeed.py` — แทนด้วย file source |
+| **File source — zero-import (Plan 7 P1–2)** | Done | DuckDB อ่าน `DataFeed/dist/<domain>/latest/` ตรง; knowledge จาก contract re-sync เอง; `data_as_of` ในคำตอบ; 4 โดเมน (revenue/expense/sales/ebt) — `docs/DATAFEED_INTEGRATION.md` |
+| **Scope enforcement (Plan 7 P3)** | Done | `scope` ใน `/api/v1/query` บังคับที่ชั้น SQL (file + legacy); key ที่ไม่ประกาศ = 400 |
+| **Workspace + scoped API key (Plan 7 P4)** | Done (API; admin UI ยังไม่มี) | key ผูก workspace/allowlist → นอกสิทธิ์ 403, ใช้ได้เฉพาะ `/query`; brain ของ Vanna ต่อ workspace — `docs/manuals/manual_api_keys.md` |
+| **Admin sources API (Plan 7 P4c)** | Done | `GET /admin/sources`, `/sources/{name}/status`, `POST /admin/sources/register` (gate เดียวกับ CLI) |
 
 ---
 
