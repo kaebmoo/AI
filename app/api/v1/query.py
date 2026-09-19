@@ -161,8 +161,6 @@ async def list_contexts(
     """List available data contexts. Public — no auth required.
     Sent with a workspace-bound API key (Phase 4a) it lists only what that key can use."""
     from sqlalchemy import text
-    from app.services.workspaces import norm
-
     allowed = None
     if x_api_key:
         from app.services.api_key_service import APIKeyService
@@ -184,7 +182,7 @@ async def list_contexts(
                 description=dict(zip(columns, r)).get("description", "") or "",
             )
             for r in rows
-            if allowed is None or norm(dict(zip(columns, r)).get("name", "")) in allowed
+            if allowed is None or dict(zip(columns, r)).get("name", "") in allowed
         ]
     except Exception as e:
         logger.error(f"Failed to list contexts: {e}")

@@ -287,3 +287,62 @@ class TestCteScoping:
     ])
     def test_legit_ctes_still_work(self, env, sql, expected):
         assert resolve(env, "revenue", {"year": 2025}).adapter.execute_query(sql) == expected
+
+
+class TestPinnedForRestrictedKeys:
+    """Plan 7 Phase 4a (review): for a key bound to a workspace/allowlist, a legacy context is its
+    main view and nothing else — until now only the prompt said so, and an unknown context fell
+    back to the whole legacy DB."""
+
+    def _pinned(self, resolver, context, scope=None):
+        from app.services.data_sources import request_pinned
+
+        pin, tok = request_pinned.set(True), request_scope.set(scope)
+        try:
+            return resolver.for_context(context)
+        finally:
+            request_scope.reset(tok)
+            request_pinned.reset(pin)
+
+    def test_legacy_context_reads_its_main_view_only(self, env):
+        source = self._pinned(env, "expense")  # main view v_other
+        assert source.adapter.execute_query("SELECT COUNT(*) AS n FROM v_other") == [{"n": 3}]
+        for sql in ("SELECT SUM(revenue) FROM revenue_search",  # another context's view
+                    "SELECT SUM(V) FROM revenue", "SELECT name FROM sqlite_master"):
+            with pytest.raises(PermissionError):
+                source.adapter.execute_query(sql)
+        with source.engine.connect() as conn:  # and behind the gate the others are empty
+            assert conn.execute(text("SELECT COUNT(*) FROM revenue_search")).scalar() == 0
+        assert "v_other" in source.adapter.scope_note
+
+    @pytest.mark.parametrize("context", ["nope", "expense ", "Expense", None, ""])
+    def test_a_context_that_does_not_resolve_is_refused_not_served_from_the_legacy_db(self, env, context):
+        from app.services.workspaces import ContextNotAllowed
+
+        with pytest.raises(ContextNotAllowed):
+            self._pinned(env, context)
+
+    def test_scope_and_file_sources_are_as_before(self, env):
+        scoped = self._pinned(env, "revenue", {"year": 2025})
+        assert scoped.adapter.execute_query("SELECT SUM(revenue) AS s FROM revenue_search") == [{"s": 6.0}]
+        assert self._pinned(env, "feed_x").adapter.engine_name == "duckdb"  # its views are the allowlist already
+
+    def test_unrestricted_callers_are_untouched(self, env):
+        assert env.for_context("expense").adapter is None and env.for_context("nope").adapter is None
+
+    def test_the_engine_pins_restricted_requests(self, env):
+        from app.services.data_sources import request_pinned
+        from app.services import query_engine as qe
+
+        seen = {}
+
+        async def fake(self, *args):
+            seen["pinned"] = request_pinned.get()
+            return "done"
+
+        with patch.object(qe.QueryEngine, "_query", fake):
+            engine = qe.QueryEngine(mcp_client=MagicMock(), admin_config=MagicMock())
+            asyncio.run(engine.query("q", allowed_contexts=frozenset({"expense"})))
+            assert seen["pinned"] is True
+            asyncio.run(engine.query("q"))
+            assert seen["pinned"] is False and request_pinned.get() is False

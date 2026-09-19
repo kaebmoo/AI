@@ -14,7 +14,7 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import create_engine, text
 
-from app.services.workspaces import ContextNotAllowed, allowed_contexts, check_context
+from app.services.workspaces import ContextNotAllowed, allowed_contexts
 from scripts.migrate_workspaces import migrate_config
 
 
@@ -61,11 +61,11 @@ class TestAllowedContexts:
         assert allowed_contexts(SimpleNamespace(), config) is None  # a row loaded before the columns existed
 
     def test_workspace_key_sees_its_workspace_only(self, config):
-        assert allowed_contexts(_key(_ws(config, "nt-report")), config) == {"feed sales", "transfer price"}
+        assert allowed_contexts(_key(_ws(config, "nt-report")), config) == {"feed_sales", "transfer price"}
 
     def test_allowlist_narrows_inside_the_workspace_never_widens(self, config):
         key = _key(_ws(config, "nt-report"), ["feed_sales", "hr_payroll"])
-        assert allowed_contexts(key, config) == {"feed sales"}
+        assert allowed_contexts(key, config) == {"feed_sales"}
 
     def test_context_created_after_the_migration_belongs_to_default(self, config):
         from app.services.workspaces import resolve_key_binding, workspace_of_context
@@ -73,10 +73,10 @@ class TestAllowedContexts:
         with config.begin() as conn:  # what a new registration / the admin UI inserts: no workspace_id
             conn.execute(text("INSERT INTO schema_contexts (name) VALUES ('feed_new')"))
         default = _ws(config, "default")
-        assert allowed_contexts(_key(default), config) == {"revenue", "feed new"}
+        assert allowed_contexts(_key(default), config) == {"revenue", "feed_new"}
         assert resolve_key_binding("default", ["feed_new"], config)[0] == default
         assert workspace_of_context("feed_new", config) == "default"
-        assert "feed new" not in allowed_contexts(_key(_ws(config, "nt-report")), config)
+        assert "feed_new" not in allowed_contexts(_key(_ws(config, "nt-report")), config)
 
     def test_inactive_context_is_not_allowed(self, config):
         with config.begin() as conn:
@@ -91,11 +91,28 @@ class TestAllowedContexts:
     def test_unreachable_config_fails_closed(self):
         assert allowed_contexts(_key(1), create_engine("sqlite://")) == frozenset()
 
-    def test_check_context_matches_underscore_and_space_spellings(self):
-        check_context("transfer_price", frozenset({"transfer price"}))
-        check_context("anything", None)
+    def test_a_named_context_becomes_the_stored_name_or_is_refused(self):
+        """Review finding (critical): the check normalised ('feed_sales ' / 'Feed_Sales' passed) but the
+        raw string travelled on, matched no context downstream, and the request fell back to the
+        legacy DB with an empty system prompt — outside the allowlist. Only a stored name leaves here."""
+        from app.services.workspaces import canonical_context
+
+        allowed = frozenset({"feed_sales", "transfer price"})
+        for raw in ("feed_sales", "feed_sales ", " Feed_Sales", "FEED SALES"):
+            assert canonical_context(raw, allowed) == "feed_sales"
+        assert canonical_context("transfer_price", allowed) == "transfer price"
+        assert canonical_context("anything ", None) == "anything "  # unrestricted: untouched, as before
+        for raw in ("hr_payroll", "hr_payroll ", "feed_sale", "", "feed_sales\x00"):
+            with pytest.raises(ContextNotAllowed):
+                canonical_context(raw, allowed)
         with pytest.raises(ContextNotAllowed):
-            check_context("hr_payroll", frozenset({"transfer price"}))
+            canonical_context("feed_sales", frozenset())
+
+    def test_two_contexts_with_the_same_normalised_name_do_not_open_each_other(self):
+        from app.services.workspaces import canonical_context
+
+        assert canonical_context("a b", frozenset({"a_b"})) == "a_b"  # never 'a b', whoever owns that
+        assert canonical_context("a b", frozenset({"a_b", "a b"})) == "a b"  # exact spelling wins
 
 
 class TestQueryEngine:
@@ -120,7 +137,11 @@ class TestQueryEngine:
         engine._schema_service.get_all_contexts.return_value = contexts
         warning_detector = MagicMock()
         warning_detector.detect = AsyncMock(return_value=[])
+        resolver = MagicMock()  # never the real config.db; pinning itself is tested in test_scope.py
+        resolver.for_context.return_value = qe.source_resolver.__class__.for_context.__globals__["LEGACY_SOURCE"]
         with patch.object(qe.provider_registry, "create_provider", return_value=provider), \
+             patch.object(qe, "source_resolver", resolver), \
+             patch.object(qe, "workspace_of_context", return_value="default"), \
              patch.object(qe, "AIService", return_value=ai_service), \
              patch.object(qe, "SchemaService", schema_cls), \
              patch.object(qe, "WarningDetector", return_value=warning_detector):
@@ -139,17 +160,23 @@ class TestQueryEngine:
 
     def test_named_context_outside_the_allowlist_is_refused_before_any_llm_call(self):
         with pytest.raises(ContextNotAllowed):
-            self._ask(self.CONTEXTS, question="เงินเดือนรวม", context="hr_payroll", allowed_contexts=frozenset({"feed sales"}))
+            self._ask(self.CONTEXTS, question="เงินเดือนรวม", context="hr_payroll", allowed_contexts=frozenset({"feed_sales"}))
+
+    @pytest.mark.parametrize("raw", ["feed_sales ", "Feed_Sales", "FEED SALES"])
+    def test_a_loosely_spelled_allowed_context_reaches_the_engine_as_the_stored_name(self, raw):
+        result, ai = self._ask(self.CONTEXTS, question="ยอดขายรวม", context=raw, allowed_contexts=frozenset({"feed_sales"}))
+        assert result.context_name == "feed_sales"
+        assert ai.query_hybrid.call_args.kwargs["context_name"] == "feed_sales"
 
     def test_auto_route_stays_inside_the_allowlist(self):
         # 'รายได้' routes to revenue (priority 10) for everyone else; this key may only see hr_payroll
-        result, _ = self._ask(self.CONTEXTS, question="รายได้เดือนนี้", allowed_contexts=frozenset({"hr payroll"}))
+        result, _ = self._ask(self.CONTEXTS, question="รายได้เดือนนี้", allowed_contexts=frozenset({"hr_payroll"}))
         assert result.context_name == "hr_payroll"
         result, _ = self._ask(self.CONTEXTS, question="รายได้เดือนนี้")
         assert result.context_name == "revenue"  # unrestricted: as before
 
     def test_no_keyword_match_falls_back_inside_the_allowlist_not_to_revenue(self):
-        result, _ = self._ask(self.CONTEXTS, question="สวัสดี", allowed_contexts=frozenset({"feed sales"}))
+        result, _ = self._ask(self.CONTEXTS, question="สวัสดี", allowed_contexts=frozenset({"feed_sales"}))
         assert result.context_name == "feed_sales"
 
     def test_empty_allowlist_reaches_nothing(self):
@@ -158,7 +185,7 @@ class TestQueryEngine:
 
     def test_cached_answer_of_another_context_is_not_served_to_a_restricted_key(self):
         _, ai = self._ask(self.CONTEXTS, question="รายได้เดือนนี้")  # unrestricted → revenue, cached
-        result, ai2 = self._ask(self.CONTEXTS, question="รายได้เดือนนี้", allowed_contexts=frozenset({"hr payroll"}))
+        result, ai2 = self._ask(self.CONTEXTS, question="รายได้เดือนนี้", allowed_contexts=frozenset({"hr_payroll"}))
         assert result.context_name == "hr_payroll" and ai2.query_hybrid.await_count == 1
 
 
@@ -197,7 +224,7 @@ class TestEndpoint:
     def test_the_keys_allowlist_is_what_the_engine_receives(self, config):
         with patch("app.services.workspaces._config_engine", return_value=config):
             kwargs = self._refused(SimpleNamespace(api_key=_key(_ws(config, "nt-report"))))
-        assert kwargs["allowed_contexts"] == {"feed sales", "transfer price"}
+        assert kwargs["allowed_contexts"] == {"feed_sales", "transfer price"}
 
     def test_session_user_is_unrestricted(self):
         assert self._refused(SimpleNamespace())["allowed_contexts"] is None
@@ -296,12 +323,12 @@ class TestWorkspaceAdmin:
         listing = {w["name"]: w["contexts"] for w in api.list_workspaces(admin, db)}
         assert listing["finance"] == ["transfer price"] and listing["nt-report"] == ["feed_sales"]
         # the nt-report key lost the context that moved away
-        assert allowed_contexts(_key(_ws(config, "nt-report")), config) == {"feed sales"}
+        assert allowed_contexts(_key(_ws(config, "nt-report")), config) == {"feed_sales"}
 
         with pytest.raises(HTTPException) as exc:  # all or nothing
             api.move_contexts(created["id"], api.WorkspaceContexts(contexts=["feed_sales", "nope"]), admin, db)
         assert exc.value.status_code == 400
-        assert allowed_contexts(_key(_ws(config, "nt-report")), config) == {"feed sales"}
+        assert allowed_contexts(_key(_ws(config, "nt-report")), config) == {"feed_sales"}
 
         api.deactivate_workspace(created["id"], admin, db)
         assert allowed_contexts(_key(created["id"]), config) == frozenset()

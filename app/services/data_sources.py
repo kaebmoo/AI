@@ -76,6 +76,9 @@ LEGACY_SOURCE = ResolvedSource(name=LEGACY, source_type=LEGACY)
 
 # The caller's scope for the current request, e.g. {"year_month": 202607} — None = unscoped
 request_scope: ContextVar[Optional[Dict[str, Any]]] = ContextVar("request_scope", default=None)
+# Phase 4a: the request comes from an API key bound to a workspace/allowlist — a legacy context is
+# then its main view and nothing else, and a context that doesn't resolve is refused (never the legacy DB)
+request_pinned: ContextVar[bool] = ContextVar("request_pinned", default=False)
 
 
 class ScopeError(ValueError):
@@ -164,7 +167,38 @@ class SourceResolver:
     def for_context(self, context_name: Optional[str]) -> ResolvedSource:
         source = self._resolve(context_name)
         scope = request_scope.get()
+        if request_pinned.get():
+            self._require_context(context_name)
+            if not scope and source.adapter is None:
+                return self._pinned(context_name, source)
         return self._scoped(context_name, source, scope) if scope else source
+
+    def _main_view(self, context_name: Optional[str]) -> Optional[str]:
+        """main_view of the active context with exactly this stored name (no loose matching here)."""
+        with self._engine().connect() as conn:
+            return conn.execute(text("SELECT main_view FROM schema_contexts WHERE name = :n AND is_active = 1"),
+                                {"n": context_name or ""}).scalar()
+
+    def _require_context(self, context_name: Optional[str]) -> None:
+        from app.services.workspaces import ContextNotAllowed
+
+        try:
+            found = self._main_view(context_name)
+        except (OperationalError, ProgrammingError):
+            found = None
+        if not found:  # unknown, deactivated since the allowlist was read, or loosely spelled
+            raise ContextNotAllowed(f"ไม่พบ context '{context_name}' สำหรับ API key นี้")
+
+    def _pinned(self, context_name: str, source: ResolvedSource) -> ResolvedSource:
+        """Legacy business DB for a restricted caller: the Phase 3 machinery with a filter that keeps
+        every row — the main view is readable, every other table is shadowed empty and refused by the gate."""
+        from app.db.session import business_engine
+
+        main_view = self._main_view(context_name)
+        note = (f"\n\n**API key นี้ query ได้เฉพาะตาราง {main_view}** (อ้างชื่อตรง ๆ ห้ามมี schema นำหน้า) — "
+                f"ตาราง/view อื่นระบบจะปฏิเสธ; ถ้าคำถามต้องใช้ข้อมูลอื่น ให้ตอบว่าอยู่นอกสิทธิ์ของ key นี้")
+        return ResolvedSource(source.name, source.source_type,
+                              ScopedSQLite(business_engine.url.database, {main_view: "1"}, note))
 
     def _context_row(self, conn, context_name: str, select: str):
         # Same row, same order as context_store.get_context_info (exact, '_'→' ',

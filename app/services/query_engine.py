@@ -26,8 +26,8 @@ from app.providers.registry import provider_registry
 from app.services.ai_service import AIService
 from app.services.mcp_client import MCPClientService
 from app.services.admin_config_service import AdminConfigService
-from app.services.data_sources import SourceBoundMCPClient, request_scope, source_resolver
-from app.services.workspaces import check_context, workspace_of_context
+from app.services.data_sources import SourceBoundMCPClient, request_pinned, request_scope, source_resolver
+from app.services.workspaces import canonical_context, check_context, workspace_of_context
 from app.services.schema_service import SchemaService
 from app.services.warning_detector import WarningDetector
 from app.services.query_classifier import query_classifier
@@ -50,8 +50,7 @@ def detect_context_from_question(question: str, schema_service: SchemaService = 
         # Phase 4a: a restricted key routes among its own contexts only (allowed = normalised names)
         if allowed is None:
             return contexts
-        from app.services.workspaces import norm
-        return [c for c in contexts if norm(c.get('name') or '') in allowed]
+        return [c for c in contexts if c.get('name') in allowed]
 
     if schema_service:
         try:
@@ -399,18 +398,20 @@ class QueryEngine:
             QueryEngineResult with query_result + warnings + context
         """
         token = request_scope.set(scope or None)
+        pin = request_pinned.set(allowed_contexts is not None)  # restricted key: see data_sources.request_pinned
         try:
             return await self._query(question, provider, context, mode, history, max_retries,
                                      conversation_id, provider_kwargs, on_status, user_id, scope, allowed_contexts)
         finally:
+            request_pinned.reset(pin)
             request_scope.reset(token)
 
     async def _query(self, question, provider, context, mode, history, max_retries,
                      conversation_id, provider_kwargs, on_status, user_id, scope, allowed_contexts=None) -> QueryEngineResult:
         """Body of query() — runs with request_scope set."""
         start_time = time.time()
-        if context:
-            check_context(context, allowed_contexts)  # before the cache, before any LLM call
+        if context:  # before the cache, before any LLM call — and only the stored name travels on
+            context = canonical_context(context, allowed_contexts)
         provider_kwargs = provider_kwargs or {}
 
         # Load config once
@@ -428,7 +429,7 @@ class QueryEngine:
         if scope_key:
             context_name_for_cache += "|" + scope_key
         if allowed_contexts is not None:  # "auto" routes differently under another allowlist
-            context_name_for_cache += "|allow:" + ",".join(sorted(allowed_contexts))
+            context_name_for_cache += "|allow:" + "\x1f".join(sorted(allowed_contexts))
         qcache_key = _cache_key(question, selected_provider_name, context_name_for_cache)
         if use_cache:
             cached = _cache_get(qcache_key)

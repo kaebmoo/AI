@@ -44,7 +44,7 @@ def _config_engine():
 
 
 def allowed_contexts(api_key: Any, config_engine=None) -> Optional[FrozenSet[str]]:
-    """Normalised context names the key may use; None = unrestricted."""
+    """The contexts the key may use, as their exact stored names; None = unrestricted."""
     workspace_id = getattr(api_key, "workspace_id", None)
     raw = getattr(api_key, "allowed_contexts", None)
     if workspace_id is None and not raw:
@@ -55,21 +55,33 @@ def allowed_contexts(api_key: Any, config_engine=None) -> Optional[FrozenSet[str
             parsed = json.loads(raw)
             if not isinstance(parsed, list) or not all(isinstance(n, str) for n in parsed):
                 raise ValueError("allowed_contexts must be a JSON list of names")
-            listed = {norm(n) for n in parsed}
+            listed = list(parsed)
         except ValueError as exc:
             logger.error(f"API key {getattr(api_key, 'key_prefix', '?')}: unreadable allowed_contexts ({exc}) — denying all")
             return frozenset()
-    if workspace_id is None:
-        return frozenset(listed)
     try:
         with (config_engine or _config_engine()).connect() as conn:
-            in_workspace = {norm(row[0]) for row in conn.execute(text(
-                "SELECT sc.name FROM schema_contexts sc JOIN workspaces w ON w.id = COALESCE(sc.workspace_id, (SELECT id FROM workspaces WHERE name = 'default')) "
-                "WHERE w.id = :ws AND sc.is_active = 1 AND w.is_active = 1"), {"ws": workspace_id})}
+            if workspace_id is None:
+                reachable = {row[0] for row in conn.execute(text("SELECT name FROM schema_contexts WHERE is_active = 1"))}
+            else:
+                reachable = {row[0] for row in conn.execute(text(
+                    "SELECT sc.name FROM schema_contexts sc JOIN workspaces w ON w.id = COALESCE(sc.workspace_id, (SELECT id FROM workspaces WHERE name = 'default')) "
+                    "WHERE w.id = :ws AND sc.is_active = 1 AND w.is_active = 1"), {"ws": workspace_id})}
     except Exception as exc:
-        logger.error(f"Workspace {workspace_id}: contexts unreadable ({exc}) — denying all")
+        logger.error(f"API key contexts unreadable ({exc}) — denying all")
         return frozenset()
-    return frozenset(in_workspace if listed is None else in_workspace & listed)
+    if listed is None:
+        return frozenset(reachable)
+    # a listed name stands for the stored context it spells (exactly, else loosely) — inside what is reachable
+    return frozenset(name for entry in listed for name in [_match(entry, reachable)] if name)
+
+
+def _match(name: str, stored) -> Optional[str]:
+    """The stored context name a caller's spelling refers to: exact first, else '_'/space/case-insensitive."""
+    if name in stored:
+        return name
+    loose = sorted(s for s in stored if norm(s) == norm(name))
+    return loose[0] if loose else None
 
 
 def is_restricted(api_key: Any) -> bool:
@@ -77,10 +89,24 @@ def is_restricted(api_key: Any) -> bool:
                                     or bool(getattr(api_key, "allowed_contexts", None)))
 
 
-def check_context(context_name: str, allowed: Optional[FrozenSet[str]]) -> None:
-    if allowed is not None and norm(context_name) not in allowed:
-        raise ContextNotAllowed(f"API key นี้ไม่มีสิทธิ์ใช้ context '{context_name}'")
+def canonical_context(context_name: str, allowed: Optional[FrozenSet[str]]) -> str:
+    """The stored name of the context a restricted caller named — or ContextNotAllowed.
 
+    Only this return value may travel on: downstream resolution is exact, and a name that matches
+    nothing there falls back to the legacy DB with an empty system prompt (i.e. outside every
+    allowlist). Unrestricted callers get their string back untouched, as before."""
+    if allowed is None:
+        return context_name
+    stored = _match(context_name, allowed) if isinstance(context_name, str) else None
+    if stored is None:
+        raise ContextNotAllowed(f"API key นี้ไม่มีสิทธิ์ใช้ context '{context_name}'")
+    return stored
+
+
+def check_context(context_name: str, allowed: Optional[FrozenSet[str]]) -> None:
+    """A context the system itself picked (router, cache) must be one of the allowed stored names."""
+    if allowed is not None and context_name not in allowed:
+        raise ContextNotAllowed(f"API key นี้ไม่มีสิทธิ์ใช้ context '{context_name}'")
 
 
 def resolve_key_binding(workspace: Optional[str], contexts: Optional[list], config_engine=None):
