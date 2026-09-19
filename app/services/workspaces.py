@@ -25,6 +25,10 @@ logger = logging.getLogger(__name__)
 DEFAULT_WORKSPACE = "default"
 
 
+# A context created after the migration (new registration, admin UI) has workspace_id NULL:
+# everywhere below NULL means 'default' — no creator has to know about workspaces.
+
+
 class ContextNotAllowed(PermissionError):
     """The caller's key may not use this context → HTTP 403."""
 
@@ -60,8 +64,8 @@ def allowed_contexts(api_key: Any, config_engine=None) -> Optional[FrozenSet[str
     try:
         with (config_engine or _config_engine()).connect() as conn:
             in_workspace = {norm(row[0]) for row in conn.execute(text(
-                "SELECT sc.name FROM schema_contexts sc JOIN workspaces w ON w.id = sc.workspace_id "
-                "WHERE sc.workspace_id = :ws AND sc.is_active = 1 AND w.is_active = 1"), {"ws": workspace_id})}
+                "SELECT sc.name FROM schema_contexts sc JOIN workspaces w ON w.id = COALESCE(sc.workspace_id, (SELECT id FROM workspaces WHERE name = 'default')) "
+                "WHERE w.id = :ws AND sc.is_active = 1 AND w.is_active = 1"), {"ws": workspace_id})}
     except Exception as exc:
         logger.error(f"Workspace {workspace_id}: contexts unreadable ({exc}) — denying all")
         return frozenset()
@@ -94,7 +98,7 @@ def resolve_key_binding(workspace: Optional[str], contexts: Optional[list], conf
             if workspace_id is None:
                 raise ValueError(f"ไม่พบ workspace '{workspace}'")
         known = {norm(name): ws for name, ws in conn.execute(text(
-            "SELECT name, workspace_id FROM schema_contexts WHERE is_active = 1"))}
+            "SELECT sc.name, COALESCE(sc.workspace_id, (SELECT id FROM workspaces WHERE name = 'default')) FROM schema_contexts sc WHERE sc.is_active = 1"))}
     for name in contexts or []:
         if norm(name) not in known:
             raise ValueError(f"ไม่พบ context '{name}'")
@@ -120,7 +124,7 @@ def workspace_of_context(context_name: Optional[str], config_engine=None) -> str
     try:
         with (config_engine or _config_engine()).connect() as conn:
             for name, workspace in conn.execute(text(
-                    "SELECT sc.name, w.name FROM schema_contexts sc JOIN workspaces w ON w.id = sc.workspace_id")):
+                    "SELECT sc.name, w.name FROM schema_contexts sc JOIN workspaces w ON w.id = COALESCE(sc.workspace_id, (SELECT id FROM workspaces WHERE name = 'default'))")):
                 if norm(name) == norm(context_name or ""):
                     return workspace
     except Exception as exc:  # registry not migrated: one brain, as before

@@ -24,91 +24,16 @@ Usage:
 """
 
 import argparse
-import json
 import sys
-import tempfile
 import time
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from scripts.datafeed.import_datafeed import (  # noqa: E402
-    check_control_totals, check_integrity_pre, contract_file, load_bundle,
+from app.services.source_registration import (  # noqa: E402,F401 — re-exported for callers of this module
+    DTYPE_DUCKDB, GateError, build_tables, register, register_domain, source_name, verify_in_place,
 )
-
-DTYPE_DUCKDB = {"integer": "BIGINT", "Int64": "BIGINT", "double": "DOUBLE", "string": "VARCHAR",
-                "boolean": "BOOLEAN"}
-
-
-def source_name(domain: str) -> str:
-    return f"datafeed_{domain}"
-
-
-def build_tables(domain: str, contract: dict, manifest: dict) -> list:
-    """Allowlist = contract datasets whose CSV is in the manifest; types from the contract."""
-    tables = []
-    for dataset in contract["datasets"]:
-        file_name = f"{dataset['name']}.csv"
-        if file_name not in manifest["files"]:
-            raise SystemExit(f"ABORT: {file_name} ไม่อยู่ใน manifest")
-        tables.append({
-            "table_name": f"feed_{domain}_{dataset['name']}",
-            "file_name": file_name,
-            "columns": [{"name": c["name"], "type": DTYPE_DUCKDB[c["dtype"]]} for c in dataset["columns"]],
-            "sha256": manifest["files"][file_name]["sha256"],
-        })
-    return tables
-
-
-def verify_in_place(latest: Path, domain: str, contract: dict, manifest: dict, tables: list) -> None:
-    """Gates 3+4 through the same read-only adapter the assistant will use."""
-    from app.services.database_adapter import DuckDBFileAdapter
-
-    with tempfile.TemporaryDirectory() as tmp:
-        # manifest already checked by check_integrity_pre — don't hash every file twice
-        adapter = DuckDBFileAdapter(f"verify-{domain}", str(latest), tables, tmp)
-        for t in tables:
-            dataset = t["table_name"][len(f"feed_{domain}_"):]
-            got = adapter.execute_query(f'SELECT COUNT(*) AS n FROM "{t["table_name"]}"')[0]["n"]
-            expected = manifest["row_counts"].get(dataset)
-            if got != expected:
-                raise SystemExit(f"ABORT: row count mismatch {t['table_name']}: {got} != {expected}")
-        print(f"Row counts OK ({len(tables)} views)")
-        check_control_totals(adapter.cursor(), latest, domain, contract)
-
-
-def register(config_engine, domain: str, root: Path, tables: list, contract_path: Path, schema_version) -> tuple:
-    """Registry + knowledge in one transaction → (context, metadata rows, docs)."""
-    from sqlalchemy import text
-    from app.services.datafeed_knowledge import knowledge_key, load_contract, sync_knowledge
-
-    # knowledge and its key from the same bytes — a contract edited mid-run can't be recorded as synced
-    contract, raw = load_contract(str(contract_path))
-    with config_engine.begin() as conn:
-        conn.execute(text(
-            "INSERT INTO data_sources (name, source_type, root_path, manifest_file, contract_file, knowledge_sha, "
-            "description) VALUES (:name, 'duckdb_file', :root, 'manifest.json', :contract, :key, :desc) "
-            "ON CONFLICT(name) DO UPDATE SET source_type='duckdb_file', root_path=excluded.root_path, "
-            "manifest_file=excluded.manifest_file, contract_file=excluded.contract_file, "
-            "knowledge_sha=excluded.knowledge_sha, description=excluded.description, is_active=1, "
-            "updated_at=CURRENT_TIMESTAMP"
-        ), {"name": source_name(domain), "root": str(root), "contract": str(contract_path),
-            "key": knowledge_key(raw, schema_version), "desc": f"DataFeed {domain} (zero-import)"})
-        source_id = conn.execute(
-            text("SELECT id FROM data_sources WHERE name = :name"), {"name": source_name(domain)}
-        ).scalar_one()
-        conn.execute(text("DELETE FROM source_tables WHERE source_id = :sid"), {"sid": source_id})
-        for t in tables:
-            conn.execute(text(
-                "INSERT INTO source_tables (source_id, table_name, file_name, columns, sha256) "
-                "VALUES (:sid, :table_name, :file_name, :columns, :sha256)"
-            ), {"sid": source_id, **t, "columns": json.dumps(t["columns"])})
-        synced = sync_knowledge(conn, domain, contract)  # creates feed_<domain> when missing
-        conn.execute(text(
-            "UPDATE schema_contexts SET source_id = :sid WHERE name = :ctx"
-        ), {"sid": source_id, "ctx": synced[0]})
-    return synced
 
 
 def bind_legacy(config_engine, domain: str) -> None:
@@ -140,22 +65,14 @@ def main():
         parser.error("--source is required")
 
     t0 = time.time()
-    latest, manifest, contract = load_bundle(Path(args.source), args.domain)
-    root = latest.absolute()  # not resolve(): a symlinked latest/ must keep following re-points
-    print(f"Domain {args.domain}: schema {manifest['schema_version']}, period {manifest['period']}, root {root}")
-
-    check_integrity_pre(latest, manifest, contract["datasets"], bool(contract.get("control_totals")))
-    tables = build_tables(args.domain, contract, manifest)
-    verify_in_place(root, args.domain, contract, manifest, tables)
-    context, n_meta, n_docs = register(config_engine, args.domain, root, tables,
-                                       contract_file(Path(args.source), args.domain).absolute(),
-                                       manifest.get("schema_version"))
-    from app.services.datafeed_knowledge import mark_brain_dirty
-    mark_brain_dirty()
-    print(f"Knowledge: {context} ({n_meta} metadata rows, {n_docs} docs) — brain marked dirty")
-    print(f"Registered source '{source_name(args.domain)}' ({len(tables)} views) → {context} "
+    try:  # gates + registry + knowledge: app/services/source_registration.py (shared with POST /admin/sources/register)
+        done = register_domain(config_engine, args.domain, Path(args.source))
+    except GateError as exc:
+        raise SystemExit(f"ABORT: {exc}") from exc
+    print(f"Domain {args.domain}: schema {done['schema_version']}, period {done['period']}, root {done['root']}")
+    print(f"Knowledge: {done['context']} ({done['metadata_rows']} metadata rows, {done['docs']} docs) — brain marked dirty")
+    print(f"Registered source '{done['source']}' ({done['views']} views) → {done['context']} "
           f"in {time.time() - t0:.1f}s — no rows imported")
-
 
 if __name__ == "__main__":
     main()

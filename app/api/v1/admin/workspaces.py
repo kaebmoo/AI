@@ -37,7 +37,9 @@ def _workspace(db: Session, workspace_id: int):
 def list_workspaces(_current_user: User = Depends(deps.require_admin), db: Session = Depends(deps.get_config_db)):
     """Workspaces with the contexts each one holds."""
     contexts = {}
-    for name, workspace_id in db.execute(text("SELECT name, workspace_id FROM schema_contexts WHERE is_active = 1 ORDER BY name")):
+    for name, workspace_id in db.execute(text(  # NULL (created after the migration) = 'default'
+            "SELECT name, COALESCE(workspace_id, (SELECT id FROM workspaces WHERE name = 'default')) "
+            "FROM schema_contexts WHERE is_active = 1 ORDER BY name")):
         contexts.setdefault(workspace_id, []).append(name)
     return [{**dict(row), "is_active": bool(row["is_active"]), "contexts": contexts.get(row["id"], [])}
             for row in db.execute(text("SELECT id, name, display_name, description, is_active FROM workspaces ORDER BY id")).mappings()]

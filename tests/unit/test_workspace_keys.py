@@ -67,6 +67,17 @@ class TestAllowedContexts:
         key = _key(_ws(config, "nt-report"), ["feed_sales", "hr_payroll"])
         assert allowed_contexts(key, config) == {"feed sales"}
 
+    def test_context_created_after_the_migration_belongs_to_default(self, config):
+        from app.services.workspaces import resolve_key_binding, workspace_of_context
+
+        with config.begin() as conn:  # what a new registration / the admin UI inserts: no workspace_id
+            conn.execute(text("INSERT INTO schema_contexts (name) VALUES ('feed_new')"))
+        default = _ws(config, "default")
+        assert allowed_contexts(_key(default), config) == {"revenue", "feed new"}
+        assert resolve_key_binding("default", ["feed_new"], config)[0] == default
+        assert workspace_of_context("feed_new", config) == "default"
+        assert "feed new" not in allowed_contexts(_key(_ws(config, "nt-report")), config)
+
     def test_inactive_context_is_not_allowed(self, config):
         with config.begin() as conn:
             conn.execute(text("UPDATE schema_contexts SET is_active = 0 WHERE name = 'feed_sales'"))

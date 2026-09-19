@@ -112,6 +112,9 @@ class Settings(BaseSettings):
 
     # Plan 7: DuckDB file sources keep their view definitions (not data) here
     DATA_SOURCE_CACHE_DIR: str = "./.source_cache"
+    # Plan 7 Phase 4c: directories POST /admin/sources/register may read a NEW bundle from (comma-separated).
+    # Empty = the API can only re-register domains from where they already are; the CLI is not limited.
+    DATA_SOURCE_ALLOWED_ROOTS: str = ""
 
     
     # Allowed Domains
