@@ -89,7 +89,7 @@ Importer เปิด write connection ของตัวเอง ไม่ผ�
 | `feed_revenue` | `datafeed_revenue` | 2.3.0 / 202608 | ✅ active (17 views — รวมตารางเป้า 2 ตาราง) | 14/14 |
 | `feed_expense` | `datafeed_expense` | 1.2.0 / 202608 | ✅ active | 12/12 |
 | `feed_sales` | `datafeed_sales` | 1.3.0 / 202608 | ✅ active (4 views — รวม `fact_sales_target_monthly`) | 12/12 |
-| `feed_ebt` | `datafeed_ebt` | 1.4.0 / 202607 | ✅ active (main view `fact_ebt_division_monthly`; ยอดรวมทางการ + `fact_ebt` ใช้ได้ตามกฎ) | 33/36 |
+| `feed_ebt` | `datafeed_ebt` | 1.4.0 / 202607 | ✅ active (main view `fact_ebt_division_monthly`; ยอดรวมทางการ + `fact_ebt` ใช้ได้ตามกฎ) | 35/36 |
 
 (รายละเอียด: `plan/archive/RESULT_P7_PHASE2.md` หัวข้ออัปเดต 2026-09-19, `plan/PLAN_REMAINING_ITEMS.md` REMAIN-11)
 
@@ -223,6 +223,7 @@ python -m scripts.datafeed.gen_golden_from_controls --domain revenue \
 - contract ที่ไม่มี `control_totals` → ไม่สร้าง golden (ของเดิมไม่ถูกลบ)
 - คำถามใช้เดือนไทย + พ.ศ. — จงใจ exercise กฎแปลงปีของระบบ
 - ค่าที่คาดหวังมาจาก control_totals → ใช้กับ eval harness
+- eval harness (`scripts/eval/run_eval.py`): คำตอบที่มีคอลัมน์ label ข้อความเพิ่ม (`SELECT division, ebt …`) นับเป็น value_match; ตัวเลขเกิน / คอลัมน์ขาด / จำนวนแถวต่าง = mismatch
   (`python -m scripts.eval.run_eval --context feed_revenue` — ดู `docs/EVAL_HARNESS.md`)
 
 ## สถานะปัจจุบัน (pilot: revenue)
