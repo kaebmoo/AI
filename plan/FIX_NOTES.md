@@ -308,6 +308,7 @@
 - ⚠️ **pipeline context เดียวเรียกตัวเลขของโดเมนหนึ่งด้วยชื่อของอีกโดเมน** เมื่อคำถามพูดถึงสองโดเมน: `SUM(expense_value_thb) AS "รายได้ลบค่าใช้จ่าย"`, "รายได้รวม 1,206 M" (= รายได้ฐานยอดขายของ 2 สายงานใน `feed_ebt`; จริง 3,274 M) — baseline ของชุด 10 ข้อ = 0/10
 - ⚠️ **"กำไรของทั้งบริษัท" → `feed_ebt` ตอบ −284 M ของ 2 สายงานขายว่าเป็น "กำไรสุทธิรวมของบริษัท"** — context เดียว ไม่เกี่ยวกับ orchestrator; contract ไม่มีกฎสำหรับคำถามนอกขอบเขต → ข้อเสนอใน `PROMPT_NT_REPORT_P7.md`
 - sales publish งวด 202608 แล้ว (prompt ของ session ระบุ 202607) — เหลือ ebt ตัวเดียวที่ 202607
+- ⚠️ **full pytest เขียน `config.db` จริง 1 แถว** (มีก่อน phase นี้): `admin_config.last_brain_relevant_change_at` ถูกขยับทุกครั้งที่รัน suite — `mark_brain_dirty()` (`app/api/v1/admin/_shared.py`, `datafeed_knowledge`) เปิด `AdminConfigService()` เอง = `ConfigSessionLocal` จริง ไม่ใช่ DB ของ test; ผล = brain ถูกมองว่า dirty เสมอหลังรัน test (ไม่มีข้อมูลอื่นเปลี่ยน — diff ของ dump ทั้ง DB กับ backup ต่างแถวเดียว) → งานแยก: fixture autouse ที่ patch `mark_brain_dirty` / ชี้ `CONFIG_DB_URL` ของ test ไป DB ชั่วคราว
 - ข้ามโดเมนด้วย `cost_center` ได้ทั้ง 4 โดเมน; ด้วยชื่อสายงานได้เฉพาะ expense ↔ ebt (revenue ต่าง 1 ชื่อ, sales ไม่มีสายงาน); กลุ่มธุรกิจ revenue ↔ sales ตรงกัน แต่ ebt ใช้ `03.Mobile`
 - expense ↔ ebt กระทบยอดตรงทุกสตางค์เมื่อกรอง 2 สายงานเดียวกัน (1,490,506,698.33) — คำถาม "ค่าใช้จ่ายของสายงานขาย 1" ตอบจาก `feed_expense` หรือ `feed_ebt` ได้เลขเดียวกัน
 
