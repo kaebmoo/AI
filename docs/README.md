@@ -82,6 +82,7 @@ AI Query Assistant สำหรับ NT (National Telecom) — แปลงค�
 | [MASTER_DATA_HIERARCHY.md](changelogs/MASTER_DATA_HIERARCHY.md) | Master data & DB-driven hierarchy |
 | [CONTEXT_ONBOARDING_SYSTEM.md](changelogs/CONTEXT_ONBOARDING_SYSTEM.md) | Context onboarding + P&L quick fix |
 | [PLAN_7_DATA_SOURCE_SERVICE_P1_4.md](changelogs/PLAN_7_DATA_SOURCE_SERVICE_P1_4.md) | Plan 7 Phase 1–4 — file source (zero-import), scope, workspace + scoped API key, admin sources API |
+| [PLAN_7_DATA_PROTECTION_P4_5.md](changelogs/PLAN_7_DATA_PROTECTION_P4_5.md) | Plan 7 Phase 4.5 — `llm_data_policy` + provider allowlist ต่อ source, retention ของผลลัพธ์, DSR, audit ของคำถาม |
 | [ADMIN_WORKSPACE_REFRESH_2026_03_23.md](changelogs/ADMIN_WORKSPACE_REFRESH_2026_03_23.md) | Admin workspace refresh + Vanna ops |
 | [CACHING_AND_CONTEXT_IMPROVEMENTS.md](changelogs/CACHING_AND_CONTEXT_IMPROVEMENTS.md) | Caching & context improvements |
 | [WEB_VISUALIZATION_ECHARTS.md](changelogs/WEB_VISUALIZATION_ECHARTS.md) | WebDataRocks + ECharts |

@@ -22,10 +22,10 @@
 | **Plan 4B** | ✅ DONE | 95% | 13 tests | Query endpoint ทำงาน, mock-heavy tests |
 | **Plan 5** | ✅ DONE | 100% | 7 tests | 3-DB live, ConfigBase แยก, business_engine ครบทุก call path |
 | **Plan 6** | ⏸ DEFERRED | 0% | 0 | multi-tenant เลื่อนเป็น Tier 3 — ตัดสิน 2026-09-18 ใช้แบบผสม (ภายใน NT หลาย workspace / ลูกค้าภายนอก private deployment) ดู PLAN_7 §12 |
-| **Plan 7** | 🟡 Phase 1 ✅ · Phase 2 ✅ · Phase 3 ✅ · Phase 4 ✅ | 4/7 phases | +150 tests | Data Source as a Service (zero-import) — Phase 1 เสร็จ 2026-09-18; Phase 2: `data_as_of`, knowledge re-sync อัตโนมัติ, 4 โดเมนลงทะเบียน (revenue 14/14, expense 12/12, sales 12/12 — 2026-09-19; ebt 1.3.0 eval 18/24 ปิดไว้ รอกฎ point-in-time ใน contract); Phase 3 (2026-09-19): `scope` บังคับที่ชั้น SQL ทั้ง file/legacy — ดู archive/RESULT_P7_PHASE{2,3}.md, PROMPT_NT_REPORT_P7.md |
+| **Plan 7** | 🟡 Phase 1 ✅ · Phase 2 ✅ · Phase 3 ✅ · Phase 4 ✅ · Phase 4.5 ✅ | 5/8 phases | +301 tests | Data Source as a Service (zero-import) — Phase 1 เสร็จ 2026-09-18; Phase 2: `data_as_of`, knowledge re-sync อัตโนมัติ, 4 โดเมนลงทะเบียน (revenue 14/14, expense 12/12, sales 12/12 — 2026-09-19; ebt 1.3.0 eval 18/24 ปิดไว้ รอกฎ point-in-time ใน contract); Phase 3 (2026-09-19): `scope` บังคับที่ชั้น SQL ทั้ง file/legacy — ดู archive/RESULT_P7_PHASE{2,3}.md, PROMPT_NT_REPORT_P7.md; Phase 4.5 (2026-09-19): `llm_data_policy` + provider allowlist ต่อ source (บังคับที่ชั้น provider, test ดัก sentinel), retention 30 วัน, DSR, `query_audit` ทุกช่องทาง — archive/RESULT_P7_PHASE45.md |
 | **Plan 1B-C** | ⬜ DEFERRED | 0% | 0 | ทำตอน Plan 6 |
 
-**Current verification note:** `pytest -q` on this workspace = `892 passed, 3 skipped` (2026-09-19, `main` หลัง Plan 7 Phase 3 + REMAIN-9 + Phase 2 รอบ sales/ebt + REMAIN-10.2; ก่อน Plan 7 = 635).
+**Current verification note:** `pytest -q` on this workspace = `936 passed, 3 skipped` (2026-09-19, `main` หลัง Plan 7 Phase 4.5; ก่อน Plan 7 = 635).
 
 ### ข้อจำกัดที่ยังมี (honest assessment)
 - End-to-end tests ส่วนใหญ่ mock-heavy — ยืนยัน contract แต่ไม่ยืนยัน behavior ครบ

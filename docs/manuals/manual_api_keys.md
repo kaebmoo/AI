@@ -145,6 +145,20 @@ HTTP 429 Too Many Requests
 | GET / POST | `/api/v1/admin/workspaces` | ดู workspace + context ที่อยู่ในแต่ละตัว / สร้าง (ชื่อเป็น slug `a-z0-9_-`) |
 | PUT | `/api/v1/admin/workspaces/{id}/contexts` | ย้าย context เข้า workspace (context อยู่ได้ workspace เดียว — key ของ workspace เดิมเสียสิทธิ์ทันที) |
 | DELETE | `/api/v1/admin/workspaces/{id}` | ปิด workspace (soft) — key ที่ผูกอยู่ใช้อะไรไม่ได้จนกว่าจะเปิดคืน; ปิด `default` ไม่ได้ |
+| PUT | `/api/v1/admin/workspaces/{id}/retention` | (Phase 4.5) override ของ workspace: `result_retention_days` (null = ค่ากลาง, 0 = ไม่ลบ), `store_result_data` (false = ไม่เก็บแถวผลลัพธ์) |
+| GET | `/api/v1/admin/query-audit` | (Phase 4.5) audit ของทุกคำถาม — filter `api_key_id`, `user_id`, `workspace`, `context`, `date_from/to`, `has_error`, `q`; `format=csv` = export |
+
+## Audit ของคำถามที่มาจาก API key (Plan 7 Phase 4.5)
+
+ทุกคำถามผ่าน `/api/v1/query` ถูกบันทึกใน `query_audit`: key ไหน (`api_key_id`), ระบบไหน (`channel` = ค่า `source` ที่ผู้เรียกส่งมา หรือ `api`), workspace, context, `scope` ที่ส่งมา, คำถาม, SQL ที่รัน, ชื่อคอลัมน์และจำนวนแถวที่คืน, provider, `llm_policy`, และ error — **รวมคำขอที่ถูกปฏิเสธ** (scope ที่บังคับไม่ได้ = `ScopeError`, context นอกสิทธิ์ = `ContextNotAllowed`, ขัด policy ของ source = `LLMPolicyError`). ไม่เก็บค่าผลลัพธ์.
+
+```bash
+# ทุกคำถามของ key 3 ในเดือน ก.ย. เป็น CSV (เปิดใน Excel ได้ — UTF-8 BOM)
+curl -H "Authorization: Bearer <ADMIN_TOKEN>" \
+  "http://localhost:8000/api/v1/admin/query-audit?api_key_id=3&date_from=2026-09-01&date_to=2026-09-30&format=csv&limit=5000" -o audit.csv
+```
+
+ฝั่งผู้เรียก (เช่น portal) ยังต้องบันทึกเองว่า **ผู้ใช้คนไหน** ถามจากสิทธิอะไร — ฝั่ง AI เห็นแค่ key (PLAN_7 §6.2 ชั้น 5).
 
 ## Integration กับ OpenMiniCrew
 

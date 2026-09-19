@@ -244,6 +244,42 @@
 - แก้บันทึกก่อนหน้า: "expense ไม่เสีย retry เพราะ golden อยู่ใน Vanna" **ไม่จริง** — eval รันบน python3.14 ที่ vanna import ไม่ได้ และ `rag_enabled=false`; สาเหตุจริงไม่ได้ไล่ (หลังเพิ่มบรรทัดวิธีกรองงวดแล้วไม่ต่างกัน)
 - NT-Report ออก contract ใหม่ 3 รอบระหว่างงาน (revenue 2.2.0→2.3.0, sales 1.3.0, ebt 1.4.0) — การเพิ่มตาราง/คอลัมน์ต้อง `register_file_source` ใหม่ทุกครั้ง (ตอนนี้ทำผ่าน `POST /admin/sources/register` ได้)
 
+## จาก Plan 7 Phase 4.5 — Data protection (2026-09-19)
+
+ผลลัพธ์/ตัวเลข/ตารางสำรวจ: `plan/archive/RESULT_P7_PHASE45.md`
+
+**เจ้าของตัดสิน (2026-09-19):** D4 = **Matcha (NT Gateway) ใช้กับข้อมูลอ่อนไหวได้** · D5 = **เลื่อน** classification ต่อคอลัมน์ (4.5 ทำ policy ต่อ source เท่านั้น) · retention default = **30 วัน** · source ใหม่ = **`full`**
+
+**Decision ที่ทำระหว่างทาง (ตรวจ/กลับได้):**
+- **บังคับสองปลาย ไม่ใช่ที่ caller:** sink = `AIProvider.__init_subclass__` ห่อ 4 method ของทุก subclass (`app/core/llm_policy.py: guard_call`); source = ฟังก์ชันที่อ่านค่าจากแถว (`get_sample_values`, value lookup, value verifier, RAG, onboarding `to_dict`, keyword index, hierarchy) คืนของว่างเอง. เหตุผล: ชั้น provider เห็นแค่ string — แยก "ค่าจากข้อมูล" กับ "คำถาม" ไม่ได้ จึงปิดได้เฉพาะสิ่งที่รู้เชิงโครงสร้าง (`explain_result` มี `data`, tool loop, `history`); ที่เหลือต้องปิดที่ต้นทาง
+- **taint เป็นชั้นสำรอง ไม่ใช่ตัวหลัก:** ค่าจากแถวผลลัพธ์ของ request (string ≥ 3 ตัวอักษร, ตัวเลข ≥ 5 หลัก, ไม่อยู่ในคำถาม) โผล่ใน payload = ปฏิเสธ — กัน caller ในอนาคตที่เอา `result.data` ไปต่อ prompt เอง; ใน flow ปัจจุบันไม่มี provider call หลัง execute นอกจาก explain (ซึ่งถูกตัดก่อน) จึงไม่มี false positive
+- **"ความรู้ที่คนเขียน" ผ่าน, "ของที่เครื่องอ่านจากแถว" ไม่ผ่าน** — instruction/กฎ/mapping จาก contract และ admin ยังเข้า prompt ภายใต้ `schema_only` (มีชื่อกลุ่ม/ค่ามิติที่เจ้าของข้อมูลประกาศเอง); **RAG ถูกตัดทั้งก้อน** เพราะ brain ปน golden ที่ `gen_golden_from_controls` สร้างจาก control totals (รหัส/ชื่อกลุ่มจริง) แยกไม่ได้ตอน retrieve — ที่มา: review รอบ 1 (critical)
+- **`aggregated_only` = ตรวจข้อความ SQL** (GROUP BY / SUM / COUNT / AVG, ไม่มี `OVER (`, ไม่มี `*`) — ไม่ใช่ k-anonymity; GROUP BY บน key ที่ไม่ซ้ำ หรือ aggregate ที่อยู่แค่ใน subquery ยังผ่าน → ของที่ห้ามเห็นรายแถวต้อง `schema_only`; k ≥ 5 ไปกับ D5
+- **registry ที่ยังไม่ migrate = `full`** (ไม่มีคอลัมน์ = ไม่มีใครตั้ง policy ได้) แต่ **engine ที่ไม่ใช่ config DB เลย = `schema_only`** (`SchemaService` โหมด standalone ชี้ไป business DB) — แยกด้วย "มีตาราง config สักตัวไหม"; คอลัมน์มีแต่ NULL/ค่าแปลก = `schema_only`
+- **audit เขียนไม่ได้ ≠ ไม่ตอบ** — log ERROR (`query audit NOT written`) แล้วตอบต่อ; ถ้าต้องการ fail closed สำหรับ workspace การเงิน ต้องเพิ่ม flag (ยังไม่ทำ)
+- **DSR ไม่ลบแถว audit** — ตัด `user_id` + คำถามออก เหลือ SQL/จำนวนแถว/เวลา; การลบเองถูกบันทึกเป็นแถว `channel='dsr_erase'`
+- **retention ล้าง `sql_result_summary` ด้วย** (= `str(data)[:1000]` แถวดิบ) ไม่ใช่แค่ `result_data`; **ไม่ล้าง `ai_response`** (คือบทสนทนา มีตัวเลขในข้อความ — ลบเมื่อ DSR เท่านั้น) ← ถ้าต้องการให้ข้อความคำตอบหมดอายุด้วย ต้องตัดสินเพิ่ม
+- test เดิมที่แก้ 1 จุด: `test_scheduler.py` นับ job ตายตัว 3 → 4 (เพิ่ม job จริง)
+
+**พบระหว่างทาง:**
+- ⚠️ **`AuditService` เขียนไม่ลงมาตลอด:** INSERT ลง `audit_log` แต่ migration 028 สร้าง `config_audit_log` ที่ schema ไม่ตรง (CHECK ของ `action` = create/update/…, คอลัมน์ `created_by`) และ error ถูกกลืนที่ `logger.warning` — `config_audit_log` ใน app.db จริงมี 0 แถว; test ของมันสร้างตาราง `audit_log` เองจึงไม่เห็น → งานแยก (ไม่แก้ใน phase นี้)
+- admin tool `search_hierarchy` เรียก `HierarchyService.search_alias` ซึ่งไม่มี (มีแต่ `search_aliases`) → tool พังอยู่แล้ว (เลยไม่รั่ว) → รวมในงานแยกข้างบน
+- **`/api/v1/query` และ telegram ไม่เคยทิ้งร่องรอยคำถามเลย** ก่อน Phase 4.5 (มีแค่ตัวนับ `api_key_usage`) — ช่องทางที่ Phase 4 เปิดให้ระบบภายนอกคือช่องทางที่ตรวจย้อนหลังไม่ได้
+- two-pass **ฝัง history ลงในข้อความ prompt** (`build_history_context`) — ไม่ได้ส่งทาง `history=` → ตัวกรองที่ชั้น provider มองไม่เห็น; test ดักเป็นตัวจับ → ตัด history ครั้งเดียวใน `QueryEngine`
+- feature flag `rag_enabled` **ไม่ได้คุม** การดึง RAG ใน hybrid flow (`get_vanna_context_string` ถูกเรียกเสมอ; `rag_enabled=True` ที่ `query_engine` เป็นค่าตายตัวและคุมแค่รูปแบบ prompt) — ที่ config จริงไม่มี RAG เพราะ vanna import ไม่ได้บน python3.14 ไม่ใช่เพราะ flag (ที่มา: review รอบ 1; ยังไม่แก้ — เปลี่ยนพฤติกรรมของ deployment ที่รัน python3.10)
+- test ที่ให้ engine สลับ provider ตาม allowlist **ยิงออกไปหา Anthropic จริง 1 ครั้ง** ระหว่างพัฒนา (เครื่องนี้มี `ANTHROPIC_API_KEY`; ข้อมูลที่ส่ง = ค่าสังเคราะห์ของ test) → test ปัจจุบัน patch `_build_provider_kwargs` ให้ hermetic; บทเรียน: test ที่สร้าง provider จริงต้องปิด key ของ provider อื่นเสมอ
+- `query_correction_log` ถูกสร้างแบบ lazy โดย `AIService` — app.db จริงยังไม่มีตารางนี้
+
+**จาก review รอบ 2:** CSV ของ audit export นำหน้า cell ที่ขึ้นต้น `= + - @` ด้วย `'`; source ที่ ≠ `full` ไม่รับ `intent_state` ของรอบก่อน (เก็บต่อ conversation อย่างเดียว — ค่า filter จาก value lookup ของ source อื่นติดมาได้); audit เขียนผ่าน `asyncio.to_thread`. **ไม่แก้:** `PolicyMCPClient` ลบ literal เฉพาะ error ที่ *คืนมา* ไม่ใช่ที่ *raise* — ตอนนี้ `execute_select` คืน dict เสมอ (raise แค่ `SourceUnavailable`) จึงไม่รั่ว แต่ tool ใหม่ที่ raise พร้อมค่าจากแถวจะหลุดเข้า retry prompt → ถ้าเพิ่ม data tool ให้คืน error เป็น dict
+
+**ข้อค้าง (ไม่บล็อก):**
+- Admin UI ของ policy / retention / audit / DSR — มีแต่ API
+- นอก `llm_data_policy`: Telegram (15 แถว + กราฟไป Bot API), schema analyzer (ไฟล์ที่ admin upload), admin agent สรุปคำถาม/SQL ของผู้ใช้อื่น
+- ค่าที่ extract ไว้แล้วใน `master_hierarchy_values` / `schema_metadata.sample_values` ของ source ที่ถูกตั้งเข้มขึ้น ยังอยู่ใน config DB (ไม่ถูกค้น/ส่งแล้ว แต่ไม่ได้ลบ)
+- DSR ไม่แตะ: `user_sessions`, `otp_requests`, `api_key_usage`, `trending_queries` (ไม่ผูก user), `unmatched_keywords.last_question` / `query_correction_log` (ไม่มี user_id — หมดอายุตาม retention), `golden_examples.added_by`, history ใน memory ของ telegram bot
+- `PIIRedactingFormatter` (PLAN_7 §11.5): ไม่เพิ่ม regex — ค่าธุรกิจใน log ลดที่ต้นทางแทน (verifier/lookup ไม่ทำงานกับ source ที่เข้ม); ที่ยังเหลือคือ literal ใน SQL ที่ log ระดับ INFO
+- app DB เข้ารหัส at-rest, TLS, credential store (§6.6 ข้อ 6) — เรื่อง deployment (Phase 7)
+
 ## จาก REMAIN-9 (2026-09-19)
 - 9.4: DDL ที่ train เพิ่มจะมีผลเมื่อ admin กด Sync Brain — ยังไม่ได้วัดผลต่อ eval
 - 9.5: `extract_hierarchy.py` เลิกรับ `--db` (อ่านข้อมูลผ่าน source ของ context, config ผ่าน CONFIG_DB_URL) — ไม่มี caller ที่ส่ง `--db`

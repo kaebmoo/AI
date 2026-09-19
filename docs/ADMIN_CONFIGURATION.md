@@ -203,6 +203,19 @@ Returns active AI providers (enabled by admin)
 
 ---
 
+### Data protection settings (Plan 7 Phase 4.5)
+
+| ตั้งที่ไหน | Key / endpoint | ค่า | ผล |
+|---|---|---|---|
+| ต่อ **source** | `PUT /api/v1/admin/sources/{name}/policy` `{"llm_data_policy": "full" \| "aggregated_only" \| "schema_only", "llm_provider_allowlist": ["matcha"] \| null}` | default `full` / `null` | ข้อมูลของ source ที่ออกไปหา LLM ได้ + provider ที่ใช้ได้ — รายละเอียดและข้อจำกัดใน `docs/DEPLOYMENT_SECURITY.md`; ดูค่าปัจจุบันที่ `GET /api/v1/admin/sources` |
+| กลาง | `PUT /api/v1/admin/config/settings/result_retention_days?value=30` | 0–3650, default **30**, 0 = ไม่ลบ | job รายวันล้างแถวผลลัพธ์ที่เก่ากว่านี้ (คำถาม/SQL/คำตอบอยู่ครบ) |
+| กลาง | `POST /api/v1/admin/config/features/store_result_data/toggle?enabled=false` | default `true` | `false` = ไม่เก็บแถวผลลัพธ์เลย (history / session data / query cache) — เปิดประวัติเก่าจะไม่มีตาราง/กราฟ และ "เปลี่ยนชนิดกราฟ" ของคำตอบล่าสุดใช้ไม่ได้ |
+| ต่อ **workspace** | `PUT /api/v1/admin/workspaces/{id}/retention` `{"result_retention_days": 7, "store_result_data": false}` | `null` = ใช้ค่ากลาง | override สำหรับ context ใน workspace นั้น |
+| ต่อ **user** | `DELETE /api/v1/admin/users/{id}/data?dry_run=true` | `dry_run=false` = ลบจริง | DSR — ลบร่องรอยของ user (ไม่ลบบัญชี); ย้อนกลับไม่ได้ |
+| — | `GET /api/v1/admin/query-audit` (+ `format=csv`) | — | audit ของทุกคำถามทุกช่องทาง |
+
+ทั้งหมดมีผลกับคำถามถัดไปโดยไม่ต้อง restart (policy ถูกอ่านต่อ request; การตั้ง policy ล้าง query cache). ยังไม่มีหน้าใน Admin UI — ใช้ API.
+
 ### Admin Endpoints (Requires Admin Auth)
 
 **GET /api/v1/admin/config/ai**

@@ -1,6 +1,6 @@
 # Plan 7: Data Source as a Service — ถามข้อมูลจากแหล่งที่ผู้ใช้กำหนด โดยไม่ต้อง import
 
-**สถานะ:** 🟡 Phase 1 ✅ DONE (2026-09-18) — Phase 2 ✅ DONE (2026-09-19 — exit ครบ 4/4 โดเมน: revenue 14/14, expense 12/12, sales 12/12, ebt 22/24 บน contract 1.3.1) — Phase 3 ✅ DONE (2026-09-19) — Phase 4 ✅ DONE (2026-09-19; API ครบ, admin UI ยังไม่ทำ) — Phase 4.5–7 ยังไม่เริ่ม | ผล: `plan/archive/RESULT_P7_PHASE{1,2,3,4}.md` | งานฝั่ง NT-Report: `plan/PROMPT_NT_REPORT_P7.md`
+**สถานะ:** 🟡 Phase 1 ✅ DONE (2026-09-18) — Phase 2 ✅ DONE (2026-09-19 — exit ครบ 4/4 โดเมน: revenue 14/14, expense 12/12, sales 12/12, ebt 22/24 บน contract 1.3.1) — Phase 3 ✅ DONE (2026-09-19) — Phase 4 ✅ DONE (2026-09-19; API ครบ, admin UI ยังไม่ทำ) — Phase 4.5 ✅ DONE (2026-09-19; `llm_data_policy` + provider allowlist ต่อ source, retention, DSR, audit ของคำถาม — API ครบ, admin UI ยังไม่ทำ, classification ต่อคอลัมน์เลื่อน) — Phase 5–7 ยังไม่เริ่ม | ผล: `plan/archive/RESULT_P7_PHASE{1,2,3,4,45}.md` | งานฝั่ง NT-Report: `plan/PROMPT_NT_REPORT_P7.md`
 **ความสัมพันธ์กับแผนเดิม:** ต่อยอด/แทนที่บางส่วนของ `PLAN_6_SAAS.md` (ดู §9), รวม Plan 1B-C (MCP SSE + API key) ไว้ใน Phase 6
 **ผู้ใช้รายแรก:** NT-Report portal (F11 dashboard Q&A) — ปัจจุบันถูก disable เพราะยังไม่ได้ตั้ง key และข้อมูลใน AI ค้างที่ revenue 202605
 
@@ -252,18 +252,20 @@ DENY SELECT ON SCHEMA::dbo TO ai_reader; -- ตารางจริงห้า
 
 ### 6.6 ข้อมูลอ่อนไหว (PDPA / ข้อมูลการเงินของลูกค้า)
 
-**สถานะปัจจุบันของ AI Project (ตรวจ code 2026-09-18):**
+**สถานะปัจจุบันของ AI Project (ตรวจ code 2026-09-18; อัปเดตหลัง Phase 4.5 2026-09-19 — ตารางสำรวจครบทุกจุด: `plan/archive/RESULT_P7_PHASE45.md` §1):**
 
 | เรื่อง | สถานะ | หลักฐาน |
 |---|---|---|
 | ลบ PII ออกจาก log (email, เบอร์ 10 หลัก, เลขบัตร 13 หลัก, password/token/otp) | ✅ | `app/core/logging.py` `PIIRedactingFormatter` (regex — ไม่ครอบคลุมชื่อคน/ที่อยู่/เลขบัญชี) |
 | API key เก็บเป็น hash | ✅ | `api_key_service.py` (sha256) |
 | ไฟล์ export หมดอายุ | ✅ | `report_service.py` 7 วัน |
-| **ส่งแถวผลลัพธ์ให้ LLM ภายนอก** | ⚠️ ส่งจริง | `explain_result(question, sql, data, ...)` ส่ง `data` ไป provider (Gemini/Claude); onboarding ส่ง `sample_values` / `all_distinct` ของคอลัมน์ |
-| **เก็บผลลัพธ์ในประวัติแชท** | ⚠️ ไม่มีวันหมดอายุ | `chat_history.question / generated_sql / result_data` — retention job มีแค่ comment ใน `app/models/chat.py` |
-| จัดชั้นความลับของข้อมูล (classification) | ❌ ไม่มี | — |
-| mask/aggregate ข้อมูลส่วนบุคคลในผลลัพธ์ | ❌ ไม่มี | — |
-| ลบข้อมูลตามคำขอ (DSR), ROPA, DPA template, breach process | ❌ ไม่มี | — |
+| **ส่งแถวผลลัพธ์ / ค่าตัวอย่างให้ LLM ภายนอก** | ✅ คุมได้ต่อ source (Phase 4.5) — default `full` = ยังส่งเหมือนเดิมจนกว่า admin จะตั้ง | `data_sources.llm_data_policy` + `llm_provider_allowlist`; บังคับที่ชั้น provider (`app/core/llm_policy.py`) + ต้นทางของค่า; test ดัก sentinel `tests/unit/test_llm_data_policy.py` |
+| **เก็บผลลัพธ์ในประวัติแชท** | ✅ หมดอายุ 30 วัน (ตั้งได้, ต่อ workspace ได้) + โหมดไม่เก็บ | `app/services/retention.py` + scheduler; ข้อความคำตอบ (`ai_response`) ไม่หมดอายุ |
+| Audit ของคำถามทุกช่องทาง | ✅ (Phase 4.5) — เดิม `/api/v1/query` + telegram ไม่มีร่องรอย | `query_audit` + `GET /admin/query-audit` (+ CSV) |
+| ลบข้อมูลตามคำขอ (DSR) | ✅ (Phase 4.5) | `DELETE /admin/users/{id}/data` |
+| จัดชั้นความลับของข้อมูล (classification) | ❌ เลื่อน (D5, 2026-09-19) | — |
+| mask/aggregate ข้อมูลส่วนบุคคลในผลลัพธ์ (k ≥ 5) | ❌ ไปกับ classification — `aggregated_only` ตอนนี้ตรวจจากข้อความ SQL เท่านั้น | — |
+| ROPA, DPA template, breach process | ❌ ไม่มี (Phase 7 / DPO) | — |
 
 **มาตรการที่ต้องเพิ่ม:**
 
@@ -298,7 +300,7 @@ DENY SELECT ON SCHEMA::dbo TO ai_reader; -- ตารางจริงห้า
 ### 6.8 Phase ที่เพิ่ม/เปลี่ยนเพราะหัวข้อนี้
 - Phase 3 (scope) เพิ่ม: column allowlist + classification policy ที่ view
 - Phase 4 (workspace) เพิ่ม: entitlement token v2, IdP group → policy mapping (แบบ B)
-- **Phase 4.5 (ใหม่, 3–4 วัน) — Data protection:** `llm_data_policy` + provider allowlist, retention/purge job ของ `chat_history.result_data`, ลบตาม user (DSR), audit export, onboarding ไม่ส่ง sample ของคอลัมน์ต้องห้าม
+- **Phase 4.5 (ใหม่, 3–4 วัน) — Data protection — ✅ DONE 2026-09-19** (`plan/archive/RESULT_P7_PHASE45.md`; exit ครบ; review อิสระ 2 รอบ)**:** `llm_data_policy` + provider allowlist, retention/purge job ของ `chat_history.result_data`, ลบตาม user (DSR), audit export, onboarding ไม่ส่ง sample ของคอลัมน์ต้องห้าม
   - **Exit:** source ที่ตั้ง `schema_only` → ตรวจ request ที่ออกไปยัง provider ไม่มีค่าจากผลลัพธ์เลย (test ดักที่ provider layer); purge job ลบ `result_data` เกินกำหนดจริง
 - Phase 7 (ภายนอก) ต้องมีก่อนเปิด: DPA template, ROPA, breach runbook, connector agent หรือ private deployment
 
@@ -349,8 +351,8 @@ NT-Report ไม่ต้อง import อะไรเข้า AI อีก ห
 | D1 | AI server รันที่ไหน และอ่าน DataFeed ของ NT-Report ทางใด — ✅ **ตัดสิน 2026-09-18:** (ก) **เครื่องเดียวกัน — local path** (ใช้อยู่แล้ว) และ**ต้องออกแบบให้เพิ่มได้**: (ค) object storage S3/MinIO และ (ง) HTTPS + token สำหรับลูกค้าที่ไม่มี (ค) — ไม่เขียน code ล่วงหน้า (ดู §13) | เจ้าของโครงการ | §6.7, §13 |
 | D2 | ใช้ DuckDB เป็น engine ของ file source — ✅ ใช้แล้ว (Phase 1; `duckdb==1.5.5`, `duckdb-engine==0.17.0` ติดตั้งทั้ง python3.10 และ 3.14) | ทีมพัฒนา | Phase 1 |
 | D3 | ชื่อ field ขอบเขตข้อมูลใน `/api/v1/query` — ✅ **ตัดสิน 2026-09-18:** **A** — field ใหม่ `scope` = บังคับจริงที่ชั้น SQL (Phase 3), `pinned_filters` รับต่อแบบ log อย่างเดียวช่วงเปลี่ยนผ่าน แล้วค่อยเลิก; NT-Report เปลี่ยนไปส่ง `scope` เมื่อ Phase 3 พร้อม | ทีมพัฒนา | Phase 3, API contract กับ NT-Report |
-| D4 | LLM ที่อนุญาตสำหรับข้อมูล confidential/personal — มี LLM ภายในหรือ endpoint ในประเทศที่ใช้ได้หรือไม่ | เจ้าของโครงการ + DPO | ถ้าไม่มี: source อ่อนไหวต้องใช้ `schema_only` เท่านั้น |
-| D5 | ใครเป็นคนกำหนด data classification ต่อคอลัมน์ (เจ้าของข้อมูลผ่าน contract / admin ลูกค้าตอน onboard) | เจ้าของโครงการ | Phase 3 / 4.5 |
+| D4 | LLM ที่อนุญาตสำหรับข้อมูล confidential/personal — ✅ **ตัดสิน 2026-09-19: Matcha (NT Gateway) ใช้ได้** → source อ่อนไหวตั้ง `llm_provider_allowlist=["matcha"]` (code คุมชื่อ provider; gateway ส่งต่อไปโมเดลใดเป็นเรื่องของสัญญากับ gateway — DPO ยังต้องยืนยัน) | เจ้าของโครงการ + DPO | Phase 4.5 |
+| D5 | ใครเป็นคนกำหนด data classification ต่อคอลัมน์ — ⏸ **ตัดสิน 2026-09-19: เลื่อน** — Phase 4.5 ทำ policy ต่อ source เท่านั้น ("ไม่ระบุ = confidential" จะเปลี่ยนพฤติกรรมทุก context ทันที); ทำเมื่อมี source ที่มีข้อมูลบุคคลจริง, ผู้กำหนดที่เสนอ = เจ้าของข้อมูลผ่าน contract | เจ้าของโครงการ | §6.6 ข้อ 1–2 (k ≥ 5, mask) รอข้อนี้ |
 | D6 | เกณฑ์เลิกโหมด import (`import_datafeed.py`) — เสนอ: หลัง Phase 2 ผ่าน 2 รอบปิดงวด | เจ้าของโครงการ | §7 |
 | D7 | จังหวะเปลี่ยนไป entitlement token v2 — เสนอ: เมื่อมีผู้เรียกรายที่ 2 หรือก่อน Phase 7 | เจ้าของโครงการ | §6.3 |
 | D8 | รูปแบบให้บริการ: private deployment ต่อลูกค้า vs multi-tenant (API ร่วม) — ✅ **ตัดสินแล้ว 2026-09-18: แบบผสม** | เจ้าของโครงการ | §12 — Phase 4, Phase 7, Plan 6 |
@@ -379,8 +381,8 @@ NT-Report ไม่ต้อง import อะไรเข้า AI อีก ห
 ### 11.5 ต้องตรวจทางเทคนิคระหว่างทำ
 - [x] option ของ DuckDB สำหรับจำกัด path/ปิด external access และ lock config — ยืนยันกับ **1.5.5**: `allowed_paths` (ต้อง SET หลัง connect และก่อนปิด external access) + `enable_external_access=false` + `lock_configuration=true` ใช้ได้; **แต่ lock ไม่กัน table function `enable_logging()`** (ทำ process ล่ม/อ่าน SQL ผู้อื่นได้) → เพิ่ม query gate ที่ parse ด้วย DuckDB เอง (รายละเอียด `FIX_NOTES.md` Plan 7 Phase 1) ✅ Phase 1
 - [x] latency ของ CSV scan เทียบ F10 (10.5s P50) — P50 6.1–6.3 s ไม่เกินเกณฑ์ → **ไม่ทำ Parquet cache** (ถ้าต้องการ: bundle มี `.parquet` + sha256 ใน manifest อยู่แล้ว อ่านตรงได้เลย เร็วกว่า CSV 50–100×) ✅ Phase 1
-- [ ] `PIIRedactingFormatter` เป็น regex — ไม่ครอบคลุมชื่อคน/ที่อยู่/เลขบัญชี; ประเมินว่าต้องเพิ่มหรือพึ่ง classification แทน (Phase 4.5)
-- [ ] ทุกจุดที่ส่งข้อมูลให้ provider (ไม่ใช่แค่ `explain_result` และ onboarding) — ต้องไล่ให้ครบก่อนเขียน test ดัก `schema_only` (Phase 4.5)
+- [x] `PIIRedactingFormatter` เป็น regex — ✅ ประเมินแล้ว (Phase 4.5): **ไม่เพิ่ม regex** — regex รู้จักรูปแบบ (email/เบอร์/บัตร) ไม่รู้จักค่าธุรกิจ; ลดที่ต้นทางแทน (source ที่เข้ม: verifier/lookup ไม่ทำงาน = ไม่มี log ของค่า); ที่เหลือคือ literal ใน SQL ที่ log ระดับ INFO — ทบทวนพร้อม classification (D5)
+- [x] ทุกจุดที่ส่งข้อมูลให้ provider — ✅ ไล่ครบ 15 จุด + จุดเก็บ/ส่งออก 17 จุด: `plan/archive/RESULT_P7_PHASE45.md` §1 (review อิสระเจอเพิ่ม 1: RAG/golden ที่สร้างจาก control totals)
 
 ### 11.7 ข้อค้างใหม่จาก Phase 1 (2026-09-18)
 **รอเจ้าของตัดสิน:**
