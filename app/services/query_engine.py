@@ -420,12 +420,11 @@ class QueryEngine:
         try:
             engine_result = await self._query(question, provider, context, mode, history, max_retries,
                                               conversation_id, provider_kwargs, on_status, user_id, scope, allowed_contexts)
-            query_audit.record(self.db, engine_result, scope, **audit,
-                               workspace=self._workspace(getattr(engine_result, "context_name", None)))
+            await self._audit(engine_result, scope, audit, getattr(engine_result, "context_name", None))
             return engine_result
-        except BaseException as exc:  # refusals (scope / allowlist / policy) and failures are audited too
-            query_audit.record(self.db, None, scope, **audit, context_name=context,
-                               workspace=self._workspace(context), error=f"{type(exc).__name__}: {exc}"[:2000])
+        except Exception as exc:  # refusals (scope / allowlist / policy) and failures are audited too
+            await self._audit(None, scope, {**audit, "error": f"{type(exc).__name__}: {exc}"[:2000],
+                                            "context_name": context}, context)
             raise
         finally:
             request_llm_policy.reset(llm)
@@ -705,6 +704,14 @@ class QueryEngine:
             logger.info(f"QueryEngine: Cached result (key={qcache_key[:12]}…, rows={len(result.data)})")
 
         return engine_result
+
+    async def _audit(self, engine_result, scope, fields: Dict[str, Any], context_name: Optional[str]) -> None:
+        if self.db is None:
+            return
+        import asyncio
+        # off the event loop: a second writer on the app DB may wait for SQLite's lock
+        await asyncio.to_thread(query_audit.record, self.db, engine_result, scope,
+                                **fields, workspace=self._workspace(context_name))
 
     @staticmethod
     def _workspace(context_name: Optional[str]) -> Optional[str]:

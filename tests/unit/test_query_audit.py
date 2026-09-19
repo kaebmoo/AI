@@ -111,6 +111,13 @@ def test_search_and_csv_export(db):
     assert export.media_type.startswith("text/csv") and body.splitlines()[0].startswith("id,created_at,user_id,api_key_id")
     assert "คำถาม 1" in body and "คำถาม 2" not in body and len(body.splitlines()) == 3
 
+    query_audit.record(db, context_name="evil", question="=HYPERLINK(\"http://x\")", sql_query=" @SUM(1)", error="-1")
+    import csv
+    import io
+    row = next(csv.DictReader(io.StringIO(search(format="csv", context="evil").body.decode("utf-8-sig"))))
+    assert (row["question"][0], row["sql_query"][0], row["error"][0]) == ("'", "'", "'")  # text to a spreadsheet, not a formula
+    assert search(context="evil")["items"][0]["question"].startswith("=")  # the stored row and the JSON are untouched
+
 
 def test_query_endpoint_tells_the_engine_which_key_and_caller(tmp_path):
     """/api/v1/query is the channel Phase 4 opened to other systems — before Phase 4.5 it left no trace."""

@@ -164,6 +164,22 @@ class TestSchemaOnlyPipeline:
             ask(resolver)
         assert fake_llm.requests and S_DIV not in fake_llm.sent() and S_DIV2 not in fake_llm.sent()
 
+    def test_intent_of_an_earlier_turn_is_not_carried_in(self, env, fake_llm):
+        """intent_state is keyed by conversation only: turn 1 on a `full` source may have stored looked-up values."""
+        from app.services.ai import intent_state
+
+        config, resolver = env
+        set_policy(config, SCHEMA_ONLY)
+        flags = {"two_pass_enabled": True, "intent_state_enabled": True}
+        stored = {"intent_type": "lookup", "metrics": [], "filters": [{"column": "division", "operator": "=", "value": S_LOOKUP}]}
+        with patch.object(intent_state, "get_intent", return_value=stored), patch.object(intent_state, "set_intent"):
+            ask(resolver, history=HISTORY, flags=flags)
+            assert fake_llm.requests and S_LOOKUP not in fake_llm.sent()
+            fake_llm.requests.clear()
+            set_policy(config, FULL)
+            ask(resolver, history=HISTORY, flags=flags)
+        assert S_LOOKUP in json.dumps(fake_llm.requests[0], ensure_ascii=False)  # full: carried, as before
+
     def test_two_pass_sends_no_value_either(self, env, fake_llm):
         config, resolver = env
         set_policy(config, SCHEMA_ONLY)

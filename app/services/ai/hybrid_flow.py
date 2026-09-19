@@ -562,8 +562,11 @@ async def build_first_attempt_prompt(
         history_context = build_history_context(history)
         previous_intent = None
         if intent_state_enabled and history:
+            from app.core.llm_policy import restricted
             from app.services.ai import intent_state
-            previous_intent = intent_state.get_intent(conversation_id)
+            # Phase 4.5: the stored intent is keyed by conversation only — its filter values may be "Actual
+            # Values Found" of an earlier turn on a `full` source; a restricted source's prompt doesn't get it
+            previous_intent = None if restricted() else intent_state.get_intent(conversation_id)
         intent_json = await extract_intent(
             service=service,
             question=question,

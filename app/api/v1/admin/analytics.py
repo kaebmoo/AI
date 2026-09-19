@@ -304,7 +304,9 @@ def get_query_audit(
         buffer = io.StringIO()
         writer = csv.DictWriter(buffer, fieldnames=columns)
         writer.writeheader()
-        writer.writerows(items)
+        # the question is whatever a caller typed: a cell starting with = + - @ is a formula to a spreadsheet
+        writer.writerows({k: "'" + v if isinstance(v, str) and v.lstrip()[:1] in ("=", "+", "-", "@") else v
+                          for k, v in item.items()} for item in items)
         return Response("\ufeff" + buffer.getvalue(), media_type="text/csv; charset=utf-8",  # BOM: Excel + Thai
                         headers={"Content-Disposition": "attachment; filename=query_audit.csv"})
     return {"total": total, "skip": skip, "limit": limit, "items": items}
