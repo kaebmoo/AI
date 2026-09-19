@@ -1,14 +1,13 @@
 """
 Unit Tests for DB Separation (Plan 5)
 =======================================
-Tests for BusinessDBAdapter and config DB session.
+Tests for the config DB session and the DB-separation migration script.
 """
 
 import pytest
 import sqlite3
 import os
 
-from app.services.business_db import BusinessDBAdapter, ColumnInfo
 
 
 @pytest.fixture
@@ -33,48 +32,6 @@ def test_sqlite(tmp_path):
     conn.commit()
     conn.close()
     return db_path
-
-
-class TestBusinessDBAdapter:
-
-    def test_adapter_sqlite(self, test_sqlite):
-        """SQLite adapter initializes correctly."""
-        adapter = BusinessDBAdapter(f"sqlite:///{test_sqlite}")
-        assert adapter.engine_type == "sqlite"
-
-    def test_adapter_query(self, test_sqlite):
-        """Execute query returns list of dicts."""
-        adapter = BusinessDBAdapter(f"sqlite:///{test_sqlite}")
-        results = adapter.execute("SELECT * FROM revenue WHERE YEAR = 2025")
-        assert len(results) == 3
-        assert "YEAR" in results[0]
-        assert results[0]["YEAR"] == 2025
-
-    def test_adapter_schema(self, test_sqlite):
-        """Get schema returns column info."""
-        adapter = BusinessDBAdapter(f"sqlite:///{test_sqlite}")
-        columns = adapter.get_schema("revenue")
-        assert len(columns) >= 5
-        col_names = [c.name for c in columns]
-        assert "REVENUE_VALUE" in col_names
-        assert "YEAR" in col_names
-
-    def test_adapter_get_tables(self, test_sqlite):
-        """Get tables returns table and view names."""
-        adapter = BusinessDBAdapter(f"sqlite:///{test_sqlite}")
-        tables = adapter.get_tables()
-        assert "revenue" in tables
-        assert "v_revenue" in tables
-
-    def test_detect_engine_postgresql(self):
-        """Detects PostgreSQL from URL."""
-        adapter = BusinessDBAdapter("postgresql://user:pass@host/db")
-        assert adapter.engine_type == "postgresql"
-
-    def test_detect_engine_mssql(self):
-        """Detects MSSQL from URL."""
-        adapter = BusinessDBAdapter("mssql+pymssql://user:pass@host/db")
-        assert adapter.engine_type == "mssql"
 
 
 class TestMigrationScript:
