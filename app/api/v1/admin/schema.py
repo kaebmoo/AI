@@ -148,13 +148,27 @@ def delete_schema_column(
     return None
 
 
+def service_for_table(table_name: str, service: SchemaService) -> SchemaService:
+    """The SchemaService that inspects this table where it really lives (Phase 4d): a file-source
+    view is read through its source; anything else through the legacy business DB, as before."""
+    from app.services import data_sources
+
+    owner = data_sources.registered_tables(service.get_config_engine()).get(table_name)
+    if not owner:
+        return service
+    return SchemaService(db_engine=service.get_config_engine(),
+                         business_engine=data_sources.source_resolver.for_context(owner["context"]).engine)
+
+
 @router.get("/schema/tables", response_model=List[str])
 def list_tables(
     current_user: User = Depends(deps.require_admin),
     service: SchemaService = Depends(deps.get_schema_service),
 ):
-    """List all tables available for view creation."""
-    return service.get_all_tables()
+    """List all tables available for view creation — legacy business DB + file-source views."""
+    from app.services.data_sources import registered_tables
+
+    return sorted(set(service.get_all_tables()) | set(registered_tables(service.get_config_engine())))
 
 
 @router.post("/schema/views", status_code=status.HTTP_201_CREATED)
@@ -192,8 +206,8 @@ async def suggest_view_mapping(
 ):
     """Get AI-powered mapping suggestions for a table."""
     try:
-        columns = service.get_table_info(table_name)
-        samples = service.get_sample_values(table_name)
+        columns = service_for_table(table_name, service).get_table_info(table_name)
+        samples = service_for_table(table_name, service).get_sample_values(table_name)
         suggestions_data = await ai_service.suggest_mappings(columns, samples)
 
         suggestions = []
@@ -207,7 +221,7 @@ async def suggest_view_mapping(
             )
         return suggestions
     except Exception as exc:
-        columns = service.get_table_info(table_name)
+        columns = service_for_table(table_name, service).get_table_info(table_name)
         return [
             ViewMappingSuggestion(
                 col=column["name"],
@@ -299,7 +313,7 @@ async def analyze_dimension_families(
     import json as _json
     import re as _re
 
-    columns = service.get_table_info(request.table_name)
+    columns = service_for_table(request.table_name, service).get_table_info(request.table_name)
     samples = service.get_sample_values(request.table_name)
 
     column_info = []
@@ -397,7 +411,7 @@ def auto_populate_dimension_families(
     """Run auto-detect and save results to DB."""
     from app.services.dimension_detector import detect_families
 
-    columns = service.get_table_info(table_name)
+    columns = service_for_table(table_name, service).get_table_info(table_name)
     all_col_names = [column["name"] for column in columns]
     auto_families = detect_families(all_col_names)
 

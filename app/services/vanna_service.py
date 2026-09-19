@@ -137,8 +137,17 @@ class VannaService(ChromaDB_VectorStore, VannaBase):
             views = sorted({row[0] for row in conn.execute(text(
                 "SELECT main_view FROM schema_contexts WHERE is_active = 1 AND main_view IS NOT NULL"))
                 if self._keep.view(row[0])})
+        # Phase 4d: a file-source view has no DDL in the business DB — what is there under the same
+        # name is F10's stale imported copy. Its DDL is the registry's column list.
+        from app.services.data_sources import registered_tables
+        file_tables = registered_tables(service.engine)
         with service.business_engine.connect() as conn:
             for name in views:
+                if name in file_tables:
+                    columns = ", ".join(f'"{c["name"]}" {c["type"]}' for c in file_tables[name]["columns"])
+                    self.train(ddl=f'CREATE TABLE "{name}" ({columns})')
+                    logger.info(f"Trained DDL (file source): {name}")
+                    continue
                 try:
                     row = conn.execute(
                         text("SELECT sql FROM sqlite_master WHERE type IN ('table', 'view') AND name = :name"),

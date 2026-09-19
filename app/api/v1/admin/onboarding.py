@@ -22,8 +22,19 @@ from app.services.schema_service import SchemaService
 
 from . import _get_business_db_path
 from ._shared import mark_brain_dirty
+from app.services.data_sources import registered_tables
 
 router = APIRouter()
+
+
+def _refuse_contract_driven(view_name: str) -> None:
+    """Onboarding inspects the legacy business DB. A file-source table has a stale copy there under the
+    same name: onboarding it would overwrite the knowledge generated from the owner's contract."""
+    owner = registered_tables().get(view_name)
+    if owner:
+        raise HTTPException(status_code=400, detail=(
+            f"{view_name} เป็นตารางของ file source (context '{owner['context']}') — ความรู้มาจาก contract; "
+            f"ใช้ POST /admin/sources/register แทนการ onboard"))
 
 
 @router.get("/contexts/onboard/available-views", response_model=AvailableViewsResponse)
@@ -53,6 +64,7 @@ async def onboard_context(
     """Full context onboarding pipeline."""
     from app.services.context_onboarding import ContextOnboardingService
 
+    _refuse_contract_driven(request.view_name)
     service = ContextOnboardingService(_get_business_db_path())
 
     try:
@@ -129,6 +141,7 @@ async def inspect_context(
     """Lightweight inspection only."""
     from app.services.context_onboarding import ContextOnboardingService
 
+    _refuse_contract_driven(request.view_name)
     service = ContextOnboardingService(_get_business_db_path())
     try:
         inspection = service.inspect(request.view_name)
@@ -146,6 +159,7 @@ async def apply_sql_statements(
     """Apply pre-generated SQL statements directly."""
     if not request.sql_statements:
         raise HTTPException(status_code=400, detail="sql_statements is empty")
+    _refuse_contract_driven(request.view_name)
 
     from app.services.context_onboarding import ContextOnboardingService
 

@@ -140,6 +140,29 @@ def _scope_note(scope: Dict[str, Any], tables: List[str], main_view: str) -> str
     return note
 
 
+def registered_tables(config_engine=None) -> Dict[str, Dict[str, Any]]:
+    """{table: {"context", "columns"}} of every active file source (Phase 4d): whoever inspects a
+    table by name — admin schema browser, onboarding, brain DDL — asks here first, because the legacy
+    business DB still holds F10's imported copy under the same names. {} = registry not migrated."""
+    if config_engine is None:
+        from app.db.session import config_engine
+    try:
+        with config_engine.connect() as conn:
+            rows = conn.execute(text(
+                "SELECT st.table_name, st.columns, sc.name FROM source_tables st "
+                "JOIN data_sources ds ON ds.id = st.source_id AND ds.is_active = 1 AND ds.source_type = :t "
+                "JOIN schema_contexts sc ON sc.source_id = ds.id "
+                "WHERE st.is_active = 1 ORDER BY sc.is_active DESC, sc.id"), {"t": DUCKDB_FILE}).all()
+    except (OperationalError, ProgrammingError) as exc:
+        if _not_migrated(exc):
+            return {}
+        raise
+    tables: Dict[str, Dict[str, Any]] = {}
+    for table, columns, context in rows:
+        tables.setdefault(table, {"context": context, "columns": json.loads(columns)})
+    return tables
+
+
 def _not_migrated(exc: Exception) -> bool:
     msg = str(exc).lower()
     return "no such" in msg or "does not exist" in msg
