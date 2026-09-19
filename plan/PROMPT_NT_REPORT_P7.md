@@ -54,6 +54,11 @@ AI assistant อ่าน DataFeed/dist/<domain>/latest/ ตรง และส�
 แจ้งฝั่ง AI เมื่อเสร็จ: schema_version ใหม่ของแต่ละโดเมน, รูปแบบ field ที่เพิ่มจริง (filter / scope_columns / scope_exempt), และ build_id ที่ publish
 ```
 
+## สถานะ 2026-09-19
+NT-Report ทำครบข้อ 1–5 (`5abdca7`, `0c4b567`, `386c63a`, `ff4af5e`, publish atomic) — ฝั่ง AI ทำข้อ 1–4 ข้างล่างแล้ว: sales เปิด + eval 12/12, `scope_columns` จาก contract, ไม่มี `scope_exempt`.
+**ค้าง — ebt (รอเจ้าของตัดสิน ก่อนส่งงานกลับ NT-Report):** `90fd787` (ebt 1.2.1) เปลี่ยน `fact_ebt_total_monthly` เป็นยอด**สะสม**ของ 2 สายงานขาย (ก.ค. 69 = +417.33 MB) ขัดกับ −1,088,133,452.03 (รายเดือนทั้งบริษัท) ที่กำหนดไว้ข้างบน.
+ถ้ายืนยันนิยามใหม่ ต้องแก้ contract: measure ทั้ง 3 ของ `fact_ebt_total_monthly` เป็น `agg: point_in_time` (ตอนนี้ `sum` — SUM ข้ามงวดจะผิด) และ description/note ขึ้นต้นว่า "ยอดสะสมตั้งแต่ต้นปีถึงงวดนั้น เฉพาะ 2 สายงานขายหลัก" + กฎว่าถาม "กำไรเดือน X" / "ทั้งบริษัท" / "รายสายงาน" ต้องตอบจากอะไร — รายละเอียด `plan/archive/RESULT_P7_PHASE2.md`
+
 ## ฝั่ง AI เมื่อ NT-Report เสร็จ
 1. `control_totals.filter` → gate (`check_control_totals`) + `gen_golden_from_controls` ใส่ WHERE ก่อน aggregate (~0.5 วัน, พร้อม test)
 2. knowledge re-sync เอง (Phase 2) — ตรวจว่า rule ใหม่อยู่ใน instruction ของ context แล้วเปิด `feed_sales` / `feed_ebt` (`is_active=1`)

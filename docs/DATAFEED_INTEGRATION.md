@@ -84,14 +84,14 @@ Importer เปิด write connection ของตัวเอง ไม่ผ�
 ผ่าน DuckDB — ไม่ต้อง import อีก NT-Report publish งวดใหม่ลง `latest/` เมื่อไร คำถามถัดไปเห็นทันที
 (ตาราง `feed_revenue_*` ใน `nt_fi_report.sqlite` ยังอยู่เป็น fallback แต่ context ไม่ได้อ่านมันแล้ว)
 
-| Context (2026-09-18) | Source | งวด | สถานะ | eval |
+| Context (2026-09-19) | Source | schema / งวด | สถานะ | eval |
 |---|---|---|---|---|
-| `feed_revenue` | `datafeed_revenue` | 202608 | ✅ active | 14/14 |
-| `feed_expense` | `datafeed_expense` | 202608 | ✅ active | 12/12 |
-| `feed_sales` | `datafeed_sales` | 202607 | ⏸ ปิด (`is_active=0`) — contract ไม่มีกฎ actual/target → ตอบยอดขายรวมเป้าด้วย | — |
-| `feed_ebt` | `datafeed_ebt` | 202607 | ⏸ ปิด — contract ไม่มี control totals / วิธีคำนวณ EBT | — |
+| `feed_revenue` | `datafeed_revenue` | 2.1.0 / 202608 | ✅ active | 14/14 |
+| `feed_expense` | `datafeed_expense` | 1.2.0 / 202608 | ✅ active | 12/12 |
+| `feed_sales` | `datafeed_sales` | 1.2.0 / 202608 | ✅ active (2026-09-19 — contract มีกฎ actual/target + `control_totals.filter`) | 12/12 |
+| `feed_ebt` | `datafeed_ebt` | 1.2.1 / 202607 | ⏸ ปิด (`is_active=0`) — ยอดรวม 1.2.1 เป็นยอด**สะสม**ของ 2 สายงานขาย แต่ AI ตอบเป็นยอด "เดือน"/ของสายงานเดียว รอตัดสิน | 12/12 บน 1.2.0 (ก่อนนิยามเปลี่ยน) |
 
-(รายละเอียด sales/ebt: `plan/archive/RESULT_P7_PHASE2.md`, `plan/PLAN_REMAINING_ITEMS.md` REMAIN-11)
+(รายละเอียด: `plan/archive/RESULT_P7_PHASE2.md` หัวข้ออัปเดต 2026-09-19, `plan/PLAN_REMAINING_ITEMS.md` REMAIN-11)
 
 ### วิธีลงทะเบียน source
 
@@ -109,7 +109,9 @@ python -m scripts.datafeed.gen_golden_from_controls --domain revenue \
 2. sha256 ของทุกไฟล์ที่ใช้ตรง manifest — **allowlist = dataset ใน contract ที่ CSV อยู่ใน `manifest.files`**
 3. row count ผ่าน view (DuckDB) ตรง `manifest.row_counts`
 4. control totals ผ่าน view ตรง `control_totals.csv` ทุกแถว — ตาม spec ใน contract: `__ALL__` = grand-total dataset
-   ถ้ามี ไม่งั้นรวมจาก source (expense/sales); contract ที่ไม่มี `control_totals` (ebt) ข้าม gate นี้
+   ถ้ามี ไม่งั้นรวมจาก source (expense/sales); `filter: {column: value}` (sales `metric: actual`) = กรอง source ก่อนรวม
+   (grand-total dataset ที่แยกต่างหากไม่ถูกกรอง); ไม่มี `bg_key` (ebt `fact_ebt_total_monthly`) = source ยอดรวมอย่างเดียว
+   ทุกแถวของ control totals คือยอดของงวดนั้น; contract ที่ไม่มี `control_totals` ข้าม gate นี้
 
 แล้วเขียนใน **transaction เดียว**: `data_sources` (`datafeed_<domain>`, `duckdb_file`, `root_path` = `.../latest`,
 `contract_file`, `knowledge_sha`), `source_tables` (ชื่อ view `feed_<domain>_<dataset>` → ไฟล์ + ชนิดคอลัมน์จาก contract),
@@ -207,7 +209,9 @@ python -m scripts.datafeed.gen_golden_from_controls --domain revenue \
   (ข) กลุ่มแรก + กลุ่มชื่อไทยอีกกลุ่ม (ทดสอบ string matching; ใช้คอลัมน์ `*_name` ใน group_keys เป็นชื่อในคำถามถ้ามี)
   → source (`SUM` เมื่อ source ละเอียดกว่า group × งวด),
   (ค) measure `agg: point_in_time` → คำถาม YTD (ทดสอบกฎ ytd ตรง ๆ)
-- contract ที่ไม่มี `control_totals` (ebt) → ไม่สร้าง golden (ของเดิมไม่ถูกลบ)
+- `filter` ใน control_totals → ทุก SQL ต่อท้าย `AND <column> = <value>` (sales: `AND metric = 'actual'`)
+- source ที่ไม่มี `bg_key` (ยอดรวมอย่างเดียว) → หนึ่งคำถามต่อ measure `agg: sum` ต่องวด (ชื่อในคำถาม: `MEASURE_WORDS` หรือ `note` ของ measure)
+- contract ที่ไม่มี `control_totals` → ไม่สร้าง golden (ของเดิมไม่ถูกลบ)
 - คำถามใช้เดือนไทย + พ.ศ. — จงใจ exercise กฎแปลงปีของระบบ
 - ค่าที่คาดหวังมาจาก control_totals → ใช้กับ eval harness
   (`python -m scripts.eval.run_eval --context feed_revenue` — ดู `docs/EVAL_HARNESS.md`)

@@ -130,11 +130,53 @@ after publish : data_as_of={'period': 202609, 'build_id': '202609-B', ...} answe
 (ถ้า control_totals ต้องกรองแถว เช่น measure_type='ADDITIVE' ให้บอกรูปแบบ field ที่เพิ่ม ฝั่ง AI จะรองรับใน gate/golden)
 ```
 
+## อัปเดต 2026-09-19 — หลัง NT-Report ทำตาม `plan/PROMPT_NT_REPORT_P7.md`
+
+NT-Report: `5abdca7` (sales 1.1.0 `control_totals.filter {metric: actual}` + กฎ actual/target), `0c4b567` (ebt 1.1.0 `fact_ebt_total_monthly` + control totals **ไม่มี `bg_key`**),
+`386c63a` (`scope_columns` ทุกโดเมน: `year_month` → period column, `org_code` → `cost_center`; **ไม่มี `scope_exempt`**), `ff4af5e` (portal ส่ง `scope`),
+publish atomic จริงแล้ว (`latest` → `builds/<id>`), และระหว่างงานนี้ `90fd787` (ebt **1.2.1** — เปลี่ยนนิยามยอดรวม ดูข้างล่าง)
+
+| Exit criterion | ผล | ผ่าน? |
+|---|---|---|
+| 4 โดเมนตอบได้ | revenue, expense, **sales** ✅ — **ebt ปิดไว้อีกครั้ง** (ความหมายของยอดรวม 1.2.1 ไม่ตรงกับที่ AI ตอบ — รอตัดสิน) | ⚠️ 3/4 |
+| eval ≥ 90% เทียบ control_totals | revenue 14/14 (เดิม), expense **12/12** (`eval_20260919_0701`), sales **12/12** (`eval_20260919_0659`), ebt 12/12 บน 1.2.0 (`eval_20260919_0657`) — ตัวเลขตรง แต่ดูข้อขัดกับแผน | ⚠️ 3/4 |
+| publish รอบใหม่แล้ว AI เห็นเอง | ✅ **เกิดจริงระหว่างงาน**: NT-Report publish build ใหม่ 06:54 (build_id `…193450Z` → `…235436Z`) — คำขอถัดไปได้ build ใหม่ + `data_as_of.build_id` ใหม่ + knowledge ebt re-sync เป็น 1.2.1 เอง โดยไม่รันอะไร | ✅ |
+| pytest | 802 → **809 passed**, 3 skipped (+7 ใหม่ ทุกข้อ fail บน code เดิม) | ✅ |
+
+**สิ่งที่ทำ (ฝั่ง AI)**
+- `dfce5d5` gate + golden รองรับ `control_totals.filter` (bind parameter ใน gate, `AND col = value` ใน golden) และ source ยอดรวมอย่างเดียว (ไม่มี `bg_key` → หนึ่งคำถามต่อ measure ต่องวด); `bg_key` ไม่ default เป็น `bu` แล้ว (อ่านแบบเดียวกับ `feed.py` ของ NT-Report) — gate บนไฟล์จริง: sales 180 แถว, ebt 57 แถว ผ่าน
+- knowledge re-sync เอง ยืนยันบน config จริง: revenue `…:2.0.0` → `8a57a5a9…:2.1.0`, expense `…:1.1.0` → `1cffe328…:1.2.0` — `scope_columns` จาก contract **ทับค่าที่ตั้งมือ**เอง (`{"year_month": …, "org_code": "cost_center"}`); ไม่มี `scope_exempt` ใน contract → ไม่ต้องเพิ่ม support
+- scope จาก contract บนข้อมูลจริง: sales `{year_month: 202607, org_code: [2P10200]}` → เห็น 7 แถว; ebt `{org_code}` → `fact_ebt_total_monthly` ใช้ไม่ได้ (ไม่มี `cost_center` — ตรงกับที่ contract ตั้งใจ); key ที่ไม่ประกาศ → ScopeError
+- atomic publish: `latest` เป็น symlink → `builds/<id>`, `data_as_of.build_id` มีค่า, งวดล่าสุด sales 202607 actual = 3,289,655,675.33 ตรง `__ALL__` ของ control totals
+- `9ec6666` instruction ของ context บอกวิธีกรองเวลาเมื่อ contract ไม่มีคอลัมน์ `year`/`month` (sales, ebt, expense): เดิมโมเดลเขียน `year = 2025 AND month = 1` ก่อนทุกข้อ (two-pass ส่ง "ปี 2025 เดือน 1") แล้วเสีย retry 1–2 รอบ —
+  sales P50 10.2 → **7.5 s** (11/12 → 12/12), ebt 12.7 → **6.9 s**, expense 12/12 เท่าเดิม; Binder error 14 / 48 → 0. revenue (มี year/month) instruction เท่าเดิมทุก byte
+
+### ⚠️ ข้อขัดกับแผน — ebt 1.2.1 (รอตัดสิน, `feed_ebt` ปิดไว้)
+เจ้าของกำหนดไว้ (2026-09-19 เช้า): EBT ก.ค. 69 = ADDITIVE `01.รายได้` − ADDITIVE `02.ค่าใช้จ่าย` = **−1,088,133,452.03** (รายเดือน ทั้งบริษัท) — ebt 1.2.0 ให้ค่านี้ (eval 12/12)
+NT-Report `90fd787` (06:54) เปลี่ยน `fact_ebt_total_monthly` เป็น **ฐานรายงาน EBT**: `AMOUNT_YTD` ของ subtotal ใน 2 สายงานขายหลัก หัก `08.รายได้อื่น` และ ER/MSP → ก.ค. 69 = 8,467.33 − 8,050.00 = **+417.33 MB (ยอดสะสม ม.ค.–ก.ค.)**; `fact_ebt` ไม่เปลี่ยน (สูตรเดิมยังได้ −1,088,133,452.03)
+
+ถามจริงบน 1.2.1:
+| คำถาม | SQL | ได้ | ปัญหา |
+|---|---|---|---|
+| กำไร EBT เดือนกรกฎาคม 2569 | `SUM(ebt) FROM …fact_ebt_total_monthly WHERE time_key = 202607` | 417.33 M "ในเดือนกรกฎาคม" | เป็นยอด**สะสม** 7 เดือนของ 2 สายงานขาย ไม่ใช่ยอดเดือน/ทั้งบริษัท |
+| กำไร EBT ของสายงานขายและปฏิบัติการลูกค้า 1 เดือน ก.ค. 69 | เหมือนข้อบน | 417.33 M | ยอดรวม 2 สายงาน ถูกตอบเป็นของสายงานเดียว |
+
+ต้นเหตุ: (1) contract ประกาศ measure ของยอดรวมเป็น `agg: sum` ทั้งที่เป็น point-in-time (YTD) และคำอธิบายคอลัมน์ไม่ได้ขึ้นต้นว่า "สะสม";
+(2) ฝั่ง AI: main view ของ context = `control_totals.source` = ตารางยอดรวมที่ไม่มีมิติ และ prompt ของ two-pass บังคับ "ใช้ตาราง main view เท่านั้น" → คำถามรายสายงาน/ศูนย์ต้นทุนไม่ไปที่ `fact_ebt`
+golden จาก control totals ให้ 12/12 ได้ทั้งที่ความหมายผิด (คำถาม golden พูดว่า "เดือน … ทั้งบริษัท") — **ตัวเลข eval ของ ebt จึงยังใช้ปิด exit ไม่ได้**
+
+ทางเลือก (เจ้าของตัดสิน):
+- **A** ยืนยันนิยามใหม่ (ฐานรายงาน, YTD, 2 สายงานขาย): NT-Report ประกาศ measure เป็น `agg: point_in_time` + ขึ้นต้น description ว่า "สะสมตั้งแต่ต้นปี … เฉพาะ 2 สายงานขาย"; ฝั่ง AI: golden ของ source ยอดรวมถามแบบ "สะสม ณ เดือน" + main view ของ ebt กลับเป็น `fact_ebt` (primary_dataset) เมื่อ control source ไม่มีมิติ (~0.5 วัน + eval)
+- **B** กลับไปนิยามเดิม (รายเดือน ทั้งบริษัท −1,088 M): NT-Report revert `90fd787`; ฝั่ง AI เปิด context ได้ทันที (ยังต้องแก้ main view ตามข้อ A สำหรับคำถามรายหน่วยงาน)
+- **C** มีทั้งสองฐานเป็นคนละคอลัมน์/ตาราง (เช่น `ebt_monthly_company` กับ `ebt_report_ytd`) พร้อมกฎว่าคำถามแบบไหนใช้ฐานไหน
+
 ## Commits (branch `main`)
 ```
 deb0a7e feat(P7-2): data_as_of in /api/v1/query from the verified build
 38ab63d feat(P7-2): contract knowledge as a service, re-synced when the contract changes
 a2b8568 feat(P7-2): register expense/sales/ebt as file sources; contract-driven gates and golden
+dfce5d5 feat(P7-2): control totals with a filter and total-only sources   (2026-09-19)
+9ec6666 feat(P7-2): feed instruction says how to filter time on a YYYYMM-only source   (2026-09-19)
 ```
 
 ## สถานะ DB หลังจบงาน (local — ไม่อยู่ใน git)
@@ -144,3 +186,4 @@ a2b8568 feat(P7-2): register expense/sales/ebt as file sources; contract-driven 
   golden `feed_expense` 12 ข้อ (ใหม่), `feed_revenue` 14 ข้อ (เดิม)
 - brain ถูก mark dirty (docs ของ 3 โดเมนใหม่ยังไม่เข้า Vanna จนกว่า admin กด Sync Brain — instruction/กฎ/metadata ใช้ได้ทันทีเพราะอ่านจาก config ตรง)
 - NT-Report `DataFeed/` ไม่ถูกแตะ
+- **2026-09-19:** `feed_sales` active + golden 12 ข้อ; `feed_ebt` ลงทะเบียนใหม่ (2 views, knowledge 1.2.1) แต่ **inactive** + golden 12 ข้อ `is_active=0`; `scope_columns` ทั้ง 4 context มาจาก contract; backup ก่อนแก้: scratchpad ของ session (`config.db.bak-*`)

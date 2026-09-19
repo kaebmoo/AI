@@ -1,6 +1,6 @@
 # Plan 7: Data Source as a Service — ถามข้อมูลจากแหล่งที่ผู้ใช้กำหนด โดยไม่ต้อง import
 
-**สถานะ:** 🟡 Phase 1 ✅ DONE (2026-09-18) — Phase 2 🟡 code ครบ, exit 2/4 โดเมน (sales/ebt รอ NT-Report แก้ contract — §11.7) — Phase 3 ✅ DONE (2026-09-19) — Phase 4–7 ยังไม่เริ่ม | ผล: `plan/archive/RESULT_P7_PHASE{1,2,3}.md` | งานฝั่ง NT-Report: `plan/PROMPT_NT_REPORT_P7.md`
+**สถานะ:** 🟡 Phase 1 ✅ DONE (2026-09-18) — Phase 2 🟡 exit 3/4 โดเมน (2026-09-19: sales ✅ 12/12; ebt ปิดไว้ — นิยามยอดรวม 1.2.1 รอตัดสิน §11.7) — Phase 3 ✅ DONE (2026-09-19) — Phase 4–7 ยังไม่เริ่ม | ผล: `plan/archive/RESULT_P7_PHASE{1,2,3}.md` | งานฝั่ง NT-Report: `plan/PROMPT_NT_REPORT_P7.md`
 **ความสัมพันธ์กับแผนเดิม:** ต่อยอด/แทนที่บางส่วนของ `PLAN_6_SAAS.md` (ดู §9), รวม Plan 1B-C (MCP SSE + API key) ไว้ใน Phase 6
 **ผู้ใช้รายแรก:** NT-Report portal (F11 dashboard Q&A) — ปัจจุบันถูก disable เพราะยังไม่ได้ตั้ง key และข้อมูลใน AI ค้างที่ revenue 202605
 
@@ -146,6 +146,9 @@ Response เพิ่ม `data_as_of` ต่อ context ที่ใช้ (จ�
 > + re-sync อัตโนมัติเมื่อ contract/schema_version เปลี่ยน (`38ab63d`); ลงทะเบียน expense/sales/ebt + gate/golden อ่านจาก contract +
 > pin CSV dialect (`a2b8568`) — eval revenue **14/14**, expense **12/12**; publish build ใหม่แล้ว AI เห็นเอง (พิสูจน์บนสำเนา layout `builds/<id>`)
 > — **sales/ebt ตอบเลขผิดความหมาย** (sales รวม actual+target, ebt บวกรายได้กับค่าใช้จ่าย) เพราะ contract ไม่มีกฎ/control totals ที่จำเป็น → context ปิดไว้ รอตัดสิน (§11.7)
+> **อัปเดต 2026-09-19:** NT-Report แก้ contract แล้ว → ฝั่ง AI รองรับ `control_totals.filter` + source ยอดรวมอย่างเดียว (`dfce5d5`), instruction บอกวิธีกรองงวด (`9ec6666`);
+> `feed_sales` เปิดแล้ว eval **12/12**; `scope_columns` จาก contract ทับค่าตั้งมือเอง; publish atomic จริง + AI เห็น build ใหม่เองระหว่างงาน —
+> **ebt ยังปิด**: NT-Report `90fd787` (ebt 1.2.1) เปลี่ยนยอดรวมเป็น YTD ของ 2 สายงานขาย (+417.33 MB) ≠ นิยามที่เจ้าของให้ไว้ (−1,088 M รายเดือนทั้งบริษัท) และ AI ตอบยอดสะสมเป็นยอดเดือน
 > ทำไปแล้วบางส่วนตอนแก้ publish race (2026-09-18, `820052e`): ตรวจ manifest ต่อ build (reconcile.ok + sha256) + ปฏิเสธเมื่อไม่ตรง + query cache ผูก build
 > เพิ่มจาก Phase 1 (✅ ทำแล้ว 2026-09-18): regen knowledge ด้วย contract 2.0.1 + กฎ `revenue_ytd` ห้าม SUM ข้ามงวด → eval 14/14
 - ลงทะเบียน source พร้อม contract → gen knowledge + golden อัตโนมัติ (ยกจาก `gen_docs_from_contract` / `gen_golden_from_controls`)
@@ -386,8 +389,9 @@ NT-Report ไม่ต้อง import อะไรเข้า AI อีก ห
 
 **ส่งต่อ Phase 2+:**
 - [x] runtime ตรวจ manifest ต่อ build (reconcile + sha256) + query cache ผูก build — `820052e` | [x] re-sync knowledge อัตโนมัติ (`38ab63d`) + `data_as_of` (`deb0a7e`) — Phase 2
-- [x] ลงทะเบียน expense/sales/ebt (`a2b8568`) — sales/ebt ตอบเลขผิดความหมาย เพราะ contract ขาดกฎ → ✅ **ตัดสิน 2026-09-19: ทางเลือก A** (แก้ contract ที่ NT-Report; เจ้าของกำหนด **EBT = ยอดขาย − ค่าใช้จ่าย** — ยอดขาย = กลุ่ม `01.รายได้` ใน fact_ebt = รายได้ฐานยอดขาย ซึ่ง**ไม่เท่ากับ**รายได้ในรายงานรายได้ เช่น รวมยอดขายบัตร prepaid ไม่ได้คิดจาก usage อย่างเดียว) และไป Phase 3 ได้เลย — [ ] รอ NT-Report ทำตาม `plan/PROMPT_NT_REPORT_P7.md` แล้วฝั่ง AI: `control_totals.filter` ใน gate/golden → เปิด context → eval
-- [ ] NT-Report ยังไม่ได้รัน publish แบบ atomic จริง (ตรวจ 2026-09-18: `latest/` ยังเป็นโฟลเดอร์, ไม่มี `build_id`) — ฝั่ง AI พร้อมแล้ว ไม่ต้องลงทะเบียนใหม่
+- [x] ลงทะเบียน expense/sales/ebt (`a2b8568`) — sales/ebt ตอบเลขผิดความหมาย เพราะ contract ขาดกฎ → ✅ **ตัดสิน 2026-09-19: ทางเลือก A** (แก้ contract ที่ NT-Report; เจ้าของกำหนด **EBT = ยอดขาย − ค่าใช้จ่าย** — ยอดขาย = กลุ่ม `01.รายได้` ใน fact_ebt = รายได้ฐานยอดขาย ซึ่ง**ไม่เท่ากับ**รายได้ในรายงานรายได้ เช่น รวมยอดขายบัตร prepaid ไม่ได้คิดจาก usage อย่างเดียว) และไป Phase 3 ได้เลย — [x] NT-Report ทำตาม `plan/PROMPT_NT_REPORT_P7.md` แล้ว; ฝั่ง AI: `control_totals.filter` + total-only ใน gate/golden (`dfce5d5`) → `feed_sales` เปิด, eval 12/12 (2026-09-19)
+- [ ] **ebt — รอเจ้าของตัดสิน (2026-09-19):** ebt 1.2.1 (`90fd787`) เปลี่ยน `fact_ebt_total_monthly` เป็นฐานรายงาน EBT (YTD, 2 สายงานขาย, ก.ค. 69 = +417.33 MB) ขัดกับ −1,088,133,452.03 ที่กำหนดไว้; AI ตอบยอดสะสมเป็น "ยอดเดือน" และตอบยอดรวมเมื่อถามรายสายงาน (main view = ตารางยอดรวม) → `feed_ebt` ปิดไว้ — ทางเลือก A/B/C ใน `plan/archive/RESULT_P7_PHASE2.md`
+- [x] NT-Report รัน publish แบบ atomic จริงแล้ว (ตรวจ 2026-09-19: `latest` → `builds/<id>`, manifest มี `build_id`) — ฝั่ง AI ไม่ได้ลงทะเบียนใหม่ revenue/expense; build ใหม่ 06:54 ถูกเห็นเอง
 - [ ] schema เปลี่ยนแบบเพิ่ม/ลบคอลัมน์: knowledge re-sync เอง แต่ view (`source_tables`) ยังเป็นชุดคอลัมน์ตอนลงทะเบียน → ต้องรัน `register_file_source` ใหม่
 - [ ] (ภายใต้ D8 แบบผสม: ไม่บังคับ — พิจารณาเมื่อ workspace ใน deployment เดียวมีความลับต่างระดับกันมาก หรือถ้าไปถึง Tier 3) พิจารณารัน SQL ของ file source **นอก process** (แบบ MCP subprocess ของ legacy) — DuckDB รันใน API process: bug/abort ของ DuckDB ในอนาคต (แบบ `enable_logging` ที่ปิดด้วย query gate แล้ว) จะล้มทั้ง API; gate ตรวจแล้วกับทุก vector ที่ reviewer เสนอ (`query()`, `json_execute_serialized_sql`, `FROM '/path'`, comment/quote tricks, subquery) — เหลือ scalar ที่ผ่านได้แค่ตัวอ่านอย่างเดียว/no-op (`current_setting`, `getvariable`, `write_log` ขณะ logging ปิด)
 - [ ] tool-loop `get_sample_values`/`get_table_stats` บน DuckDB (ตอนนี้ fail closed)

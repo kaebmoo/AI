@@ -18,7 +18,9 @@ Request เพิ่มเติมสำหรับ portal (optional ทั้
 
 ### `scope` — ทำงานอย่างไร
 - key ที่ใช้ได้ต่อ context = `schema_contexts.scope_columns` (`{key: column}`) — context `feed_*` ได้จาก `scope_columns` ใน contract
-  (re-sync อัตโนมัติ); ตอนนี้ตั้งไว้: `feed_revenue` / `feed_expense` → `year_month` (expense map ไป `time_key`)
+  (re-sync อัตโนมัติ); ตอนนี้ (contract 2026-09-19) ทุกโดเมนประกาศ `year_month` (expense/ebt map ไป `time_key`) และ
+  `org_code` → `cost_center` — ไม่มี `scope_exempt`: dataset ที่ไม่มี `cost_center` (เช่น revenue `fact_bu_monthly`,
+  ebt `fact_ebt_total_monthly`, dim ที่ไม่มีงวด) ใช้ไม่ได้เมื่อ scope มี key นั้น
 - ค่า: จำนวนเต็มหรือข้อความ หรือ list ของค่าเหล่านั้น (1–1000 ค่า = `IN`); หลาย key = AND
 - **key ที่ context ไม่ประกาศ / ค่าผิดชนิด → HTTP 400** — ไม่มีทางตอบแบบไม่กรอง
 - ระบบห่อทุกตารางของ context ด้วย TEMP view ต่อ query: ตารางที่มีคอลัมน์ครบ = กรองตาม scope, ตารางที่ไม่มี = ใช้ไม่ได้;
@@ -31,7 +33,7 @@ Request เพิ่มเติมสำหรับ portal (optional ทั้
 Response มี `data_as_of` (Plan 7 Phase 2) — ความสดของข้อมูลที่ใช้ตอบ มาจาก `manifest.json` ของ build ที่ AI ตรวจแล้ว
 (reconcile.ok + sha256) และเป็น build เดียวกับที่ SQL อ่านจริง (คำตอบจาก cache ก็เป็น build เดียวกัน เพราะ cache ผูก build):
 ```json
-"data_as_of": {"period": 202608, "built_at": "2026-09-11T01:37:35+00:00", "build_id": null}
+"data_as_of": {"period": 202608, "built_at": "2026-09-18T23:54:11+00:00", "build_id": "20260918T235411Z"}
 ```
 - `period` = งวดล่าสุดใน bundle (YYYYMM ค.ศ.), `built_at` = เวลา build (UTC), `build_id` = id ของ build
   (มีเมื่อ NT-Report publish แบบ atomic — `builds/<id>` + symlink `latest`; ก่อนหน้านั้นเป็น `null`)

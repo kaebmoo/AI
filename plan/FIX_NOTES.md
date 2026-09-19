@@ -186,6 +186,23 @@
 - ต้องบอกโมเดลใน prompt ว่าตารางหลักใช้ไม่ได้ภายใต้ scope — ไม่งั้นโมเดลวนใช้ main view จนหมดรอบ retry
 - `tests/unit/test_vanna_documentation.py` รันไฟล์เดี่ยว ๆ error 12 ข้อ (pandas circular import บน py3.14) — มีก่อนงานนี้, full suite ผ่าน
 
+## จาก Plan 7 Phase 2 รอบปิด sales/ebt (2026-09-19)
+
+ผลลัพธ์/ตัวเลข: `plan/archive/RESULT_P7_PHASE2.md` หัวข้ออัปเดต 2026-09-19
+
+**Decision ที่ทำระหว่างทาง (ตรวจ/กลับได้):**
+- `control_totals.bg_key` **ไม่ default เป็น `bu` แล้ว** — ไม่มี = source ยอดรวมอย่างเดียว (อ่านแบบเดียวกับ `feed.py` ของ NT-Report); contract ทั้ง 4 ประกาศ `bg_key` ชัดอยู่แล้ว ยกเว้น ebt ที่ตั้งใจไม่มี
+- `filter` ใช้กับ source เท่านั้น — grand-total dataset ที่แยกต่างหากไม่ถูกกรอง (คอลัมน์ของ filter เป็นของ source)
+- instruction ของ `feed_*` เพิ่มบรรทัดวิธีกรองงวดเมื่อ contract ไม่มีคอลัมน์ `year` (generic จาก `period_key` ไม่ hardcode โดเมน) — revenue ไม่เปลี่ยน; knowledge key ไม่รวม code → context เดิมได้บรรทัดนี้เมื่อ contract เปลี่ยนหรือลงทะเบียนใหม่ (expense ได้แล้วจาก re-sync 1.2.0)
+- **เปิด `feed_ebt` แล้วปิดกลับ** ในรอบเดียวกัน หลังพบว่า NT-Report เปลี่ยนนิยามยอดรวมระหว่างงาน — golden 12 ข้อเก็บไว้แบบ `is_active=0`
+
+**พบระหว่างทาง:**
+- ⚠️ **two-pass + contract ที่ไม่มีคอลัมน์ year/month:** Pass 1 คืน `time_range {year, month}` → Pass 2 เขียน `year = 2025 AND CAST(month AS INTEGER) = 1` ก่อนเสมอ → Binder error → retry (ทุกข้อของ sales/ebt); expense ไม่เป็นเพราะ golden ของมันอยู่ใน Vanna เป็น few-shot — แก้ด้วยบรรทัดใน instruction (`9ec6666`)
+- ⚠️ **main view = `control_totals.source`** ใช้ได้เมื่อ source มีมิติ (revenue `fact_bu_monthly`, sales/expense = fact หลัก) แต่ ebt 1.1.0+ source คือตารางยอดรวมที่ไม่มีมิติ → prompt two-pass ("ต้องใช้ตาราง main view เท่านั้น") ทำให้คำถามรายสายงานได้ยอดรวม — ยังไม่แก้ (ผูกกับการตัดสินนิยาม ebt)
+- ⚠️ **golden จาก control totals ตรวจตัวเลข ไม่ได้ตรวจความหมาย** — ebt 1.2.1 ได้ 12/12 ได้ทั้งที่คำถามพูดว่า "เดือน … ทั้งบริษัท" แต่ค่าเป็น YTD ของ 2 สายงาน; `agg` ของ measure ใน contract (`sum` vs `point_in_time`) คือสิ่งเดียวที่บอก generator ว่าต้องถามแบบไหน
+- `register_context` ตั้ง `is_active=1` ทุกครั้งที่ sync — context ที่ admin ปิดไว้ไม่ถูก re-sync เอง (resolver ข้าม context ที่ปิด) แต่ `register_file_source` จะเปิดคืน → ลงทะเบียน ebt ใหม่ต้องปิดเองอีกครั้งถ้ายังไม่พร้อม
+- eval 1 ข้อ `execution_failed` detail ว่าง latency 61 s = gateway timeout (ไม่เกี่ยวกับ SQL) — `run_eval` เก็บ `str(e)` ซึ่งว่างสำหรับ timeout
+
 ## จาก REMAIN-9 (2026-09-19)
 - 9.4: DDL ที่ train เพิ่มจะมีผลเมื่อ admin กด Sync Brain — ยังไม่ได้วัดผลต่อ eval
 - 9.5: `extract_hierarchy.py` เลิกรับ `--db` (อ่านข้อมูลผ่าน source ของ context, config ผ่าน CONFIG_DB_URL) — ไม่มี caller ที่ส่ง `--db`

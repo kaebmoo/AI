@@ -403,6 +403,12 @@ Deferred (ทำตอน Plan 6 SaaS)
 สถานะ: source + knowledge ลงทะเบียนแล้ว, context `feed_sales`/`feed_ebt` ปิดไว้ (`is_active=0`) — ✅ ตัดสิน 2026-09-19: **ทางเลือก A** (NT-Report แก้ contract; EBT = ยอดขาย − ค่าใช้จ่าย โดยยอดขาย = กลุ่ม 01.รายได้ ใน fact_ebt ซึ่งเป็นรายได้ฐานยอดขาย ≠ รายได้ในรายงานรายได้ เช่น รวมยอดขายบัตร prepaid) → prompt `plan/PROMPT_NT_REPORT_P7.md`
 หลังแก้ contract (ทางเลือก A): knowledge re-sync เอง → เปิด context → `gen_golden_from_controls` → eval ≥ 90%
 
+**อัปเดต 2026-09-19:**
+- ✅ **sales ปิดแล้ว** — NT-Report sales 1.2.0 (`control_totals.filter {metric: actual}` + กฎ); ฝั่ง AI `dfce5d5` + `9ec6666`; `feed_sales` active, golden 12 ข้อ, eval **12/12** (P50 7.5 s)
+- ⬜ **ebt ยังเปิดอยู่ (รอเจ้าของตัดสิน)** — ebt 1.2.0 ให้ −1,088,133,452.03 ตามที่กำหนด (eval 12/12) แต่ NT-Report `90fd787` (1.2.1) เปลี่ยนยอดรวมเป็น YTD ของ 2 สายงานขาย (+417.33 MB);
+  AI ตอบยอดสะสมเป็นยอดเดือน และตอบยอดรวมเมื่อถามรายสายงาน → `feed_ebt` ปิดไว้, golden 12 ข้อ `is_active=0` — ทางเลือก A/B/C: `plan/archive/RESULT_P7_PHASE2.md`
+  - งานฝั่ง AI ที่ต้องทำไม่ว่าเลือกทางไหน: main view ของ context ไม่ควรเป็นตารางยอดรวมที่ไม่มีมิติ (ตอนนี้ = `control_totals.source`) เพราะ prompt two-pass บังคับใช้ main view
+
 ---
 
 ## Backlog / Nice-to-Have
