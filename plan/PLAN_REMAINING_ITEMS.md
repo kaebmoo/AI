@@ -412,7 +412,19 @@ Deferred (ทำตอน Plan 6 SaaS)
 - ✅ **sales ปิดแล้ว** — NT-Report sales 1.2.0 (`control_totals.filter {metric: actual}` + กฎ); ฝั่ง AI `dfce5d5` + `9ec6666`; `feed_sales` active, golden 12 ข้อ, eval **12/12** (P50 7.5 s)
 - ⬜ **ebt ยังเปิดอยู่ (รอเจ้าของตัดสิน)** — ebt 1.2.0 ให้ −1,088,133,452.03 ตามที่กำหนด (eval 12/12) แต่ NT-Report `90fd787` (1.2.1) เปลี่ยนยอดรวมเป็น YTD ของ 2 สายงานขาย (+417.33 MB);
   AI ตอบยอดสะสมเป็นยอดเดือน และตอบยอดรวมเมื่อถามรายสายงาน → `feed_ebt` ปิดไว้, golden 12 ข้อ `is_active=0` — ทางเลือก A/B/C: `plan/archive/RESULT_P7_PHASE2.md`
-  - งานฝั่ง AI ที่ต้องทำไม่ว่าเลือกทางไหน: main view ของ context ไม่ควรเป็นตารางยอดรวมที่ไม่มีมิติ (ตอนนี้ = `control_totals.source`) เพราะ prompt two-pass บังคับใช้ main view
+  - **2026-09-19 บ่าย — ตัดสินแล้ว: ebt 1.3.0 มีทั้งรายเดือน (`*_month`) และสะสม**; ฝั่ง AI `c6e7cca` (golden แยกเดือน/สะสม 24 ข้อ, instruction ชี้ `fact_ebt`, prompt ยอมตารางที่ instruction ระบุ); eval **18/24 = 75%** → ยังปิด —
+    รอ NT-Report: `agg: point_in_time` ของ measure สะสม + กฎห้าม SUM ข้ามงวดของตารางยอดรวม + description ขึ้นต้น "ยอดสะสม" + กฎ EBT รายสายงาน (รายละเอียด RESULT_P7_PHASE2)
+  - (เดิม) งานฝั่ง AI ที่ต้องทำไม่ว่าเลือกทางไหน: main view ของ context ไม่ควรเป็นตารางยอดรวมที่ไม่มีมิติ (ตอนนี้ = `control_totals.source`) เพราะ prompt two-pass บังคับใช้ main view
+
+---
+
+## REMAIN-12: two-pass Pass 1 เห็นเฉพาะคอลัมน์ของ main view (เสนอ 2026-09-19)
+
+**Plan:** 7 (context ที่มีหลายตาราง) | **Priority:** Medium | **Effort:** ~1 วัน + eval ทุก feed context
+
+context ของ file source มีหลายตาราง แต่ Pass 1 (intent) และ schema metadata ใน prompt มาจาก main view ตารางเดียว → คำถามที่ filter ด้วยมิติของตารางอื่น
+(ebt: "EBT ของสายงาน 1" ขณะ main view = ตารางยอดรวมที่ไม่มี division) ถูกทิ้ง filter เงียบ ๆ แล้วตอบยอดรวม. `c6e7cca` แก้ได้เฉพาะกรณี GROUP BY ("แยกตามสายงาน").
+ข้อเสนอ: ให้ Pass 1 เห็นคอลัมน์ของทุกตารางที่ instruction ระบุ (ชุดเดียวกับ `hybrid_flow.table_rule`) และถ้า intent มี filter/dimension ที่ไม่อยู่ใน main view ให้ Pass 2 ใช้ตารางที่มีคอลัมน์นั้น; ถ้าไม่มีตารางไหนมี → ตอบว่าตอบไม่ได้ ไม่ตอบยอดรวม
 
 ---
 

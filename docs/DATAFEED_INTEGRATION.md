@@ -89,7 +89,7 @@ Importer เปิด write connection ของตัวเอง ไม่ผ�
 | `feed_revenue` | `datafeed_revenue` | 2.1.0 / 202608 | ✅ active | 14/14 |
 | `feed_expense` | `datafeed_expense` | 1.2.0 / 202608 | ✅ active | 12/12 |
 | `feed_sales` | `datafeed_sales` | 1.2.0 / 202608 | ✅ active (2026-09-19 — contract มีกฎ actual/target + `control_totals.filter`) | 12/12 |
-| `feed_ebt` | `datafeed_ebt` | 1.2.1 / 202607 | ⏸ ปิด (`is_active=0`) — ยอดรวม 1.2.1 เป็นยอด**สะสม**ของ 2 สายงานขาย แต่ AI ตอบเป็นยอด "เดือน"/ของสายงานเดียว รอตัดสิน | 12/12 บน 1.2.0 (ก่อนนิยามเปลี่ยน) |
+| `feed_ebt` | `datafeed_ebt` | 1.3.0 / 202607 | ⏸ ปิด (`is_active=0`) — มีทั้งรายเดือน (`*_month`) และสะสม แต่โมเดลยัง SUM คอลัมน์สะสมข้ามงวด / ใช้สะสมตอบรายเดือน รอกฎใน contract | 18/24 |
 
 (รายละเอียด: `plan/archive/RESULT_P7_PHASE2.md` หัวข้ออัปเดต 2026-09-19, `plan/PLAN_REMAINING_ITEMS.md` REMAIN-11)
 
@@ -210,7 +210,10 @@ python -m scripts.datafeed.gen_golden_from_controls --domain revenue \
   → source (`SUM` เมื่อ source ละเอียดกว่า group × งวด),
   (ค) measure `agg: point_in_time` → คำถาม YTD (ทดสอบกฎ ytd ตรง ๆ)
 - `filter` ใน control_totals → ทุก SQL ต่อท้าย `AND <column> = <value>` (sales: `AND metric = 'actual'`)
-- source ที่ไม่มี `bg_key` (ยอดรวมอย่างเดียว) → หนึ่งคำถามต่อ measure `agg: sum` ต่องวด (ชื่อในคำถาม: `MEASURE_WORDS` หรือ `note` ของ measure)
+- source ที่ไม่มี `bg_key` (ยอดรวมอย่างเดียว) → หนึ่งคำถามต่อ measure ต่องวด ถามเป็น "ของเดือน…" หรือ "สะสมตั้งแต่ต้นปีถึงเดือน…" ตาม measure
+  (`MEASURE_WORDS`; measure ที่ไม่รู้จัก = `note` + `agg: point_in_time` → สะสม) — คำถามต้องบอกฐานให้ชัด ไม่งั้นคำตอบผิดความหมายได้คะแนน
+- main view ที่เป็นตารางยอดรวมไม่มีมิติ (control totals ไม่มี `bg_key`): instruction ของ context ชี้ตารางรายละเอียด (`primary_dataset`) พร้อมคอลัมน์
+  และ prompt ยอมให้ใช้ตารางที่ instruction ระบุชื่อ (`hybrid_flow.table_rule`) — context ที่ instruction ไม่เอ่ยถึงตารางอื่นยังถูกตรึงที่ main view เหมือนเดิม
 - contract ที่ไม่มี `control_totals` → ไม่สร้าง golden (ของเดิมไม่ถูกลบ)
 - คำถามใช้เดือนไทย + พ.ศ. — จงใจ exercise กฎแปลงปีของระบบ
 - ค่าที่คาดหวังมาจาก control_totals → ใช้กับ eval harness

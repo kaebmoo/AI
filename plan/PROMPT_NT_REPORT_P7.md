@@ -59,6 +59,20 @@ NT-Report ทำครบข้อ 1–5 (`5abdca7`, `0c4b567`, `386c63a`, `ff4a
 **ค้าง — ebt (รอเจ้าของตัดสิน ก่อนส่งงานกลับ NT-Report):** `90fd787` (ebt 1.2.1) เปลี่ยน `fact_ebt_total_monthly` เป็นยอด**สะสม**ของ 2 สายงานขาย (ก.ค. 69 = +417.33 MB) ขัดกับ −1,088,133,452.03 (รายเดือนทั้งบริษัท) ที่กำหนดไว้ข้างบน.
 ถ้ายืนยันนิยามใหม่ ต้องแก้ contract: measure ทั้ง 3 ของ `fact_ebt_total_monthly` เป็น `agg: point_in_time` (ตอนนี้ `sum` — SUM ข้ามงวดจะผิด) และ description/note ขึ้นต้นว่า "ยอดสะสมตั้งแต่ต้นปีถึงงวดนั้น เฉพาะ 2 สายงานขายหลัก" + กฎว่าถาม "กำไรเดือน X" / "ทั้งบริษัท" / "รายสายงาน" ต้องตอบจากอะไร — รายละเอียด `plan/archive/RESULT_P7_PHASE2.md`
 
+## งานถัดไปของ NT-Report — ebt PATCH (2026-09-19 บ่าย, หลัง 1.3.0)
+```
+ebt 1.3.0 (bebc797) ฝั่ง AI eval ได้ 18/24: โมเดล SUM คอลัมน์สะสมข้ามงวด 4 ข้อ (SUM(ebt) WHERE time_key BETWEEN 202501 AND 202505)
+และใช้คอลัมน์สะสมตอบคำถามรายเดือน 2 ข้อ (SELECT ebt … ถาม "ของเดือน") — แก้ที่ domains.py → contract, bump PATCH:
+1) control_totals.measures: sales_base_revenue / expense / ebt → agg: point_in_time (ตอนนี้ sum); *_month คง sum
+2) business_rule ใหม่สำหรับ fact_ebt_total_monthly (แบบ ytd_point_in_time ของ revenue): คอลัมน์ sales_base_revenue / expense / ebt
+   เป็นยอดสะสม ณ งวด — เลือกแถว time_key = งวดที่ถามแถวเดียว ห้าม SUM หรือ BETWEEN ข้ามงวด (สะสมถึง พ.ค. 2568 = WHERE time_key = 202505);
+   ยอดรายเดือนใช้ *_month (SUM ข้ามงวดได้)
+3) description ของ 3 คอลัมน์สะสมขึ้นต้นว่า "ยอดสะสมตั้งแต่ต้นปี (YTD) — ไม่ใช่ยอดของเดือน; รายเดือนใช้ <col>_month"
+4) กฎว่า EBT/รายได้/ค่าใช้จ่าย "รายสายงาน" หรือ "รายศูนย์ต้นทุน" คำนวณจาก fact_ebt อย่างไร (SUBTOTAL ต่อ division? หัก 08.รายได้อื่น และ ER/MSP ด้วยไหม?)
+   — ตอนนี้ AI ไม่มีกฎนี้ จึงยังไม่ควรตอบ
+ฝั่ง AI re-sync เอง ไม่ต้องลงทะเบียนใหม่ (คอลัมน์ไม่เปลี่ยน)
+```
+
 ## ฝั่ง AI เมื่อ NT-Report เสร็จ
 1. `control_totals.filter` → gate (`check_control_totals`) + `gen_golden_from_controls` ใส่ WHERE ก่อน aggregate (~0.5 วัน, พร้อม test)
 2. knowledge re-sync เอง (Phase 2) — ตรวจว่า rule ใหม่อยู่ใน instruction ของ context แล้วเปิด `feed_sales` / `feed_ebt` (`is_active=1`)

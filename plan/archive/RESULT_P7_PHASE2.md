@@ -170,6 +170,28 @@ golden จาก control totals ให้ 12/12 ได้ทั้งที่�
 - **B** กลับไปนิยามเดิม (รายเดือน ทั้งบริษัท −1,088 M): NT-Report revert `90fd787`; ฝั่ง AI เปิด context ได้ทันที (ยังต้องแก้ main view ตามข้อ A สำหรับคำถามรายหน่วยงาน)
 - **C** มีทั้งสองฐานเป็นคนละคอลัมน์/ตาราง (เช่น `ebt_monthly_company` กับ `ebt_report_ytd`) พร้อมกฎว่าคำถามแบบไหนใช้ฐานไหน
 
+### อัปเดต 2026-09-19 (บ่าย) — เจ้าของตัดสิน: มีทั้งสองฐาน (ebt **1.3.0**, NT-Report `bebc797`, build `20260919T001920Z`)
+`fact_ebt_total_monthly`: `sales_base_revenue` / `expense` / `ebt` = **สะสม (YTD)** ตามรายงาน EBT (2 สายงานขาย, หัก `08.รายได้อื่น` และ ER/MSP) — ก.ค. 69 = 8,467.33 / 8,050.00 / **417.33 MB**;
+`*_month` = **รายเดือน** — ก.ค. 69 `ebt_month` = −284,046,246.64; กฎใหม่ `monthly_vs_ytd_selection` (ถาม "เดือน" → `*_month`, ถาม "สะสม/YTD" → ไม่มี suffix; โดเมนที่ยังไม่ประกาศ YTD ห้ามเดา)
+
+ฝั่ง AI (`c6e7cca`): gate ผ่าน 114 แถว; golden ของ source ยอดรวมถามแยก "ของเดือน…" กับ "สะสมตั้งแต่ต้นปีถึงเดือน…" ต่อ measure (24 ข้อ); main view ยังเป็นตารางยอดรวมทางการ แต่ instruction ชี้ตารางรายละเอียด `fact_ebt` + คอลัมน์
+และ prompt ยอมให้ใช้ตารางที่ instruction ของ context ระบุชื่อ (context อื่นทุกตัวได้ prompt เดิม — ตรวจกับ config จริงแล้วไม่มีตัวไหนเข้าเงื่อนไข) — ลอง main view = `fact_ebt` แล้วแย่กว่า (โมเดลคำนวณยอดทางการเอง **5/24**)
+
+**eval ebt 1.3.0 = 18/24 (75%) — ไม่ผ่านเกณฑ์ 90% → `feed_ebt` ยังปิด** (`eval_20260919_0747`, P50 7.2 s, ไม่มี retry):
+| พลาด | จำนวน | ตัวอย่าง SQL ของโมเดล | ต้นเหตุ |
+|---|---|---|---|
+| SUM คอลัมน์สะสมข้ามงวด | 4 | `SUM(ebt) … WHERE time_key BETWEEN 202501 AND 202505` | contract ประกาศ measure สะสมเป็น `agg: sum` และไม่มีกฎ point-in-time ของตารางยอดรวม (กฎ `amount_vs_amount_ytd` พูดถึง `fact_ebt` เท่านั้น) |
+| ใช้คอลัมน์สะสมตอบคำถามรายเดือน | 2 | `SELECT ebt … WHERE time_key = 202505` (ถาม "ของเดือน") | ชื่อ `ebt` / `expense` ไม่บอกว่าเป็นยอดสะสม — กฎ `monthly_vs_ytd_selection` อย่างเดียวไม่พอ |
+
+ถามจริงเพิ่ม: "กำไร EBT เดือน ก.ค. 69" → `ebt_month` −284.05 M ✅; "รายได้รวมสะสมถึง ก.ค. 69 แยกตามสายงาน" → `fact_ebt` แยก 2 สายงาน ✅ (แต่ตีความ "69" เป็น 2025);
+"กำไร EBT ของสายงาน 1 เดือน ก.ค. 69" → ยังตอบยอดรวม 2 สายงาน ❌ (Pass 1 ของ two-pass เห็นแค่คอลัมน์ของ main view จึงทิ้ง filter สายงาน — ข้อจำกัด "หนึ่ง context = หนึ่ง main view" ของ pipeline)
+
+**ที่ต้องทำต่อ:**
+- NT-Report (contract ebt, PATCH): (1) measure สะสม 3 ตัวใน `control_totals` เป็น `agg: point_in_time`; (2) กฎใหม่แบบ `ytd_point_in_time` ของ revenue สำหรับ**ตารางยอดรวม**: "`sales_base_revenue`/`expense`/`ebt` เป็นยอดสะสม ณ งวด — เลือกแถว `time_key` = งวดที่ถามแถวเดียว ห้าม SUM/BETWEEN ข้ามงวด; รายเดือนใช้ `*_month` (SUM ข้ามงวดได้)";
+  (3) description ของ 3 คอลัมน์สะสมขึ้นต้นด้วย "ยอด**สะสม**ตั้งแต่ต้นปี (YTD) — ไม่ใช่ยอดของเดือน"; (4) กฎว่า "EBT รายสายงาน/ศูนย์ต้นทุน" คำนวณจาก `fact_ebt` อย่างไร (SUBTOTAL ต่อ division, หักรายการยกเว้นไหม)
+- ฝั่ง AI หลัง contract ใหม่: re-sync เอง → `register_file_source --domain ebt` ไม่จำเป็น (คอลัมน์ไม่เปลี่ยน) → เปิด context → eval 24 ข้อ ≥ 90%
+- ฝั่ง AI (งานแยก, เสนอเป็น REMAIN-12): Pass 1 ของ two-pass รู้จักเฉพาะคอลัมน์ของ main view → คำถามที่ filter ด้วยมิติของตารางอื่นใน context เดียวกันถูกทิ้ง filter เงียบ ๆ
+
 ## Commits (branch `main`)
 ```
 deb0a7e feat(P7-2): data_as_of in /api/v1/query from the verified build
@@ -177,6 +199,7 @@ deb0a7e feat(P7-2): data_as_of in /api/v1/query from the verified build
 a2b8568 feat(P7-2): register expense/sales/ebt as file sources; contract-driven gates and golden
 dfce5d5 feat(P7-2): control totals with a filter and total-only sources   (2026-09-19)
 9ec6666 feat(P7-2): feed instruction says how to filter time on a YYYYMM-only source   (2026-09-19)
+c6e7cca feat(P7-2): ebt 1.3.0 - golden asks monthly vs YTD, detail fact reachable from a totals main view   (2026-09-19)
 ```
 
 ## สถานะ DB หลังจบงาน (local — ไม่อยู่ใน git)
@@ -186,4 +209,4 @@ dfce5d5 feat(P7-2): control totals with a filter and total-only sources   (2026-
   golden `feed_expense` 12 ข้อ (ใหม่), `feed_revenue` 14 ข้อ (เดิม)
 - brain ถูก mark dirty (docs ของ 3 โดเมนใหม่ยังไม่เข้า Vanna จนกว่า admin กด Sync Brain — instruction/กฎ/metadata ใช้ได้ทันทีเพราะอ่านจาก config ตรง)
 - NT-Report `DataFeed/` ไม่ถูกแตะ
-- **2026-09-19:** `feed_sales` active + golden 12 ข้อ; `feed_ebt` ลงทะเบียนใหม่ (2 views, knowledge 1.2.1) แต่ **inactive** + golden 12 ข้อ `is_active=0`; `scope_columns` ทั้ง 4 context มาจาก contract; backup ก่อนแก้: scratchpad ของ session (`config.db.bak-*`)
+- **2026-09-19:** `feed_sales` active + golden 12 ข้อ; `feed_ebt` ลงทะเบียนใหม่ (2 views, schema **1.3.0**) แต่ **inactive** + golden 24 ข้อ `is_active=0`; `scope_columns` ทั้ง 4 context มาจาก contract; backup ก่อนแก้: scratchpad ของ session (`config.db.bak-*`)

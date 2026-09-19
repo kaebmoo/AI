@@ -203,6 +203,13 @@
 - `register_context` ตั้ง `is_active=1` ทุกครั้งที่ sync — context ที่ admin ปิดไว้ไม่ถูก re-sync เอง (resolver ข้าม context ที่ปิด) แต่ `register_file_source` จะเปิดคืน → ลงทะเบียน ebt ใหม่ต้องปิดเองอีกครั้งถ้ายังไม่พร้อม
 - eval 1 ข้อ `execution_failed` detail ว่าง latency 61 s = gateway timeout (ไม่เกี่ยวกับ SQL) — `run_eval` เก็บ `str(e)` ซึ่งว่างสำหรับ timeout
 
+## จาก ebt 1.3.0 (2026-09-19 บ่าย)
+
+- `c6e7cca`: **prompt ของ context ที่ instruction ระบุชื่อตารางอื่นของ source เดียวกัน** เปลี่ยนจาก "ต้องใช้ตาราง X เท่านั้น" เป็น "ใช้ X เป็นหลัก — ใช้ Y แทนได้เฉพาะกรณีที่คำแนะนำระบุ" (`hybrid_flow.table_rule`, 1 query ต่อ prompt) — ตอนนี้เข้าเงื่อนไขเฉพาะ `feed_ebt`; ถ้า contract อื่นเขียนชื่อ `feed_<d>_<dataset>` ลงใน business_rules ในอนาคต context นั้นจะเข้าเงื่อนไขด้วย (ตั้งใจ)
+- ลอง main view = `primary_dataset` เมื่อ control source ไม่มีมิติ → 5/24 (โมเดลคำนวณยอดทางการเองจาก `fact_ebt`, ลืมรายการยกเว้น) → ไม่ใช้; main view คงเป็น `control_totals.source`
+- golden ที่ถามแยก "ของเดือน" / "สะสม" ทำให้ ebt จาก 12/12 (ชุดเดิม ตรวจแค่ตัวเลข) เหลือ 18/24 — คะแนนที่ลดคือความหมายผิดที่ชุดเดิมมองไม่เห็น
+- พบ: โมเดลตีความ "ก.ค. 69" (ปี 2 หลัก) เป็น 2025 ในคำถามหนึ่ง — ไม่ได้ไล่ต่อ (ไม่เฉพาะ ebt)
+
 ## จาก REMAIN-10 ข้อ 2 — rebuild keyword index (2026-09-19)
 
 - `2243fbe`: ตัดสิน "ตัวเลข" จาก**ค่า** (`isinstance(value, str)`) ไม่ใช่ type ของคอลัมน์ — `unit_price` ของ transfer price เก็บเป็น text จึงยังถูก index ทั้งค่า (211 คำ) แต่ไม่ถูกแตกเป็นคำสั้น
