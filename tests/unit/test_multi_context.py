@@ -370,3 +370,29 @@ def test_no_value_of_the_restricted_source_reaches_a_provider(two_sources):
         assert sentinel not in sent, sentinel
     split_requests = [r for r in fake.requests if "You split one business question" in str(r)]
     assert split_requests and all(A_DIV not in str(r) for r in split_requests)  # the split sees no data at all
+
+
+def test_admin_switches_a_workspace_on_and_off(tmp_path):
+    """PUT /admin/workspaces/{id}/multi-context keeps the JSON list that enabled_workspaces reads."""
+    from fastapi import HTTPException
+    from sqlalchemy.orm import Session
+    from app.api.v1.admin.workspaces import WorkspaceMultiContext, set_multi_context
+    from app.services.admin_config_service import AdminConfigService
+
+    config = create_engine(f"sqlite:///{tmp_path / 'config.db'}")
+    with config.begin() as conn:
+        conn.execute(text("CREATE TABLE workspaces (id INTEGER PRIMARY KEY, name TEXT, is_active BOOLEAN DEFAULT 1)"))
+        conn.execute(text("INSERT INTO workspaces (id, name) VALUES (1, 'default'), (2, 'nt-report')"))
+        conn.execute(text("CREATE TABLE admin_config (id INTEGER PRIMARY KEY, config_key TEXT UNIQUE, config_value TEXT, config_type TEXT, "
+                          "category TEXT, description TEXT, is_active BOOLEAN DEFAULT 1, updated_by TEXT, "
+                          "created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)"))
+    admin = SimpleNamespace(email="admin@test")
+    with Session(config) as db:
+        assert mc.enabled_workspaces(AdminConfigService(db)) == frozenset()  # nothing set = off
+        assert set_multi_context(2, WorkspaceMultiContext(enabled=True), admin, db)["enabled_workspaces"] == ["nt-report"]
+        set_multi_context(1, WorkspaceMultiContext(enabled=True), admin, db)
+        assert mc.enabled_workspaces(AdminConfigService(db)) == frozenset({"default", "nt-report"})
+        assert set_multi_context(1, WorkspaceMultiContext(enabled=False), admin, db)["enabled_workspaces"] == ["nt-report"]
+        assert mc.enabled_workspaces(AdminConfigService(db)) == NT
+        with pytest.raises(HTTPException):
+            set_multi_context(9, WorkspaceMultiContext(enabled=True), admin, db)
