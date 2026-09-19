@@ -1,6 +1,6 @@
 # Plan 7: Data Source as a Service — ถามข้อมูลจากแหล่งที่ผู้ใช้กำหนด โดยไม่ต้อง import
 
-**สถานะ:** 🟡 Phase 1 ✅ DONE (2026-09-18) — Phase 2 ✅ DONE (2026-09-19 — exit ครบ 4/4 โดเมน: revenue 14/14, expense 12/12, sales 12/12, ebt 22/24 บน contract 1.3.1) — Phase 3 ✅ DONE (2026-09-19) — Phase 4–7 ยังไม่เริ่ม | ผล: `plan/archive/RESULT_P7_PHASE{1,2,3}.md` | งานฝั่ง NT-Report: `plan/PROMPT_NT_REPORT_P7.md`
+**สถานะ:** 🟡 Phase 1 ✅ DONE (2026-09-18) — Phase 2 ✅ DONE (2026-09-19 — exit ครบ 4/4 โดเมน: revenue 14/14, expense 12/12, sales 12/12, ebt 22/24 บน contract 1.3.1) — Phase 3 ✅ DONE (2026-09-19) — Phase 4 ✅ DONE (2026-09-19; API ครบ, admin UI ยังไม่ทำ) — Phase 4.5–7 ยังไม่เริ่ม | ผล: `plan/archive/RESULT_P7_PHASE{1,2,3,4}.md` | งานฝั่ง NT-Report: `plan/PROMPT_NT_REPORT_P7.md`
 **ความสัมพันธ์กับแผนเดิม:** ต่อยอด/แทนที่บางส่วนของ `PLAN_6_SAAS.md` (ดู §9), รวม Plan 1B-C (MCP SSE + API key) ไว้ใน Phase 6
 **ผู้ใช้รายแรก:** NT-Report portal (F11 dashboard Q&A) — ปัจจุบันถูก disable เพราะยังไม่ได้ตั้ง key และข้อมูลใน AI ค้างที่ revenue 202605
 
@@ -165,7 +165,10 @@ Response เพิ่ม `data_as_of` ต่อ context ที่ใช้ (จ�
 - `scope` → ห่อ view ด้วย WHERE; `scope_columns` ใน contract
 - **Exit:** test: scope `year_month=202607` แล้วถาม "เดือนล่าสุด" ได้ 202607 ไม่ใช่ 202608; scope หน่วยงาน A ถามถึงหน่วยงาน B ได้ 0 แถว/ปฏิเสธ; scope คอลัมน์ที่ไม่ประกาศ = 400
 
-### Phase 4 — Workspace + scoped API key + admin (3 วัน)
+### Phase 4 — Workspace + scoped API key + admin (3 วัน) — ✅ DONE 2026-09-19
+> ผล (`plan/archive/RESULT_P7_PHASE4.md`): key ผูก workspace/allowlist → นอกสิทธิ์ = **403** (ระบุชื่อ, auto-route, cache) และใช้ได้เฉพาะ `/api/v1/query`;
+> context แบบ legacy ของ key ที่ถูกจำกัดอ่านได้เฉพาะ main view (กลไก Phase 3); brain ของ Vanna แยกต่อ workspace; admin API: workspaces, sources (list/status/register ผ่าน gate เดียวกับ CLI);
+> REMAIN-9.6 ปิด; review อิสระ 2 รอบ (รอบแรกพบ critical 1 ข้อ — แก้แล้ว `f07439d`); config จริง: workspace `nt-report` = `feed_*`. เหลือ: admin **UI**, ออก key จริงให้ portal (§11.3)
 - `workspaces`, `APIKey.workspace_id/allowed_contexts`, Chroma แยกต่อ workspace
 - Admin API/UI: ลงทะเบียน source, ทดสอบการเชื่อมต่อ, ดู freshness, ออก key
 - **Exit:** key ของ workspace A เรียก context ของ B ไม่ได้ (403) — มี test คุม
@@ -396,7 +399,7 @@ NT-Report ไม่ต้อง import อะไรเข้า AI อีก ห
 - [ ] schema เปลี่ยนแบบเพิ่ม/ลบคอลัมน์: knowledge re-sync เอง แต่ view (`source_tables`) ยังเป็นชุดคอลัมน์ตอนลงทะเบียน → ต้องรัน `register_file_source` ใหม่
 - [ ] (ภายใต้ D8 แบบผสม: ไม่บังคับ — พิจารณาเมื่อ workspace ใน deployment เดียวมีความลับต่างระดับกันมาก หรือถ้าไปถึง Tier 3) พิจารณารัน SQL ของ file source **นอก process** (แบบ MCP subprocess ของ legacy) — DuckDB รันใน API process: bug/abort ของ DuckDB ในอนาคต (แบบ `enable_logging` ที่ปิดด้วย query gate แล้ว) จะล้มทั้ง API; gate ตรวจแล้วกับทุก vector ที่ reviewer เสนอ (`query()`, `json_execute_serialized_sql`, `FROM '/path'`, comment/quote tricks, subquery) — เหลือ scalar ที่ผ่านได้แค่ตัวอ่านอย่างเดียว/no-op (`current_setting`, `getvariable`, `write_log` ขณะ logging ปิด)
 - [ ] tool-loop `get_sample_values`/`get_table_stats` บน DuckDB (ตอนนี้ fail closed)
-- [ ] admin UI/endpoint (schema browser, onboarding, keyword index, sync-brain) ให้เห็น file source — ตอนนี้เห็นแค่ business DB เดิม (สำหรับ `feed_*` = สำเนาเก่า)
+- [x] admin endpoint (schema browser, onboarding, sync-brain DDL) เห็น file source แล้ว — Phase 4d `5428bb3` (keyword index แก้ไปก่อนแล้ว `0f3aaa7`); ฝั่ง UI (frontend-admin) ของ workspaces/sources ยังไม่ทำ
 - [ ] `/chat/train` validate SQL ตาม source ของ context
 - [ ] ลบ `.source_cache/*.duckdb` ของ fingerprint เก่า
 

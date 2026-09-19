@@ -49,12 +49,23 @@ from app.db.session import SessionLocal
 from app.services.api_key_service import APIKeyService
 
 db = SessionLocal()
+from app.services.workspaces import resolve_key_binding
+
+workspace_id, allowed = resolve_key_binding("nt-report", None)  # หรือ ["feed_revenue", ...] เพื่อจำกัดแคบลงอีก
 raw_key, record = APIKeyService(db).create_key(
     user_id=<admin_user_id>, name="nt-report-portal",
     scopes="query", rate_limit_per_minute=20, rate_limit_per_day=2000,
+    workspace_id=workspace_id, allowed_contexts=allowed,
 )
 print(raw_key)  # เก็บใส่ .env ของ pocketbase_0 (ASSISTANT_API_KEY) — แสดงครั้งเดียว
 ```
+หรือผ่าน admin API: `POST /api/v1/admin/api-keys` `{"name": "nt-report-portal", "workspace": "nt-report", "rate_limit_per_minute": 20, "rate_limit_per_day": 2000}`
+
+### Key ที่ผูก workspace (Plan 7 Phase 4)
+- เห็นเฉพาะ context ของ workspace นั้น (config ปัจจุบัน: `nt-report` = `feed_revenue`, `feed_expense`, `feed_sales`, `feed_ebt`); `allowed_contexts` ทำให้แคบลงได้อีก ไม่มีทางกว้างขึ้น
+- context นอกสิทธิ์ → **HTTP 403** (ทั้งที่ระบุชื่อเองและที่ระบบเลือกให้) — ห้าม retry โดยเปลี่ยน context เอง; ไม่ส่ง `context` = ระบบเลือกภายในสิทธิ์ของ key
+- ใช้ได้เฉพาะ `/api/v1/query` และ `/api/v1/query/contexts` (endpoint อื่น = 403); `GET /query/contexts` พร้อม key จะแสดงเฉพาะ context ที่ key ใช้ได้
+- key เดิมที่ไม่ผูก workspace ทำงานเหมือนเดิมทุกอย่าง
 
 - per-minute limit enforce ผ่าน Redis (F4.4) — Redis ล่ม = fail-open + warning
 - **ไม่เปิด CORS** — portal เรียกผ่าน PB hook proxy (same-origin) เท่านั้น

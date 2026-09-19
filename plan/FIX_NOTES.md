@@ -223,6 +223,27 @@
 - main view = ตารางยอดรวมทางการดีกว่า = ตารางรายละเอียด (5–6/24: โมเดลคำนวณ KPI ทางการเองจาก `fact_ebt`)
 - ชื่อคอลัมน์ `expense` ชนกับคำทั่วไป → Pass 1 ใส่ metric `expense` แม้ถามรายเดือน (พลาดซ้ำ 1–2 ข้อทุกรอบ) — ชื่อแบบ `expense_ytd` จะไม่กำกวม (MAJOR ฝั่ง NT-Report — ไม่ได้ขอ)
 
+## จาก Plan 7 Phase 4 (2026-09-19)
+
+ผลลัพธ์/ตัวเลข: `plan/archive/RESULT_P7_PHASE4.md`
+
+**Decision ที่ทำระหว่างทาง (ตรวจ/กลับได้):**
+- **key ที่ถูกจำกัดใช้ได้เฉพาะ `/api/v1/query*`** — `/chat`, `/admin` รับ context ได้แต่ไม่รู้จัก allowlist; แก้ที่ `deps.enforce_key_surface` จุดเดียว
+- **allowlist เก็บเป็นชื่อจริงใน DB** (ไม่ใช่ชื่อ normalize) และชื่อที่ผู้เรียกส่งมาถูกแปลงเป็นชื่อจริงก่อนใช้ — ที่มา: review รอบ 1 (critical)
+- **`request_pinned`**: key ที่ถูกจำกัด + context legacy → รัน in-process ผ่าน `ScopedSQLite(main_view: "1")` = table allowlist จริง (เดิมมีแค่ prompt); ผู้เรียกที่ไม่ถูกจำกัดยังผ่าน MCP ตามเดิม
+- **`workspace_id` NULL = `default`** ทุกจุด — context ที่สร้างหลัง migration (ลงทะเบียนใหม่ / admin UI) ไม่ต้องรู้จัก workspace
+- **brain ต่อ workspace = Chroma directory แยก** (ไม่ใช่ metadata filter — Vanna base class ผูกชื่อ collection ตายตัว); `default` ใช้ path เดิม
+- **gate/registration ย้ายเข้า `app/services/source_registration.py`** — app ห้าม import `scripts/`; ฟังก์ชันยัง `print` ความคืบหน้า (CLI ใช้ + test ของ importer อ่าน stdout)
+- **`DATA_SOURCE_ALLOWED_ROOTS` อยู่ใน .env ไม่ใช่ admin_config** — เป็นขอบเขตความปลอดภัยของ admin API เอง (admin แก้ผ่าน UI ได้ = ไม่มีความหมาย)
+- สร้าง workspace `nt-report` + ย้าย `feed_*` ใน config จริง (ย้อนได้ด้วย `PUT /admin/workspaces/{default}/contexts`); ยังไม่ได้ออก key จริง
+
+**พบระหว่างทาง:**
+- ⚠️ context ที่ resolve ไม่ได้ **ตกไป legacy DB พร้อม system prompt เปล่า** (`SourceResolver._resolve` → `LEGACY_SOURCE`, `build_system_prompt` → ข้อความ ERROR) — ปิดแล้วสำหรับ key ที่ถูกจำกัด; ผู้เรียกทั่วไปยังเป็นแบบเดิม
+- anyio TaskGroup ห่อ exception ใน ExceptionGroup → branch ที่ endpoint เปิด MCP เองเคยคืน 200 + error แทน 400/403 (`b85dac4`) — ScopeError ของ Phase 3 ก็โดนแบบเดียวกัน
+- test ของ QueryEngine ที่ไม่ patch `source_resolver` อ่าน `config.db` จริง (อ่านอย่างเดียว) — test ใหม่ patch ทั้งหมด
+- แก้บันทึกก่อนหน้า: "expense ไม่เสีย retry เพราะ golden อยู่ใน Vanna" **ไม่จริง** — eval รันบน python3.14 ที่ vanna import ไม่ได้ และ `rag_enabled=false`; สาเหตุจริงไม่ได้ไล่ (หลังเพิ่มบรรทัดวิธีกรองงวดแล้วไม่ต่างกัน)
+- NT-Report ออก contract ใหม่ 3 รอบระหว่างงาน (revenue 2.2.0→2.3.0, sales 1.3.0, ebt 1.4.0) — การเพิ่มตาราง/คอลัมน์ต้อง `register_file_source` ใหม่ทุกครั้ง (ตอนนี้ทำผ่าน `POST /admin/sources/register` ได้)
+
 ## จาก REMAIN-9 (2026-09-19)
 - 9.4: DDL ที่ train เพิ่มจะมีผลเมื่อ admin กด Sync Brain — ยังไม่ได้วัดผลต่อ eval
 - 9.5: `extract_hierarchy.py` เลิกรับ `--db` (อ่านข้อมูลผ่าน source ของ context, config ผ่าน CONFIG_DB_URL) — ไม่มี caller ที่ส่ง `--db`

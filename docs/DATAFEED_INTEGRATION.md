@@ -86,10 +86,10 @@ Importer เปิด write connection ของตัวเอง ไม่ผ�
 
 | Context (2026-09-19) | Source | schema / งวด | สถานะ | eval |
 |---|---|---|---|---|
-| `feed_revenue` | `datafeed_revenue` | 2.1.0 / 202608 | ✅ active | 14/14 |
+| `feed_revenue` | `datafeed_revenue` | 2.3.0 / 202608 | ✅ active (17 views — รวมตารางเป้า 2 ตาราง) | 14/14 |
 | `feed_expense` | `datafeed_expense` | 1.2.0 / 202608 | ✅ active | 12/12 |
-| `feed_sales` | `datafeed_sales` | 1.2.0 / 202608 | ✅ active (2026-09-19 — contract มีกฎ actual/target + `control_totals.filter`) | 12/12 |
-| `feed_ebt` | `datafeed_ebt` | 1.3.1 / 202607 | ✅ active (2026-09-19 — contract มีรายเดือน `*_month` + สะสม `agg: point_in_time` + สูตรรายสายงาน/ศูนย์ต้นทุน; main view = ตารางยอดรวมทางการ, คำถามที่ระบุหน่วยงานถูกบังคับไป `fact_ebt`) | 22/24 |
+| `feed_sales` | `datafeed_sales` | 1.3.0 / 202608 | ✅ active (4 views — รวม `fact_sales_target_monthly`) | 12/12 |
+| `feed_ebt` | `datafeed_ebt` | 1.4.0 / 202607 | ✅ active (main view `fact_ebt_division_monthly`; ยอดรวมทางการ + `fact_ebt` ใช้ได้ตามกฎ) | 33/36 |
 
 (รายละเอียด: `plan/archive/RESULT_P7_PHASE2.md` หัวข้ออัปเดต 2026-09-19, `plan/PLAN_REMAINING_ITEMS.md` REMAIN-11)
 
@@ -101,6 +101,12 @@ python -m scripts.datafeed.register_file_source --domain revenue \
 python -m scripts.datafeed.gen_golden_from_controls --domain revenue \
     --source /path/to/DataFeed/dist          # golden สำหรับ eval (ถ้า contract มี control_totals)
 ```
+
+ผ่าน admin API (Plan 7 Phase 4c — gate ชุดเดียวกัน, code เดียวกัน: `app/services/source_registration.py`):
+- `POST /api/v1/admin/sources/register` `{"domain": "sales"}` — ลงทะเบียน**ซ้ำ**จากที่เดิม (ใช้เมื่อ contract เพิ่มตาราง/คอลัมน์ — allowlist ของ view เขียนตอนลงทะเบียน);
+  `{"domain": "x", "source_dir": "/path/to/dist"}` สำหรับ path ใหม่ ต้องอยู่ใต้ `DATA_SOURCE_ALLOWED_ROOTS` (.env, คั่นด้วย `,`) — gate ล้ม = 400 และ registry ไม่เปลี่ยน
+- `GET /api/v1/admin/sources` — source + context ที่ผูก + workspace; `GET /api/v1/admin/sources/{name}/status` — ทดสอบการอ่าน + `data_as_of` (resolve แบบเดียวกับคำถามจริง)
+- instruction ของ context แสดง**ทุกตาราง**ของ contract (ชื่อเต็ม, grain, คอลัมน์) — ตารางหลักใช้ตอบก่อน ตารางอื่นใช้เมื่อกฎสั่งหรือคำถามต้องใช้คอลัมน์ที่ตารางหลักไม่มี
 
 `register_file_source` ผ่าน gate ชุดเดียวกับ importer แต่ตรวจ **ไฟล์ในที่เดิม** และเขียน registry
 เฉพาะเมื่อผ่านทุกข้อ (ไม่ผ่าน = registry ไม่เปลี่ยน):
