@@ -15,6 +15,7 @@ A context outside the set is refused with ContextNotAllowed (HTTP 403) — never
 
 import json
 import logging
+import re
 from typing import Any, FrozenSet, Optional
 
 from sqlalchemy import inspect, text
@@ -100,6 +101,69 @@ def resolve_key_binding(workspace: Optional[str], contexts: Optional[list], conf
         if workspace_id is not None and known[norm(name)] != workspace_id:
             raise ValueError(f"context '{name}' ไม่อยู่ใน workspace '{workspace}'")
     return workspace_id, (json.dumps(list(contexts), ensure_ascii=False) if contexts is not None else None)
+
+
+
+# ── Vanna brain per workspace (Phase 4b) ───────────────────────────────────────────────────
+
+def brain_path(base: str, workspace: Optional[str]) -> str:
+    """Chroma directory of a workspace's brain; 'default' keeps the path it always had."""
+    if workspace in (None, DEFAULT_WORKSPACE):
+        return base
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", workspace):  # it becomes part of a path
+        raise ValueError(f"workspace name is not a slug: {workspace!r}")
+    return f"{base.rstrip('/')}__{workspace}"
+
+
+def workspace_of_context(context_name: Optional[str], config_engine=None) -> str:
+    """Name of the workspace a context belongs to — the brain a question about it retrieves from."""
+    try:
+        with (config_engine or _config_engine()).connect() as conn:
+            for name, workspace in conn.execute(text(
+                    "SELECT sc.name, w.name FROM schema_contexts sc JOIN workspaces w ON w.id = sc.workspace_id")):
+                if norm(name) == norm(context_name or ""):
+                    return workspace
+    except Exception as exc:  # registry not migrated: one brain, as before
+        logger.debug(f"workspace_of_context({context_name}): {exc}")
+    return DEFAULT_WORKSPACE
+
+
+class BrainFilter:
+    """What is trained into a workspace's brain. A named workspace holds its own contexts and their
+    tables only; 'default' holds everything not owned by another workspace — including knowledge
+    no context owns (global rules, free-text golden categories). With no other workspace defined
+    that is everything: the brain the deployment always had."""
+
+    def __init__(self, workspace: Optional[str], config_engine=None):
+        self.workspace = workspace or DEFAULT_WORKSPACE
+        self._own_contexts, self._own_views, self._foreign_contexts, self._foreign_views = set(), set(), set(), set()
+        with (config_engine or _config_engine()).connect() as conn:
+            rows = list(conn.execute(text(
+                "SELECT sc.name, sc.main_view, w.name, sc.id FROM schema_contexts sc "
+                "LEFT JOIN workspaces w ON w.id = sc.workspace_id")))
+            tables = {}
+            try:
+                for context_id, table in conn.execute(text(
+                        "SELECT sc.id, st.table_name FROM schema_contexts sc JOIN source_tables st ON st.source_id = sc.source_id")):
+                    tables.setdefault(context_id, set()).add(table)
+            except Exception:
+                pass  # no file-source registry
+        for name, main_view, workspace_name, context_id in rows:
+            own = (workspace_name or DEFAULT_WORKSPACE) == self.workspace
+            views = {v.lower() for v in ({main_view} | tables.get(context_id, set())) if v}
+            (self._own_contexts if own else self._foreign_contexts).add(norm(name))
+            (self._own_views if own else self._foreign_views).update(views)
+
+    def _keep(self, value: Optional[str], own: set, foreign: set) -> bool:
+        if self.workspace == DEFAULT_WORKSPACE:
+            return value is None or value not in foreign
+        return value is not None and value in own
+
+    def context(self, name: Optional[str]) -> bool:
+        return self._keep(norm(name) if name else None, self._own_contexts, self._foreign_contexts)
+
+    def view(self, name: Optional[str]) -> bool:
+        return self._keep(name.lower() if name else None, self._own_views, self._foreign_views)
 
 
 _key_columns_checked: set = set()  # engine URLs whose api_keys table this process has checked

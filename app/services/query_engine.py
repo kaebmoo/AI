@@ -27,7 +27,7 @@ from app.services.ai_service import AIService
 from app.services.mcp_client import MCPClientService
 from app.services.admin_config_service import AdminConfigService
 from app.services.data_sources import SourceBoundMCPClient, request_scope, source_resolver
-from app.services.workspaces import check_context
+from app.services.workspaces import check_context, workspace_of_context
 from app.services.schema_service import SchemaService
 from app.services.warning_detector import WarningDetector
 from app.services.query_classifier import query_classifier
@@ -560,7 +560,8 @@ class QueryEngine:
             schema_service = SchemaService(db_engine=config_engine, business_engine=source.engine)
             mcp_client = SourceBoundMCPClient(self.mcp_client, source)
 
-        ai_service = AIService(provider=provider_instance, mcp_client=mcp_client)
+        ai_service = AIService(provider=provider_instance, mcp_client=mcp_client,
+                               workspace=workspace_of_context(context_name))  # RAG retrieves from that workspace's brain
 
         # 3. Build system prompt
         system_prompt = schema_service.build_system_prompt(

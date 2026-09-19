@@ -101,10 +101,11 @@ class AIService:
 
         self._pending_limit_warning = ""
 
-        # Initialize Vanna RAG
+        # Initialize Vanna RAG — the brain of the workspace the queried context belongs to (Phase 4b)
         try:
             self.vanna = VannaService(config={
                 "path": settings.VANNA_CHROMA_PATH,
+                "workspace": kwargs.get("workspace"),
                 "distance_threshold": settings.VANNA_DISTANCE_THRESHOLD
             })
         except RECOVERABLE_AI_EXCEPTIONS:

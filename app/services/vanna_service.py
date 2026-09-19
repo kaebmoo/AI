@@ -23,7 +23,18 @@ from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 
+class _KeepAll:
+    """BrainFilter stand-in until sync_brain sets the real one: train everything (the old behaviour)."""
+
+    def context(self, _name) -> bool:
+        return True
+
+    view = context
+
+
 class VannaService(ChromaDB_VectorStore, VannaBase):
+    _keep = _KeepAll()
+
     def __init__(self, config: Dict[str, Any] = None):
         if not _VANNA_AVAILABLE:
             raise ImportError(
@@ -34,8 +45,10 @@ class VannaService(ChromaDB_VectorStore, VannaBase):
         if config is None:
             config = {}
 
-        # Initialize ChromaDB at project root
-        db_path = config.get("path", "./chroma_db")
+        # Plan 7 Phase 4b: one brain per workspace — 'default' keeps the path it always had
+        from app.services.workspaces import brain_path
+        self.workspace = config.get("workspace")
+        db_path = brain_path(config.get("path", "./chroma_db"), self.workspace)
         self.distance_threshold = config.get("distance_threshold", 1.8)
 
         # Initialize Vanna's Vector Store
@@ -59,7 +72,10 @@ class VannaService(ChromaDB_VectorStore, VannaBase):
         Synchronize the Vanna 'Brain' (Vector DB) with the current Database state.
         This wipes and re-trains to ensure consistency.
         """
-        logger.info("Starting Vanna Brain Sync...")
+        from app.services.workspaces import BrainFilter
+        # what belongs in this workspace's brain (no other workspace defined = everything, as before)
+        self._keep = BrainFilter(self.workspace, schema_service.engine)
+        logger.info("Starting Vanna Brain Sync (workspace=%s)...", self._keep.workspace)
 
         # Clear existing collections to avoid duplicates
         try:
@@ -119,7 +135,8 @@ class VannaService(ChromaDB_VectorStore, VannaBase):
         """
         with service.engine.connect() as conn:
             views = sorted({row[0] for row in conn.execute(text(
-                "SELECT main_view FROM schema_contexts WHERE is_active = 1 AND main_view IS NOT NULL"))})
+                "SELECT main_view FROM schema_contexts WHERE is_active = 1 AND main_view IS NOT NULL"))
+                if self._keep.view(row[0])})
         with service.business_engine.connect() as conn:
             for name in views:
                 try:
@@ -141,6 +158,8 @@ class VannaService(ChromaDB_VectorStore, VannaBase):
         with service.engine.connect() as conn:
             rules = conn.execute(text("SELECT * FROM schema_business_rules WHERE is_active=1")).mappings().all()
             for rule in rules:
+                if not self._keep.view(rule['table_name']):  # a rule about another workspace's view
+                    continue
                 doc_text = f"**Rule: {rule['rule_name']}**\nCode: {rule['rule_code']}\nDescription: {rule['rule_description']}\nCorrect Example: {rule['example_correct']}\nSeverity: {rule['severity']}"
                 self.train(documentation=doc_text)
 
@@ -148,6 +167,8 @@ class VannaService(ChromaDB_VectorStore, VannaBase):
         with service.engine.connect() as conn:
             mappings = conn.execute(text("SELECT * FROM schema_semantic_mapping WHERE is_active=1")).mappings().all()
             for m in mappings:
+                if not self._keep.context(m['context_name']):
+                    continue
                 doc_text = f"**Term Mapping**\nKeyword: '{m['keyword']}' means column `{m['target_column']}` ({m['keyword_type']})\nCondition: {m['target_condition']}\nNote: {m['description']}"
                 self.train(documentation=doc_text)
 
@@ -157,9 +178,9 @@ class VannaService(ChromaDB_VectorStore, VannaBase):
         # 4. Manual documentation from vanna_documentation table
         try:
             with service.engine.connect() as conn:
-                docs = conn.execute(text(
-                    "SELECT title, content FROM vanna_documentation WHERE is_active = 1 ORDER BY category, doc_key"
-                )).mappings().all()
+                docs = [d for d in conn.execute(text(
+                    "SELECT title, content, context_name FROM vanna_documentation WHERE is_active = 1 ORDER BY category, doc_key"
+                )).mappings().all() if self._keep.context(d['context_name'])]
                 for doc in docs:
                     self.train(documentation=f"## {doc['title']}\n{doc['content']}")
             logger.info(f"Trained {len(docs)} documentation entries from DB")
@@ -175,6 +196,8 @@ class VannaService(ChromaDB_VectorStore, VannaBase):
 
         trained = 0
         for ctx in contexts:
+            if not self._keep.context(ctx.get('name')):
+                continue
             try:
                 main_view = ctx.get('main_view', '')
                 display_name = ctx.get('display_name', ctx.get('name', ''))
@@ -215,7 +238,9 @@ class VannaService(ChromaDB_VectorStore, VannaBase):
     def _sync_golden_examples(self, service: SchemaService):
         """Train SQL from Golden Examples"""
         with service.engine.connect() as conn:
-            examples = conn.execute(text("SELECT * FROM golden_examples WHERE is_active=1")).mappings().all()
+            # category = the context name for generated golden; free text (legacy) belongs to 'default'
+            examples = [e for e in conn.execute(text("SELECT * FROM golden_examples WHERE is_active=1")).mappings().all()
+                        if self._keep.context(e['category'])]
             for ex in examples:
                 self.train(question=ex['question_pattern'], sql=ex['expected_sql'])
                 

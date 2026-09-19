@@ -211,13 +211,20 @@ def sync_brain_knowledge(
     _current_user: User = Depends(deps.require_admin),
     service: SchemaService = Depends(deps.get_schema_service),
 ):
-    """Trigger Vanna brain sync. Admin only."""
+    """Trigger Vanna brain sync. Admin only. One brain per active workspace (Plan 7 Phase 4b)."""
     try:
-        vanna = VannaService(config={
-            "path": settings.VANNA_CHROMA_PATH,
-            "distance_threshold": settings.VANNA_DISTANCE_THRESHOLD,
-        })
-        vanna.sync_brain(service)
+        from sqlalchemy import text as _text
+        try:
+            with service.engine.connect() as conn:
+                workspaces = [row[0] for row in conn.execute(_text("SELECT name FROM workspaces WHERE is_active = 1 ORDER BY id"))]
+        except Exception:  # registry not migrated: the single brain, as before
+            workspaces = [None]
+        for workspace in workspaces or [None]:
+            VannaService(config={
+                "path": settings.VANNA_CHROMA_PATH,
+                "distance_threshold": settings.VANNA_DISTANCE_THRESHOLD,
+                "workspace": workspace,
+            }).sync_brain(service)
 
         # Record sync timestamp
         try:
