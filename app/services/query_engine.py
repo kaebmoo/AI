@@ -28,6 +28,7 @@ from app.services.mcp_client import MCPClientService
 from app.services.admin_config_service import AdminConfigService
 from app.core.llm_policy import FULL, LLMPolicyError, PolicyMCPClient, RequestPolicy, history_without_answers, normalize, request_llm_policy
 from app.services.data_sources import SourceBoundMCPClient, request_pinned, request_scope, source_resolver
+from app.services.retention import stores_results
 from app.services.workspaces import canonical_context, check_context, workspace_of_context
 from app.services.schema_service import SchemaService
 from app.services.warning_detector import WarningDetector
@@ -685,7 +686,7 @@ class QueryEngine:
         )
 
         # --- Query Result Cache: store successful result ---
-        if use_cache and result.data and not result.error:
+        if use_cache and result.data and not result.error and stores_results(context_name):
             _cache_set(qcache_key, engine_result)
             logger.info(f"QueryEngine: Cached result (key={qcache_key[:12]}…, rows={len(result.data)})")
 

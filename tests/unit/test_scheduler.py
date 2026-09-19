@@ -31,7 +31,7 @@ async def test_start_does_not_create_duplicate_tasks():
         await asyncio.sleep(0)
         await scheduler.stop()
 
-    assert mock_run_periodic.call_count == 3  # auto_analyze, config_gc, export_cleanup
+    assert mock_run_periodic.call_count == 4  # auto_analyze, config_gc, export_cleanup, result_retention
     assert len(scheduler._tasks) == 0
 
 

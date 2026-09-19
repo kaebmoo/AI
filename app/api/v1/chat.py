@@ -19,6 +19,7 @@ from app.services.ai_service import AIService
 from app.services.data_sources import SourceBoundMCPClient, source_resolver
 from app.services.schema_service import SchemaService
 from app.services.query_engine import QueryEngine, QueryEngineResult, detect_context_from_question
+from app.services.retention import stores_results
 from app.services.intent_classifier import classify_intent
 from app.providers.chart_postprocessor import enrich_chart_config, resolve_max_series_warning
 from app.models.chat_session import ChatSessionData
@@ -231,7 +232,8 @@ def _save_history(
         conversation_id=conversation_id,
         question=result.question,
         generated_sql=result.sql_query,
-        sql_result_summary=str(result.data)[:1000] if result.data else None,
+        sql_result_summary=(str(result.data)[:1000]
+                            if result.data and stores_results(engine_result.context_name) else None),
         ai_response=ai_response_text if not result.error else f"Error: {result.error}",
         execution_time_ms=engine_result.execution_time_ms,
         tokens_used=result.tokens_used,
@@ -364,7 +366,8 @@ def _persist_render_payload(db: Session, chat_entry: ChatHistory, response_data:
         }
         chat_entry.render_meta = json.dumps(meta, ensure_ascii=False, default=str)
         chat_entry.result_data = (
-            json.dumps(data[:max_rows], ensure_ascii=False, default=str) if data else None
+            json.dumps(data[:max_rows], ensure_ascii=False, default=str)
+            if data and stores_results(chat_entry.context_name) else None
         )
         db.commit()
     except Exception as e:
@@ -632,7 +635,7 @@ async def chat(
 
     # 6. Save session data for chart-only re-render (non-fatal)
     result = engine_result.query_result
-    if result.data and not result.error:
+    if result.data and not result.error and stores_results(engine_result.context_name):
         try:
             columns = list(result.data[0].keys()) if result.data else []
             existing_cfg = result.explanation.get("chart_config") if isinstance(result.explanation, dict) else {}
@@ -764,7 +767,7 @@ async def chat_stream(
             _update_conversation_meta(db, conversation_id, request.question)
 
             # Save session data for chart-only re-render (non-fatal)
-            if result.data and not result.error:
+            if result.data and not result.error and stores_results(engine_result.context_name):
                 try:
                     columns = list(result.data[0].keys()) if result.data else []
                     existing_cfg = result.explanation.get("chart_config") if isinstance(result.explanation, dict) else {}

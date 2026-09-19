@@ -22,6 +22,11 @@ class WorkspaceCreate(BaseModel):
     description: Optional[str] = None
 
 
+class WorkspaceRetention(BaseModel):
+    result_retention_days: Optional[int] = Field(None, ge=0, le=3650, description="null = the global setting; 0 = keep forever")
+    store_result_data: Optional[bool] = Field(None, description="null = the global setting; false = never store result rows")
+
+
 class WorkspaceContexts(BaseModel):
     contexts: List[str] = Field(..., description="Context names to move into this workspace")
 
@@ -41,8 +46,9 @@ def list_workspaces(_current_user: User = Depends(deps.require_admin), db: Sessi
             "SELECT name, COALESCE(workspace_id, (SELECT id FROM workspaces WHERE name = 'default')) "
             "FROM schema_contexts WHERE is_active = 1 ORDER BY name")):
         contexts.setdefault(workspace_id, []).append(name)
-    return [{**dict(row), "is_active": bool(row["is_active"]), "contexts": contexts.get(row["id"], [])}
-            for row in db.execute(text("SELECT id, name, display_name, description, is_active FROM workspaces ORDER BY id")).mappings()]
+    shown = ("id", "name", "display_name", "description", "is_active", "result_retention_days", "store_result_data")
+    return [{**{k: row[k] for k in shown if k in row}, "is_active": bool(row["is_active"]), "contexts": contexts.get(row["id"], [])}
+            for row in db.execute(text("SELECT * FROM workspaces ORDER BY id")).mappings()]
 
 
 @router.post("/workspaces", status_code=status.HTTP_201_CREATED)
@@ -74,6 +80,17 @@ def move_contexts(workspace_id: int, data: WorkspaceContexts, _current_user: Use
     db.commit()
     clear_query_cache()  # allowlists are part of the cache key, cached routes are not re-checked per workspace
     return {"workspace": workspace["name"], "moved": data.contexts}
+
+
+@router.put("/workspaces/{workspace_id}/retention")
+def set_retention(workspace_id: int, data: WorkspaceRetention, _current_user: User = Depends(deps.require_admin),
+                  db: Session = Depends(deps.get_config_db)):
+    """Phase 4.5: this workspace's override of result_retention_days / store_result_data (null = global)."""
+    workspace = _workspace(db, workspace_id)
+    db.execute(text("UPDATE workspaces SET result_retention_days = :d, store_result_data = :s WHERE id = :id"),
+               {"d": data.result_retention_days, "s": data.store_result_data, "id": workspace_id})
+    db.commit()
+    return {"workspace": workspace["name"], **data.model_dump()}
 
 
 @router.delete("/workspaces/{workspace_id}")

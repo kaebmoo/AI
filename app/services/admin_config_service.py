@@ -676,6 +676,8 @@ class AdminConfigService:
             "escalation_ladder_enabled": self.get_config("escalation_ladder_enabled", "false") == "true",
             "escalation_tool_loop_enabled": self.get_config("escalation_tool_loop_enabled", "false") == "true",
             "query_latency_budget_s": self._get_float_config("query_latency_budget_s", 45.0),
+            # Phase 4.5 retention (app/services/retention.py): false = result rows are never stored
+            "store_result_data": self.get_config("store_result_data", "true") == "true",
         }
 
     def _get_float_config(self, key: str, default: float) -> float:

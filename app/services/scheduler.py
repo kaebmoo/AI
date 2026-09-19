@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 AUTO_ANALYZE_INTERVAL = 6 * 3600   # 6 hours
 CONFIG_GC_INTERVAL = 24 * 3600     # 24 hours
 EXPORT_CLEANUP_INTERVAL = 24 * 3600  # daily
+RESULT_RETENTION_INTERVAL = 24 * 3600  # daily
 
 
 class BackgroundScheduler:
@@ -45,6 +46,10 @@ class BackgroundScheduler:
         ))
         self._tasks.append(asyncio.create_task(
             self._run_periodic("export_cleanup", EXPORT_CLEANUP_INTERVAL, self._job_export_cleanup)
+        ))
+
+        self._tasks.append(asyncio.create_task(
+            self._run_periodic("result_retention", RESULT_RETENTION_INTERVAL, self._job_result_retention)
         ))
 
         logger.info("Background scheduler started with %d jobs", len(self._tasks))
@@ -135,6 +140,17 @@ class BackgroundScheduler:
             removed = cleanup_expired(db)
             if removed:
                 logger.info("[ExportCleanup] Removed %s expired exports/files", removed)
+        finally:
+            db.close()
+
+    async def _job_result_retention(self):
+        """Purge stored result rows past result_retention_days (question / SQL / answer stay)."""
+        db = self._db_factory()
+        try:
+            from app.services.retention import purge_results
+            done = await asyncio.to_thread(purge_results, db)
+            if any(done.values()):
+                logger.info("[ResultRetention] purged %s", done)
         finally:
             db.close()
 

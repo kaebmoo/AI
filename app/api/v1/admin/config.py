@@ -125,6 +125,7 @@ def toggle_feature_flag(
 # The range is the contract; keep it in sync with the Admin UI input bounds.
 _NUMERIC_CONFIG_RANGES = {
     "query_latency_budget_s": (5.0, 300.0),
+    "result_retention_days": (0.0, 3650.0),  # Phase 4.5: stored result rows older than this are purged; 0 = never
 }
 
 

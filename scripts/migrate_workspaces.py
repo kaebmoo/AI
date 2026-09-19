@@ -36,6 +36,13 @@ def migrate_config(config_engine) -> None:
         """))
         conn.execute(text("INSERT INTO workspaces (name, display_name) VALUES (:n, 'Default') ON CONFLICT(name) DO NOTHING"),
                      {"n": DEFAULT_WORKSPACE})
+    # Phase 4.5: per-workspace override of the result retention (NULL = the global admin_config value)
+    ws_columns = {c["name"] for c in inspect(config_engine).get_columns("workspaces")}
+    for column, ddl in (("result_retention_days", "INTEGER"), ("store_result_data", "BOOLEAN")):
+        if column not in ws_columns:
+            with config_engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE workspaces ADD COLUMN {column} {ddl}"))
+            print(f"Added workspaces.{column}")
     if "workspace_id" not in {c["name"] for c in inspect(config_engine).get_columns("schema_contexts")}:
         with config_engine.begin() as conn:
             conn.execute(text("ALTER TABLE schema_contexts ADD COLUMN workspace_id INTEGER REFERENCES workspaces(id)"))
