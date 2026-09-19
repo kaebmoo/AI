@@ -1,6 +1,6 @@
 # Plan 7: Data Source as a Service — ถามข้อมูลจากแหล่งที่ผู้ใช้กำหนด โดยไม่ต้อง import
 
-**สถานะ:** 🟡 Phase 1 ✅ DONE (2026-09-18) — Phase 2 ✅ DONE (2026-09-19 — exit ครบ 4/4 โดเมน: revenue 14/14, expense 12/12, sales 12/12, ebt 22/24 บน contract 1.3.1) — Phase 3 ✅ DONE (2026-09-19) — Phase 4 ✅ DONE (2026-09-19; API ครบ, admin UI ยังไม่ทำ) — Phase 4.5 ✅ DONE (2026-09-19; `llm_data_policy` + provider allowlist ต่อ source, retention, DSR, audit ของคำถาม — API ครบ, admin UI ยังไม่ทำ, classification ต่อคอลัมน์เลื่อน) — Phase 5 ✅ DONE (2026-09-19; orchestrator หลัง flag ต่อ workspace ที่ `/api/v1/query`, eval ข้ามโดเมน 8–9/10 จาก baseline 0/10) — Phase 6–7 ยังไม่เริ่ม | ผล: `plan/archive/RESULT_P7_PHASE{1,2,3,4,45,5}.md` | งานฝั่ง NT-Report: `plan/PROMPT_NT_REPORT_P7.md`
+**สถานะ:** 🟡 Phase 1 ✅ DONE (2026-09-18) — Phase 2 ✅ DONE (2026-09-19 — exit ครบ 4/4 โดเมน: revenue 14/14, expense 12/12, sales 12/12, ebt 22/24 บน contract 1.3.1) — Phase 3 ✅ DONE (2026-09-19) — Phase 4 ✅ DONE (2026-09-19; API ครบ, admin UI ยังไม่ทำ) — Phase 4.5 ✅ DONE (2026-09-19; `llm_data_policy` + provider allowlist ต่อ source, retention, DSR, audit ของคำถาม — API ครบ, admin UI ยังไม่ทำ, classification ต่อคอลัมน์เลื่อน) — Phase 5 ✅ DONE (2026-09-19; orchestrator หลัง flag ต่อ workspace ที่ `/api/v1/query`, eval ข้ามโดเมน 8–9/10 จาก baseline 0/10) — Phase 6 🟡 สำรวจ/แผนย่อยแล้ว รอเจ้าของระบุผู้ใช้และ MCP client — Phase 7 ยังไม่เริ่ม | ผล: `plan/archive/RESULT_P7_PHASE{1,2,3,4,45,5}.md` | งานฝั่ง NT-Report: `plan/PROMPT_NT_REPORT_P7.md`
 **ความสัมพันธ์กับแผนเดิม:** ต่อยอด/แทนที่บางส่วนของ `PLAN_6_SAAS.md` (ดู §9), รวม Plan 1B-C (MCP SSE + API key) ไว้ใน Phase 6
 **ผู้ใช้รายแรก:** NT-Report portal (F11 dashboard Q&A) — ปัจจุบันถูก disable เพราะยังไม่ได้ตั้ง key และข้อมูลใน AI ค้างที่ revenue 202605
 
@@ -185,8 +185,11 @@ Response เพิ่ม `data_as_of` ต่อ context ที่ใช้ (จ�
   2. **Orchestrator:** แตกคำถามเป็นคำถามย่อยต่อ context → รันแยก → LLM รวมคำตอบ (ไม่ JOIN ข้าม source ใน SQL เพราะ key ของแต่ละโดเมนไม่ตรงกัน)
 - **Exit:** ชุดคำถามข้ามโดเมน 10 ข้อ เทียบตัวเลขกับ dashboard ถูก ≥ 8 ข้อ; ข้อที่ตอบไม่ได้ต้องบอกว่าไม่ได้ ไม่เดาตัวเลข
 
-### Phase 6 — ช่องทางใช้งาน (2–3 วัน)
-- MCP server แบบ SSE + API key (= Plan 1B-C ที่ deferred ไว้)
+### Phase 6 — ช่องทางใช้งาน (2–3 วัน) — 🟡 สำรวจแล้ว รอเจ้าของตัดสิน
+> ผลสำรวจและแผนย่อย: [`archive/RESULT_P7_PHASE6.md`](archive/RESULT_P7_PHASE6.md) — baseline 997 passed / 3 skipped บนสำเนา DB; MCP ภายใน 35 tools ห้ามเปิดตรง; SDK 1.26.0 mount ASGI/ส่ง request header ผ่าน tool ได้จริง (in-process proof).
+> ยังไม่เริ่ม implementation: รอเจ้าของระบุผู้ใช้/client รายแรก พร้อมขอบเขตข้อมูลที่ส่งให้ client ได้ ตาม prompt ข้อ 2. Scope ที่ desktop ส่งเองไม่ใช่ entitlement และ `llm_data_policy` ฝั่ง server ไม่คุม LLM ของ client.
+- facade บาง ๆ (`ask`, `list_contexts`, `source_status`) ผ่านทางเข้าเดียวกับ REST; auth/usage เดิม + workspace/allowlist + audit `mcp`
+- transport รอ client: เสนอ stateless Streamable HTTP; legacy SSE เฉพาะเมื่อจำเป็น (Plan 1B-C / REMAIN-8 ยังไม่ปิด)
 - (ตัวเลือก) embeddable chat widget ที่ client ฝังเองได้ — ทำเมื่อมี client ที่ 2 ต้องการ; NT-Report ใช้ panel ของตัวเองผ่าน PB proxy อยู่แล้ว
 
 ### Phase 7 — เปิดให้ภายนอก = private deployment ต่อลูกค้า (อนาคต — ปรับตาม D8 2026-09-18)

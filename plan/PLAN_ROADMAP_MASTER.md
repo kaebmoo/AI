@@ -23,7 +23,7 @@
 | **Plan 5** | ✅ DONE | 100% | 7 tests | 3-DB live, ConfigBase แยก, business_engine ครบทุก call path |
 | **Plan 6** | ⏸ DEFERRED | 0% | 0 | multi-tenant เลื่อนเป็น Tier 3 — ตัดสิน 2026-09-18 ใช้แบบผสม (ภายใน NT หลาย workspace / ลูกค้าภายนอก private deployment) ดู PLAN_7 §12 |
 | **Plan 7** | 🟡 Phase 1 ✅ · Phase 2 ✅ · Phase 3 ✅ · Phase 4 ✅ · Phase 4.5 ✅ · Phase 5 ✅ | 6/8 phases | +352 tests | Data Source as a Service (zero-import) — Phase 1 เสร็จ 2026-09-18; Phase 2: `data_as_of`, knowledge re-sync อัตโนมัติ, 4 โดเมนลงทะเบียน (revenue 14/14, expense 12/12, sales 12/12 — 2026-09-19; ebt 1.3.0 eval 18/24 ปิดไว้ รอกฎ point-in-time ใน contract); Phase 3 (2026-09-19): `scope` บังคับที่ชั้น SQL ทั้ง file/legacy — ดู archive/RESULT_P7_PHASE{2,3}.md, PROMPT_NT_REPORT_P7.md; Phase 4.5 (2026-09-19): `llm_data_policy` + provider allowlist ต่อ source (บังคับที่ชั้น provider, test ดัก sentinel), retention 30 วัน, DSR, `query_audit` ทุกช่องทาง — archive/RESULT_P7_PHASE45.md; Phase 5 (2026-09-19): คำถามข้ามหลาย context — แตกคำถามต่อ context → `QueryEngine.query` เดิม → รวมด้วย template + คำนวณใน code, flag ต่อ workspace ที่ `/api/v1/query`; eval ข้ามโดเมน 0/10 → 8–9/10 — archive/RESULT_P7_PHASE5.md |
-| **Plan 1B-C** | ⬜ DEFERRED | 0% | 0 | ทำตอน Plan 6 |
+| **Plan 1B-C** | 🟡 SURVEY | 0% implementation | SDK probe | รวม Plan 7 Phase 6; สำรวจแล้ว รอเจ้าของระบุ MCP client/ขอบเขตข้อมูล — archive/RESULT_P7_PHASE6.md; ยังไม่ปิด |
 
 **Current verification note:** `pytest -q` on this workspace = `997 passed, 3 skipped` (2026-09-19, `main` หลัง Plan 7 Phase 5; ก่อน Plan 7 = 635).
 
@@ -193,8 +193,8 @@ ConfigSessionLocal = sessionmaker(bind=config_engine)
 **Effort:** 2-4 สัปดาห์
 
 #### PLAN-REMAIN-8: Plan 1B Phase C — MCP SSE + Auth
-**Status:** Deferred (ทำตอน Plan 6)
-**Detail:** เปลี่ยน MCP transport จาก stdio → SSE + API key auth
+**Status:** Survey + proposal (Plan 7 Phase 6); รอเจ้าของระบุผู้ใช้/client และขอบเขตข้อมูล
+**Detail:** External facade + API key auth ผ่าน query pipeline เดิม; transport ตาม client. Internal MCP คง stdio; ยังไม่ปิด — `archive/RESULT_P7_PHASE6.md`
 
 ---
 
@@ -209,7 +209,7 @@ ConfigSessionLocal = sessionmaker(bind=config_engine)
 | 5 | PLAN-REMAIN-5: Scheduled Jobs | 4-6 ชม. | REMAIN-1 |
 | 6 | PLAN-REMAIN-6: DB Config Separation | 4-6 ชม. | — |
 | 7 | PLAN-REMAIN-7: Plan 6 SaaS | 2-4 สัปดาห์ | REMAIN-6 |
-| 8 | PLAN-REMAIN-8: MCP SSE + Auth | 1-2 วัน | REMAIN-7 |
+| 8 | PLAN-REMAIN-8: External MCP + Auth | 1-2 วัน | Plan 7 Phase 6 / owner client decision |
 
 **Total remaining effort: ~20-25 ชม. สำหรับ Items 1-6**
 
@@ -229,7 +229,7 @@ ConfigSessionLocal = sessionmaker(bind=config_engine)
 | 6 | Plan 4: Telegram Interface | 3-5 วัน | 🟡 70% |
 | 7 | Plan 5: DB Separation | 2-3 วัน | 🟡 40% |
 | 8 | Plan 6: SaaS Architecture | 2-4 สัปดาห์ | ⬜ DESIGN |
-| 8.5 | Plan 1B Phase C: MCP SSE + Auth | 1-2 วัน | ⬜ DEFERRED |
+| 8.5 | Plan 1B Phase C: External MCP + Auth | 1-2 วัน | 🟡 สำรวจแล้ว รอ client (P7-6) |
 
 ---
 
@@ -239,7 +239,7 @@ ConfigSessionLocal = sessionmaker(bind=config_engine)
 |------|---------|
 | `archive/PLAN_0_FIX_LEGACY_TESTS.md` | ✅ Done |
 | `archive/PLAN_1_ADMIN_AGENT.md` | ✅ Done |
-| `archive/PLAN_1B_MCP_CONSOLIDATION.md` | 🟡 Phase A partial, Phase B done, Phase C deferred |
+| `archive/PLAN_1B_MCP_CONSOLIDATION.md` | 🟡 Phase A partial, Phase B done, Phase C survey under P7-6 |
 | `archive/PLAN_2_FEEDBACK_QUERYLOG.md` | ✅ Done |
 | `archive/PLAN_3_SELF_LEARNING.md` | 🟡 Dedup+Analyzer done, Audit+Scheduler pending |
 | `archive/PLAN_4_TELEGRAM.md` | 🟡 Files done, registration pending |

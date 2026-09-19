@@ -337,12 +337,12 @@ Design เสร็จ (PLAN_6_SAAS.md) แต่ยังไม่เริ่�
 **Plan:** 1B | **Priority:** 📋 Future | **Effort:** 1-2 วัน
 
 ### สถานะ
-Deferred (ทำตอน Plan 6 SaaS)
+🟡 รวมใน Plan 7 Phase 6 — สำรวจ + แผนย่อยแล้ว (2026-09-19), **รอเจ้าของระบุผู้ใช้/client และขอบเขตข้อมูล**; ยังไม่ implement / ยังไม่ปิด
 
 ### เนื้อหา
-- เปลี่ยน MCP transport จาก stdio → SSE (Server-Sent Events)
-- เพิ่ม API key auth สำหรับ MCP connections
-- รองรับ remote MCP clients
+- External facade แยกจาก MCP ภายใน (ห้ามเปิด raw SQL/sample/admin tools ตรง)
+- API key auth/usage เดิม + workspace/allowlist/scope/audit; transport ตาม client (เสนอ Streamable HTTP, ไม่เปลี่ยน internal stdio)
+- ต้องต่อ client จริงอย่างน้อยหนึ่งตัวและผ่าน exit ก่อนปิด — ดู [`archive/RESULT_P7_PHASE6.md`](archive/RESULT_P7_PHASE6.md)
 
 ---
 
