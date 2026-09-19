@@ -13,6 +13,7 @@ class AnalyzeQueryLogsTool(AdminTool):
     description = "Analyze recent query logs: error rates, common failures, context distribution. Optionally filter by date range or context."
     description_th = "วิเคราะห์ query logs: อัตรา error, ปัญหาที่พบบ่อย, การกระจายตาม context"
     category = "analysis"
+    database = "app"  # chat_history, user_feedback
     requires_confirmation = False
 
     @property
@@ -92,6 +93,7 @@ class ReviewFeedbackTool(AdminTool):
     description = "Review recent user feedback (thumbs down, categories). Shows questions, SQL, and feedback details."
     description_th = "ดู feedback จากผู้ใช้ (thumbs down, หมวดหมู่) พร้อมรายละเอียด"
     category = "analysis"
+    database = "app"  # chat_history, user_feedback
     requires_confirmation = False
 
     @property

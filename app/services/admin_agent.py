@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
+from app.tools.admin.base import tool_session
 from app.tools.admin.registry import admin_tool_registry
 from app.core.time_utils import utcnow
 
@@ -135,7 +136,7 @@ class AdminAgent:
                         )
                         break
                     else:
-                        result = await tool.execute(tool_args, self.db)
+                        result = await self._run_tool(tool, tool_args)
                         tool_calls_made.append({
                             "tool_name": tool_name,
                             "tool_args": tool_args,
@@ -156,7 +157,7 @@ class AdminAgent:
                     tool = admin_tool_registry.get(tool_name)
                     if tool:
                         logger.info(f"Admin Agent: keyword fallback → {tool_name}({tool_args})")
-                        result = await tool.execute(tool_args, self.db)
+                        result = await self._run_tool(tool, tool_args)
                         tool_calls_made.append({
                             "tool_name": tool_name,
                             "tool_args": tool_args,
@@ -222,6 +223,11 @@ class AdminAgent:
         (r"cache|แคช|refresh|รีเฟรช", "refresh_cache", {}),
     ]
 
+    async def _run_tool(self, tool, tool_args: Dict[str, Any]) -> Dict[str, Any]:
+        """self.db is the app DB (conversations, messages) — a tool runs on the DB its own tables live in."""
+        with tool_session(tool) as tool_db:
+            return await tool.execute(tool_args, tool_db)
+
     def _keyword_fallback(self, message: str) -> Optional[tuple]:
         """Match user message to a tool using keyword patterns.
 
@@ -272,7 +278,7 @@ class AdminAgent:
             }
 
         # Execute
-        result = await tool.execute(tool_args, self.db)
+        result = await self._run_tool(tool, tool_args)
 
         # Save result
         await self._save_message(

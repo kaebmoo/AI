@@ -72,9 +72,13 @@ def agent_session(agent_db):
     """Create SQLAlchemy session from temp DB."""
     from sqlalchemy import create_engine
     from sqlalchemy.orm import Session as SASession
+    from sqlalchemy.orm import sessionmaker
     engine = create_engine(f"sqlite:///{agent_db}")
     session = SASession(engine)
-    yield session
+    # the agent opens a session per tool (tool_session) — keep those on the temp DB too
+    factory = sessionmaker(bind=engine)
+    with patch("app.db.session.ConfigSessionLocal", factory), patch("app.db.session.SessionLocal", factory):
+        yield session
     session.close()
 
 

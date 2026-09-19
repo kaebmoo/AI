@@ -6,6 +6,7 @@ endpoint, providing a structured interface for LLM function calling.
 """
 
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
 
 
@@ -17,6 +18,9 @@ class AdminTool(ABC):
     description: str = ""  # English description for LLM
     description_th: str = ""  # Thai description for UI display
     category: str = ""  # grouping: mapping, rule, example, onboarding, analysis, system
+
+    # Which DB the tool's tables live in: "config" (mappings, rules, examples) or "app" (chat history, feedback)
+    database: str = "config"
 
     # Safety
     requires_confirmation: bool = False  # If True, agent asks user to confirm before executing
@@ -37,7 +41,7 @@ class AdminTool(ABC):
 
         Args:
             params: Validated parameters matching parameters_schema.
-            db: SQLAlchemy session.
+            db: SQLAlchemy session on the tool's `database` — callers get one from tool_session().
 
         Returns:
             Dict with at least:
@@ -57,3 +61,26 @@ class AdminTool(ABC):
                 "parameters": self.parameters_schema,
             }
         }
+
+
+@contextmanager
+def tool_session(tool: AdminTool):
+    """A session on the DB the tool's tables live in. The caller's own session is not it:
+    the Admin Agent holds an app-DB session, config tables live in the config DB."""
+    from app.db import session as db_session
+    db = (db_session.SessionLocal if tool.database == "app" else db_session.ConfigSessionLocal)()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+def audit_change(**kwargs) -> None:
+    """config_audit_log lives in the app DB; a config tool's own session is the config DB."""
+    from app.db import session as db_session
+    from app.services.audit_service import AuditService
+    db = db_session.SessionLocal()
+    try:
+        AuditService(db).log_change(**kwargs)
+    finally:
+        db.close()

@@ -31,33 +31,29 @@ mcp = FastMCP(
 
 # ── DB Session Helper ─────────────────────────────────────
 
-_db_session = None
+_db_sessions: Dict[str, Any] = {}
 
 
-def _get_db():
-    """Get a SQLAlchemy session for admin operations (config DB).
+def _get_db(database: str = "config"):
+    """Get a SQLAlchemy session on the DB a tool's tables live in (AdminTool.database).
 
-    Admin tools query config tables (schema_contexts, mappings, rules, etc.)
-    which live in config.db, NOT app.db or business DB.
+    Most admin tools query config tables (mappings, rules, examples) in config.db;
+    the analysis tools read chat_history / user_feedback in app.db.
     """
-    global _db_session
-    if _db_session is None:
+    if database not in _db_sessions:
         from sqlalchemy import create_engine
         from sqlalchemy.orm import Session
 
-        # Priority: CONFIG_DB_URL > DATABASE_URL > hardcoded fallback
-        db_url = os.environ.get("CONFIG_DB_URL", "")
-        if not db_url:
-            db_url = os.environ.get("DATABASE_URL", "")
+        # Priority: env var > project-root file
+        env_vars = ["DATABASE_URL"] if database == "app" else ["CONFIG_DB_URL", "DATABASE_URL"]
+        db_url = next((os.environ[v] for v in env_vars if os.environ.get(v)), "")
         if not db_url:
             project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            db_file = os.path.join(project_root, "config.db")
-            db_url = f"sqlite:///{db_file}"
+            db_url = f"sqlite:///{os.path.join(project_root, database + '.db')}"
 
-        engine = create_engine(db_url)
-        _db_session = Session(engine)
+        _db_sessions[database] = Session(create_engine(db_url))
 
-    return _db_session
+    return _db_sessions[database]
 
 
 # ── MCP Tool Wrappers ─────────────────────────────────────
@@ -181,7 +177,7 @@ async def analyze_query_logs(days: int = 7, context_name: str = "", errors_only:
     params = {"days": days, "errors_only": errors_only}
     if context_name:
         params["context_name"] = context_name
-    result = await tool.execute(params, _get_db())
+    result = await tool.execute(params, _get_db(tool.database))
     return json.dumps(result, ensure_ascii=False, default=str)
 
 
@@ -190,7 +186,7 @@ async def review_feedback(days: int = 7, thumbs_down_only: bool = True, limit: i
     """ดู feedback จากผู้ใช้ พร้อมรายละเอียด"""
     from app.tools.admin.analysis_tools import ReviewFeedbackTool
     tool = ReviewFeedbackTool()
-    result = await tool.execute({"days": days, "thumbs_down_only": thumbs_down_only, "limit": limit}, _get_db())
+    result = await tool.execute({"days": days, "thumbs_down_only": thumbs_down_only, "limit": limit}, _get_db(tool.database))
     return json.dumps(result, ensure_ascii=False, default=str)
 
 

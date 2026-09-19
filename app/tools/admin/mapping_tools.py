@@ -198,8 +198,8 @@ class AddMappingTool(AdminTool):
 
         # Audit log
         try:
-            from app.services.audit_service import AuditService
-            AuditService(db).log_change(
+            from app.tools.admin.base import audit_change
+            audit_change(
                 action="INSERT", table_name="schema_semantic_mapping",
                 record_id=mapping.id,
                 new_value={"keyword": params["keyword"], "target_column": params["target_column"], "target_value": target_value},

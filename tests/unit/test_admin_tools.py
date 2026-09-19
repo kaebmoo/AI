@@ -116,6 +116,22 @@ def admin_tools_db(tmp_path):
     return db_path
 
 
+@pytest.fixture(autouse=True)
+def app_db(tmp_path):
+    """App DB for the add tools' audit (DDL of migration 028) — never the real app.db."""
+    from pathlib import Path
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    path = str(tmp_path / "test_app.sqlite")
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        (Path(__file__).resolve().parents[2] / "database/migrations/028_audit_log.sql").read_text(encoding="utf-8"))
+    conn.close()
+    with patch("app.db.session.SessionLocal", sessionmaker(bind=create_engine(f"sqlite:///{path}"))):
+        yield path
+
+
 @pytest.fixture
 def mock_db_session(admin_tools_db):
     """Create a mock SQLAlchemy-like session backed by the test DB."""
@@ -364,3 +380,47 @@ class TestSearchHierarchy:
         assert (await tool.execute({"keyword": "datacom", "context_name": "secret"}, db=None))["data"] == []
         assert (await tool.execute({"keyword": "datacom", "context_name": "revenue", "level_name": "ฝ่าย"}, db=None))["data"] == []
         assert (await tool.execute({"keyword": "datacom", "context_name": "revenue"}, db=None))["total"] == 1
+
+
+class TestToolsRunOnTheirOwnDatabase:
+    """Two separate DB files, as in production: the Admin Agent holds an app-DB session,
+    the config tools' tables are in the config DB, the audit table is in the app DB."""
+
+    @pytest.fixture
+    def config_db(self, admin_tools_db):
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        with patch("app.db.session.ConfigSessionLocal", sessionmaker(bind=create_engine(f"sqlite:///{admin_tools_db}"))):
+            yield admin_tools_db
+
+    async def test_agent_adds_on_config_db_and_audits_on_app_db(self, config_db, app_db):
+        from app.db import session as db_session
+        from app.services.admin_agent import AdminAgent
+        from app.tools.admin.mapping_tools import AddMappingTool
+
+        agent_db = db_session.SessionLocal()  # app DB: has no schema_semantic_mapping
+        try:
+            result = await AdminAgent(agent_db)._run_tool(AddMappingTool(), {
+                "keyword": "บรอดแบนด์", "target_column": "SERVICE_GROUP", "target_value": "Broadband"})
+        finally:
+            agent_db.close()
+        assert result["success"], result["message"]
+
+        config = sqlite3.connect(config_db)
+        assert config.execute("SELECT id FROM schema_semantic_mapping WHERE keyword = 'บรอดแบนด์'").fetchone() == (
+            result["data"]["id"],)
+        config.close()
+        app = sqlite3.connect(app_db)
+        assert app.execute("SELECT action, table_name, record_id, source FROM config_audit_log").fetchall() == [
+            ("create", "schema_semantic_mapping", result["data"]["id"], "admin_agent")]
+        app.close()
+
+    def test_each_tool_declares_a_known_database(self, config_db, app_db):
+        from app.tools.admin.base import tool_session
+        registry = AdminToolRegistry()
+        registry.discover()
+        for tool in registry.tools.values():
+            assert tool.database in ("config", "app"), tool.name
+            with tool_session(tool) as db:
+                expected = app_db if tool.category == "analysis" else config_db
+                assert db.get_bind().url.database == expected, tool.name

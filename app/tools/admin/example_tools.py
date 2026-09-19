@@ -133,8 +133,8 @@ class AddExampleTool(AdminTool):
 
         # Audit log
         try:
-            from app.services.audit_service import AuditService
-            AuditService(db).log_change(
+            from app.tools.admin.base import audit_change
+            audit_change(
                 action="INSERT", table_name="golden_examples",
                 record_id=example.id,
                 new_value={"question": params["question"], "sql": params["sql"][:200]},

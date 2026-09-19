@@ -181,8 +181,8 @@ class AddRuleTool(AdminTool):
 
         # Audit log
         try:
-            from app.services.audit_service import AuditService
-            AuditService(db).log_change(
+            from app.tools.admin.base import audit_change
+            audit_change(
                 action="INSERT", table_name="schema_business_rules",
                 record_id=rule.id,
                 new_value={"rule_code": params["rule_code"], "description": params["description"][:200]},
