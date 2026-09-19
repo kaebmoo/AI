@@ -50,9 +50,16 @@ def register_context(conn, domain: str, contract: dict) -> str:
     context_name = f"feed_{domain}"
     main_view = f"feed_{domain}_{main_view_dataset(contract)}"
     rules_text = "\n".join(f"- {r['text']}" for r in contract.get("business_rules", []))
+    period_key = contract.get("period_key", "year_month")
+    period_line = f"งวด ({period_key}) เป็น ค.ศ. รูปแบบ YYYYMM"
+    if not any(c["name"] == "year" for d in contract["datasets"] for c in d["columns"]):
+        # the generic prompt talks in year + month; say how that maps onto the only period column
+        period_line += (f" — ไม่มีคอลัมน์ year / month: กรองเวลาด้วย {period_key} = ปี ค.ศ. × 100 + เดือน เท่านั้น "
+                        f"(ปี พ.ศ. ต้องลบ 543 ก่อน: มกราคม พ.ศ. 2568 = ค.ศ. 2025 → {period_key} = 202501, "
+                        f"ทั้งปี ค.ศ. 2025 → {period_key} BETWEEN 202501 AND 202512)")
     instruction = (
         f"ข้อมูลจาก DataFeed (schema {contract['schema_version']}) — {contract.get('units', '')}\n"
-        f"งวด ({contract.get('period_key', 'year_month')}) เป็น ค.ศ. รูปแบบ YYYYMM\n"
+        f"{period_line}\n"
         f"กฎสำคัญ:\n{rules_text}"
     )
     params = {"name": context_name, "main_view": main_view, "desc": contract.get("title", ""),

@@ -98,6 +98,19 @@ class TestSyncKnowledge:
         assert "กฎใหม่" in instr and "กฎหนึ่ง" not in instr
         assert "datafeed_x_rule_r2" in docs and "datafeed_x_rule_r1" not in docs
 
+    def test_instruction_says_how_to_filter_time_without_year_month_columns(self, config_engine):
+        """sales/ebt/expense have only the YYYYMM period column — without this line the model
+        writes `year = 2025 AND month = 1` first and burns a retry on every question."""
+        _sync(config_engine)
+        with config_engine.connect() as conn:
+            instr = conn.execute(text("SELECT instruction_th FROM schema_contexts")).scalar_one()
+        assert "ไม่มีคอลัมน์ year" in instr and "year_month = 202501" in instr
+        with_year = {**CONTRACT, "datasets": [{**CONTRACT["datasets"][0], "columns": CONTRACT["datasets"][0]["columns"]
+                                               + [{"name": "year", "dtype": "Int64"}, {"name": "month", "dtype": "Int64"}]}]}
+        _sync(config_engine, with_year)  # revenue: year/month exist — nothing to warn about
+        with config_engine.connect() as conn:
+            assert "ไม่มีคอลัมน์ year" not in conn.execute(text("SELECT instruction_th FROM schema_contexts")).scalar_one()
+
     def test_main_view_prefers_control_totals_source(self):
         assert dk.main_view_dataset({**CONTRACT, "control_totals": {"source": "fact_other"}}) == "fact_other"
         assert dk.main_view_dataset(CONTRACT) == "fact_bu_monthly"
