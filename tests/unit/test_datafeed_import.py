@@ -298,3 +298,31 @@ class TestControlTotalsFilterAndTotalOnly:
         q = {sql.split()[1]: question for question, sql in build_examples(controls, "e", {**self.EBT, "control_totals": spec})}
         assert "สะสม" in q["ebt"] and "สะสม" not in q["ebt_month"] and "ของเดือนกรกฎาคม 2569" in q["ebt_month"]
         assert "สะสม" in q["other_ytd"] and q["other_ytd"].startswith("ยอดอื่น")  # unknown measure: note + agg
+
+
+def test_golden_of_a_grouped_source_with_several_measures_asks_each_one():
+    """ebt 1.4.0: control totals per division (bg_key) with six measures — YTD and monthly of three
+    figures. Asking only the first of each kind (the revenue shape) left expense/ebt and every
+    per-division figure unmeasured."""
+    import pandas as pd
+    from scripts.datafeed.gen_golden_from_controls import build_examples
+
+    contract = {"domain": "ebt", "title": "EBT feed", "control_totals": {
+        "source": "fact_div", "grand_total": {"source": "fact_total"}, "period_key": "time_key", "bg_key": "division",
+        "group_keys": ["division", "time_key"],
+        "measures": [{"name": "ebt", "agg": "point_in_time"}, {"name": "ebt_month", "agg": "sum"},
+                     {"name": "expense_month", "agg": "sum"}]},
+        "datasets": [{"name": "fact_div", "keys": ["division", "time_key"], "columns": []}]}
+    rows = [(d, t, m, 1.0) for t in (202606, 202607) for m in ("ebt", "ebt_month", "expense_month")
+            for d in ("สายงาน 1", "สายงาน 2", "__ALL__")]
+    controls = pd.DataFrame(rows, columns=["division", "time_key", "measure", "value"])
+    examples = dict(build_examples(controls, "ebt", contract))
+    sqls = set(examples.values())
+    for m in ("ebt", "ebt_month", "expense_month"):  # every measure: both periods in total, the latest per division
+        assert {f"SELECT {m} FROM feed_ebt_fact_total WHERE time_key = {t}" for t in (202606, 202607)} <= sqls
+        assert f"SELECT {m} FROM feed_ebt_fact_div WHERE division = 'สายงาน 1' AND time_key = 202607" in sqls
+    assert len(examples) == 3 * 2 + 3 * 2
+    by_sql = {sql: q for q, sql in examples.items()}
+    assert "สะสม" in by_sql["SELECT ebt FROM feed_ebt_fact_div WHERE division = 'สายงาน 2' AND time_key = 202607"]
+    assert "ของเดือนกรกฎาคม 2569" in by_sql["SELECT ebt_month FROM feed_ebt_fact_total WHERE time_key = 202607"]
+    assert all("สายงาน สายงาน" in q for q, sql in examples.items() if "fact_div" in sql)  # group noun + label

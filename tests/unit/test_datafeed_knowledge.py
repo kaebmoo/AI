@@ -115,16 +115,22 @@ class TestSyncKnowledge:
         assert dk.main_view_dataset({**CONTRACT, "control_totals": {"source": "fact_other"}}) == "fact_other"
         assert dk.main_view_dataset(CONTRACT) == "fact_bu_monthly"
 
-    def test_dimensionless_main_view_points_at_the_detail_fact(self, config_engine):
-        """ebt: the main view is fact_ebt_total_monthly (one row per period). 'EBT of division X'
-        answered the all-division total until the instruction named the detail fact."""
-        _sync(config_engine, {**CONTRACT, "control_totals": {"source": "fact_total"}})
+    def test_instruction_lists_every_table_of_the_contract(self, config_engine):
+        """The prompt describes the main view only. Questions the main view can't answer (ebt per cost
+        center, revenue/sales full-year targets) need the other tables: their full names make them
+        usable (hybrid_flow.table_rule), their columns let Pass 1 name a filter on them."""
+        two = {**CONTRACT, "control_totals": {"source": "fact_bu_monthly", "bg_key": "bu"}, "datasets": CONTRACT["datasets"] + [{
+            "name": "fact_target", "kind": "fact", "grain": "bu x month (plan)", "keys": ["year_month"],
+            "columns": [{"name": "year_month", "dtype": "Int64"}, {"name": "revenue_target", "dtype": "double"}]}]}
+        _sync(config_engine, two)
         with config_engine.connect() as conn:
             instr = conn.execute(text("SELECT instruction_th FROM schema_contexts")).scalar_one()
-        assert "feed_x_fact_total" in instr and "ไม่มีมิติ" in instr
-        assert "feed_x_fact_bu_monthly (คอลัมน์: year_month, bu, revenue)" in instr
-        assert dk.detail_table_line("x", {**CONTRACT, "control_totals": {"source": "fact_total", "bg_key": "bu"}}) == ""
-        assert dk.detail_table_line("x", CONTRACT) == ""
+        assert "feed_x_fact_bu_monthly (ตารางหลัก" in instr
+        assert "feed_x_fact_target" in instr and "bu x month (plan)" in instr and "year_month, revenue_target" in instr
+        assert instr.index("feed_x_fact_target") < instr.index("กฎสำคัญ")
+
+    def test_single_table_contract_gets_no_table_list(self):
+        assert dk.tables_section("x", CONTRACT) == ""
 
 
 def _contract_file(tmp_path, contract=CONTRACT):

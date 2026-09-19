@@ -39,6 +39,7 @@ QUESTION_WORDS = {
     "revenue": ("รายได้", "กลุ่มธุรกิจ"),
     "expense": ("ค่าใช้จ่าย", "กลุ่ม"),
     "sales": ("ยอดขาย", "กลุ่มธุรกิจ"),
+    "ebt": ("EBT", "สายงาน"),
 }
 # Total-only sources ask once per measure: measure name → (what the question calls it, is it YTD).
 # Default only — an unknown measure is asked by its contract note, YTD when agg is point_in_time.
@@ -53,11 +54,12 @@ MEASURE_WORDS = {
 }
 
 
-def total_question(measure: dict, year_month: int) -> str:
+def total_question(measure: dict, year_month: int, of: str = "") -> str:
+    """One measure, worded as monthly or YTD; `of` = ' ของสายงาน X' for one group's figure."""
     default = ((measure.get("note") or measure["name"]).split(",")[0], measure.get("agg") == "point_in_time")
     noun, ytd = MEASURE_WORDS.get(measure["name"], default)
     when = f"สะสมตั้งแต่ต้นปีถึงเดือน{thai_period(year_month)}" if ytd else f"ของเดือน{thai_period(year_month)}"
-    return f"{noun} {when} เท่าไร"
+    return f"{noun}{of} {when} เท่าไร"
 
 
 def thai_period(year_month: int) -> str:
@@ -116,6 +118,15 @@ def build_examples(controls: pd.DataFrame, domain: str, contract: dict) -> list:
     periods = pick_periods(controls[period_key].tolist())
     if not bg_key:  # total-only source: every measure, per period (one row per period — never summed)
         return [(total_question(m, ym), total_sql(m["name"], ym)) for ym in periods for m in measures]
+    kinds = [m.get("agg", "sum") for m in measures]
+    if len(kinds) != len(set(kinds)):
+        # several measures of one kind (ebt: YTD + monthly of three figures): the revenue shape below
+        # asks the first of each kind only. Every measure: the total per period, each group at the latest.
+        latest = periods[-1]
+        groups = sorted(set(controls[(controls[period_key] == latest) & (controls[bg_key] != "__ALL__")][bg_key]))
+        return ([(total_question(m, ym), total_sql(m["name"], ym)) for ym in periods for m in measures]
+                + [(total_question(m, latest, f" ของ{group_noun} {bg}"), group_sql(m["name"], bg, latest))
+                   for m in measures for bg in groups[:2]])
     rows = controls[(controls["measure"] == monthly) & (controls[bg_key] != "__ALL__")] if monthly else controls[:0]
 
     for ym in periods if monthly else []:

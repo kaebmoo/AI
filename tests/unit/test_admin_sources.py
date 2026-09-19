@@ -30,9 +30,10 @@ def _write_bundle(path, complete=True, **kwargs):
 
     path.mkdir(parents=True, exist_ok=True)
     dist = _write_importer_bundle(path, **kwargs)
-    if complete:
-        (path / "contracts" / "rev.yaml").write_text(yaml.safe_dump(
-            {**CONTRACT, "primary_dataset": "fact_bu", "title": "Rev feed", "period_key": "year_month"}, allow_unicode=True))
+    contract = {**CONTRACT, "primary_dataset": "fact_bu", "title": "Rev feed", "period_key": "year_month"}
+    if not complete:
+        del contract["schema_version"]  # knowledge generation needs it
+    (path / "contracts" / "rev.yaml").write_text(yaml.safe_dump(contract, allow_unicode=True))
     return dist
 
 
@@ -114,11 +115,11 @@ def test_symlink_out_of_the_root_does_not_pass(tmp_path):
 
 
 def test_malformed_contract_is_400_not_500_and_writes_nothing(tmp_path):
-    dist = _write_bundle(tmp_path, complete=False)  # no primary_dataset
+    dist = _write_bundle(tmp_path, complete=False)  # no schema_version
     engine = _config(tmp_path / "config.db")
     with patch.object(api.settings, "DATA_SOURCE_ALLOWED_ROOTS", str(tmp_path)), pytest.raises(HTTPException) as exc:
         _post(engine, domain="rev", source_dir=str(dist))
-    assert exc.value.status_code == 400 and "primary_dataset" in exc.value.detail
+    assert exc.value.status_code == 400 and "schema_version" in exc.value.detail
     assert _registry(engine)[1] == [] and [r[0] for r in _registry(engine)[0]] == ["legacy"]
 
 
