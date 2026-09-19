@@ -97,7 +97,9 @@ async def simple_query(
         from app.services.query_engine import QueryEngine
 
         # Plan 7 Phase 4a: what this caller's API key may reach (None = session user / unrestricted key)
-        allowed = allowed_contexts(getattr(http_request.state, "api_key", None))
+        api_key = getattr(http_request.state, "api_key", None)
+        allowed = allowed_contexts(api_key)
+        audit_as = {"api_key_id": getattr(api_key, "id", None), "channel": request_body.source or "api"}
 
         # Get MCP client from app state (same as chat endpoint)
         mcp_client = getattr(http_request.app.state, "mcp_client", None)
@@ -109,6 +111,7 @@ async def simple_query(
                 user_id=current_user.id,
                 scope=request_body.scope,
                 allowed_contexts=allowed,
+                **audit_as,
             )
         else:
             from app.services.mcp_client import MCPClientService
@@ -121,6 +124,7 @@ async def simple_query(
                     user_id=current_user.id,
                     scope=request_body.scope,
                     allowed_contexts=allowed,
+                    **audit_as,
                 )
 
         # QueryEngineResult has .query_result (QueryResult) + .context_name + .execution_time_ms

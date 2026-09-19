@@ -252,6 +252,7 @@ class TelegramDispatcher:
                         question=text,
                         context=selected_context,
                         history=context.user_data.get("history", []),
+                        user_id=getattr(user, "id", None), channel="telegram",
                     )
                 else:
                     mcp_client = MCPClientService()
@@ -261,6 +262,7 @@ class TelegramDispatcher:
                             question=text,
                             context=selected_context,
                             history=context.user_data.get("history", []),
+                            user_id=getattr(user, "id", None), channel="telegram",
                         )
             finally:
                 if engine is not None:

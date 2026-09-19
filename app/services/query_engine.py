@@ -28,6 +28,7 @@ from app.services.mcp_client import MCPClientService
 from app.services.admin_config_service import AdminConfigService
 from app.core.llm_policy import FULL, LLMPolicyError, PolicyMCPClient, RequestPolicy, history_without_answers, normalize, request_llm_policy
 from app.services.data_sources import SourceBoundMCPClient, request_pinned, request_scope, source_resolver
+from app.services import query_audit
 from app.services.retention import stores_results
 from app.services.workspaces import canonical_context, check_context, workspace_of_context
 from app.services.schema_service import SchemaService
@@ -235,6 +236,7 @@ class QueryEngineResult:
     source_version: str = ""  # Plan 7: source + verified build the answer was read from
     data_as_of: Optional[Dict[str, Any]] = None  # Plan 7: manifest period/built_at/build_id; None = legacy
     llm_policy: str = FULL  # Phase 4.5: the source's llm_data_policy this answer was produced under
+    cache_hit: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -383,9 +385,13 @@ class QueryEngine:
         user_id: Optional[int] = None,
         scope: Optional[Dict[str, Any]] = None,
         allowed_contexts: Optional[frozenset] = None,
+        api_key_id: Optional[int] = None,
+        channel: Optional[str] = None,
     ) -> QueryEngineResult:
         """
         Main entry point.
+
+        api_key_id / channel (Phase 4.5): who is asking and through what — for the query audit only.
 
         allowed_contexts (Plan 7 Phase 4a): normalised names the caller's API key may use (None =
         unrestricted). A named context outside it raises ContextNotAllowed (403); auto-routing and
@@ -410,9 +416,17 @@ class QueryEngine:
         token = request_scope.set(scope or None)
         pin = request_pinned.set(allowed_contexts is not None)  # restricted key: see data_sources.request_pinned
         llm = request_llm_policy.set(None)  # Phase 4.5: set once the context's source is known (_execute_query)
+        audit = {"user_id": user_id, "api_key_id": api_key_id, "channel": channel, "question": question}
         try:
-            return await self._query(question, provider, context, mode, history, max_retries,
-                                     conversation_id, provider_kwargs, on_status, user_id, scope, allowed_contexts)
+            engine_result = await self._query(question, provider, context, mode, history, max_retries,
+                                              conversation_id, provider_kwargs, on_status, user_id, scope, allowed_contexts)
+            query_audit.record(self.db, engine_result, scope, **audit,
+                               workspace=self._workspace(getattr(engine_result, "context_name", None)))
+            return engine_result
+        except BaseException as exc:  # refusals (scope / allowlist / policy) and failures are audited too
+            query_audit.record(self.db, None, scope, **audit, context_name=context,
+                               workspace=self._workspace(context), error=f"{type(exc).__name__}: {exc}"[:2000])
+            raise
         finally:
             request_llm_policy.reset(llm)
             request_pinned.reset(pin)
@@ -464,7 +478,7 @@ class QueryEngine:
                 trace.total_s = round(time.time() - start_time, 4)
                 emit(trace)
                 # replace() = shallow copy — don't mutate the shared cached object
-                return replace(cached, execution_time_ms=(time.time() - start_time) * 1000)
+                return replace(cached, execution_time_ms=(time.time() - start_time) * 1000, cache_hit=True)
 
         # --- Request dedup: block identical requests within N seconds ---
         dedup_key = _dedup_mark(question + scope_key, selected_provider_name, user_id)
@@ -691,6 +705,14 @@ class QueryEngine:
             logger.info(f"QueryEngine: Cached result (key={qcache_key[:12]}…, rows={len(result.data)})")
 
         return engine_result
+
+    @staticmethod
+    def _workspace(context_name: Optional[str]) -> Optional[str]:
+        """Audit label only — never a reason to fail."""
+        try:
+            return workspace_of_context(context_name) if context_name else None
+        except Exception:
+            return None
 
     def _resolve_context(
         self,

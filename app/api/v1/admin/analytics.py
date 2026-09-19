@@ -255,6 +255,61 @@ def clear_query_cache_endpoint(
     return {"status": "success", "entries_cleared": cleared}
 
 
+@router.get("/query-audit")
+def get_query_audit(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=5000),
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    user_id: Optional[int] = None,
+    api_key_id: Optional[int] = None,
+    workspace: Optional[str] = None,
+    context: Optional[str] = None,
+    has_error: bool = Query(False, description="Only refusals / failures"),
+    q: Optional[str] = Query(None, description="Text in the question or the SQL"),
+    format: str = Query("json", pattern="^(json|csv)$"),
+    _current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_db),
+):
+    """Phase 4.5: who asked what, under which key / workspace / scope, what SQL ran, which columns and how
+    many rows came back — every channel (chat, /api/v1/query, telegram). `format=csv` exports the same filter."""
+    from app.models.query_audit import QueryAudit
+
+    QueryAudit.__table__.create(db.get_bind(), checkfirst=True)  # an app DB nobody has asked anything of yet
+    query = db.query(QueryAudit).order_by(QueryAudit.created_at.desc(), QueryAudit.id.desc())
+    try:
+        if date_from:
+            query = query.filter(QueryAudit.created_at >= datetime.fromisoformat(date_from))
+        if date_to:
+            query = query.filter(QueryAudit.created_at <= datetime.fromisoformat(date_to))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="date_from / date_to ต้องเป็น ISO 8601")  # an audit never guesses the range
+    for column, value in ((QueryAudit.user_id, user_id), (QueryAudit.api_key_id, api_key_id),
+                          (QueryAudit.workspace, workspace), (QueryAudit.context_name, context)):
+        if value is not None:
+            query = query.filter(column == value)
+    if has_error:
+        query = query.filter(QueryAudit.error.isnot(None))
+    if q:
+        query = query.filter(QueryAudit.question.contains(q) | QueryAudit.sql_query.contains(q))
+
+    total = query.count()
+    columns = [c.name for c in QueryAudit.__table__.columns]
+    items = [{c: getattr(row, c) for c in columns} for row in query.offset(skip).limit(limit)]
+    if format == "csv":
+        import csv
+        import io
+
+        from fastapi.responses import Response
+        buffer = io.StringIO()
+        writer = csv.DictWriter(buffer, fieldnames=columns)
+        writer.writeheader()
+        writer.writerows(items)
+        return Response("\ufeff" + buffer.getvalue(), media_type="text/csv; charset=utf-8",  # BOM: Excel + Thai
+                        headers={"Content-Disposition": "attachment; filename=query_audit.csv"})
+    return {"total": total, "skip": skip, "limit": limit, "items": items}
+
+
 @router.get("/query-logs")
 def get_query_logs(
     skip: int = Query(0, ge=0),
