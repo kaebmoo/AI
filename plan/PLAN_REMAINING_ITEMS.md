@@ -387,7 +387,12 @@ Deferred (ทำตอน Plan 6 SaaS)
     SQLite เท่ากันทุก byte; DuckDB เท่ากันที่ชุดคอลัมน์ + จำนวน (code เดิมเองให้ค่าต่างกันทุกครั้งที่เรียก: `DISTINCT … LIMIT` ไม่มี ORDER BY)
   - latency value lookup: expense #6 2.72 → **0.61 s**, #17 1.37 → **0.31 s**, #34 1.41 → **0.33 s**, #36 1.42 → **0.32 s**; ทุก golden รวม 13.1 → 7.8 s
   - แย่ลงได้กรณีเดียว: keyword ที่ตรงทุกคอลัมน์ (+1 scan) — เช่น `%`/`_`; คำจริงที่ตก fallback ส่วนใหญ่ไม่ตรงเลย
-- ⬜ ข้อ 2 (rebuild index จริง, ไม่ index คอลัมน์ตัวเลข) — ยังไม่ทำ
+- ✅ **ข้อ 2 เสร็จ 2026-09-19** (`2243fbe`) — ไม่ index ค่าที่ไม่ใช่ข้อความ (ดูจากค่า ไม่ใช่ type ที่ประกาศ — view ของ SQLite มักไม่มี type) + ไม่เก็บตัวเลขล้วนที่ถูกตัดออกมาจากค่ายาว (`700` ของ `MY 5G 700 MHZ`); ค่าที่เป็นรหัสทั้งค่า (`gl_code`, `'007'`) ยังค้นได้
+  - บนสำเนา: keyword ตัวเลขล้วน 1,062 → 700 (เหลือแต่รหัสทั้งค่า: feed_expense `gl_code` 640, revenue `SUB_ITEM` 29, pl `report_date` 26, `gl_prefix` 5) — ไม่มี golden ข้อไหนได้ keyword ตัวเลข ("10 อันดับ" ไม่ match แล้ว)
+  - block "Actual Values Found" เปลี่ยน 33/42 ข้อ: expense เลิกได้ขยะ `ค่า` (8 ข้อ) ได้ `บัญชี`/`ตบชง.` แทน, feed_revenue ได้ BU ตรงชื่อ (9 ข้อ); noise ใหม่: `ด้วย` (transfer price 1 ข้อ), `ค่า` ของ feed_expense (12 ข้อ)
+  - eval เต็ม (matcha gpt-4.1, วันเดียวกัน): ก่อน `eval_20260919_0712` **30/63** → หลัง `eval_20260919_0722` **31/63** (ต่าง #35 mismatch → exact; feed_revenue 14/14, feed_expense 12/12 ทั้งสองรอบ; golden_broken 12 เท่าเดิม); value lookup ของ golden ทั้งชุด 2.12 → 1.88 s
+  - **rebuild ของจริงแล้ว** (backup ใน scratchpad ของ session): 5,390 → 21,538 แถว — revenue 1,679→6,133, expense 2,155→3,403, transfer price 285→3,421, pl_costtype 1,271→1,399, feed_revenue 0→15, feed_expense 0→1,620, feed_sales 0→5,547; `feed_sales` eval หลัง rebuild 12/12 (`eval_20260919_0725`)
+  - เหลือ (ไม่ทำ): noise คำไทยสั้น (`ค่า`, `ด้วย`) มาจากการตัดคำด้วยช่องว่าง — ถ้าจะแก้ ให้เพิ่ม stop words ฝั่ง index (ตอนนี้กรองแค่ฝั่งคำถาม `THAI_STOP_WORDS`)
 
 ---
 

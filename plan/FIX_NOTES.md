@@ -203,6 +203,12 @@
 - `register_context` ตั้ง `is_active=1` ทุกครั้งที่ sync — context ที่ admin ปิดไว้ไม่ถูก re-sync เอง (resolver ข้าม context ที่ปิด) แต่ `register_file_source` จะเปิดคืน → ลงทะเบียน ebt ใหม่ต้องปิดเองอีกครั้งถ้ายังไม่พร้อม
 - eval 1 ข้อ `execution_failed` detail ว่าง latency 61 s = gateway timeout (ไม่เกี่ยวกับ SQL) — `run_eval` เก็บ `str(e)` ซึ่งว่างสำหรับ timeout
 
+## จาก REMAIN-10 ข้อ 2 — rebuild keyword index (2026-09-19)
+
+- `2243fbe`: ตัดสิน "ตัวเลข" จาก**ค่า** (`isinstance(value, str)`) ไม่ใช่ type ของคอลัมน์ — `unit_price` ของ transfer price เก็บเป็น text จึงยังถูก index ทั้งค่า (211 คำ) แต่ไม่ถูกแตกเป็นคำสั้น
+- config.db จริง rebuild แล้ว → prompt ของ context legacy เปลี่ยน (block "Actual Values Found") — eval ก่อน/หลัง 30/63 → 31/63; ตัวเลขและ noise ที่เหลือใน `PLAN_REMAINING_ITEMS.md` REMAIN-10
+- อ่านตัวเลข eval: 30–31/63 รวม feed 26 ข้อ (26/26) — ส่วน legacy = 4/37 → 5/37 เท่าระดับเดิมของ 2026-09-18 (19/51 รวม feed_revenue 14) ; golden legacy ส่วนใหญ่ mismatch จากรูปผลลัพธ์/alias ไม่เกี่ยวกับงานนี้
+
 ## จาก REMAIN-9 (2026-09-19)
 - 9.4: DDL ที่ train เพิ่มจะมีผลเมื่อ admin กด Sync Brain — ยังไม่ได้วัดผลต่อ eval
 - 9.5: `extract_hierarchy.py` เลิกรับ `--db` (อ่านข้อมูลผ่าน source ของ context, config ผ่าน CONFIG_DB_URL) — ไม่มี caller ที่ส่ง `--db`
