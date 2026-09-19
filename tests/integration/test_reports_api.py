@@ -73,6 +73,19 @@ class TestReportsFlow:
         resp = reports_client.get("/api/v1/reports/")
         assert any(e["id"] == export_id for e in resp.json())
 
+    def test_export_and_download_are_audited(self, reports_client, chat_entry, db_session, test_user):
+        """Data access goes to query_audit — config_audit_log's vocabulary has no export or download."""
+        from app.models.query_audit import QueryAudit
+        export_id = reports_client.post("/api/v1/reports/", json={"chat_history_id": chat_entry.id}).json()["id"]
+        assert reports_client.get(f"/api/v1/reports/{export_id}/download").status_code == 200
+
+        rows = db_session.query(QueryAudit).order_by(QueryAudit.id).all()
+        assert [(r.channel, r.user_id, r.sql_query, r.row_count) for r in rows] == [
+            ("report_export", test_user.id, chat_entry.generated_sql, 0),  # rows leave at download
+            ("report_download", test_user.id, chat_entry.generated_sql, 10),
+        ]
+        assert rows[0].question == chat_entry.question == rows[1].question
+
     def test_other_users_export_forbidden(self, reports_client, chat_entry, db_session, admin_user):
         from app.models.report_export import ReportExport
         other_export = ReportExport(user_id=admin_user.id, question="x", sql_text="SELECT 1", status="done")

@@ -146,7 +146,7 @@ HTTP 429 Too Many Requests
 | PUT | `/api/v1/admin/workspaces/{id}/contexts` | ย้าย context เข้า workspace (context อยู่ได้ workspace เดียว — key ของ workspace เดิมเสียสิทธิ์ทันที) |
 | DELETE | `/api/v1/admin/workspaces/{id}` | ปิด workspace (soft) — key ที่ผูกอยู่ใช้อะไรไม่ได้จนกว่าจะเปิดคืน; ปิด `default` ไม่ได้ |
 | PUT | `/api/v1/admin/workspaces/{id}/retention` | (Phase 4.5) override ของ workspace: `result_retention_days` (null = ค่ากลาง, 0 = ไม่ลบ), `store_result_data` (false = ไม่เก็บแถวผลลัพธ์) |
-| GET | `/api/v1/admin/query-audit` | (Phase 4.5) audit ของทุกคำถาม — filter `api_key_id`, `user_id`, `workspace`, `context`, `date_from/to`, `has_error`, `q`; `format=csv` = export |
+| GET | `/api/v1/admin/query-audit` | (Phase 4.5) audit ของทุกคำถาม — filter `api_key_id`, `user_id`, `workspace`, `context`, `channel` (เช่น `report_download`), `date_from/to`, `has_error`, `q`; `format=csv` = export |
 
 ## Audit ของคำถามที่มาจาก API key (Plan 7 Phase 4.5)
 

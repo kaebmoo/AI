@@ -91,7 +91,8 @@ def test_search_and_csv_export(db):
 
     for i, (ctx, key, err) in enumerate([("feed_sales", 1, None), ("feed_sales", 2, "ScopeError: x"), ("revenue", 1, None)]):
         query_audit.record(db, user_id=i, api_key_id=key, workspace="nt-report" if ctx.startswith("feed") else "default",
-                           context_name=ctx, question=f"คำถาม {i}", sql_query=f"SELECT {i} FROM {ctx}", error=err, row_count=i)
+                           context_name=ctx, question=f"คำถาม {i}", sql_query=f"SELECT {i} FROM {ctx}", error=err, row_count=i,
+                           channel="report_download" if i == 2 else "chat")
 
     def search(**kw):
         params = dict(skip=0, limit=50, date_from=None, date_to=None, user_id=None, api_key_id=None, workspace=None,
@@ -102,6 +103,7 @@ def test_search_and_csv_export(db):
     assert [r["context_name"] for r in search(api_key_id=1)["items"]] == ["revenue", "feed_sales"]  # newest first
     assert search(workspace="nt-report", has_error=True)["items"][0]["error"] == "ScopeError: x"
     assert search(q="FROM revenue")["total"] == 1 and search(q="คำถาม 1")["total"] == 1
+    assert [r["context_name"] for r in search(channel="report_download")["items"]] == ["revenue"]
     assert search(date_from="2999-01-01")["total"] == 0
     with pytest.raises(HTTPException) as exc:
         search(date_from="yesterday")

@@ -156,15 +156,9 @@ def download_export(
     if not os.path.exists(export.file_path):
         raise HTTPException(status_code=410, detail="Export file no longer available")
 
-    try:
-        from app.services.audit_service import AuditService
-        AuditService(db).log_change(
-            action="SELECT", table_name="report_exports", record_id=None,
-            new_value={"export_id": export.id, "event": "downloaded"},
-            source="report_export", user_id=current_user.id,
-        )
-    except Exception:
-        pass
+    from app.services import query_audit
+    query_audit.record(db, user_id=current_user.id, channel="report_download", question=export.question,
+                       sql_query=export.sql_text, row_count=export.row_count)
 
     created = export.created_at.strftime("%Y%m%d") if export.created_at else "report"
     return FileResponse(

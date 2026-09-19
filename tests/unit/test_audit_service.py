@@ -60,10 +60,10 @@ def test_get_recent_filters_by_table(audit_db):
     assert len(audit.get_recent()) == 2
 
 
-@pytest.mark.parametrize("action,source", [("SELECT", "manual"), ("INSERT", "report_export")])
+@pytest.mark.parametrize("action,source", [("SELECT", "manual"), ("INSERT", "not_a_source")])
 def test_unwritable_audit_is_an_error_not_a_silent_loss(audit_db, caplog, action, source):
     with caplog.at_level(logging.ERROR, logger="app.services.audit_service"):
-        AuditService(audit_db).log_change(action=action, table_name="report_exports", source=source)
+        AuditService(audit_db).log_change(action=action, table_name="schema_semantic_mapping", source=source)
     assert [r.levelno for r in caplog.records] == [logging.ERROR]
     assert AuditService(audit_db).get_recent() == []
 

@@ -265,6 +265,7 @@ def get_query_audit(
     api_key_id: Optional[int] = None,
     workspace: Optional[str] = None,
     context: Optional[str] = None,
+    channel: Optional[str] = None,  # chat / telegram / report_export / report_download / an API caller's source
     has_error: bool = Query(False, description="Only refusals / failures"),
     q: Optional[str] = Query(None, description="Text in the question or the SQL"),
     format: str = Query("json", pattern="^(json|csv)$"),
@@ -272,7 +273,7 @@ def get_query_audit(
     db: Session = Depends(deps.get_db),
 ):
     """Phase 4.5: who asked what, under which key / workspace / scope, what SQL ran, which columns and how
-    many rows came back — every channel (chat, /api/v1/query, telegram). `format=csv` exports the same filter."""
+    many rows came back — every channel (chat, /api/v1/query, telegram, xlsx export and download). `format=csv` exports the same filter."""
     from app.models.query_audit import QueryAudit
 
     QueryAudit.__table__.create(db.get_bind(), checkfirst=True)  # an app DB nobody has asked anything of yet
@@ -285,7 +286,8 @@ def get_query_audit(
     except ValueError:
         raise HTTPException(status_code=400, detail="date_from / date_to ต้องเป็น ISO 8601")  # an audit never guesses the range
     for column, value in ((QueryAudit.user_id, user_id), (QueryAudit.api_key_id, api_key_id),
-                          (QueryAudit.workspace, workspace), (QueryAudit.context_name, context)):
+                          (QueryAudit.workspace, workspace), (QueryAudit.context_name, context),
+                          (QueryAudit.channel, channel)):
         if value is not None:
             query = query.filter(column == value)
     if has_error:

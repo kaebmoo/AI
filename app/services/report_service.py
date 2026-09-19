@@ -71,15 +71,12 @@ def create_export(db: Session, user, chat_history_id: int) -> ReportExport:
     db.commit()
     db.refresh(export)
 
-    try:
-        from app.services.audit_service import AuditService
-        AuditService(db).log_change(
-            action="INSERT", table_name="report_exports", record_id=None,
-            new_value={"export_id": export.id, "chat_history_id": chat.id},
-            source="report_export", user_id=user.id,
-        )
-    except Exception:
-        pass
+    # An export is data access, not a config change: query_audit (never raises), not config_audit_log.
+    # The exporter is the user — an admin may export somebody else's question. No rows leave here:
+    # the download's audit row carries the row count.
+    from app.services import query_audit
+    query_audit.record(db, user_id=user.id, channel="report_export", context_name=chat.context_name,
+                       question=chat.question, sql_query=chat.generated_sql)
     return export
 
 
