@@ -93,6 +93,12 @@ def get_hierarchy_cache() -> Dict[str, List[Dict]]:
 
 
 def get_vanna_context_string(service: Any, question: str) -> str:
+    # Phase 4.5: the brain holds golden SQL generated from the source's own control totals
+    # (gen_golden_from_controls: real group codes and labels) next to what people wrote, and retrieval
+    # can't tell them apart — a source that isn't `full` gets no RAG context at all
+    from app.core.llm_policy import restricted
+    if restricted():
+        return ""
     try:
         if not service.vanna:
             return ""

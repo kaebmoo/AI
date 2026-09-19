@@ -67,14 +67,18 @@ def restricted() -> bool:
     return state is not None and state.policy != FULL
 
 
-# ponytail: keyword check, not a parser — a query is "aggregate" when it groups or uses SUM/COUNT/AVG.
-# MIN/MAX return a single real row value, so they don't count. Upgrade: k-anonymity (group size >= k)
-# needs COUNT(*) per group in the executed SQL — with column classification (D5, deferred).
+# ponytail: keyword check, not a parser — a query is "aggregate" when it groups or uses SUM/COUNT/AVG
+# and has no window function and no `*` column list (both hand back detail rows next to the aggregate).
+# MIN/MAX return a single real row value, so they don't count.
+# Known ceiling: GROUP BY on a unique key, or an aggregate that sits only in a subquery, still passes —
+# a source that must not show row-level values needs schema_only. Upgrade: k-anonymity (group size >= k,
+# COUNT(*) per group in the executed SQL) together with column classification (D5, deferred).
 _AGGREGATE_RE = re.compile(r"\bGROUP\s+BY\b|\b(?:SUM|COUNT|AVG)\s*\(", re.IGNORECASE)
+_DETAIL_RE = re.compile(r"\bOVER\s*\(|\bSELECT\s+(?:DISTINCT\s+)?(?:\w+\s*\.\s*)?\*", re.IGNORECASE)
 
 
 def is_aggregate_sql(sql: Optional[str]) -> bool:
-    return bool(sql and _AGGREGATE_RE.search(sql))
+    return bool(sql and _AGGREGATE_RE.search(sql) and not _DETAIL_RE.search(sql))
 
 
 def rows_may_reach_llm(sql: Optional[str]) -> bool:

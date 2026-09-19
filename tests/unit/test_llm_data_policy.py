@@ -150,6 +150,20 @@ class TestSchemaOnlyPipeline:
         assert len(fake_llm.requests) == 1  # no explanation request at all
         assert "2" in str(result.query_result.explanation)  # told without the LLM
 
+    def test_rag_context_is_not_retrieved(self, env, fake_llm):
+        """The brain holds golden SQL generated from the source's control totals (real group codes/labels)."""
+        golden = {"ddl": [], "doc": [f"กลุ่ม {S_DIV2}"], "sql": [f"SELECT SUM(revenue) FROM feed_x_fact WHERE division = '{S_DIV}'"]}
+        vanna = MagicMock()
+        vanna.get_rag_context.return_value = golden
+        config, resolver = env
+        with patch("app.services.ai.service.VannaService", MagicMock(return_value=vanna)):
+            ask(resolver)
+            assert S_DIV in json.dumps(fake_llm.requests[0], ensure_ascii=False)  # full: retrieved, as before
+            fake_llm.requests.clear()
+            set_policy(config, SCHEMA_ONLY)
+            ask(resolver)
+        assert fake_llm.requests and S_DIV not in fake_llm.sent() and S_DIV2 not in fake_llm.sent()
+
     def test_two_pass_sends_no_value_either(self, env, fake_llm):
         config, resolver = env
         set_policy(config, SCHEMA_ONLY)
@@ -206,6 +220,9 @@ class TestAggregatedOnly:
         assert llm_policy.is_aggregate_sql("SELECT COUNT (*) FROM t")
         assert not llm_policy.is_aggregate_sql("SELECT name, salary FROM t")
         assert not llm_policy.is_aggregate_sql("SELECT MAX(salary) FROM t")  # one person's real value
+        assert not llm_policy.is_aggregate_sql("SELECT name, salary, COUNT(*) OVER () FROM t")  # detail rows + a window
+        assert not llm_policy.is_aggregate_sql("SELECT t.*, (SELECT SUM(x) FROM o) AS total FROM t")
+        assert not llm_policy.is_aggregate_sql("select * from (select a, sum(b) from t group by a)")
         assert not llm_policy.is_aggregate_sql(None)
 
 
@@ -350,7 +367,17 @@ class TestRegistry:
         with config.begin() as conn:
             conn.execute(text("CREATE TABLE data_sources (id INTEGER PRIMARY KEY, name TEXT, is_active BOOLEAN)"))
             conn.execute(text("CREATE TABLE source_tables (source_id INT, table_name TEXT, is_active BOOLEAN)"))
+            conn.execute(text("CREATE TABLE schema_contexts (id INTEGER PRIMARY KEY, name TEXT)"))
         assert policy_for_table("anything", config) == FULL
+
+    def test_an_engine_that_is_not_the_config_db_is_unreadable_not_unmigrated(self, tmp_path):
+        """SchemaService's standalone fallback hands over the business DB: no registry there ≠ nobody restricted."""
+        from app.services.data_sources import policy_for_context
+
+        business = create_engine(f"sqlite:///{tmp_path / 'biz.sqlite'}")
+        with business.begin() as conn:
+            conn.execute(text("CREATE TABLE revenue (v REAL)"))
+        assert policy_for_table("revenue", business) == SCHEMA_ONLY == policy_for_context("revenue", business)
 
 
 class TestValuesAreNotCopiedOutOfARestrictedSource:

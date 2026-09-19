@@ -28,7 +28,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from sqlalchemy.exc import OperationalError, ProgrammingError
 
 from app.core.llm_policy import FULL, SCHEMA_ONLY, normalize, parse_allowlist
@@ -189,7 +189,7 @@ def policy_for_table(table_name: Optional[str], config_engine=None) -> str:
             if row is None:
                 row = conn.execute(text("SELECT llm_data_policy FROM data_sources WHERE name = :n"), {"n": LEGACY}).first()
     except (OperationalError, ProgrammingError) as exc:
-        return FULL if _not_migrated(exc) else SCHEMA_ONLY
+        return _unreadable_policy(config_engine, exc)
     return normalize(row[0]) if row else FULL
 
 
@@ -204,8 +204,21 @@ def policy_for_context(context_name: Optional[str], config_engine=None) -> str:
                 "(SELECT source_id FROM schema_contexts WHERE name = :c), (SELECT id FROM data_sources WHERE name = :l))"),
                 {"c": context_name or "", "l": LEGACY}).first()
     except (OperationalError, ProgrammingError) as exc:
-        return FULL if _not_migrated(exc) else SCHEMA_ONLY
+        return _unreadable_policy(config_engine, exc)
     return normalize(row[0]) if row else FULL
+
+
+def _unreadable_policy(config_engine, exc: Exception) -> str:
+    """No registry yet (a config DB from before Plan 7) = nobody could have restricted anything = full.
+    Anything else — including an engine that isn't the config DB at all (SchemaService's standalone
+    fallback points at the business DB) — is a policy we couldn't read = schema_only."""
+    try:
+        tables = set(inspect(config_engine).get_table_names())
+        if _not_migrated(exc) and tables & {"schema_contexts", "schema_metadata", "admin_config"}:
+            return FULL
+    except Exception:
+        pass
+    return SCHEMA_ONLY
 
 
 def _not_migrated(exc: Exception) -> bool:
