@@ -27,5 +27,6 @@ class QueryAudit(Base):
     cache_hit = Column(Boolean, default=False)
     error = Column(Text, nullable=True)                       # includes refusals: scope / allowlist / policy
     execution_time_ms = Column(Float, default=0.0)
+    request_group = Column(String, nullable=True, index=True)  # Phase 5: a multi-context question and its sub-questions
 
     __table_args__ = (Index("ix_query_audit_ws_ctx", "workspace", "context_name"),)

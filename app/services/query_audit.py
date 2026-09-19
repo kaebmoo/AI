@@ -5,6 +5,7 @@ import json
 import logging
 from typing import Any, Dict, Optional
 
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from app.models.query_audit import QueryAudit
@@ -12,6 +13,17 @@ from app.models.query_audit import QueryAudit
 logger = logging.getLogger(__name__)
 
 _tables_checked = set()
+
+
+def ensure_table(bind) -> None:
+    """query_audit exists with today's columns — once per process per database (idempotent)."""
+    if str(bind.url) in _tables_checked:
+        return
+    QueryAudit.__table__.create(bind, checkfirst=True)  # an app DB created before Phase 4.5
+    if "request_group" not in {c["name"] for c in inspect(bind).get_columns("query_audit")}:
+        with bind.begin() as conn:  # a table created before Phase 5
+            conn.execute(text("ALTER TABLE query_audit ADD COLUMN request_group VARCHAR"))
+    _tables_checked.add(str(bind.url))
 
 
 def record(db: Optional[Session], engine_result=None, scope: Optional[Dict[str, Any]] = None, **fields: Any) -> None:
@@ -27,9 +39,7 @@ def record(db: Optional[Session], engine_result=None, scope: Optional[Dict[str, 
         if scope:
             fields["scope"] = json.dumps(scope, ensure_ascii=False, sort_keys=True, default=str)
         bind = db.get_bind()
-        if str(bind.url) not in _tables_checked:  # an app DB created before Phase 4.5
-            QueryAudit.__table__.create(bind, checkfirst=True)
-            _tables_checked.add(str(bind.url))
+        ensure_table(bind)
         with Session(bind=bind) as session:
             session.add(QueryAudit(**fields))
             session.commit()

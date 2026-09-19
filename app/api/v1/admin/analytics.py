@@ -266,6 +266,7 @@ def get_query_audit(
     workspace: Optional[str] = None,
     context: Optional[str] = None,
     channel: Optional[str] = None,  # chat / telegram / report_export / report_download / an API caller's source
+    request_group: Optional[str] = None,  # Phase 5: a multi-context question and its sub-questions
     has_error: bool = Query(False, description="Only refusals / failures"),
     q: Optional[str] = Query(None, description="Text in the question or the SQL"),
     format: str = Query("json", pattern="^(json|csv)$"),
@@ -276,7 +277,8 @@ def get_query_audit(
     many rows came back — every channel (chat, /api/v1/query, telegram, xlsx export and download). `format=csv` exports the same filter."""
     from app.models.query_audit import QueryAudit
 
-    QueryAudit.__table__.create(db.get_bind(), checkfirst=True)  # an app DB nobody has asked anything of yet
+    from app.services.query_audit import ensure_table
+    ensure_table(db.get_bind())  # an app DB nobody has asked anything of yet / a table from before Phase 5
     query = db.query(QueryAudit).order_by(QueryAudit.created_at.desc(), QueryAudit.id.desc())
     try:
         if date_from:
@@ -287,7 +289,7 @@ def get_query_audit(
         raise HTTPException(status_code=400, detail="date_from / date_to ต้องเป็น ISO 8601")  # an audit never guesses the range
     for column, value in ((QueryAudit.user_id, user_id), (QueryAudit.api_key_id, api_key_id),
                           (QueryAudit.workspace, workspace), (QueryAudit.context_name, context),
-                          (QueryAudit.channel, channel)):
+                          (QueryAudit.channel, channel), (QueryAudit.request_group, request_group)):
         if value is not None:
             query = query.filter(column == value)
     if has_error:

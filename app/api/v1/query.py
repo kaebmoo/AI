@@ -54,6 +54,10 @@ class SimpleQueryResponse(BaseModel):
     # Plan 7: freshness of the file-source build the answer came from; null = legacy business DB
     data_as_of: Optional[Dict[str, Any]] = Field(
         None, description="{period, built_at, build_id} from the verified manifest (file source only)")
+    # Plan 7 Phase 5: a question answered from several contexts — one entry per context, each with its own
+    # sub-question, answer, freshness (and sql / data when asked for); null = a single-context answer
+    parts: Optional[List[Dict[str, Any]]] = Field(None, description="Per-context parts of a multi-context answer")
+    computed: Optional[Dict[str, Any]] = Field(None, description="ratio / difference computed from two parts, in code")
 
 
 class ContextInfo(BaseModel):
@@ -71,6 +75,33 @@ def _find_refusal(exc: BaseException):
         if found is not None:
             return found
     return None
+
+
+def _multi_response(multi, request_body: SimpleQueryRequest) -> SimpleQueryResponse:
+    parts = []
+    for part in multi.parts:
+        qr = part.result.query_result if part.result is not None else None
+        rows = (qr.data or []) if qr is not None else []
+        entry = {"context": part.context, "question": part.question, "answer": _part_answer(qr),
+                 "row_count": len(rows), "error": part.error,
+                 "data_as_of": part.result.data_as_of if part.result is not None else None}
+        if request_body.include_sql:
+            entry["sql"] = qr.sql_query if qr is not None else None
+        if request_body.include_data:
+            entry["data"] = rows[:request_body.max_rows]
+        parts.append(entry)
+    return SimpleQueryResponse(
+        answer=multi.answer, context=multi.context_name, row_count=sum(p["row_count"] for p in parts),
+        execution_time_ms=round(multi.execution_time_ms, 1), parts=parts, computed=multi.computed,
+        error="; ".join(multi.warnings) if any(p["error"] for p in parts) else None,
+    )
+
+
+def _part_answer(qr) -> str:
+    explanation = getattr(qr, "explanation", None)
+    if isinstance(explanation, dict):
+        explanation = explanation.get("explanation")
+    return str(explanation or "")
 
 
 # ── Endpoints ─────────────────────────────────────────────
@@ -101,31 +132,25 @@ async def simple_query(
         allowed = allowed_contexts(api_key)
         audit_as = {"api_key_id": getattr(api_key, "id", None), "channel": request_body.source or "api"}
 
+        async def ask(mcp):
+            from app.services import multi_context  # Phase 5: off unless the workspace is enabled in admin_config
+            engine = QueryEngine(mcp_client=mcp, db_session=db, admin_config=admin_config)
+            return await multi_context.ask(engine, request_body.question, request_body.context,
+                                           user_id=current_user.id, scope=request_body.scope,
+                                           allowed_contexts=allowed, **audit_as)
+
         # Get MCP client from app state (same as chat endpoint)
         mcp_client = getattr(http_request.app.state, "mcp_client", None)
         if mcp_client:
-            engine = QueryEngine(mcp_client=mcp_client, db_session=db, admin_config=admin_config)
-            result = await engine.query(
-                question=request_body.question,
-                context=request_body.context,
-                user_id=current_user.id,
-                scope=request_body.scope,
-                allowed_contexts=allowed,
-                **audit_as,
-            )
+            result = await ask(mcp_client)
         else:
             from app.services.mcp_client import MCPClientService
             mcp_client = MCPClientService()
             async with mcp_client.connected():
-                engine = QueryEngine(mcp_client=mcp_client, db_session=db, admin_config=admin_config)
-                result = await engine.query(
-                    question=request_body.question,
-                    context=request_body.context,
-                    user_id=current_user.id,
-                    scope=request_body.scope,
-                    allowed_contexts=allowed,
-                    **audit_as,
-                )
+                result = await ask(mcp_client)
+
+        if not hasattr(result, "query_result"):
+            return _multi_response(result, request_body)
 
         # QueryEngineResult has .query_result (QueryResult) + .context_name + .execution_time_ms
         qr = result.query_result

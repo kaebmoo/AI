@@ -216,3 +216,50 @@ class TestQueryContextsEndpoint:
         assert resp.status_code == 200
         data = resp.json()
         assert isinstance(data, list)
+
+
+class TestMultiContextResponse:
+    """Plan 7 Phase 5: a question answered from several contexts — `parts` per context, refusals keep their status."""
+
+    @staticmethod
+    def _multi():
+        from app.providers.base import QueryResult
+        from app.services import multi_context as mc
+        from app.services.query_engine import QueryEngineResult
+
+        def part(context, value, period):
+            result = QueryEngineResult(
+                query_result=QueryResult(question="q", sql_query=f"SELECT v FROM {context}", data=[{"v": value}, {"v": 0.0}],
+                                         explanation={"explanation": f"คำตอบ {context}"}, tokens_used=0, provider="matcha"),
+                context_name=context, data_as_of={"period": period})
+            return mc.Part(context=context, question=f"ถาม {context}", result=result)
+
+        return mc.MultiResult(parts=[part("feed_revenue", 3.0, 202608), part("feed_ebt", 2.0, 202607)], answer="รวม",
+                              warnings=["งวดไม่เท่ากัน"], execution_time_ms=10.0, request_group="g")
+
+    def test_parts_carry_context_freshness_and_optional_sql_and_data(self, query_client):
+        with patch("app.services.multi_context.ask", AsyncMock(return_value=self._multi())):
+            body = query_client.post("/api/v1/query/", json={"question": "รายได้และ EBT", "include_sql": True,
+                                                              "include_data": True, "max_rows": 1}).json()
+        assert body["answer"] == "รวม" and body["context"] == "feed_revenue+feed_ebt" and body["row_count"] == 4
+        assert body["data_as_of"] is None and body["error"] is None  # freshness is per part
+        first, second = body["parts"]
+        assert first == {"context": "feed_revenue", "question": "ถาม feed_revenue", "answer": "คำตอบ feed_revenue", "row_count": 2,
+                         "error": None, "data_as_of": {"period": 202608}, "sql": "SELECT v FROM feed_revenue", "data": [{"v": 3.0}]}
+        assert second["data_as_of"] == {"period": 202607}
+        with patch("app.services.multi_context.ask", AsyncMock(return_value=self._multi())):
+            plain = query_client.post("/api/v1/query/", json={"question": "รายได้และ EBT"}).json()
+        assert "sql" not in plain["parts"][0] and "data" not in plain["parts"][0]
+
+    def test_single_context_answer_has_no_parts(self, query_client):
+        with patch("app.services.query_engine.QueryEngine") as MockEngine:
+            MockEngine.return_value.query = AsyncMock(return_value=_mock_query_engine_result(data=[{"v": 1}]))
+            body = query_client.post("/api/v1/query/", json={"question": "รายได้รวม"}).json()
+        assert body["parts"] is None and body["computed"] is None and body["answer"] == "test"
+
+    def test_refusal_of_a_sub_question_keeps_its_status(self, query_client):
+        from app.services.data_sources import ScopeError
+        from app.services.workspaces import ContextNotAllowed
+        for refusal, status in ((ScopeError("scope"), 400), (ContextNotAllowed("นอกสิทธิ์"), 403)):
+            with patch("app.services.multi_context.ask", AsyncMock(side_effect=refusal)):
+                assert query_client.post("/api/v1/query/", json={"question": "รายได้และค่าใช้จ่าย"}).status_code == status

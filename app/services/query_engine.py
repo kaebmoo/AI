@@ -387,11 +387,13 @@ class QueryEngine:
         allowed_contexts: Optional[frozenset] = None,
         api_key_id: Optional[int] = None,
         channel: Optional[str] = None,
+        request_group: Optional[str] = None,
     ) -> QueryEngineResult:
         """
         Main entry point.
 
         api_key_id / channel (Phase 4.5): who is asking and through what — for the query audit only.
+        request_group (Phase 5): audit id shared by the sub-questions of one multi-context question.
 
         allowed_contexts (Plan 7 Phase 4a): normalised names the caller's API key may use (None =
         unrestricted). A named context outside it raises ContextNotAllowed (403); auto-routing and
@@ -416,7 +418,8 @@ class QueryEngine:
         token = request_scope.set(scope or None)
         pin = request_pinned.set(allowed_contexts is not None)  # restricted key: see data_sources.request_pinned
         llm = request_llm_policy.set(None)  # Phase 4.5: set once the context's source is known (_execute_query)
-        audit = {"user_id": user_id, "api_key_id": api_key_id, "channel": channel, "question": question}
+        audit = {"user_id": user_id, "api_key_id": api_key_id, "channel": channel, "question": question,
+                 "request_group": request_group}
         try:
             engine_result = await self._query(question, provider, context, mode, history, max_retries,
                                               conversation_id, provider_kwargs, on_status, user_id, scope, allowed_contexts)
@@ -564,40 +567,8 @@ class QueryEngine:
             history = history_without_answers(history)
 
         # 2. Resolve provider
-        selected_provider = provider or ai_config.get("default_provider", settings.AI_PROVIDER)
-
-        # Build provider kwargs dynamically: DB → .env → hardcoded fallback
-        resolved_kwargs = _build_provider_kwargs(
-            selected_provider,
-            ai_config,
-            admin_config_service=self.admin_config,
-        )
-        # Caller overrides take precedence
-        for k, v in resolved_kwargs.items():
-            provider_kwargs.setdefault(k, v)
-
-        provider_instance = provider_registry.create_provider(selected_provider, **provider_kwargs)
-        if not provider_instance or not provider_instance.is_configured():
-            # Try fallback
-            provider_instance = provider_registry.get_fallback(selected_provider, **provider_kwargs)
-
-        if not provider_instance:
-            raise ValueError(f"No available provider for '{selected_provider}'")
-
-        if llm_providers is not None and provider_instance.name in llm_providers:
-            selected_provider = provider_instance.name  # get_fallback may have switched — the cache check reads it
-        elif llm_providers is not None:
-            if provider:  # the caller named it — refuse, never switch silently
-                raise LLMPolicyError(f"provider '{provider}' ไม่อยู่ใน llm_provider_allowlist ของ source '{source.name}'")
-            provider_instance = None
-            for name in sorted(llm_providers):
-                candidate = provider_registry.create_provider(
-                    name, **_build_provider_kwargs(name, ai_config, admin_config_service=self.admin_config))
-                if candidate and candidate.is_configured():
-                    provider_instance, selected_provider = candidate, name
-                    break
-            if provider_instance is None:
-                raise LLMPolicyError(f"ไม่มี provider ใน llm_provider_allowlist ของ source '{source.name}' ที่พร้อมใช้")
+        provider_instance, selected_provider = self._provider_for(
+            provider, ai_config, provider_kwargs, llm_providers, str(source.name))
 
         # Tier-based cost control: classify query complexity and select model
         tier_enabled = feature_flags.get("tier_classification_enabled", False) if self.admin_config else False
@@ -704,6 +675,46 @@ class QueryEngine:
             logger.info(f"QueryEngine: Cached result (key={qcache_key[:12]}…, rows={len(result.data)})")
 
         return engine_result
+
+    def _provider_for(self, provider: Optional[str], ai_config: dict, provider_kwargs: Dict,
+                      llm_providers: Optional[frozenset], source_name: str):
+        """(provider instance, its name) for a request held to llm_providers (None = any provider).
+        Shared by the single-context pipeline and the multi-context split (Plan 7 Phase 5)."""
+        selected_provider = provider or ai_config.get("default_provider", settings.AI_PROVIDER)
+
+        # Build provider kwargs dynamically: DB → .env → hardcoded fallback
+        resolved_kwargs = _build_provider_kwargs(
+            selected_provider,
+            ai_config,
+            admin_config_service=self.admin_config,
+        )
+        # Caller overrides take precedence
+        for k, v in resolved_kwargs.items():
+            provider_kwargs.setdefault(k, v)
+
+        provider_instance = provider_registry.create_provider(selected_provider, **provider_kwargs)
+        if not provider_instance or not provider_instance.is_configured():
+            # Try fallback
+            provider_instance = provider_registry.get_fallback(selected_provider, **provider_kwargs)
+
+        if not provider_instance:
+            raise ValueError(f"No available provider for '{selected_provider}'")
+
+        if llm_providers is not None and provider_instance.name in llm_providers:
+            selected_provider = provider_instance.name  # get_fallback may have switched — the cache check reads it
+        elif llm_providers is not None:
+            if provider:  # the caller named it — refuse, never switch silently
+                raise LLMPolicyError(f"provider '{provider}' ไม่อยู่ใน llm_provider_allowlist ของ source '{source_name}'")
+            provider_instance = None
+            for name in sorted(llm_providers):
+                candidate = provider_registry.create_provider(
+                    name, **_build_provider_kwargs(name, ai_config, admin_config_service=self.admin_config))
+                if candidate and candidate.is_configured():
+                    provider_instance, selected_provider = candidate, name
+                    break
+            if provider_instance is None:
+                raise LLMPolicyError(f"ไม่มี provider ใน llm_provider_allowlist ของ source '{source_name}' ที่พร้อมใช้")
+        return provider_instance, selected_provider
 
     async def _audit(self, engine_result, scope, fields: Dict[str, Any], context_name: Optional[str]) -> None:
         if self.db is None:
