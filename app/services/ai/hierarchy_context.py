@@ -171,6 +171,9 @@ def extract_keywords_from_question(_service: Any, question: str, context_name: s
 
 
 def lookup_values_from_question(service: Any, question: str, context_name: str, table_name: str) -> List[Dict]:
+    from app.core.llm_policy import restricted
+    if restricted():  # Phase 4.5: "Actual Values Found" are real column values — not for this source's provider
+        return []
     from app.db.session import config_engine
     from app.services.data_sources import source_resolver
     from app.services.schema_service import SchemaService

@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.api import deps
 from app.db.session import get_config_db
+from app.core.llm_policy import LLMPolicyError
 from app.services.data_sources import ScopeError
 from app.services.workspaces import ContextNotAllowed, allowed_contexts
 from app.models.user import User
@@ -62,8 +63,8 @@ class ContextInfo(BaseModel):
 
 
 def _find_refusal(exc: BaseException):
-    """A ScopeError / ContextNotAllowed anywhere inside (nested) exception groups, else None."""
-    if isinstance(exc, (ScopeError, ContextNotAllowed)):
+    """A ScopeError / ContextNotAllowed / LLMPolicyError anywhere inside (nested) exception groups, else None."""
+    if isinstance(exc, (ScopeError, ContextNotAllowed, LLMPolicyError)):
         return exc
     for inner in getattr(exc, "exceptions", None) or ():
         found = _find_refusal(inner)

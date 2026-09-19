@@ -119,6 +119,19 @@ class RetryStatus:
     error: Optional[str] = None
 
 
+def _guarded(method: str, fn):
+    import functools
+
+    from app.core.llm_policy import guard_call
+
+    @functools.wraps(fn)
+    async def wrapper(self, *args, **kwargs):
+        return await guard_call(self, method, fn, args, kwargs)
+
+    wrapper._llm_guarded = True
+    return wrapper
+
+
 class AIProvider(ABC):
     """Abstract base class for AI providers.
 
@@ -131,6 +144,17 @@ class AIProvider(ABC):
 
     name: str = ""
     last_usage: Optional[TokenUsage] = None
+
+    # Phase 4.5: the one place every request to a provider passes — the source's llm_data_policy is
+    # enforced here for every subclass (auto-discovered ones too), whatever the caller did or forgot
+    _GUARDED = ("generate_sql", "explain_result", "generate_content", "generate_structured")
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        for method in AIProvider._GUARDED:
+            fn = cls.__dict__.get(method)
+            if fn is not None and not getattr(fn, "_llm_guarded", False):
+                setattr(cls, method, _guarded(method, fn))
 
     def is_configured(self) -> bool:
         """Check if provider has required credentials. Override in subclass."""

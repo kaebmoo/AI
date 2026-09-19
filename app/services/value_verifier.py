@@ -77,6 +77,9 @@ class ValueVerifier:
             question: Original user question (used to extract user's intended terms
                       when AI-generated values don't exist in DB)
         """
+        from app.core.llm_policy import restricted
+        if restricted():  # Phase 4.5: the correction hint carries real column values into the retry prompt
+            return VerifyResult(needs_retry=False)
         conditions = self._parse_where_conditions(sql)
         if not conditions:
             return VerifyResult(needs_retry=False)

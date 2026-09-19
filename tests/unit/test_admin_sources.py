@@ -154,3 +154,33 @@ def test_listing_and_status(tmp_path):
         api.source_status("nope", ADMIN, db)
     assert exc.value.status_code == 404
     assert json.dumps(listed)  # serialisable
+
+
+def test_source_policy_is_set_listed_and_survives_re_registration(tmp_path):
+    """Phase 4.5: llm_data_policy / llm_provider_allowlist per source; NT-Report re-registers often."""
+    from app.services.data_sources import SourceResolver
+
+    dist = _write_bundle(tmp_path)
+    engine = _config(tmp_path / "config.db")
+    registration.register_domain(engine, "rev", dist)
+    db = sessionmaker(bind=engine)()
+    listed = {s["name"]: s for s in api.list_sources(ADMIN, db)}
+    assert listed["datafeed_rev"]["llm_data_policy"] == "full" and listed["datafeed_rev"]["llm_provider_allowlist"] is None
+
+    with patch.object(api, "clear_query_cache") as cleared:
+        api.set_source_policy("datafeed_rev", api.SourcePolicyRequest(
+            llm_data_policy="schema_only", llm_provider_allowlist=["matcha"]), ADMIN, db)
+    assert cleared.called
+    registration.register_domain(engine, "rev", dist)  # a new contract must not reopen the source
+    listed = {s["name"]: s for s in api.list_sources(ADMIN, db)}
+    assert listed["datafeed_rev"]["llm_data_policy"] == "schema_only"
+    assert listed["datafeed_rev"]["llm_provider_allowlist"] == ["matcha"] and listed["legacy"]["llm_data_policy"] == "full"
+    resolved = SourceResolver(config_engine=engine, cache_dir=str(tmp_path / "cache")).for_context("feed_rev")
+    assert resolved.llm_data_policy == "schema_only" and resolved.llm_providers == frozenset({"matcha"})
+
+    for bad, status in ((("datafeed_rev", ["gpt-typo"]), 400), (("nope", None), 404)):
+        with pytest.raises(HTTPException) as exc:
+            api.set_source_policy(bad[0], api.SourcePolicyRequest(llm_data_policy="full", llm_provider_allowlist=bad[1]), ADMIN, db)
+        assert exc.value.status_code == status
+    with pytest.raises(ValueError):
+        api.SourcePolicyRequest(llm_data_policy="everything")

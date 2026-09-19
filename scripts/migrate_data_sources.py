@@ -68,6 +68,13 @@ def migrate(config_engine=None):
             with config_engine.begin() as conn:
                 conn.execute(text(f"ALTER TABLE data_sources ADD COLUMN {column} TEXT"))
             print(f"Added data_sources.{column}")
+    # Phase 4.5: what of this source's data may reach an LLM provider. DEFAULT 'full' fills every
+    # existing row and every later INSERT (behaviour unchanged); NULL / unknown = schema_only at read time.
+    if "llm_data_policy" not in ds_columns:
+        with config_engine.begin() as conn:
+            conn.execute(text("ALTER TABLE data_sources ADD COLUMN llm_data_policy TEXT DEFAULT 'full'"))
+            conn.execute(text("ALTER TABLE data_sources ADD COLUMN llm_provider_allowlist TEXT"))  # JSON list; NULL = any
+        print("Added data_sources.llm_data_policy, llm_provider_allowlist")
 
     existing = {c["name"] for c in inspect(config_engine).get_columns("schema_contexts")}
     with config_engine.begin() as conn:

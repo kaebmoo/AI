@@ -366,6 +366,12 @@ class SchemaService:
     
     def get_sample_values(self, table_name: str) -> Dict[str, List[str]]:
         """Get sample values for important columns"""
+        # Phase 4.5: values read from the rows — none for a source whose policy isn't `full`, whoever asks
+        # (system prompt, suggest-mappings, dimension-families)
+        from app.core.llm_policy import FULL, restricted
+        from app.services.data_sources import policy_for_table
+        if restricted() or policy_for_table(table_name, self.engine) != FULL:
+            return {}
         samples = {}
         inspector = inspect(self.business_engine)
         

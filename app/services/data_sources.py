@@ -25,12 +25,13 @@ import logging
 import os
 import threading
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError, ProgrammingError
 
+from app.core.llm_policy import FULL, SCHEMA_ONLY, normalize, parse_allowlist
 from app.services.database_adapter import DuckDBFileAdapter, ScopedDuckDB, ScopedSQLite, execute_select
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,8 @@ class ResolvedSource:
     name: str
     source_type: str
     adapter: Optional[DuckDBFileAdapter] = None  # None = legacy
+    llm_data_policy: str = FULL  # Phase 4.5: what of this source's data may reach an LLM provider
+    llm_providers: Optional[frozenset] = None  # llm_provider_allowlist; None = any provider
 
     @property
     def version(self) -> str:
@@ -163,6 +166,33 @@ def registered_tables(config_engine=None) -> Dict[str, Dict[str, Any]]:
     return tables
 
 
+def _row_policy(row) -> Dict[str, Any]:
+    # a registry migrated before Phase 4.5 has no policy columns = nobody could have restricted anything;
+    # a column that is there but NULL / unknown = schema_only (normalize), a broken allowlist = no provider
+    if "llm_data_policy" not in row:
+        return {}
+    return {"llm_data_policy": normalize(row["llm_data_policy"]),
+            "llm_providers": parse_allowlist(row["llm_provider_allowlist"])}
+
+
+def policy_for_table(table_name: Optional[str], config_engine=None) -> str:
+    """Policy of the source a table belongs to — for whoever reads values outside a query request
+    (onboarding, admin schema pages): a registered file-source table, else the legacy business DB."""
+    if config_engine is None:
+        from app.db.session import config_engine
+    try:
+        with config_engine.connect() as conn:
+            row = conn.execute(text(
+                "SELECT ds.llm_data_policy FROM source_tables st "
+                "JOIN data_sources ds ON ds.id = st.source_id AND ds.is_active = 1 "
+                "WHERE st.table_name = :t AND st.is_active = 1"), {"t": table_name or ""}).first()
+            if row is None:
+                row = conn.execute(text("SELECT llm_data_policy FROM data_sources WHERE name = :n"), {"n": LEGACY}).first()
+    except (OperationalError, ProgrammingError) as exc:
+        return FULL if _not_migrated(exc) else SCHEMA_ONLY
+    return normalize(row[0]) if row else FULL
+
+
 def _not_migrated(exc: Exception) -> bool:
     msg = str(exc).lower()
     return "no such" in msg or "does not exist" in msg
@@ -220,8 +250,7 @@ class SourceResolver:
         main_view = self._main_view(context_name)
         note = (f"\n\n**API key นี้ query ได้เฉพาะตาราง {main_view}** (อ้างชื่อตรง ๆ ห้ามมี schema นำหน้า) — "
                 f"ตาราง/view อื่นระบบจะปฏิเสธ; ถ้าคำถามต้องใช้ข้อมูลอื่น ให้ตอบว่าอยู่นอกสิทธิ์ของ key นี้")
-        return ResolvedSource(source.name, source.source_type,
-                              ScopedSQLite(business_engine.url.database, {main_view: "1"}, note))
+        return replace(source, adapter=ScopedSQLite(business_engine.url.database, {main_view: "1"}, note))
 
     def _context_row(self, conn, context_name: str, select: str):
         # Same row, same order as context_store.get_context_info (exact, '_'→' ',
@@ -257,7 +286,7 @@ class SourceResolver:
         else:
             filters = scope_filters(scope, mapping, source.adapter.view_columns)
             adapter = ScopedDuckDB(source.adapter, filters, _scope_note(scope, list(filters), row["main_view"]))
-        return ResolvedSource(source.name, source.source_type, adapter)
+        return replace(source, adapter=adapter)
 
     def _resolve(self, context_name: Optional[str]) -> ResolvedSource:
         if not context_name:
@@ -271,8 +300,10 @@ class SourceResolver:
                     return LEGACY_SOURCE
                 if row["id"] is None:
                     raise ValueError(f"Context '{context_name}' points to missing data source id {row['source_id']}")
+                policy = _row_policy(row)
                 if row["source_type"] == LEGACY:
-                    return LEGACY_SOURCE
+                    legacy = replace(LEGACY_SOURCE, **policy)
+                    return LEGACY_SOURCE if legacy == LEGACY_SOURCE else legacy
                 tables = [dict(r) for r in conn.execute(text(
                     "SELECT table_name, file_name, columns FROM source_tables "
                     "WHERE source_id = :sid AND is_active = 1 ORDER BY table_name"
@@ -295,7 +326,7 @@ class SourceResolver:
         if row.get("contract_file"):  # Phase 2: knowledge follows the contract (one stat per request)
             from app.services.datafeed_knowledge import ensure_current
             ensure_current(self._engine(), row, adapter.manifest)
-        return ResolvedSource(row["name"], DUCKDB_FILE, adapter)
+        return ResolvedSource(row["name"], DUCKDB_FILE, adapter, **policy)
 
     def _adapter(self, name: str, root: str, tables: List[Dict], manifest_file: Optional[str]) -> DuckDBFileAdapter:
         # realpath in the key: DuckDB pins allowed_paths to the real files at SET time, so a

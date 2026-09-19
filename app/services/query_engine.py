@@ -26,6 +26,7 @@ from app.providers.registry import provider_registry
 from app.services.ai_service import AIService
 from app.services.mcp_client import MCPClientService
 from app.services.admin_config_service import AdminConfigService
+from app.core.llm_policy import FULL, LLMPolicyError, PolicyMCPClient, RequestPolicy, history_without_answers, normalize, request_llm_policy
 from app.services.data_sources import SourceBoundMCPClient, request_pinned, request_scope, source_resolver
 from app.services.workspaces import canonical_context, check_context, workspace_of_context
 from app.services.schema_service import SchemaService
@@ -215,6 +216,13 @@ def _dedup_release(key: str) -> None:
     _dedup_store.pop(key, None)
 
 
+def _source_policy(source) -> tuple:
+    """(llm_data_policy, provider allowlist) of a resolved source. The resolver only ever produces a known
+    policy string and frozenset|None; anything else (a stand-in object) reads as schema_only / no allowlist."""
+    providers = getattr(source, "llm_providers", None)
+    return normalize(getattr(source, "llm_data_policy", None)), providers if isinstance(providers, frozenset) else None
+
+
 @dataclass
 class QueryEngineResult:
     """Combined result from QueryEngine — wraps QueryResult + extras"""
@@ -225,6 +233,7 @@ class QueryEngineResult:
     provider_used: str = ""
     source_version: str = ""  # Plan 7: source + verified build the answer was read from
     data_as_of: Optional[Dict[str, Any]] = None  # Plan 7: manifest period/built_at/build_id; None = legacy
+    llm_policy: str = FULL  # Phase 4.5: the source's llm_data_policy this answer was produced under
 
 
 # ---------------------------------------------------------------------------
@@ -399,10 +408,12 @@ class QueryEngine:
         """
         token = request_scope.set(scope or None)
         pin = request_pinned.set(allowed_contexts is not None)  # restricted key: see data_sources.request_pinned
+        llm = request_llm_policy.set(None)  # Phase 4.5: set once the context's source is known (_execute_query)
         try:
             return await self._query(question, provider, context, mode, history, max_retries,
                                      conversation_id, provider_kwargs, on_status, user_id, scope, allowed_contexts)
         finally:
+            request_llm_policy.reset(llm)
             request_pinned.reset(pin)
             request_scope.reset(token)
 
@@ -434,8 +445,13 @@ class QueryEngine:
         if use_cache:
             cached = _cache_get(qcache_key)
             # Plan 7: an answer read from another source — or an older build of it — is a miss
-            if cached is not None and cached.source_version != source_resolver.for_context(cached.context_name).version:
-                cached = None
+            if cached is not None:
+                current = source_resolver.for_context(cached.context_name)
+                policy, providers = _source_policy(current)
+                # Phase 4.5: an answer produced under another policy, or by a provider the source no longer allows
+                if (cached.source_version != current.version or cached.llm_policy != policy
+                        or (providers is not None and cached.provider_used not in providers)):
+                    cached = None
             if cached is not None:
                 from dataclasses import replace
                 from app.services.ai.trace import emit, new_trace
@@ -512,7 +528,28 @@ class QueryEngine:
         allowed_contexts: Optional[frozenset] = None,
     ) -> QueryEngineResult:
         """Query pipeline after cache/dedup gates (split out so dedup can wrap it)."""
-        # 1. Resolve provider
+        # 1. Detect context → its data source (Plan 7): legacy = business DB เดิม via MCP,
+        # file source = DuckDB in-process. Everything below reads through these two.
+        context_name = self._resolve_context(question, context, history, allowed_contexts)
+        source = source_resolver.for_context(context_name)
+        if source.adapter is None:
+            schema_service, mcp_client = self.schema_service, self.mcp_client
+        else:
+            from app.db.session import config_engine
+            schema_service = SchemaService(db_engine=config_engine, business_engine=source.engine)
+            mcp_client = SourceBoundMCPClient(self.mcp_client, source)
+
+        # Phase 4.5: from here on every provider call of this request is held to the source's policy
+        llm_policy, llm_providers = _source_policy(source)
+        request_llm_policy.set(RequestPolicy(policy=llm_policy, providers=llm_providers,
+                                             source=str(source.name), question=question))
+        if llm_policy != FULL:
+            mcp_client = PolicyMCPClient(mcp_client)
+            # earlier answers explain earlier rows, and two-pass writes the history into the prompt text
+            # itself (build_history_context) where the provider guard can't tell it from the question
+            history = history_without_answers(history)
+
+        # 2. Resolve provider
         selected_provider = provider or ai_config.get("default_provider", settings.AI_PROVIDER)
 
         # Build provider kwargs dynamically: DB → .env → hardcoded fallback
@@ -533,6 +570,21 @@ class QueryEngine:
         if not provider_instance:
             raise ValueError(f"No available provider for '{selected_provider}'")
 
+        if llm_providers is not None and provider_instance.name in llm_providers:
+            selected_provider = provider_instance.name  # get_fallback may have switched — the cache check reads it
+        elif llm_providers is not None:
+            if provider:  # the caller named it — refuse, never switch silently
+                raise LLMPolicyError(f"provider '{provider}' ไม่อยู่ใน llm_provider_allowlist ของ source '{source.name}'")
+            provider_instance = None
+            for name in sorted(llm_providers):
+                candidate = provider_registry.create_provider(
+                    name, **_build_provider_kwargs(name, ai_config, admin_config_service=self.admin_config))
+                if candidate and candidate.is_configured():
+                    provider_instance, selected_provider = candidate, name
+                    break
+            if provider_instance is None:
+                raise LLMPolicyError(f"ไม่มี provider ใน llm_provider_allowlist ของ source '{source.name}' ที่พร้อมใช้")
+
         # Tier-based cost control: classify query complexity and select model
         tier_enabled = feature_flags.get("tier_classification_enabled", False) if self.admin_config else False
         force_tier = feature_flags.get("force_tier", None) if self.admin_config else None
@@ -550,24 +602,13 @@ class QueryEngine:
         else:
             cheap_model = None  # same as default — no swap needed
 
-        # 2. Detect context → its data source (Plan 7): legacy = business DB เดิม via MCP,
-        # file source = DuckDB in-process. Everything below reads through these two.
-        context_name = self._resolve_context(question, context, history, allowed_contexts)
-        source = source_resolver.for_context(context_name)
-        if source.adapter is None:
-            schema_service, mcp_client = self.schema_service, self.mcp_client
-        else:
-            from app.db.session import config_engine
-            schema_service = SchemaService(db_engine=config_engine, business_engine=source.engine)
-            mcp_client = SourceBoundMCPClient(self.mcp_client, source)
-
         ai_service = AIService(provider=provider_instance, mcp_client=mcp_client,
                                workspace=workspace_of_context(context_name))  # RAG retrieves from that workspace's brain
 
         # 3. Build system prompt
         system_prompt = schema_service.build_system_prompt(
             ai_provider=selected_provider,
-            include_samples=True,
+            include_samples=llm_policy == FULL,  # also part of the prompt cache key
             language="thai",
             context_name=context_name,
             rag_enabled=True,
@@ -640,6 +681,7 @@ class QueryEngine:
             provider_used=selected_provider,
             source_version=source.version,
             data_as_of=source.data_as_of,
+            llm_policy=llm_policy,
         )
 
         # --- Query Result Cache: store successful result ---
