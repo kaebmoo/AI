@@ -320,3 +320,47 @@ class TestListContexts:
         assert result["total"] >= 2
         names = [c["name"] for c in result["data"]]
         assert "revenue" in names
+
+
+class TestSearchHierarchy:
+    """search_hierarchy used to call a method that doesn't exist — always an error."""
+
+    @pytest.fixture
+    def hierarchy_db(self, tmp_path):
+        from pathlib import Path
+        path = str(tmp_path / "config.sqlite")
+        conn = sqlite3.connect(path)
+        conn.executescript(
+            (Path(__file__).resolve().parents[2] / "database/migrations/009_master_hierarchy.sql").read_text(encoding="utf-8"))
+        conn.execute("DELETE FROM master_hierarchy_values")
+        conn.execute("DELETE FROM master_hierarchy")
+        for ctx in ("revenue", "secret"):
+            conn.execute("INSERT INTO master_hierarchy (context_name, level, level_label_th, level_label_en, "
+                         "level_columns, detection_keywords) VALUES (?, 0, 'กลุ่มบริการ', 'Service group', "
+                         "'[\"SERVICE_GROUP\"]', '[]')", (ctx,))
+            conn.execute("INSERT INTO master_hierarchy_values (context_name, level, value, aliases) "
+                         "VALUES (?, 0, ?, '[\"datacom\"]')", (ctx, f"DATACOM-{ctx}"))
+        conn.commit()
+        conn.close()
+
+        def policy(context_name, *args, **kwargs):
+            return "full" if context_name == "revenue" else "schema_only"
+
+        with patch("app.services.hierarchy_service._get_conn", side_effect=lambda: sqlite3.connect(path)), \
+             patch("app.services.data_sources.policy_for_context", side_effect=policy):
+            yield
+
+    async def test_all_contexts_when_none_given_and_policy_kept(self, hierarchy_db):
+        from app.tools.admin.system_tools import SearchHierarchyTool
+        result = await SearchHierarchyTool().execute({"keyword": "Datacom"}, db=None)
+        assert result["success"], result["message"]
+        # the restricted context's values never reach the agent's LLM
+        assert [(m["value"], m["column"], m["level"]) for m in result["data"]] == [
+            ("DATACOM-revenue", "SERVICE_GROUP", "กลุ่มบริการ")]
+
+    async def test_context_and_level_filters(self, hierarchy_db):
+        from app.tools.admin.system_tools import SearchHierarchyTool
+        tool = SearchHierarchyTool()
+        assert (await tool.execute({"keyword": "datacom", "context_name": "secret"}, db=None))["data"] == []
+        assert (await tool.execute({"keyword": "datacom", "context_name": "revenue", "level_name": "ฝ่าย"}, db=None))["data"] == []
+        assert (await tool.execute({"keyword": "datacom", "context_name": "revenue"}, db=None))["total"] == 1

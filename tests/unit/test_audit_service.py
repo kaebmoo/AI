@@ -1,84 +1,76 @@
 """
 Plan 3: Audit Service Tests
 =============================
-Tests that audit logging records changes with source tracking.
+AuditService against the real DDL of migration 028 (config_audit_log) — a home-made
+table here once hid that the service wrote to a table that didn't exist.
 """
 
+import json
+import logging
+import sqlite3
+from pathlib import Path
+
 import pytest
-from datetime import datetime
-from sqlalchemy import text
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from app.services.audit_service import AuditService
+
+MIGRATION = Path(__file__).resolve().parents[2] / "database" / "migrations" / "028_audit_log.sql"
 
 
-class TestAuditLogTable:
-    """Verify audit_log table schema and insert behavior."""
+@pytest.fixture
+def audit_db(tmp_path):
+    path = tmp_path / "app.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(MIGRATION.read_text(encoding="utf-8"))
+    conn.close()
+    session = sessionmaker(bind=create_engine(f"sqlite:///{path}"))()
+    yield session
+    session.close()
 
-    def _ensure_audit_table(self, db_session):
-        """Create audit_log table if it doesn't exist (from migration 028)."""
-        db_session.execute(text("""
-            CREATE TABLE IF NOT EXISTS audit_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                action TEXT NOT NULL,
-                table_name TEXT NOT NULL,
-                record_id INTEGER,
-                old_value TEXT,
-                new_value TEXT,
-                source TEXT DEFAULT 'manual',
-                user_id INTEGER,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """))
-        db_session.commit()
 
-    def test_log_manual_add(self, db_session):
-        """Admin adding mapping → audit log with source='manual'."""
-        self._ensure_audit_table(db_session)
-        db_session.execute(text("""
-            INSERT INTO audit_log (action, table_name, record_id, new_value, source, user_id)
-            VALUES ('INSERT', 'schema_semantic_mapping', 1, '{"keyword": "datacom"}', 'manual', 1)
-        """))
-        db_session.commit()
+# (action, source) exactly as the callers pass them: admin tools, scheduler auto-apply
+@pytest.mark.parametrize("action,source,stored", [
+    ("INSERT", "admin_agent", "create"),
+    ("INSERT", "auto_analyzer", "create"),
+    ("UPDATE", "manual", "update"),
+    ("DELETE", "api", "delete"),
+    ("toggle", "onboarding", "toggle"),
+])
+def test_log_change_lands_in_config_audit_log(audit_db, action, source, stored):
+    AuditService(audit_db).log_change(
+        action=action, table_name="schema_semantic_mapping", record_id=1,
+        old_value={"target_column": "BUSINESS"}, new_value={"keyword": "ดาต้าคอม"},
+        source=source, user_id=7,
+    )
+    rows = AuditService(audit_db).get_recent(source=source)
+    assert len(rows) == 1
+    row = rows[0]
+    assert (row["action"], row["source"], row["created_by"], row["record_id"]) == (stored, source, 7, 1)
+    assert json.loads(row["new_value"]) == {"keyword": "ดาต้าคอม"}
+    assert json.loads(row["old_value"]) == {"target_column": "BUSINESS"}
 
-        row = db_session.execute(text("SELECT action, table_name, new_value, source FROM audit_log WHERE source = 'manual'")).fetchone()
-        assert row is not None
-        assert "datacom" in row[2]  # new_value
 
-    def test_log_auto_add(self, db_session):
-        """Auto-analyzer applying fix → audit log with source='auto_analyzer'."""
-        self._ensure_audit_table(db_session)
-        db_session.execute(text("""
-            INSERT INTO audit_log (action, table_name, record_id, new_value, source)
-            VALUES ('INSERT', 'schema_semantic_mapping', 2, '{"keyword": "mobile"}', 'auto_analyzer')
-        """))
-        db_session.commit()
+def test_get_recent_filters_by_table(audit_db):
+    audit = AuditService(audit_db)
+    audit.log_change(action="INSERT", table_name="golden_examples", record_id=1)
+    audit.log_change(action="INSERT", table_name="schema_business_rules", record_id=2)
+    assert [r["record_id"] for r in audit.get_recent(table_name="schema_business_rules")] == [2]
+    assert len(audit.get_recent()) == 2
 
-        row = db_session.execute(text("SELECT * FROM audit_log WHERE source = 'auto_analyzer'")).fetchone()
-        assert row is not None
 
-    def test_log_agent_add(self, db_session):
-        """Admin agent adding rule → audit log with source='admin_agent'."""
-        self._ensure_audit_table(db_session)
-        db_session.execute(text("""
-            INSERT INTO audit_log (action, table_name, record_id, new_value, source, user_id)
-            VALUES ('INSERT', 'schema_business_rules', 5, '{"rule_code": "R99"}', 'admin_agent', 1)
-        """))
-        db_session.commit()
+@pytest.mark.parametrize("action,source", [("SELECT", "manual"), ("INSERT", "report_export")])
+def test_unwritable_audit_is_an_error_not_a_silent_loss(audit_db, caplog, action, source):
+    with caplog.at_level(logging.ERROR, logger="app.services.audit_service"):
+        AuditService(audit_db).log_change(action=action, table_name="report_exports", source=source)
+    assert [r.levelno for r in caplog.records] == [logging.ERROR]
+    assert AuditService(audit_db).get_recent() == []
 
-        row = db_session.execute(text("SELECT * FROM audit_log WHERE source = 'admin_agent'")).fetchone()
-        assert row is not None
 
-    def test_log_contains_old_new_values(self, db_session):
-        """Update operation → audit log has both old_value and new_value."""
-        self._ensure_audit_table(db_session)
-        db_session.execute(text("""
-            INSERT INTO audit_log (action, table_name, record_id, old_value, new_value, source)
-            VALUES ('UPDATE', 'schema_semantic_mapping', 1,
-                    '{"target_column": "BUSINESS"}',
-                    '{"target_column": "SERVICE_GROUP"}',
-                    'manual')
-        """))
-        db_session.commit()
-
-        row = db_session.execute(text("SELECT action, old_value, new_value FROM audit_log WHERE action = 'UPDATE'")).fetchone()
-        assert row is not None
-        assert row[1] is not None  # old_value
-        assert row[2] is not None  # new_value
+def test_missing_table_is_an_error(tmp_path, caplog):
+    session = sessionmaker(bind=create_engine(f"sqlite:///{tmp_path / 'empty.db'}"))()
+    with caplog.at_level(logging.ERROR, logger="app.services.audit_service"):
+        AuditService(session).log_change(action="INSERT", table_name="x")
+    session.close()
+    assert caplog.records and caplog.records[0].levelno == logging.ERROR

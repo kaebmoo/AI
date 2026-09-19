@@ -1,7 +1,7 @@
 """
 Audit Service
 ==============
-Records all config changes to audit_log table.
+Records all config changes to config_audit_log (app DB, migration 028).
 Used by admin tools, auto-analyzer, and admin agent.
 """
 
@@ -16,9 +16,14 @@ from app.core.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
 
+# Vocabulary of the CHECK constraints in database/migrations/028_audit_log.sql
+_ACTIONS = {"create", "update", "delete", "toggle", "auto_apply"}
+_SOURCES = {"manual", "admin_agent", "auto_analyzer", "onboarding", "api"}
+_ACTION_ALIASES = {"insert": "create"}  # callers pass SQL verbs
+
 
 class AuditService:
-    """Log config changes to audit_log table."""
+    """Log config changes to config_audit_log. `db` must be an app-DB session."""
 
     def __init__(self, db: Session):
         self.db = db
@@ -33,10 +38,13 @@ class AuditService:
         source: str = "manual",  # manual, admin_agent, auto_analyzer, onboarding
         user_id: int = None,
     ):
-        """Record a config change to the audit_log table."""
+        """Record a config change. Never raises — a failed write is logged at ERROR."""
         try:
+            action = _ACTION_ALIASES.get(action.lower(), action.lower())
+            if action not in _ACTIONS or source not in _SOURCES:
+                raise ValueError(f"action={action!r} source={source!r} not in config_audit_log vocabulary")
             self.db.execute(text("""
-                INSERT INTO audit_log (action, table_name, record_id, old_value, new_value, source, user_id, created_at)
+                INSERT INTO config_audit_log (action, table_name, record_id, old_value, new_value, source, created_by, created_at)
                 VALUES (:action, :table_name, :record_id, :old_value, :new_value, :source, :user_id, :created_at)
             """), {
                 "action": action,
@@ -50,7 +58,8 @@ class AuditService:
             })
             self.db.commit()
         except Exception as e:
-            logger.warning(f"Failed to write audit log: {e}")
+            self.db.rollback()
+            logger.error("Failed to write audit log (%s on %s): %s", action, table_name, e)
 
     def get_recent(
         self,
@@ -59,7 +68,7 @@ class AuditService:
         source: str = None,
     ) -> List[Dict[str, Any]]:
         """Get recent audit log entries."""
-        sql = "SELECT * FROM audit_log WHERE 1=1"
+        sql = "SELECT * FROM config_audit_log WHERE 1=1"
         params: Dict[str, Any] = {}
 
         if table_name:
@@ -76,5 +85,5 @@ class AuditService:
             result = self.db.execute(text(sql), params)
             return [dict(zip(result.keys(), row)) for row in result.fetchall()]
         except Exception as e:
-            logger.warning(f"Failed to read audit log: {e}")
+            logger.error("Failed to read audit log: %s", e)
             return []

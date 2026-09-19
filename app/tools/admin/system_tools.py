@@ -135,19 +135,23 @@ class SearchHierarchyTool(AdminTool):
     async def execute(self, params: Dict[str, Any], db) -> Dict[str, Any]:
         try:
             from app.services.hierarchy_service import HierarchyService
-            service = HierarchyService(db)
-            results = service.search_alias(
-                keyword=params["keyword"],
-                context_name=params.get("context_name"),
-            )
+            service = HierarchyService()
+            # No context given = every hierarchy context; search_aliases applies each source's llm_data_policy
+            contexts = [params["context_name"]] if params.get("context_name") else [
+                c["context_name"] for c in service.list_contexts()]
+            results = [r for c in contexts for r in service.search_aliases(c, params["keyword"], limit=30)]
+            if params.get("level_name"):
+                results = [r for r in results if r.get("level_label_th") == params["level_name"]]
 
             matches = []
             for r in results[:30]:
                 matches.append({
                     "value": r.get("value", ""),
                     "column": r.get("column_name", ""),
-                    "aliases": r.get("aliases", []),
-                    "level": r.get("level_name", ""),
+                    "matched_alias": r.get("matched_alias", ""),
+                    "level": r.get("level_label_th", ""),
+                    "context": r.get("context_name", ""),
+                    "parent_chain": r.get("parent_chain", []),
                 })
 
             return {
