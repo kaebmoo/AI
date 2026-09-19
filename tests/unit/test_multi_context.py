@@ -116,7 +116,8 @@ class TestComputeAndCombine:
         assert "งวดข้อมูลล่าสุดของแต่ละแหล่งไม่เท่ากัน" in text_ and "a 202608" in text_ and "b 202607" in text_
         assert any("ไม่ได้คำนวณ" in w for w in warnings)
 
-    @pytest.mark.parametrize("rows", [[], [{"v": 1.0}, {"v": 2.0}], [{"v": 1.0, "w": 2.0}], [{"v": "text"}], [{"v": 0.0}]])
+    @pytest.mark.parametrize("rows", [[], [{"v": 1.0}, {"v": 2.0}], [{"v": 1.0, "w": 2.0}], [{"v": "text"}], [{"v": 0.0}],
+                                      [{"month": 7}], [{"v": float("nan")}], [{"v": float("inf")}], [{"v": True}]])
     def test_not_computed_without_one_number_per_part(self, rows):
         assert mc.compute([part("a", [{"v": 5.0}]), part("b", rows)], "ratio", [0, 1]) is None
 

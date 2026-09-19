@@ -253,12 +253,16 @@ def _has(value, numbers) -> bool:
 
 
 def score_cross_domain(example, expected, answer_parts, computed, warnings):
-    """(ok, detail). expected: [(accepted contexts, number)]; answer_parts: [(context, rows, error)]."""
+    """(ok, detail). expected: [(accepted contexts, number)]; answer_parts: [(context, rows, error)].
+
+    An expected number counts only when it is in a ONE-row result of an accepted context — a breakdown that
+    happens to contain the number in one of its cells is not an answer to "how much in total"."""
     rows_with_numbers = [c for c, rows, err in answer_parts if not err and _numbers(rows)]
     if example.get("unanswerable"):
         return (not rows_with_numbers, "answered with a number" if rows_with_numbers else "no number given")
     missing = [f"{value:,.2f} ({'/'.join(accept)})" for accept, value in expected
-               if not _has(value, [n for c, rows, err in answer_parts if c in accept and not err for n in _numbers(rows)])]
+               if not _has(value, [n for c, rows, err in answer_parts if c in accept and not err and len(rows or []) == 1
+                                   for n in _numbers(rows)])]
     if missing:
         return False, "missing: " + "; ".join(missing)
     if example.get("computed"):

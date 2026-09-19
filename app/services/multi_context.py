@@ -12,7 +12,7 @@ step, no number that didn't come out of a sub-question's own SQL.
 
 Off unless ``admin_config.multi_context_workspaces`` (JSON list of workspace names) names the
 workspace. Never crosses a workspace, never leaves the caller's allowlist. A caller that names a
-context, or sends history, stays on the single-context path.
+context stays on the single-context path. Stateless: no history — the only entry point is /api/v1/query.
 """
 
 import asyncio
@@ -209,15 +209,14 @@ async def _split(engine, question: str, found: List[Dict], provider: Optional[st
 
 
 def _scalar(part: Part) -> Optional[float]:
-    # ponytail: "the" number of a part = the only number in its single row (a lone float beats ints such as
-    # a period column). Two measures in one row = not computable here; the parts still show both.
+    # ponytail: "the" number of a part = the only float in its single row. An int is a period, a code or a
+    # count — never taken for the measure (review 2026-09-19: a lone `SELECT month` would have been divided).
+    # Two measures in one row = not computable here; the parts still show both.
     rows = part.result.query_result.data if part.ok else None
     if not rows or len(rows) != 1 or not isinstance(rows[0], dict):
         return None
-    numbers = [v for v in rows[0].values() if isinstance(v, (int, float)) and not isinstance(v, bool)]
-    floats = [v for v in numbers if isinstance(v, float)]
-    pick = numbers if len(numbers) == 1 else floats if len(floats) == 1 else []
-    return float(pick[0]) if pick else None
+    floats = [v for v in rows[0].values() if isinstance(v, float) and v == v and abs(v) != float("inf")]
+    return floats[0] if len(floats) == 1 else None
 
 
 def compute(parts: List[Part], operation: str, operands: List[int]) -> Optional[Dict[str, Any]]:
@@ -296,7 +295,9 @@ async def answer(engine, question: str, *, scope: Optional[Dict[str, Any]] = Non
     except _REFUSALS:
         raise
     except Exception as exc:  # the split is an optimisation of routing — its failure is not the caller's failure
-        logger.warning("multi-context split failed (%s) — single-context path", exc)
+        # ERROR, not warning: the question now gets today's single-context answer (one half of it) — a source
+        # that doesn't resolve or a provider that is down must be seen by whoever runs the service
+        logger.error("multi-context split failed (%s: %s) — single-context path", type(exc).__name__, exc)
         return None
     if split is None:
         logger.warning("multi-context split unusable — single-context path")
