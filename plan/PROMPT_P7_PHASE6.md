@@ -1,5 +1,5 @@
 ทำงานต่อ Plan 7 (Data Source as a Service) ใน repo /Users/seal/Documents/GitHub/AI — branch main
-origin/main = 6edf8cd; local นำอยู่ 23 commit (Phase 4.5 + งาน AuditService/admin tools + Phase 5: 3ef27ad..52c3ee8 + prompt นี้) — ยังไม่ push; commit ใหม่ห้าม push จนกว่าจะสั่ง; ห้าม rebase / force-push
+origin/main = 52c3ee8 (Phase 1–5 push แล้ว 2026-09-19); local นำอยู่แค่ commit ของ prompt นี้ — ตรวจด้วย `git status -sb` ก่อนเริ่ม; commit ใหม่ห้าม push จนกว่าจะสั่ง; ห้าม rebase / force-push
 ถ้า main มี commit ใหม่จาก session อื่น ให้ทำต่อบนนั้น
 
 ## อ่านก่อน (บังคับ)
