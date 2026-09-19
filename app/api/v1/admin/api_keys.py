@@ -17,7 +17,17 @@ def create_api_key(
     current_user: User = Depends(deps.require_admin),
     db: Session = Depends(deps.get_db),
 ):
-    """Create a new API key. The raw key is returned once."""
+    """Create a new API key. The raw key is returned once.
+
+    workspace / allowed_contexts (Plan 7 Phase 4a) bind the key to those contexts and to the query
+    API; a binding that could never work is refused here (400), not discovered as 403s later.
+    """
+    from app.services.workspaces import resolve_key_binding
+
+    try:
+        workspace_id, allowed = resolve_key_binding(request.workspace, request.allowed_contexts)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     service = APIKeyService(db)
     raw_key, api_key = service.create_key(
         user_id=current_user.id,
@@ -25,6 +35,8 @@ def create_api_key(
         scopes=request.scopes,
         rate_limit_per_minute=request.rate_limit_per_minute,
         rate_limit_per_day=request.rate_limit_per_day,
+        workspace_id=workspace_id,
+        allowed_contexts=allowed,
     )
     return APIKeyCreateResponse(
         id=api_key.id,
@@ -37,6 +49,8 @@ def create_api_key(
         is_active=api_key.is_active,
         last_used_at=str(api_key.last_used_at) if api_key.last_used_at else None,
         created_at=str(api_key.created_at) if api_key.created_at else None,
+        workspace_id=api_key.workspace_id,
+        allowed_contexts=api_key.allowed_contexts,
         raw_key=raw_key,
     )
 
@@ -61,6 +75,8 @@ def list_api_keys(
             is_active=key.is_active,
             last_used_at=str(key.last_used_at) if key.last_used_at else None,
             created_at=str(key.created_at) if key.created_at else None,
+            workspace_id=key.workspace_id,
+            allowed_contexts=key.allowed_contexts,
         ).model_dump()
         for key in keys
     ]

@@ -30,6 +30,8 @@ class APIKeyService:
 
     def __init__(self, db: Session):
         self.db = db
+        from app.services.workspaces import ensure_api_key_columns
+        ensure_api_key_columns(db.get_bind())  # Phase 4a columns on a pre-Phase-4 app DB
 
     def create_key(
         self,
@@ -39,6 +41,8 @@ class APIKeyService:
         rate_limit_per_minute: int = 30,
         rate_limit_per_day: int = 1000,
         expires_at: Optional[datetime] = None,
+        workspace_id: Optional[int] = None,
+        allowed_contexts: Optional[str] = None,
     ) -> Tuple[str, APIKey]:
         """Create a new API key.
 
@@ -56,6 +60,8 @@ class APIKeyService:
             name=name,
             user_id=user_id,
             scopes=scopes,
+            workspace_id=workspace_id,          # Phase 4a — see app/services/workspaces.py
+            allowed_contexts=allowed_contexts,  # JSON list; validated by resolve_key_binding
             rate_limit_per_minute=rate_limit_per_minute,
             rate_limit_per_day=rate_limit_per_day,
             is_active=True,

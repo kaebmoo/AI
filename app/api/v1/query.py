@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.api import deps
 from app.db.session import get_config_db
 from app.services.data_sources import ScopeError
+from app.services.workspaces import ContextNotAllowed, allowed_contexts
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -83,6 +84,9 @@ async def simple_query(
     try:
         from app.services.query_engine import QueryEngine
 
+        # Plan 7 Phase 4a: what this caller's API key may reach (None = session user / unrestricted key)
+        allowed = allowed_contexts(getattr(http_request.state, "api_key", None))
+
         # Get MCP client from app state (same as chat endpoint)
         mcp_client = getattr(http_request.app.state, "mcp_client", None)
         if mcp_client:
@@ -92,6 +96,7 @@ async def simple_query(
                 context=request_body.context,
                 user_id=current_user.id,
                 scope=request_body.scope,
+                allowed_contexts=allowed,
             )
         else:
             from app.services.mcp_client import MCPClientService
@@ -103,6 +108,7 @@ async def simple_query(
                     context=request_body.context,
                     user_id=current_user.id,
                     scope=request_body.scope,
+                    allowed_contexts=allowed,
                 )
 
         # QueryEngineResult has .query_result (QueryResult) + .context_name + .execution_time_ms
@@ -133,6 +139,8 @@ async def simple_query(
 
     except ScopeError as e:  # never answered unscoped — the caller asked for a scope we can't enforce
         raise HTTPException(status_code=400, detail=str(e))
+    except ContextNotAllowed as e:  # outside the key's workspace/allowlist — refused, never re-routed silently
+        raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
         execution_time_ms = (time.time() - start_time) * 1000
         logger.error(f"Simple query failed: {e}")
@@ -147,9 +155,18 @@ async def simple_query(
 @router.get("/contexts", response_model=List[ContextInfo])
 async def list_contexts(
     db: Session = Depends(get_config_db),
+    x_api_key: Optional[str] = Depends(deps.api_key_header),
+    app_db: Session = Depends(deps.get_db),
 ):
-    """List available data contexts. Public — no auth required."""
+    """List available data contexts. Public — no auth required.
+    Sent with a workspace-bound API key (Phase 4a) it lists only what that key can use."""
     from sqlalchemy import text
+    from app.services.workspaces import norm
+
+    allowed = None
+    if x_api_key:
+        from app.services.api_key_service import APIKeyService
+        allowed = allowed_contexts(APIKeyService(app_db).validate_key(x_api_key))
 
     try:
         # Actual columns: name, display_name, description (NOT context_name, display_name_th)
@@ -167,6 +184,7 @@ async def list_contexts(
                 description=dict(zip(columns, r)).get("description", "") or "",
             )
             for r in rows
+            if allowed is None or norm(dict(zip(columns, r)).get("name", "")) in allowed
         ]
     except Exception as e:
         logger.error(f"Failed to list contexts: {e}")

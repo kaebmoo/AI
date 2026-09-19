@@ -19,6 +19,9 @@ class APIKey(Base):
     name = Column(String(200), default="")
     user_id = Column(Integer, nullable=False)
     scopes = Column(String(100), default="query")  # query, admin, full
+    # Plan 7 Phase 4a — both NULL = unrestricted (keys issued before Phase 4). See app/services/workspaces.py
+    workspace_id = Column(Integer, nullable=True)      # config DB workspaces.id (no FK: another database)
+    allowed_contexts = Column(Text, nullable=True)     # JSON list of context names; narrows the workspace
     rate_limit_per_minute = Column(Integer, default=30)
     rate_limit_per_day = Column(Integer, default=1000)
     is_active = Column(Boolean, default=True)

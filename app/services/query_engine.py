@@ -27,6 +27,7 @@ from app.services.ai_service import AIService
 from app.services.mcp_client import MCPClientService
 from app.services.admin_config_service import AdminConfigService
 from app.services.data_sources import SourceBoundMCPClient, request_scope, source_resolver
+from app.services.workspaces import check_context
 from app.services.schema_service import SchemaService
 from app.services.warning_detector import WarningDetector
 from app.services.query_classifier import query_classifier
@@ -36,7 +37,7 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
-def detect_context_from_question(question: str, schema_service: SchemaService = None) -> str:
+def detect_context_from_question(question: str, schema_service: SchemaService = None, allowed=None) -> str:
     """
     Auto-detect context from user's question using DB keywords.
 
@@ -45,9 +46,16 @@ def detect_context_from_question(question: str, schema_service: SchemaService = 
     question_lower = question.lower()
     context_scores = {}
 
+    def usable(contexts):
+        # Phase 4a: a restricted key routes among its own contexts only (allowed = normalised names)
+        if allowed is None:
+            return contexts
+        from app.services.workspaces import norm
+        return [c for c in contexts if norm(c.get('name') or '') in allowed]
+
     if schema_service:
         try:
-            contexts = schema_service.get_all_contexts()
+            contexts = usable(schema_service.get_all_contexts())
             for ctx in contexts:
                 ctx_name = ctx.get('name')
                 ctx_keywords = ctx.get('keywords', [])
@@ -65,12 +73,15 @@ def detect_context_from_question(question: str, schema_service: SchemaService = 
 
     if schema_service:
         try:
-            contexts = schema_service.get_all_contexts()
+            contexts = usable(schema_service.get_all_contexts())
             if contexts:
                 return contexts[0].get('name', 'revenue')
         except Exception:
             pass
 
+    if allowed is not None:  # never fall back to a context the key can't use
+        from app.services.workspaces import ContextNotAllowed
+        raise ContextNotAllowed("API key นี้ไม่มี context ที่ใช้ได้")
     return "revenue"
 
 
@@ -362,9 +373,14 @@ class QueryEngine:
         on_status: Callable = None,
         user_id: Optional[int] = None,
         scope: Optional[Dict[str, Any]] = None,
+        allowed_contexts: Optional[frozenset] = None,
     ) -> QueryEngineResult:
         """
         Main entry point.
+
+        allowed_contexts (Plan 7 Phase 4a): normalised names the caller's API key may use (None =
+        unrestricted). A named context outside it raises ContextNotAllowed (403); auto-routing and
+        the cache stay inside it.
 
         scope (Plan 7 Phase 3): row filter enforced at the SQL layer for this request,
         e.g. {"year_month": 202607} — every source resolution sees it (ScopeError = 400).
@@ -385,14 +401,16 @@ class QueryEngine:
         token = request_scope.set(scope or None)
         try:
             return await self._query(question, provider, context, mode, history, max_retries,
-                                     conversation_id, provider_kwargs, on_status, user_id, scope)
+                                     conversation_id, provider_kwargs, on_status, user_id, scope, allowed_contexts)
         finally:
             request_scope.reset(token)
 
     async def _query(self, question, provider, context, mode, history, max_retries,
-                     conversation_id, provider_kwargs, on_status, user_id, scope) -> QueryEngineResult:
+                     conversation_id, provider_kwargs, on_status, user_id, scope, allowed_contexts=None) -> QueryEngineResult:
         """Body of query() — runs with request_scope set."""
         start_time = time.time()
+        if context:
+            check_context(context, allowed_contexts)  # before the cache, before any LLM call
         provider_kwargs = provider_kwargs or {}
 
         # Load config once
@@ -409,6 +427,8 @@ class QueryEngine:
         scope_key = json.dumps(scope, sort_keys=True, default=str) if scope else ""
         if scope_key:
             context_name_for_cache += "|" + scope_key
+        if allowed_contexts is not None:  # "auto" routes differently under another allowlist
+            context_name_for_cache += "|allow:" + ",".join(sorted(allowed_contexts))
         qcache_key = _cache_key(question, selected_provider_name, context_name_for_cache)
         if use_cache:
             cached = _cache_get(qcache_key)
@@ -441,7 +461,7 @@ class QueryEngine:
                 ),
                 # REMAIN-9.3: the dataclass default "revenue" would be saved to chat history and
                 # steer the follow-up into the wrong context
-                context_name=self._resolve_context(question, context, history),
+                context_name=self._resolve_context(question, context, history, allowed_contexts),
                 execution_time_ms=(time.time() - start_time) * 1000,
                 provider_used=selected_provider_name,
             )
@@ -462,6 +482,7 @@ class QueryEngine:
                 qcache_key=qcache_key,
                 start_time=start_time,
                 conversation_id=conversation_id,
+                allowed_contexts=allowed_contexts,
             )
         except BaseException:
             _dedup_release(dedup_key)  # failed — allow immediate retry
@@ -487,6 +508,7 @@ class QueryEngine:
         qcache_key: str,
         start_time: float,
         conversation_id: Optional[str] = None,
+        allowed_contexts: Optional[frozenset] = None,
     ) -> QueryEngineResult:
         """Query pipeline after cache/dedup gates (split out so dedup can wrap it)."""
         # 1. Resolve provider
@@ -529,7 +551,7 @@ class QueryEngine:
 
         # 2. Detect context → its data source (Plan 7): legacy = business DB เดิม via MCP,
         # file source = DuckDB in-process. Everything below reads through these two.
-        context_name = self._resolve_context(question, context, history)
+        context_name = self._resolve_context(question, context, history, allowed_contexts)
         source = source_resolver.for_context(context_name)
         if source.adapter is None:
             schema_service, mcp_client = self.schema_service, self.mcp_client
@@ -630,6 +652,7 @@ class QueryEngine:
         question: str,
         explicit_context: str = None,
         history: List[Dict] = None,
+        allowed_contexts: Optional[frozenset] = None,
     ) -> str:
         """
         Determine data context from question + history.
@@ -644,7 +667,8 @@ class QueryEngine:
             return explicit_context
 
         # Auto-detect from question
-        detected = self._detect_context_from_question(question)
+        detected = detect_context_from_question(question, self.schema_service, allowed_contexts)
+        check_context(detected, allowed_contexts)  # whatever the router did, never outside the allowlist
 
         # If history has context info, consider maintaining it
         # (simple heuristic: if detected is just default and history suggests otherwise)

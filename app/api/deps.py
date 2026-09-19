@@ -35,6 +35,17 @@ def get_config_db() -> Generator:
     finally:
         db.close()
 
+def enforce_key_surface(api_key, path: str) -> None:
+    """A key bound to a workspace/allowlist (Plan 7 Phase 4a) works on the query API only:
+    /chat, /admin, … take a context too and know nothing about allowlists."""
+    from app.services.workspaces import is_restricted
+
+    prefix = f"{settings.API_V1_STR}/query"
+    if is_restricted(api_key) and not (path == prefix or path.startswith(prefix + "/")):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="API key นี้ใช้ได้เฉพาะ /api/v1/query")
+
+
 def get_current_user(
     request: Request,
     token: Optional[str] = Depends(header_scheme),
@@ -53,6 +64,7 @@ def get_current_user(
             api_key_service = APIKeyService(db)
             api_key = api_key_service.validate_key(x_api_key)
             if api_key:
+                enforce_key_surface(api_key, request.url.path)
                 # Track usage
                 api_key_service.track_usage(api_key.id)
                 # Store API key info in request state for scope checking
@@ -61,6 +73,8 @@ def get_current_user(
                 user = db.query(User).filter(User.id == api_key.user_id).first()
                 if user and user.is_active:
                     return user
+        except HTTPException:
+            raise  # a valid but restricted key off the query API: 403, not a fall-through to session auth
         except (ImportError, ValueError, AttributeError) as e:
             logger.debug(f"API key auth failed, falling through to session auth: {e}")
         except Exception as e:

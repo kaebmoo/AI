@@ -337,6 +337,9 @@ class APIKeyCreateRequest(BaseModel):
     scopes: str = Field("query", description="Comma-separated scopes: query, admin, full")
     rate_limit_per_minute: int = Field(30, ge=1, le=1000)
     rate_limit_per_day: int = Field(1000, ge=1, le=100000)
+    # Plan 7 Phase 4a — both omitted = unrestricted key (as before)
+    workspace: Optional[str] = Field(None, description="Workspace name: the key reaches only its contexts")
+    allowed_contexts: Optional[List[str]] = Field(None, description="Narrows the workspace to these contexts")
 
 
 class APIKeyResponse(BaseModel):
@@ -351,6 +354,8 @@ class APIKeyResponse(BaseModel):
     is_active: bool
     last_used_at: Optional[str] = None
     created_at: Optional[str] = None
+    workspace_id: Optional[int] = None
+    allowed_contexts: Optional[str] = None  # JSON list
 
     class Config:
         from_attributes = True
