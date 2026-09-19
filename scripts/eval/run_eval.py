@@ -46,7 +46,35 @@ def _rows_to_multiset(rows):
     return sorted(tuples, key=lambda t: tuple(str(x) for x in t))
 
 
+def _label_drops(expected, actual):
+    """Sets of extra TEXT columns of `actual` that may be ignored so the column counts agree.
+
+    The model often answers "EBT of division X" with SELECT division, ebt — the value is right and
+    the row carries its label. Only columns that hold nothing but text/NULL and whose name is not an
+    expected column can be dropped: an extra number is a different answer, not a label.
+    """
+    from itertools import combinations
+
+    if not expected or not actual:
+        return
+    extra = len(actual[0]) - len(expected[0])
+    if extra <= 0:
+        return
+    wanted = {c.lower() for c in expected[0]}
+    labels = [c for c in actual[0] if c.lower() not in wanted
+              and all(r.get(c) is None or isinstance(r.get(c), str) for r in actual)]
+    yield from combinations(labels, extra)
+
+
 def _values_match(expected, actual) -> bool:
+    """Values match, column for column — or once extra label columns of `actual` are set aside."""
+    if _values_match_strict(expected, actual):
+        return True
+    return any(_values_match_strict(expected, [{k: v for k, v in r.items() if k not in drop} for r in actual])
+               for drop in _label_drops(expected, actual))
+
+
+def _values_match_strict(expected, actual) -> bool:
     """Multiset compare of value-tuples; column count must match."""
     if not expected and not actual:
         return True
@@ -77,7 +105,8 @@ def _columns_match(expected, actual) -> bool:
 
 
 def match_status(expected, actual) -> str:
-    """exact_match = values AND column names match; value_match = values only.
+    """exact_match = values AND column names match; value_match = values only
+    (other column names, or extra text label columns next to the expected values).
 
     value_match is reported separately — a same-values result under different
     column names may still be a wrong projection (e.g. SUM(x) aliased as the
@@ -199,7 +228,7 @@ async def run_eval(provider=None, context_filter=None, limit=None):
                         if record["status"] == "mismatch":
                             record["detail"] = f"expected {len(expected_rows)} rows, got {len(actual_rows)}"
                         elif record["status"] == "value_match":
-                            record["detail"] = "values match but column names differ"
+                            record["detail"] = "values match; column names differ or label columns were added"
                 except Exception as e:
                     record["latency_s"] = round(time.time() - t0, 2)
                     record["status"] = "execution_failed"
