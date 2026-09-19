@@ -240,6 +240,101 @@ async def run_eval(provider=None, context_filter=None, limit=None):
     return records
 
 
+# ── Questions across contexts (Plan 7 Phase 5) ─────────────
+
+
+def _numbers(rows):
+    return [float(v) for row in rows or [] if isinstance(row, dict) for v in row.values()
+            if isinstance(v, (int, float)) and not isinstance(v, bool)]
+
+
+def _has(value, numbers) -> bool:
+    return any(abs(value - n) <= max(0.01, abs(value) * 1e-9) for n in numbers)
+
+
+def score_cross_domain(example, expected, answer_parts, computed, warnings):
+    """(ok, detail). expected: [(accepted contexts, number)]; answer_parts: [(context, rows, error)]."""
+    rows_with_numbers = [c for c, rows, err in answer_parts if not err and _numbers(rows)]
+    if example.get("unanswerable"):
+        return (not rows_with_numbers, "answered with a number" if rows_with_numbers else "no number given")
+    missing = [f"{value:,.2f} ({'/'.join(accept)})" for accept, value in expected
+               if not _has(value, [n for c, rows, err in answer_parts if c in accept and not err for n in _numbers(rows)])]
+    if missing:
+        return False, "missing: " + "; ".join(missing)
+    if example.get("computed"):
+        a, b = expected[0][1], expected[1][1]
+        want = a / b if example["computed"] == "ratio" else a - b
+        if not computed or computed.get("operation") != example["computed"] or abs(computed["value"] - want) > max(1e-6, abs(want) * 1e-9):
+            return False, f"computed {example['computed']} expected {want:,.6f}, got {computed}"
+    if example.get("period_warning") and example.get("_periods_differ") and not any("งวด" in w for w in warnings):
+        return False, "sources stand at different periods and the answer doesn't say so"
+    return True, "all expected numbers present"
+
+
+async def run_cross_domain(path, provider=None):
+    from app.services import multi_context
+    from app.services.data_sources import source_resolver
+    from app.services.mcp_client import MCPClientService
+    from app.services.query_engine import QueryEngine, clear_query_cache
+
+    golden = json.loads(Path(path).read_text())
+    allowed = frozenset(golden["allowed_contexts"]) if golden.get("allowed_contexts") else None
+    records = []
+    mcp_client = MCPClientService()
+    async with mcp_client.connected():
+        engine = QueryEngine(mcp_client=mcp_client)
+        print(f"multi-context workspaces enabled: {sorted(multi_context.enabled_workspaces(engine.admin_config)) or 'none (baseline)'}")
+        try:
+            for i, ex in enumerate(golden["examples"], 1):
+                print(f"[{i}/{len(golden['examples'])}] {ex['question'][:60]}…", flush=True)
+                record = {"id": ex["id"], "question": ex["question"], "category": "cross_domain",
+                          "expected_sql": "\n".join(f"-- {p['context']}\n{p['sql']}" for p in ex["parts"]),
+                          "generated_sql": None, "status": None, "latency_s": None, "tokens": None, "detail": None}
+                expected, broken = [], None
+                for part in ex["parts"]:
+                    rows, err = run_expected_sql(part["sql"], part["context"])
+                    numbers = _numbers(rows)
+                    if err or len(numbers) != 1:
+                        broken = err or f"expected SQL of {part['context']} must return one number, got {rows}"
+                        break
+                    expected.append((part.get("accept") or [part["context"]], numbers[0]))
+                if broken:
+                    record.update(status="golden_broken", detail=broken)
+                    records.append(record)
+                    continue
+                periods = {(source_resolver.for_context(p["context"]).data_as_of or {}).get("period") for p in ex["parts"]}
+                ex["_periods_differ"] = len(periods) > 1
+
+                clear_query_cache()
+                t0 = time.time()
+                try:
+                    result = await asyncio.wait_for(multi_context.ask(
+                        engine, ex["question"], provider=provider, allowed_contexts=allowed, user_id=None), timeout=300)
+                    record["latency_s"] = round(time.time() - t0, 2)
+                    if isinstance(result, multi_context.MultiResult):
+                        parts = [(p.context, p.result.query_result.data if p.result is not None else [], p.error)
+                                 for p in result.parts]
+                        record["generated_sql"] = "\n".join(
+                            f"-- {p.context}: {p.question}\n{p.result.query_result.sql_query if p.result is not None else ''}"
+                            for p in result.parts)
+                        computed, warnings = result.computed, result.warnings
+                    else:
+                        qr = result.query_result
+                        parts = [(result.context_name, qr.data or [], qr.error)]
+                        record["generated_sql"] = f"-- {result.context_name}\n{qr.sql_query}"
+                        computed, warnings = None, []
+                    ok, record["detail"] = score_cross_domain(ex, expected, parts, computed, warnings)
+                    record["status"] = "value_match" if ok else "mismatch"
+                except Exception as e:
+                    record["latency_s"] = round(time.time() - t0, 2)
+                    record.update(status="execution_failed", detail=f"{type(e).__name__}: {e}")
+                print(f"    → {record['status']} ({record['latency_s']} s) {record['detail']}", flush=True)
+                records.append(record)
+        finally:
+            engine.close()
+    return records
+
+
 # ── Reporting ──────────────────────────────────────────────
 
 
@@ -344,10 +439,19 @@ def main():
     parser.add_argument("--context", default=None, help="Filter by golden category")
     parser.add_argument("--limit", type=int, default=None, help="Run only N examples")
     parser.add_argument("--compare", default=None, help="Path to BASELINE.json to diff against")
+    parser.add_argument("--cross-domain", default=None, metavar="JSON",
+                        help="Questions across contexts (e.g. scripts/eval/cross_domain_golden.json) instead of golden_examples")
     args = parser.parse_args()
 
-    records = asyncio.run(run_eval(provider=args.provider, context_filter=args.context, limit=args.limit))
+    if args.cross_domain:
+        records = asyncio.run(run_cross_domain(args.cross_domain, provider=args.provider))
+    else:
+        records = asyncio.run(run_eval(provider=args.provider, context_filter=args.context, limit=args.limit))
     summary = summarize(records, args.provider)
+    latencies = sorted(r["latency_s"] for r in records if r.get("latency_s") is not None)
+    if latencies:  # nearest-rank percentiles
+        summary["latency_p50_s"] = latencies[(len(latencies) - 1) // 2]
+        summary["latency_p95_s"] = latencies[min(len(latencies) - 1, int(len(latencies) * 0.95))]
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     write_reports(records, summary, args.provider)
 

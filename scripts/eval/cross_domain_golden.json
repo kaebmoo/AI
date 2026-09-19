@@ -1,0 +1,48 @@
+{
+  "_doc": "Plan 7 Phase 5 — questions across contexts (approved by the owner 2026-09-19). Expected numbers are NOT stored: each part's sql runs against the context's source at eval time (they reconcile with control_totals.csv, which the NT-Report dashboards reconcile with). A question is correct when every expected number shows up in the rows of an answer part from an accepted context, the expected computed value / period warning is there, and an 'unanswerable' question returns no number.",
+  "allowed_contexts": ["feed_revenue", "feed_expense", "feed_sales", "feed_ebt"],
+  "examples": [
+    {"id": 1, "question": "รายได้รวมและค่าใช้จ่ายรวมเดือนกรกฎาคม 2569 เท่าไหร่",
+     "parts": [
+       {"context": "feed_revenue", "sql": "SELECT revenue FROM feed_revenue_fact_total_monthly WHERE year_month = 202607"},
+       {"context": "feed_expense", "sql": "SELECT SUM(expense_value_thb) AS expense FROM feed_expense_fact_expense WHERE time_key = 202607"}]},
+    {"id": 2, "question": "อัตราส่วนรายได้ต่อค่าใช้จ่ายเดือนสิงหาคม 2569",
+     "parts": [
+       {"context": "feed_revenue", "sql": "SELECT revenue FROM feed_revenue_fact_total_monthly WHERE year_month = 202608"},
+       {"context": "feed_expense", "sql": "SELECT SUM(expense_value_thb) AS expense FROM feed_expense_fact_expense WHERE time_key = 202608"}],
+     "computed": "ratio"},
+    {"id": 3, "question": "ยอดขายจริงและรายได้ของกลุ่มธุรกิจ 3.Mobile เดือนกรกฎาคม 2569",
+     "parts": [
+       {"context": "feed_sales", "sql": "SELECT SUM(amount) AS sales FROM feed_sales_fact_sales WHERE metric = 'actual' AND business_group = '3.Mobile' AND year_month = 202607"},
+       {"context": "feed_revenue", "sql": "SELECT SUM(revenue) AS revenue FROM feed_revenue_fact_bu_monthly WHERE bu = '3.Mobile' AND year_month = 202607"}]},
+    {"id": 4, "question": "ยอดขายจริงรวมกับรายได้รวมเดือนกรกฎาคม 2569 ต่างกันเท่าไหร่",
+     "parts": [
+       {"context": "feed_sales", "sql": "SELECT SUM(amount) AS sales FROM feed_sales_fact_sales WHERE metric = 'actual' AND year_month = 202607"},
+       {"context": "feed_revenue", "sql": "SELECT revenue FROM feed_revenue_fact_total_monthly WHERE year_month = 202607"}],
+     "computed": "difference"},
+    {"id": 5, "question": "รายได้ ยอดขายจริง และค่าใช้จ่ายของศูนย์ต้นทุน 2P10200 เดือนกรกฎาคม 2569",
+     "parts": [
+       {"context": "feed_revenue", "sql": "SELECT SUM(revenue) AS revenue FROM feed_revenue_fact_org_monthly WHERE cost_center = '2P10200' AND year_month = 202607"},
+       {"context": "feed_sales", "sql": "SELECT SUM(amount) AS sales FROM feed_sales_fact_sales WHERE metric = 'actual' AND cost_center = '2P10200' AND year_month = 202607"},
+       {"context": "feed_expense", "sql": "SELECT SUM(expense_value_thb) AS expense FROM feed_expense_fact_expense WHERE cost_center = '2P10200' AND time_key = 202607"}]},
+    {"id": 6, "question": "ค่าใช้จ่ายและ EBT ของสายงานขายและปฏิบัติการลูกค้า 1 เดือนกรกฎาคม 2569",
+     "parts": [
+       {"context": "feed_ebt", "accept": ["feed_ebt", "feed_expense"], "sql": "SELECT expense_month FROM feed_ebt_fact_ebt_division_monthly WHERE division = 'สายงานขายและปฏิบัติการลูกค้า 1' AND time_key = 202607"},
+       {"context": "feed_ebt", "sql": "SELECT ebt_month FROM feed_ebt_fact_ebt_division_monthly WHERE division = 'สายงานขายและปฏิบัติการลูกค้า 1' AND time_key = 202607"}]},
+    {"id": 7, "question": "EBT สะสมถึงเดือนกรกฎาคม 2569 และรายได้รวมสะสมทั้งบริษัทถึงเดือนเดียวกัน",
+     "parts": [
+       {"context": "feed_ebt", "sql": "SELECT ebt FROM feed_ebt_fact_ebt_total_monthly WHERE time_key = 202607"},
+       {"context": "feed_revenue", "sql": "SELECT revenue_ytd FROM feed_revenue_fact_total_monthly WHERE year_month = 202607"}]},
+    {"id": 8, "question": "รายได้และค่าใช้จ่ายเดือนล่าสุด",
+     "parts": [
+       {"context": "feed_revenue", "sql": "SELECT revenue FROM feed_revenue_fact_total_monthly ORDER BY year_month DESC LIMIT 1"},
+       {"context": "feed_expense", "sql": "SELECT SUM(expense_value_thb) AS expense FROM feed_expense_fact_expense WHERE time_key = (SELECT MAX(time_key) FROM feed_expense_fact_expense)"}]},
+    {"id": 9, "question": "รายได้รวมและ EBT เดือนล่าสุด",
+     "parts": [
+       {"context": "feed_revenue", "sql": "SELECT revenue FROM feed_revenue_fact_total_monthly ORDER BY year_month DESC LIMIT 1"},
+       {"context": "feed_ebt", "sql": "SELECT ebt_month FROM feed_ebt_fact_ebt_total_monthly ORDER BY time_key DESC LIMIT 1"}],
+     "period_warning": "when_periods_differ"},
+    {"id": 10, "question": "กำไรของทั้งบริษัทเดือนกรกฎาคม 2569",
+     "parts": [], "unanswerable": true}
+  ]
+}
