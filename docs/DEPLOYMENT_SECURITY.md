@@ -51,6 +51,17 @@ reminder at startup when `engine=mssql`.
 - **Audit ของคำถาม:** `query_audit` เขียนที่ `QueryEngine.query` (chat, `/api/v1/query`, telegram) และที่ xlsx export (`channel` = `report_export` ตอนขอ, `report_download` ตอนดาวน์โหลด พร้อมจำนวนแถว): user, api_key, channel, workspace, context, scope, คำถาม, SQL, ชื่อคอลัมน์, จำนวนแถว, provider, policy, cache_hit, error (รวมคำขอที่ถูกปฏิเสธ) — **ไม่มีค่าผลลัพธ์**. ค้น/ export: `GET /admin/query-audit?...&format=csv`. เขียนไม่ได้ = ERROR ใน log แต่คำตอบยังออก (availability ก่อน) — ตั้ง alert ที่ข้อความ `query audit NOT written`
 - ⚖️ กรอบ PDPA (§6.6 ข้อ 8 ของแผน) ยังต้องให้ DPO/ฝ่ายกฎหมายทบทวน — มาตรการข้างบนเป็นเครื่องมือทางเทคนิค ไม่ใช่การรับรองความสอดคล้องตามกฎหมาย
 
+## Plan 7 Phase 5 — คำถามข้ามหลาย context (2026-09-19)
+
+- **ปิดเป็นค่าเริ่มต้น**; เปิดต่อ workspace: `PUT /admin/workspaces/{id}/multi-context` `{"enabled": true}` → `admin_config.multi_context_workspaces` (JSON list; อ่านไม่ได้ = ปิด); มีผลที่ `/api/v1/query` เมื่อผู้เรียกไม่ระบุ `context` — ไม่ต้อง migrate (`query_audit.request_group` ถูกเพิ่มเองเมื่อใช้ครั้งแรก)
+- orchestrator (`app/services/multi_context.py`) ถือผลของหลาย source พร้อมกัน — สิ่งที่บังคับ:
+  - context ผู้สมัคร = ใน **workspace เดียวกัน** และ**ในสิทธิ์ของ key** เท่านั้น; ชื่อ context อื่นไม่เข้า prompt ของตัวแตกคำถาม; ผลของตัวแตกถูกตรวจใน code (context ⊆ ผู้สมัคร)
+  - provider call ของตัวแตก (call เดียวที่อยู่นอก `QueryEngine.query`) รันใต้ policy **เข้มสุด**ของทุก source ที่เกี่ยว + **intersection** ของ `llm_provider_allowlist` (ว่าง = 403) — เห็นแค่คำถาม + ชื่อ/คำอธิบาย/keyword ของ context ไม่มีค่าจากข้อมูล
+  - คำถามย่อยทุกข้อรันผ่าน `QueryEngine.query` = scope / allowlist / pinned / `llm_data_policy` / audit ของแต่ละ source ตามเดิม; **ขั้นรวมคำตอบไม่มี LLM** → ค่าของ source ที่ ≠ `full` ไม่มีทางไปถึง provider (test sentinel: `tests/unit/test_multi_context.py`)
+  - ข้อย่อยถูกปฏิเสธ (scope 400 / allowlist 403 / policy 403) = ปฏิเสธทั้งคำถาม; ข้อย่อยล้ม = บอกว่าส่วนนั้นตอบไม่ได้ ไม่คำนวณข้ามส่วน
+  - ไม่ JOIN ข้าม source; อัตราส่วน/ส่วนต่างคำนวณใน code จากผลของคำถามย่อย เฉพาะเมื่องวดล่าสุดของ source เท่ากัน
+- audit: แถวแม่ + แถวคำถามย่อยใช้ `request_group` เดียวกัน (`GET /admin/query-audit?request_group=…`)
+
 ## API Key Rate Limiting (F4.4)
 
 - Daily limit: enforced in DB (`api_key_usage`).

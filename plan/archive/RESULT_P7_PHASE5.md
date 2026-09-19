@@ -4,7 +4,20 @@
 **Baseline:** pytest **946 passed, 3 skipped** (`venv/bin/python3.14 -m pytest -q -p no:cacheprovider`; 936 ของ Phase 4.5 + 10 จากงาน AuditService/admin tools ที่ merge เข้า main ระหว่างทาง) | backup `config.db` + `app.db` อยู่ใน scratchpad ของ session
 **Provider ของการวัด:** admin default (matcha, gpt-4.1) | ทุกการทดลองรันบน**สำเนา** config/app DB ที่ migrate แล้ว — DB จริงไม่ถูกแตะ
 
-> สถานะ: **ข้อ 1 (สำรวจ) + ข้อ 2 (แผนย่อย) เสร็จ — รอเจ้าของตัดสิน §3** ก่อนทำ orchestrator
+## สรุป
+
+| Exit criterion | ผล | ผ่าน? |
+|---|---|---|
+| ชุดคำถามข้ามโดเมน 10 ข้อ ถูก ≥ 8 (เทียบตัวเลขที่ dashboard ใช้) | baseline (flag ปิด) **0/10** → เปิด orchestrator **8/10, 8/10, 9/10** (3 รอบ LLM จริง; รอบ 3 ใช้เกณฑ์ให้คะแนนที่เข้มขึ้นหลัง review) — `eval_20260919_2200` (baseline), `_2203`, `_2209`, `_2221` | ✅ |
+| ข้อที่ตอบไม่ได้ต้องบอกว่าไม่ได้ ไม่เดาตัวเลข | orchestrator: ส่วนที่ล้ม/ถูกปฏิเสธ = "ตอบได้ k จาก n ส่วน" + ไม่คำนวณ (unit test); **แต่ข้อ 10 "กำไรของทั้งบริษัท" ยังถูกตอบด้วยยอดของ 2 สายงานขาย (−284.05 M) ทั้ง 3 รอบ** — เป็น pipeline context เดียว (`feed_ebt`) + contract ไม่มีกฎสำหรับคำถามนอกขอบเขต ไม่ใช่ orchestrator → ข้อเสนอถึง NT-Report (§7) | ⚠️ 9/10 ข้อ |
+| eval รายโดเมนไม่ลด (flag เปิด) | revenue **14/14**, expense **12/12**, sales **12/12**, ebt **35/36** — เท่าเดิมทุกโดเมน (P50 5.6 / 6.6 / 6.2 / 7.4 s) | ✅ |
+| latency คำถามข้ามโดเมน (เพดานที่เจ้าของรับ: P50 ≤ 15 s, P95 ≤ 30 s) | P50 **7.8–9.2 s**, P95 **11.5–12.1 s** (2 ใน 3 รอบ); รอบแรก P95 = 106 s จากข้อเดียวที่ gateway ค้าง (ไม่เกิดซ้ำ) — baseline context เดียว P50 6.3 s | ✅ |
+| flag ปิด = พฤติกรรมเดิม | unit test (ไม่มี provider call, `engine.query` ได้ argument เดิม); response เพิ่ม field `parts` / `computed` = `null` | ✅ |
+| sentinel ที่ขอบ HTTP: source A = `full`, B = `schema_only` → ไม่มีค่าของ B ใน request ใด | `test_no_value_of_the_restricted_source_reaches_a_provider` — QueryEngine → AIService → MatchaProvider จริง ทั้ง call แตกคำถามและคำถามย่อยทั้งสอง; ค่าของ A เดินทาง (ตัวควบคุมบวก), ของ B = 0, ผู้เรียกยังได้แถวของ B, ratio คำนวณใน code | ✅ |
+| review อิสระ (agent แยก อ่านอย่างเดียว) | **ไม่มี critical / high**; medium 3 → แก้ `d07f397`; low 2 (1 แก้, 1 รับไว้) — §6 | ✅ |
+| pytest | 946 → **997 passed**, 3 skipped (+51; ไม่มี test เดิมถูกแก้) | ✅ |
+
+**เจ้าของตัดสิน (2026-09-19):** orchestrator + template (ไม่มี LLM ในขั้นรวม) · ชุด 10 ข้อ = ชุดร่าง §2 · งวดไม่เท่ากัน = ตอบ + เตือน ไม่คำนวณข้าม · ratio + ส่วนต่างพร้อมป้าย "ไม่ใช่กำไร / EBT ทางการ" · ไม่ข้าม workspace · scope ที่ไม่ประกาศ = 400 ทั้งคำถาม · `/api/v1/query` ก่อน · P50 ≤ 15 s / P95 ≤ 30 s
 
 ## 1. สำรวจ
 
@@ -117,7 +130,7 @@ LLM จริง 8 ข้อ (key จำลองของ workspace `nt-report`
 - P5–P7 ที่ใช้คำของโดเมนเดียว ("EBT สะสมของแต่ละสายงาน", "ผลดำเนินงาน…") route ถูกอยู่แล้ว; ข้อที่ปนคำของหลายโดเมน ("ค่าใช้จ่ายและ EBT ของสายงานขาย 1") ต้องพึ่งขั้นตรวจผู้สมัครของ orchestrator (ข้อ 4a–4b: ตัวแตกคำถามตอบได้ว่า "context เดียวพอ")
 - งานแยกที่ควรทำ (ไม่ใช่ของ phase นี้): ทำความสะอาด keyword ของ workspace `default` (`ฝ่าย`, `หน่วยงาน`, `owner`, `user` ของ `transfer price`; `กำไร`/`profit` ของ `revenue`) พร้อมวัดด้วยชุด 989 ข้อนี้ — ทำผ่าน admin UI ได้ ไม่ต้องแก้ code
 
-## 3. รอเจ้าของตัดสิน
+## 3. ข้อที่เสนอให้เจ้าของตัดสิน — **รับข้อเสนอทุกข้อ (2026-09-19)**
 
 | # | เรื่อง | ข้อเสนอ |
 |---|---|---|
@@ -130,8 +143,83 @@ LLM จริง 8 ข้อ (key จำลองของ workspace `nt-report`
 | Q7 | latency / ช่องทาง | `/api/v1/query` ก่อน; เพดานที่เสนอ: P50 ≤ 15 s, P95 ≤ 30 s สำหรับ 2–3 context (แตก ~1.5 s + ข้อย่อยขนานกัน ~6–10 s) |
 | Q8 | **ใหม่:** "รายได้ − ค่าใช้จ่าย" ข้ามโดเมน | ratio (dashboard จริงทำ) คำนวณได้พร้อมสูตรและที่มา; **difference ระหว่าง revenue กับ expense ไม่เรียกว่ากำไร/EBT** — แสดงเป็น "ส่วนต่าง (ไม่ใช่ EBT ทางการ)"; คำถามที่ถาม "กำไร" ตรง ๆ ไป `feed_ebt` / บอกว่าไม่มี (P8) |
 
-## 4. ข้อเสนอถึง NT-Report (ร่าง — ย้ายเข้า `plan/PROMPT_NT_REPORT_P7.md` เมื่อเจ้าของเห็นชอบ)
+## 4. สิ่งที่ทำ (ข้อ 4) — `app/services/multi_context.py`
+
+```
+/api/v1/query (ไม่ส่ง context) → multi_context.ask
+  1. enabled_workspaces   admin_config.multi_context_workspaces (JSON list; อ่านไม่ได้ = ปิด)
+  2. candidates           deterministic: context ที่ keyword "เฉพาะตัว" อยู่ในคำถาม — workspace เดียว, ในสิทธิ์ของ key; < 2 = เส้นทางเดิม
+  3. _split               LLM 1 call (cheap model) ใต้ RequestPolicy = policy เข้มสุด + intersection ของ provider allowlist
+                          เห็น: คำถาม + ชื่อ/คำอธิบาย/keyword ของผู้สมัคร → parse_split ตรวจใน code (context ⊆ ผู้สมัคร, operation, operands)
+                          1 ส่วน = ใช้ context นั้นกับคำถามเดิม · ผิดรูป/ล้ม = เส้นทางเดิม (log ERROR)
+  4. engine.query × n     ขนานกัน; scope / allowed_contexts / user / key / channel เดิม + request_group
+                          ScopeError / ContextNotAllowed / LLMPolicyError ของข้อใด = ปฏิเสธทั้งคำถาม (400 / 403)
+  5. compute + combine    ใน code ไม่มี LLM: ที่มาของทุกส่วน (context, คำถามย่อย, งวด), ratio / difference เมื่อทุกส่วนได้ float ตัวเดียว
+                          และงวดล่าสุดของ source เท่ากัน, เตือนงวดไม่เท่ากัน, "ตอบได้ k จาก n ส่วน"
+  6. audit                แถวแม่ (context_name = a+b) + แถวลูก ใช้ request_group เดียวกัน
+```
+- เปิด/ปิด: `PUT /admin/workspaces/{id}/multi-context` (`GET /admin/workspaces` แสดงสถานะ) — config จริง**ยังไม่ได้เปิด** (เปิดเฉพาะบนสำเนาที่ใช้วัด)
+- response: `parts[]` (context, question, answer, row_count, error, data_as_of, + sql / data เมื่อขอ) + `computed` — `docs/PORTAL_INTEGRATION.md`
+- `QueryEngine._provider_for` แยกจาก `_execute_query` (ย้าย code เดิม) ให้การเลือก provider ตาม allowlist ใช้ชุดเดียวกัน; `query(request_group=…)`
+- ไม่ทำ (ตามแผน): cache ของคำตอบรวม, LLM สรุปรวม, JOIN ข้าม source, ข้าม workspace, chat / telegram
+
+## 5. Eval ข้ามโดเมน (ข้อ 5) — `python -m scripts.eval.run_eval --cross-domain scripts/eval/cross_domain_golden.json`
+
+ต่อข้อ: SQL ตรวจมือต่อ context รันกับ source ตอน eval (ไม่ฝังตัวเลข — build ใหม่ไม่ทำให้ golden เสีย) → ข้อถูกเมื่อ**ทุก**ตัวเลขที่คาดอยู่ในผลลัพธ์**แถวเดียว**ของส่วนที่มาจาก context ที่ยอมรับ + ผลคำนวณตรง + มีคำเตือนงวด (เมื่องวดต่าง) / ข้อ "ต้องตอบไม่ได้" ถูกเมื่อไม่มีตัวเลข
+
+| # | คำถาม | baseline | รอบ 1 | รอบ 2 | รอบ 3 |
+|---|---|---|---|---|---|
+| 1 | รายได้รวมและค่าใช้จ่ายรวม ก.ค. 2569 | ❌ | ✅ | ✅ | ✅ |
+| 2 | อัตราส่วนรายได้ต่อค่าใช้จ่าย ส.ค. 2569 (= 0.9305) | ❌ | ✅ | ✅ | ✅ |
+| 3 | ยอดขายจริงและรายได้ของ 3.Mobile | ❌ | ✅ | ✅ | ✅ |
+| 4 | ยอดขายจริงรวมกับรายได้รวม ต่างกันเท่าไหร่ (= 14,989,680.87) | ❌ | ✅ (106 s) | ✅ | ✅ |
+| 5 | รายได้ / ยอดขาย / ค่าใช้จ่ายของศูนย์ต้นทุน 2P10200 (3 context) | ❌ | ✅ | ✅ | ✅ |
+| 6 | ค่าใช้จ่ายและ EBT ของสายงานขาย 1 | ❌ | ✅ | ✅ | ✅ |
+| 7 | EBT สะสม + รายได้รวมสะสมทั้งบริษัท | ❌ | ✅ | ✅ | ✅ |
+| 8 | รายได้และค่าใช้จ่ายเดือนล่าสุด | ❌ | ✅ | ✅ | ✅ |
+| 9 | รายได้รวมและ EBT เดือนล่าสุด (งวดต่างกัน) | ❌ | ❌ | ❌ | ✅ |
+| 10 | กำไรของทั้งบริษัท (ต้องตอบว่าไม่มี) | ❌ | ❌ | ❌ | ❌ |
+| | **รวม** | **0/10** | **8/10** | **8/10** | **9/10** |
+| | P50 / P95 (s) | 6.3 / 9.5 | 9.2 / 106.4 | 8.9 / 11.5 | 7.8 / 12.1 |
+
+- ข้อ 9 (รอบ 1–2): คำถามย่อย "EBT เดือนล่าสุด" ได้ `ebt_month` **รายสายงาน 2 แถว** (−233.17 M, −50.88 M) แทนยอดรวม −284.05 M — ตัวเลขถูก แต่ไม่ใช่ยอดที่ถาม; เป็นพฤติกรรมของ context `feed_ebt` เอง (main view = ตารางรายสายงาน)
+- ข้อ 10: `SUM(ebt_month)` ของ 2 สายงานขาย แล้วอธิบายว่า "กำไรสุทธิรวมของบริษัท −284.05 ล้านบาท" — ผิดแบบมั่นใจ, context เดียว, ไม่ผ่าน orchestrator → §7 ข้อ 1
+- รอบ 1–2 ให้คะแนนด้วยเกณฑ์เดิม (ตัวเลขอยู่ในแถวใดก็ได้); รอบ 3 ใช้เกณฑ์แถวเดียว — baseline 0/10 ไม่เปลี่ยนภายใต้เกณฑ์ใด
+
+## 6. Review อิสระ (agent แยก อ่านอย่างเดียว, บน `3e7c80e` + `d0f22cb`)
+
+**ไม่พบ critical / high.** Medium — แก้แล้ว `d07f397`:
+- M1 `_scalar` รับ int ตัวเดียวในแถวเป็น measure (`SELECT month` แถวเดียว → ถูกนำไปหาร) → นับเฉพาะ **float ตัวเดียว** (ไม่รับ int / bool / NaN / inf) + test
+- M2 eval ให้คะแนนหลวม — ตัวเลขที่คาดอยู่ใน cell ใดของ breakdown ก็ผ่าน → นับเฉพาะผลลัพธ์แถวเดียว
+- M3 `_split` ล้ม (source resolve ไม่ได้ / provider ล่ม) → fallback ไปเส้นทาง context เดียว = อาการเดียวกับ bug ที่ feature นี้แก้ → คง fallback (ความล้มของตัวแตกไม่ใช่ความผิดของผู้เรียก) แต่ log เป็น **ERROR**
+
+Low: L1 race ของ lazy `ALTER TABLE` ระหว่างสอง process (เสีย audit 1 แถว + log ERROR; แบบเดียวกับ `ensure_api_key_columns`) — รับไว้; L2 docstring พูดถึง history ที่ `ask()` ไม่รับ → แก้ docstring
+
+ยืนยันว่าถูก: `generate_structured` + `generate_content` อยู่ใต้ `guard_call` ทั้งคู่ และ ContextVar ถูก reset ใน `finally`; policy เข้มสุด + intersection (ว่าง = ปฏิเสธก่อนเรียก); `_provider_for` ไม่คืน provider นอก allowlist แม้ผ่าน fallback; provider instance สร้างใหม่ทุกครั้ง (สลับ cheap model ไม่กระทบ request อื่น); `candidates` (ชื่อจริงตรงตัว, NULL = default, workspace ที่ปิดไม่นับ); resolve แบบไม่มี scope ใน `_split` อ่านแค่ policy; `asyncio.gather` = Task แยก → ContextVar ของคำถามย่อยไม่ปนกัน; refusal ของข้อย่อย → 400/403 ผ่าน `_find_refusal`; ไม่มี provider call ใน `combine` / `compute`; `sql` / `data` ของ `parts` ไม่ออกถ้าไม่ขอ; audit + DSR ครอบแถวแม่; flag ปิด = config read 1 ครั้งแล้วเส้นทางเดิม; session ที่ใช้ร่วมกันระหว่างคำถามย่อย (audit เขียนด้วย Session ใหม่ต่อครั้ง)
+
+## 7. ข้อเสนอถึง NT-Report (ฉบับเต็มอยู่ใน `plan/PROMPT_NT_REPORT_P7.md` หัวข้อ Phase 5)
 - P8: ไม่มีชุด "ผลดำเนินงานทั้งบริษัท / ทุกสายงาน" ใน DataFeed — `feed_ebt` = 2 สายงานขาย; ถ้า portal ต้องตอบ "กำไรทั้งบริษัท" ต้องมี dataset ทางการจากต้นทาง (ฝั่ง AI จะไม่คำนวณเอง)
 - ชื่อสายงานของ revenue ต่างจาก expense/ebt 1 ชื่อ (`กรรมการผู้จัดการใหญ่` vs `… บมจ.เอ็นที`) — ถ้าจะให้เทียบรายสายงานข้ามโดเมนด้วยชื่อ ควรใช้ชื่อชุดเดียวกัน หรือประกาศรหัสสายงานร่วม
 - sales ไม่มีสายงาน (มีแต่สายการขาย) → คำถาม "ยอดขายของสายงาน X" เทียบกับรายได้/ค่าใช้จ่ายของสายงานเดียวกันได้เฉพาะผ่าน `cost_center`
 - ebt `group_1` ใช้ `03.Mobile` ขณะที่ revenue/sales ใช้ `3.Mobile`
+
+## 8. สถานะ DB จริง
+`config.db` / `app.db` จริง**ไม่ถูกแตะ** (ทุกการวัดใช้สำเนาใน scratchpad ที่ migrate แล้ว) — multi-context ยัง**ปิด**ทุก workspace; migration ของ Phase 4.5 ยังไม่ได้รันบน DB จริง (ข้อค้างเดิม — Phase 5 ไม่ต้องการ migration เพิ่ม: `query_audit.request_group` เพิ่มเองเมื่อใช้ครั้งแรก)
+
+## 9. ค้าง / ข้อสังเกต
+- **เปิดใช้จริงกับ `nt-report`** = เจ้าของตัดสิน (`PUT /admin/workspaces/{id}/multi-context`) — แนะนำหลัง NT-Report รับข้อเสนอ §7 ข้อ 1 (กำไรทั้งบริษัท)
+- chat / telegram: ต้องออกแบบ follow-up ของคำตอบหลาย context ก่อน (chat เก็บ `context_name` เดียวให้คำถามถัดไป; `a+b` จะตก legacy DB)
+- workspace `default`: keyword ปนกัน (`ฝ่าย`/`หน่วยงาน` ของ `transfer price`, `กำไร` ของ `revenue`) → เปิด multi-context แล้วคำถาม context เดียวจำนวนมากจะถูกส่งไปแตก; ทำความสะอาด keyword ก่อน (วัดด้วยชุด 989 ข้อ)
+- คำถามซ้ำภายใน 5 วินาที → คำถามย่อยโดน dedup ("คำถามซ้ำ" ต่อส่วน); ไม่มี dedup ระดับคำถามแม่
+- คำอธิบายของแต่ละส่วนยังเป็นของ LLM ต่อข้อย่อย (ภายใต้ policy ของ source นั้น) — คำตอบรวมยาว; template สั้นต่อส่วน (`template_answers_enabled`) ช่วยได้เมื่อเปิด
+- ข้าม context ด้วยชื่อสายงาน / กลุ่มธุรกิจของ ebt ยังพึ่งการสะกดของแต่ละโดเมน (§1b) — `cost_center` เป็น key เดียวที่ตรงกันทั้ง 4 โดเมน
+
+## Commits
+```
+3ef27ad docs(P7-5): survey of cross-context questions, contract comparability, baseline of today's router; sub-plan and exit criteria
+0cc8304 docs(P7-5): option 1 measured on 989 real questions - de-duplicating overlapping router keywords regresses single-context routing, reverted
+3e7c80e feat(P7-5): questions across contexts - split per context, sub-questions through QueryEngine.query, answers combined by code
+d0f22cb feat(P7-5): eval of questions across contexts - run_eval --cross-domain, 10 questions scored against each source
+d619350 feat(P7-5): admin switches questions across contexts on and off per workspace
+d07f397 fix(P7-5): review - only a float is a part's measure; a failed split is logged as an error; the eval counts a number only in a one-row result
+```

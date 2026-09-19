@@ -286,6 +286,36 @@
 - `PIIRedactingFormatter` (PLAN_7 §11.5): ไม่เพิ่ม regex — ค่าธุรกิจใน log ลดที่ต้นทางแทน (verifier/lookup ไม่ทำงานกับ source ที่เข้ม); ที่ยังเหลือคือ literal ใน SQL ที่ log ระดับ INFO
 - app DB เข้ารหัส at-rest, TLS, credential store (§6.6 ข้อ 6) — เรื่อง deployment (Phase 7)
 
+## จาก Plan 7 Phase 5 — ถามข้ามหลาย context (2026-09-19)
+
+ผลลัพธ์/ตัวเลข/ตารางสำรวจ: `plan/archive/RESULT_P7_PHASE5.md`
+
+**เจ้าของตัดสิน (2026-09-19):** orchestrator + **template รวมคำตอบ (ไม่มี LLM ในขั้นรวม ทุก policy)** · ชุด 10 ข้อ = ชุดร่างใน RESULT (ความจริง = SQL ตรวจมือบน source ที่กระทบยอดกับ control totals) · งวดของ source ไม่เท่ากัน = **ตอบ + เตือน, ไม่คำนวณข้าม** · คำนวณข้ามโดเมนใน code ได้ทั้ง **ratio และส่วนต่าง พร้อมป้าย "ไม่ใช่กำไร / EBT ทางการ"** · **ไม่ข้าม workspace** · scope ที่ context หนึ่งในชุดไม่ประกาศ = **400 ทั้งคำถาม** · เปิดที่ **`/api/v1/query` ก่อน** · เพดาน latency P50 ≤ 15 s / P95 ≤ 30 s
+
+**Decision ที่ทำระหว่างทาง (ตรวจ/กลับได้):**
+- **flag = รายชื่อ workspace** (`admin_config.multi_context_workspaces`, JSON list; ไม่มี/อ่านไม่ได้ = ปิด) ไม่ใช่ bool — keyword ของ workspace `default` ยังปนกันมาก (`ฝ่าย`/`หน่วยงาน` ของ `transfer price`, `กำไร` ของ `revenue`) เปิดทั้งระบบ = คำถาม context เดียวจำนวนมากจะถูกส่งไปแตก; ตั้งผ่าน `PUT /admin/workspaces/{id}/multi-context` (endpoint ใหม่ — `PUT /admin/config/settings/{key}` รับเฉพาะตัวเลขใน allowlist)
+- **ผู้สมัคร = context ที่ keyword "เฉพาะตัว" อยู่ในคำถาม** (ไม่มี context อื่นใน workspace เดียวกัน + ในสิทธิ์ ใช้คำเดียวกัน) — marker ร่วม (`feed`, `dashboard`) จึงไม่นับ; ทั้งหมดมาจาก `schema_contexts.keywords` (DB) ไม่มีคำใน code
+- **ตัวแตกคำถามเป็น LLM 1 call แต่ผลถูกตรวจใน code:** context ⊆ ผู้สมัคร, ≤ 1 ข้อต่อ context, operation ∈ {none, ratio, difference} + operands ชี้ส่วนที่มีจริง; ผิดรูป = **กลับไปเส้นทาง context เดียว** (ไม่ใช่ error ของผู้เรียก); ตอบว่า context เดียวพอ = ใช้ context นั้นกับ**คำถามเดิม** (ได้ routing ของทางเลือก 1 มาด้วย เช่น "ค่าใช้จ่ายและ EBT ของสายงานขาย 1" → `feed_ebt` แทน `feed_expense`)
+- **provider call ของตัวแตกรันใต้ `RequestPolicy` ที่ตั้งเอง** = policy เข้มสุด + intersection ของ allowlist ของทุก source ผู้สมัคร (ว่าง = `LLMPolicyError` ก่อนเรียก); resolve source ตรงนี้**ไม่มี scope** (ใช้อ่าน policy เท่านั้น) — scope ถูกบังคับในคำถามย่อย
+- **`_provider_for`** แยกออกจาก `_execute_query` (ย้าย code เดิมทั้งก้อน) ให้ตัวแตกใช้กติกาเลือก provider ชุดเดียวกัน
+- **ตัวเลขที่ใช้คำนวณ = ตัวเลขตัวเดียวในแถวเดียวของส่วนนั้น** (float ตัวเดียวชนะ int เช่นคอลัมน์งวด); สอง measure ในแถว = ไม่คำนวณ (แสดงทั้งสองส่วนตามปกติ)
+- **ไม่มี cache ของคำตอบรวม** — คำถามย่อยมี cache ของตัวเองที่ผูก scope + allowlist + build + policy และเคารพ `stores_results` อยู่แล้ว
+- **audit:** `query_audit.request_group` (คอลัมน์ใหม่, เพิ่มเองแบบ lazy เหมือน `ensure_api_key_columns`) — แถวแม่ไม่มี SQL, แถวลูกมี
+- **response:** เพิ่ม `parts` + `computed` (null สำหรับคำตอบ context เดียว — field เดิมไม่เปลี่ยน)
+
+**พบระหว่างทาง:**
+- ⚠️ **การนับ keyword ซ้อน (`ค่า` + `ค่าใช้จ่าย` + `จ่าย` = 3 คะแนนจากคำเดียว) ค้ำ routing ของ `default` อยู่** — ลองเลิกนับซ้ำแล้ววัดกับคำถามจริง 989 ข้อ: แย่ลง 14, ดีขึ้น 3 → revert; งานแยก = ทำความสะอาด keyword ผ่าน admin UI พร้อมวัดด้วยชุดเดียวกัน
+- ⚠️ **pipeline context เดียวเรียกตัวเลขของโดเมนหนึ่งด้วยชื่อของอีกโดเมน** เมื่อคำถามพูดถึงสองโดเมน: `SUM(expense_value_thb) AS "รายได้ลบค่าใช้จ่าย"`, "รายได้รวม 1,206 M" (= รายได้ฐานยอดขายของ 2 สายงานใน `feed_ebt`; จริง 3,274 M) — baseline ของชุด 10 ข้อ = 0/10
+- ⚠️ **"กำไรของทั้งบริษัท" → `feed_ebt` ตอบ −284 M ของ 2 สายงานขายว่าเป็น "กำไรสุทธิรวมของบริษัท"** — context เดียว ไม่เกี่ยวกับ orchestrator; contract ไม่มีกฎสำหรับคำถามนอกขอบเขต → ข้อเสนอใน `PROMPT_NT_REPORT_P7.md`
+- sales publish งวด 202608 แล้ว (prompt ของ session ระบุ 202607) — เหลือ ebt ตัวเดียวที่ 202607
+- ข้ามโดเมนด้วย `cost_center` ได้ทั้ง 4 โดเมน; ด้วยชื่อสายงานได้เฉพาะ expense ↔ ebt (revenue ต่าง 1 ชื่อ, sales ไม่มีสายงาน); กลุ่มธุรกิจ revenue ↔ sales ตรงกัน แต่ ebt ใช้ `03.Mobile`
+- expense ↔ ebt กระทบยอดตรงทุกสตางค์เมื่อกรอง 2 สายงานเดียวกัน (1,490,506,698.33) — คำถาม "ค่าใช้จ่ายของสายงานขาย 1" ตอบจาก `feed_expense` หรือ `feed_ebt` ได้เลขเดียวกัน
+
+**ข้อค้าง (ไม่บล็อก):**
+- chat / telegram ยังเป็น context เดียว — chat เก็บ `context_name` ไว้ให้ follow-up; ชื่อแบบ `a+b` จะพาคำถามถัดไปตก legacy DB → ต้องออกแบบ follow-up ของคำตอบหลาย context ก่อนเปิด
+- คำถามซ้ำภายใน 5 วินาที: คำถามย่อยโดน dedup → ส่วนนั้นรายงาน "คำถามซ้ำ" (ไม่มี dedup ระดับคำถามแม่)
+- ตัวแตกคำถามเห็น `description` ของ context ซึ่งตอนนี้เป็นอังกฤษสั้น ๆ จาก contract ("NT Revenue Data Feed")
+
 ## จาก REMAIN-9 (2026-09-19)
 - 9.4: DDL ที่ train เพิ่มจะมีผลเมื่อ admin กด Sync Brain — ยังไม่ได้วัดผลต่อ eval
 - 9.5: `extract_hierarchy.py` เลิกรับ `--db` (อ่านข้อมูลผ่าน source ของ context, config ผ่าน CONFIG_DB_URL) — ไม่มี caller ที่ส่ง `--db`

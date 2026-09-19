@@ -41,6 +41,32 @@ Response มี `data_as_of` (Plan 7 Phase 2) — ความสดของข
 - portal ควรแสดงให้ผู้ใช้เห็น และเตือนเองเมื่อ `period` ไม่ตรงงวดของรายงานที่เปิดอยู่
 - ระหว่าง publish (แบบเดิมที่ไม่ atomic) คำถามได้ `error` "ข้อมูลกำลังถูก publish — กรุณาถามใหม่" ไม่ใช่คำตอบจากไฟล์ครึ่งไฟล์
 
+## คำถามข้ามหลาย context (Plan 7 Phase 5)
+
+ปิดเป็นค่าเริ่มต้น — เปิดต่อ workspace: `PUT /api/v1/admin/workspaces/{id}/multi-context` `{"enabled": true}` (เก็บใน `admin_config.multi_context_workspaces` = JSON list ของชื่อ workspace)
+
+เมื่อเปิด และ**ไม่ได้ส่ง `context`**: คำถามที่มีคำเฉพาะของ context มากกว่าหนึ่งตัว (ใน workspace เดียวกัน และในสิทธิ์ของ key) เช่น
+"รายได้และค่าใช้จ่ายเดือนกรกฎาคม 2569" จะถูกแตกเป็นคำถามย่อยต่อ context → แต่ละข้อรันผ่าน pipeline เดิม (scope / allowlist / policy / audit ของตัวเอง) → รวมคำตอบด้วย template ใน code (ไม่มี LLM ในขั้นรวม, ไม่ JOIN ข้าม source)
+
+Response ของคำถามแบบนี้:
+```json
+{"answer": "คำถามนี้ใช้ข้อมูลจาก 2 แหล่ง — … **1. DataFeed revenue (`feed_revenue`) — ข้อมูลถึงงวด 202608** …",
+ "context": "feed_revenue+feed_expense", "row_count": 2, "data_as_of": null,
+ "parts": [{"context": "feed_revenue", "question": "รายได้เดือนสิงหาคม 2569", "answer": "…", "row_count": 1,
+            "error": null, "data_as_of": {"period": 202608, "built_at": "…", "build_id": "…"}, "sql": "…", "data": [...]},
+           {"context": "feed_expense", "…": "…"}],
+ "computed": {"operation": "ratio", "operands": ["feed_revenue", "feed_expense"],
+              "values": [3434072699.62, 3690470021.65], "value": 0.9305}}
+```
+- `parts` = ที่มาของตัวเลขแต่ละตัว (`sql` / `data` มีเมื่อขอ `include_sql` / `include_data`; `max_rows` ต่อส่วน); `data_as_of` ระดับบน = `null` — ความสดอยู่ต่อส่วน; คำตอบ context เดียว: `parts` = `computed` = `null` (field อื่นเหมือนเดิม)
+- `computed` = อัตราส่วน / ส่วนต่าง ที่**คำนวณใน code** เมื่อคำถามขอ, ทุกส่วนได้ค่าเดียว และงวดล่าสุดของ source เท่ากัน; ส่วนต่างระหว่างสอง source ติดป้าย "ไม่ใช่กำไร / EBT ทางการ" (กำไรทางการมาจาก `feed_ebt`)
+- งวดล่าสุดของ source ไม่เท่ากัน (เช่น revenue 202608, ebt 202607) → คำตอบมีบรรทัดเตือน + งวดของแต่ละส่วน และ**ไม่คำนวณ**ข้ามส่วน
+- ส่วนใดตอบไม่ได้ → `parts[].error` + `error` ระดับบน + ข้อความ "ตอบได้ k จาก n ส่วน" — ไม่มีการเดาตัวเลข
+- `scope` ใช้กับทุกคำถามย่อย; context ใดในชุดไม่ประกาศ key นั้น → **400 ทั้งคำถาม**; context นอกสิทธิ์ของ key ไม่ถูกพิจารณาเลย และ 403 ของข้อย่อย = 403 ทั้งคำถาม; ไม่ข้าม workspace
+- latency ≈ 1 call แตกคำถาม + คำถามย่อยรันขนาน (วัด 2026-09-19: P50 ~9 s)
+- audit: แถวแม่ (`context_name` = `a+b`) + แถวของคำถามย่อย ใช้ `request_group` เดียวกัน (`GET /admin/query-audit?request_group=…`)
+- ช่องทาง: `/api/v1/query` เท่านั้น (chat / telegram ยังเป็น context เดียว)
+
 ## ออก API key ให้ portal
 
 ```python

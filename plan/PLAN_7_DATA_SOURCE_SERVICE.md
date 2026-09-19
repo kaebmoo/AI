@@ -1,6 +1,6 @@
 # Plan 7: Data Source as a Service — ถามข้อมูลจากแหล่งที่ผู้ใช้กำหนด โดยไม่ต้อง import
 
-**สถานะ:** 🟡 Phase 1 ✅ DONE (2026-09-18) — Phase 2 ✅ DONE (2026-09-19 — exit ครบ 4/4 โดเมน: revenue 14/14, expense 12/12, sales 12/12, ebt 22/24 บน contract 1.3.1) — Phase 3 ✅ DONE (2026-09-19) — Phase 4 ✅ DONE (2026-09-19; API ครบ, admin UI ยังไม่ทำ) — Phase 4.5 ✅ DONE (2026-09-19; `llm_data_policy` + provider allowlist ต่อ source, retention, DSR, audit ของคำถาม — API ครบ, admin UI ยังไม่ทำ, classification ต่อคอลัมน์เลื่อน) — Phase 5–7 ยังไม่เริ่ม | ผล: `plan/archive/RESULT_P7_PHASE{1,2,3,4,45}.md` | งานฝั่ง NT-Report: `plan/PROMPT_NT_REPORT_P7.md`
+**สถานะ:** 🟡 Phase 1 ✅ DONE (2026-09-18) — Phase 2 ✅ DONE (2026-09-19 — exit ครบ 4/4 โดเมน: revenue 14/14, expense 12/12, sales 12/12, ebt 22/24 บน contract 1.3.1) — Phase 3 ✅ DONE (2026-09-19) — Phase 4 ✅ DONE (2026-09-19; API ครบ, admin UI ยังไม่ทำ) — Phase 4.5 ✅ DONE (2026-09-19; `llm_data_policy` + provider allowlist ต่อ source, retention, DSR, audit ของคำถาม — API ครบ, admin UI ยังไม่ทำ, classification ต่อคอลัมน์เลื่อน) — Phase 5 ✅ DONE (2026-09-19; orchestrator หลัง flag ต่อ workspace ที่ `/api/v1/query`, eval ข้ามโดเมน 8–9/10 จาก baseline 0/10) — Phase 6–7 ยังไม่เริ่ม | ผล: `plan/archive/RESULT_P7_PHASE{1,2,3,4,45,5}.md` | งานฝั่ง NT-Report: `plan/PROMPT_NT_REPORT_P7.md`
 **ความสัมพันธ์กับแผนเดิม:** ต่อยอด/แทนที่บางส่วนของ `PLAN_6_SAAS.md` (ดู §9), รวม Plan 1B-C (MCP SSE + API key) ไว้ใน Phase 6
 **ผู้ใช้รายแรก:** NT-Report portal (F11 dashboard Q&A) — ปัจจุบันถูก disable เพราะยังไม่ได้ตั้ง key และข้อมูลใน AI ค้างที่ revenue 202605
 
@@ -174,7 +174,12 @@ Response เพิ่ม `data_as_of` ต่อ context ที่ใช้ (จ�
 - **Exit:** key ของ workspace A เรียก context ของ B ไม่ได้ (403) — มี test คุม
 - ตาม D8 (§12): workspace = การแบ่ง**ภายใน deployment เดียว** (หน่วยงานของ NT / หน่วยงานของลูกค้าหนึ่งราย) ไม่ใช่การแยกลูกค้าต่างองค์กร — query worker นอก process จึง**ไม่บังคับ** (ความเสียหายจำกัดใน deployment เดียว)
 
-### Phase 5 — ถามข้ามหลาย context (4–5 วัน)
+### Phase 5 — ถามข้ามหลาย context (4–5 วัน) — ✅ DONE 2026-09-19
+> ผล (`plan/archive/RESULT_P7_PHASE5.md`): สำรวจก่อน — คำถามข้ามโดเมนจริงของผู้ใช้เกือบทั้งหมดเป็น "ผลดำเนินงานรายกลุ่มธุรกิจ" ซึ่ง `pl_costtype` (ชุดที่รวมมาแล้ว) ตอบอยู่แล้ว = ทางเลือก 1;
+> dashboard ของ NT-Report ที่ข้ามโดเมนจริง (Forecast, OrgReport) **วางตัวเลขข้างกัน + หารกัน** ไม่มีหน้าใดเอารายได้ลบค่าใช้จ่ายข้ามโดเมนมาเรียกว่ากำไร → **ทางเลือก 2** `app/services/multi_context.py`:
+> ผู้สมัครแบบ deterministic (keyword เฉพาะตัว, workspace เดียว, ในสิทธิ์ของ key) → LLM แตกคำถาม 1 call (ตรวจผลใน code) → คำถามย่อยผ่าน `QueryEngine.query` เดิม → **รวมด้วย template ไม่มี LLM** + ratio/ส่วนต่างคำนวณใน code;
+> ปิดเป็นค่าเริ่มต้น เปิดต่อ workspace (`PUT /admin/workspaces/{id}/multi-context`), `/api/v1/query` เท่านั้น — eval 10 ข้อ: baseline **0/10** → **8/10, 8/10, 9/10** (P50 7.8–9.2 s, P95 ~12 s); eval รายโดเมนเท่าเดิม (14/12/12/35); review อิสระไม่พบ critical/high; ข้อ "กำไรทั้งบริษัท" ยังถูกตอบด้วยยอด 2 สายงานขาย (pipeline context เดียว + contract ไม่มีกฎ → ข้อเสนอใน `PROMPT_NT_REPORT_P7.md`);
+> ทางเลือก 1 ที่ชั้น router (เลิกนับ keyword ซ้อน) วัดกับคำถามจริง 989 ข้อแล้ว**แย่ลง** → ไม่ทำ. เหลือ: chat / telegram, keyword ของ workspace `default`
 - ทางเลือกตามลำดับความง่าย:
   1. **ใช้ context ที่รวมมาแล้วจากต้นทาง** (เช่น `feed_ebt` = รายได้ − ค่าใช้จ่ายระดับหน่วยงาน) — ไม่ต้องเขียน code แค่ router เลือกถูก
   2. **Orchestrator:** แตกคำถามเป็นคำถามย่อยต่อ context → รันแยก → LLM รวมคำตอบ (ไม่ JOIN ข้าม source ใน SQL เพราะ key ของแต่ละโดเมนไม่ตรงกัน)
@@ -311,7 +316,7 @@ DENY SELECT ON SCHEMA::dbo TO ai_reader; -- ตารางจริงห้า
 | CSV scan ทุก query ช้า | latency | Phase 1 วัดจริงก่อน; ถ้าเกินเกณฑ์ → cache เป็น Parquet ต่อ manifest sha256 (ยังนับเป็น zero-import เพราะ invalidate อัตโนมัติ) |
 | ต้นทางไม่มี contract | knowledge ต่ำ ตอบผิด | fallback เป็น auto-onboarding (context_onboarding ผ่าน adapter) + ติดป้ายว่า "ความแม่นยำยังไม่ผ่าน eval" |
 | AI server เข้าถึงที่เก็บข้อมูลไม่ได้ | ใช้ไม่ได้เลย | Phase 0 ต้องตัดสินเรื่องที่ตั้งข้อมูลก่อน |
-| คำถามข้ามโดเมนตอบผิดแบบมั่นใจ | ความน่าเชื่อถือ | Phase 5 เริ่มจาก context ที่รวมมาแล้ว; orchestrator ต้องแสดงที่มาของแต่ละตัวเลข |
+| คำถามข้ามโดเมนตอบผิดแบบมั่นใจ | ความน่าเชื่อถือ | Phase 5 เริ่มจาก context ที่รวมมาแล้ว; orchestrator ต้องแสดงที่มาของแต่ละตัวเลข — ✅ ทำแล้ว (ที่มา + งวดต่อส่วน, คำนวณใน code); เหลือ: คำถาม "ทั้งบริษัท" ที่ `feed_ebt` ตอบด้วยยอด 2 สายงานขาย (รอ contract) |
 | สองโหมด (import + file) อยู่คู่กัน | ดูแลยาก | ตั้งเกณฑ์เลิกโหมด import หลัง Phase 2 ผ่าน 2 รอบปิดงวด |
 
 ## 8. ผลต่อ NT-Report (ผู้เรียกรายแรก)
