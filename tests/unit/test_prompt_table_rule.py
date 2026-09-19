@@ -74,3 +74,26 @@ def test_sql_that_drops_the_filter_is_rejected():
     assert hybrid_flow.dropped_filter_error("SELECT SUM(amount) FROM feed_e_fact WHERE Division LIKE '%1%'", ["division"], "feed_e_total") is None
     assert hybrid_flow.dropped_filter_error(total, [], "feed_e_total") is None  # legacy / nothing required
     assert hybrid_flow.dropped_filter_error(total, None, "feed_e_total") is None
+
+
+def test_filter_pass_1_made_up_from_the_context_rules_is_not_required(tmp_path):
+    """ebt 1.3.1 says the report covers two divisions; Pass 1 turned that into a division filter on
+    a question that names none, and the guard rejected the correct totals SQL until retries ran out."""
+    engine = _config_with_columns(tmp_path)
+    made_up = {"filters": [{"column": "division", "operator": "IN", "value": ["สายงานขาย 1", "สายงานขาย 2"]}]}
+    asked = {"filters": [{"column": "division", "operator": "LIKE", "value": "%สายงานขาย 1%"}]}
+    total_q, division_q = "รายได้ตามรายงาน EBT สะสมถึงเดือนกันยายน 2568", "กำไร EBT ของสายงานขาย 1 เดือนกันยายน 2568"
+    assert hybrid_flow.unfilterable_columns(made_up, "feed_e_total", engine, total_q) == ([], [])
+    assert hybrid_flow.unfilterable_columns(asked, "feed_e_total", engine, division_q)[0] == ["division"]
+    assert hybrid_flow.unfilterable_columns({"dimensions": ["division"]}, "feed_e_total", engine, "รายได้แยกตามสายงาน")[0] == ["division"]
+
+
+def test_pass_1_is_told_the_columns_only_the_other_table_has(tmp_path):
+    """Pass 1 saw '(ใช้ตาราง <main view>)' only, and on some runs left the division out of the
+    intent altogether — nothing downstream can enforce a filter that was never extracted."""
+    engine = _config_with_columns(tmp_path)
+    hint = hybrid_flow.intent_table_hint("feed_e_total", engine)
+    assert "feed_e_fact" in hint and "division" in hint and "cost_center" in hint
+    assert "time_key" not in hint and "feed_e_dim" not in hint  # main-view columns / uninstructed tables add nothing
+    assert hybrid_flow.intent_table_hint("revenue_search", engine) == ""  # legacy: prompt unchanged
+    assert hybrid_flow.intent_table_hint("t", create_engine("sqlite://")) == ""

@@ -82,25 +82,46 @@ def table_rule(context_table: str, config_engine=None) -> str:
             f"ระบุให้ใช้ (ห้ามใช้ตารางอื่นนอกจากนี้)")
 
 
-def unfilterable_columns(intent: Dict, context_table: str, config_engine=None) -> tuple[List[str], List[str]]:
+def intent_table_hint(context_table: str, config_engine=None) -> str:
+    """Pass 1 line: the columns only the context's other tables have. Pass 1 was told the main view
+    alone and on some runs left a named division out of the intent — nothing downstream can enforce
+    a filter that was never extracted. Contexts without such tables: "" (prompt unchanged)."""
+    tables = _context_tables(context_table, config_engine)
+    main_columns = {c.lower() for c in tables.get(context_table, [])}
+    lines = [f"{t} (คอลัมน์: {', '.join(c for c in cols if c.lower() not in main_columns)})"
+             for t, cols in tables.items() if t != context_table and cols]
+    if not lines:
+        return ""
+    return ("\nตารางอื่นของ context นี้: " + "; ".join(lines) + " — ถ้าคำถามระบุหน่วยงาน/รายการ/มิติที่ตรงกับคอลัมน์เหล่านี้ "
+            "ต้องใส่เป็น filter หรือ dimension ด้วยชื่อคอลัมน์นั้นเสมอ แม้ตารางหลักไม่มีคอลัมน์นั้น (ห้ามละไว้)")
+
+
+def unfilterable_columns(intent: Dict, context_table: str, config_engine=None, question: Optional[str] = None) -> tuple[List[str], List[str]]:
     """(columns, tables): intent filter/dimension columns the main view lacks but another table of
     the context has, and those tables. A name no table has is left alone — Pass 1 often names a
-    column loosely (business_unit for bu) and Pass 2 maps it. Legacy contexts: always ([], [])."""
+    column loosely (business_unit for bu) and Pass 2 maps it. Legacy contexts: always ([], []).
+    With the question given, a filter counts only when its value occurs in it: Pass 1 also turns
+    context rules into filters ("the report covers two divisions") that nobody asked for."""
     tables = _context_tables(context_table, config_engine)
     main_columns = {c.lower() for c in tables.get(context_table, [])}
     if not main_columns:
         return [], []
-    wanted = {str(f.get("column", "")).lower() for f in intent.get("filters") or [] if isinstance(f, dict)}
+    def asked(value) -> bool:
+        values = value if isinstance(value, list) else [value]
+        return question is None or any(str(v).strip("%'\" ").lower() in question.lower() for v in values if str(v).strip("%'\" "))
+
+    wanted = {str(f.get("column", "")).lower() for f in intent.get("filters") or []
+              if isinstance(f, dict) and asked(f.get("value"))}
     wanted |= {str(d).lower() for d in intent.get("dimensions") or []}
     others = {t: {c.lower() for c in cols} for t, cols in tables.items() if t != context_table}
     missing = sorted(c for c in wanted - main_columns if c and any(c in cols for cols in others.values()))
     return missing, [t for t, cols in others.items() if missing and set(missing) <= cols]
 
 
-def unfilterable_rule(intent: Dict, context_table: str, config_engine=None) -> str:
+def unfilterable_rule(intent: Dict, context_table: str, config_engine=None, question: Optional[str] = None) -> str:
     """Pass 2 line for those columns. Without it the model kept the main view and dropped the
     filter: one cost center was answered with the all-division total."""
-    missing, fits = unfilterable_columns(intent, context_table, config_engine)
+    missing, fits = unfilterable_columns(intent, context_table, config_engine, question)
     if not missing:
         return ""
     where = f"ต้องใช้ตาราง {', '.join(fits)} ตามกฎของ context" if fits else "ไม่มีตารางเดียวที่มีครบ"
@@ -563,7 +584,7 @@ async def build_first_attempt_prompt(
         if intent_json:
             logger.info("Two-Pass Mode: Pass 1 success. Building Pass 2 prompt.")
             if required_columns is not None:
-                required_columns[:] = unfilterable_columns(intent_json, context_table)[0]
+                required_columns[:] = unfilterable_columns(intent_json, context_table, question=question)[0]
             user_prompt = build_pass2_prompt(
                 service=service,
                 question=question,
@@ -1107,7 +1128,7 @@ async def extract_intent(
 
 คำถามใหม่ (follow-up): {question}
 
-**บริบท:** ข้อมูล{context_thai} (ใช้ตาราง {context_table})
+**บริบท:** ข้อมูล{context_thai} (ใช้ตาราง {context_table}){intent_table_hint(context_table)}
 
 ---
 **Task:** อัปเดต intent เดิมตามคำถามใหม่ — คงค่า filter/dimension ที่ไม่ถูกกล่าวถึงไว้ตามเดิม (inherit) และเปลี่ยนเฉพาะส่วนที่คำถามใหม่ระบุ
@@ -1116,7 +1137,7 @@ async def extract_intent(
     else:
         prompt_header = f"""คำถาม: {question}
 
-**บริบท:** ข้อมูล{context_thai} (ใช้ตาราง {context_table}){history_context}
+**บริบท:** ข้อมูล{context_thai} (ใช้ตาราง {context_table}){intent_table_hint(context_table)}{history_context}
 
 {rag_context}
 
@@ -1280,7 +1301,7 @@ def build_pass2_prompt(
 **สร้าง SQL จาก Structured Intent ข้างต้น:**
 สำคัญ:
 - {table_rule(context_table)}
-{unfilterable_rule(intent, context_table)}- **ยึดตาม Structured Intent เป็นหลัก** — Dimensions คือ GROUP BY, Filters คือ WHERE
+{unfilterable_rule(intent, context_table, question=question)}- **ยึดตาม Structured Intent เป็นหลัก** — Dimensions คือ GROUP BY, Filters คือ WHERE
 - ห้ามเพิ่ม WHERE filter ที่ไม่อยู่ใน Filters ข้างต้น (ยกเว้น time_range)
 - Dimensions (GROUP BY) columns ห้ามใช้เป็น WHERE filter
 - ถ้ามี "Actual Values Found" → ใช้เป็นค่าอ้างอิงสำหรับ filter ที่ระบุไว้แล้วเท่านั้น
