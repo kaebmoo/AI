@@ -115,6 +115,17 @@ class TestSyncKnowledge:
         assert dk.main_view_dataset({**CONTRACT, "control_totals": {"source": "fact_other"}}) == "fact_other"
         assert dk.main_view_dataset(CONTRACT) == "fact_bu_monthly"
 
+    def test_dimensionless_main_view_points_at_the_detail_fact(self, config_engine):
+        """ebt: the main view is fact_ebt_total_monthly (one row per period). 'EBT of division X'
+        answered the all-division total until the instruction named the detail fact."""
+        _sync(config_engine, {**CONTRACT, "control_totals": {"source": "fact_total"}})
+        with config_engine.connect() as conn:
+            instr = conn.execute(text("SELECT instruction_th FROM schema_contexts")).scalar_one()
+        assert "feed_x_fact_total" in instr and "ไม่มีมิติ" in instr
+        assert "feed_x_fact_bu_monthly (คอลัมน์: year_month, bu, revenue)" in instr
+        assert dk.detail_table_line("x", {**CONTRACT, "control_totals": {"source": "fact_total", "bg_key": "bu"}}) == ""
+        assert dk.detail_table_line("x", CONTRACT) == ""
+
 
 def _contract_file(tmp_path, contract=CONTRACT):
     path = tmp_path / "x.yaml"

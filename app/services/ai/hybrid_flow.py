@@ -42,6 +42,30 @@ def build_history_context(history: Optional[List[Dict]]) -> str:
     return "\n\n**ประวัติสนทนาก่อนหน้า (ใช้เพื่อเข้าใจบริบท follow-up):**\n" + "\n".join(parts)
 
 
+def table_rule(context_table: str, config_engine=None) -> str:
+    """The prompt's table pin. A context is answered from its main view — plus any table of its own
+    source that its instruction names (a file source whose main view is a dimensionless totals
+    table sends per-division questions to the detail fact). No such table = the pin as it always was.
+    """
+    pin = f"ต้องใช้ตาราง {context_table} เท่านั้น"
+    try:
+        from sqlalchemy import text
+
+        if config_engine is None:
+            from app.db.session import config_engine
+        with config_engine.connect() as conn:
+            extra = [row[0] for row in conn.execute(text(
+                "SELECT st.table_name FROM schema_contexts sc JOIN source_tables st ON st.source_id = sc.source_id "
+                "WHERE sc.main_view = :t AND sc.is_active = 1 AND st.is_active = 1 AND st.table_name != :t "
+                "AND instr(sc.instruction_th, st.table_name) > 0 ORDER BY st.table_name"), {"t": context_table})]
+    except Exception:  # registry not migrated / config unreachable: keep the pin
+        return pin
+    if not extra:
+        return pin
+    return (f"ใช้ตาราง {context_table} เป็นหลัก — ใช้ {', '.join(extra)} แทนได้เฉพาะกรณีที่คำแนะนำของ context "
+            f"ระบุให้ใช้ (ห้ามใช้ตารางอื่นนอกจากนี้)")
+
+
 def build_initial_user_prompt(
     question: str,
     context_table: str,
@@ -65,7 +89,7 @@ def build_initial_user_prompt(
 - มี semantic mapping ใดที่ตรงกับ keyword ในคำถาม?
 
 **ขั้นตอนที่ 2 — SQL:**
-สำคัญ: ต้องใช้ตาราง {context_table} เท่านั้น
+สำคัญ: {table_rule(context_table)}
 ถ้ามี "Actual Values Found" → ใช้ column/value จากนั้น ห้ามเดาเอง
 
 ```sql
@@ -94,7 +118,7 @@ Error: {last_error.get('error', '')}
 - ต้องแก้ไขส่วนใดของ SQL?
 
 **SQL ที่แก้ไขแล้ว:**
-สำคัญ: ต้องใช้ตาราง {context_table} เท่านั้น
+สำคัญ: {table_rule(context_table)}
 
 ```sql
 <SQL ที่แก้ไขแล้ว>
@@ -1190,7 +1214,7 @@ def build_pass2_prompt(
 {value_matches_text}
 **สร้าง SQL จาก Structured Intent ข้างต้น:**
 สำคัญ:
-- ต้องใช้ตาราง {context_table} เท่านั้น
+- {table_rule(context_table)}
 - **ยึดตาม Structured Intent เป็นหลัก** — Dimensions คือ GROUP BY, Filters คือ WHERE
 - ห้ามเพิ่ม WHERE filter ที่ไม่อยู่ใน Filters ข้างต้น (ยกเว้น time_range)
 - Dimensions (GROUP BY) columns ห้ามใช้เป็น WHERE filter

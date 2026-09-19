@@ -9,7 +9,8 @@ Everything about the data comes from the contract's control_totals (Plan 7 Phase
 source / grand_total datasets, period_key, bg_key, group_keys and measures
 (agg 'sum' → monthly questions, 'point_in_time' → YTD questions), plus `filter`
 ({column: value} → AND column = value in every SQL). A source without bg_key (ebt's
-fact_ebt_total_monthly) is total-only: one question per measure per period.
+fact_ebt_total_monthly) is total-only: one question per measure per period, worded as
+monthly or YTD per measure (MEASURE_WORDS, else the measure's agg).
 A contract without control_totals gets no golden — there is nothing to check against.
 
 Marker: category = 'feed_<domain>' — delete-and-regen is clean.
@@ -39,13 +40,24 @@ QUESTION_WORDS = {
     "expense": ("ค่าใช้จ่าย", "กลุ่ม"),
     "sales": ("ยอดขาย", "กลุ่มธุรกิจ"),
 }
-# Total-only sources ask once per measure: measure name → what the question calls it.
-# Default only — an unknown measure is asked by its contract note.
+# Total-only sources ask once per measure: measure name → (what the question calls it, is it YTD).
+# Default only — an unknown measure is asked by its contract note, YTD when agg is point_in_time.
+# The question must say which one it wants: a YTD value asked as "เดือน" scores a wrong-meaning answer right.
 MEASURE_WORDS = {
-    "sales_base_revenue": "รายได้ (ฐานยอดขาย) ในรายงาน EBT",
-    "expense": "ค่าใช้จ่ายในรายงาน EBT",
-    "ebt": "กำไร (ขาดทุน) ก่อนภาษี EBT",
+    "sales_base_revenue": ("รายได้ (ฐานยอดขาย) ตามรายงาน EBT", True),
+    "expense": ("ค่าใช้จ่ายตามรายงาน EBT", True),
+    "ebt": ("กำไร (ขาดทุน) EBT ตามรายงาน EBT", True),
+    "sales_base_revenue_month": ("รายได้ (ฐานยอดขาย) ตามรายงาน EBT", False),
+    "expense_month": ("ค่าใช้จ่ายตามรายงาน EBT", False),
+    "ebt_month": ("กำไร (ขาดทุน) EBT ตามรายงาน EBT", False),
 }
+
+
+def total_question(measure: dict, year_month: int) -> str:
+    default = ((measure.get("note") or measure["name"]).split(",")[0], measure.get("agg") == "point_in_time")
+    noun, ytd = MEASURE_WORDS.get(measure["name"], default)
+    when = f"สะสมตั้งแต่ต้นปีถึงเดือน{thai_period(year_month)}" if ytd else f"ของเดือน{thai_period(year_month)}"
+    return f"{noun} {when} เท่าไร"
 
 
 def thai_period(year_month: int) -> str:
@@ -102,10 +114,8 @@ def build_examples(controls: pd.DataFrame, domain: str, contract: dict) -> list:
 
     examples = []
     periods = pick_periods(controls[period_key].tolist())
-    if not bg_key:  # total-only source: every sum measure, per period
-        return [(f"{MEASURE_WORDS.get(m['name'], m.get('note') or m['name'])} รวมทั้งบริษัทเดือน{thai_period(ym)} เท่าไร",
-                 total_sql(m["name"], ym))
-                for ym in periods for m in measures if m.get("agg", "sum") == "sum"]
+    if not bg_key:  # total-only source: every measure, per period (one row per period — never summed)
+        return [(total_question(m, ym), total_sql(m["name"], ym)) for ym in periods for m in measures]
     rows = controls[(controls["measure"] == monthly) & (controls[bg_key] != "__ALL__")] if monthly else controls[:0]
 
     for ym in periods if monthly else []:

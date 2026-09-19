@@ -45,6 +45,21 @@ def main_view_dataset(contract: dict) -> str:
     return (contract.get("control_totals") or {}).get("source") or contract["primary_dataset"]
 
 
+def detail_table_line(domain: str, contract: dict) -> str:
+    """For a main view that is a totals table with no dimensions (control totals without bg_key —
+    ebt's fact_ebt_total_monthly): the prompt steers the model to the main view, so a question
+    about one division got the all-division total. Name the detail fact and its columns.
+    (Tried the detail fact as main view instead: the model re-derived the official totals, 5/24.)"""
+    spec = contract.get("control_totals") or {}
+    primary = contract["primary_dataset"]
+    if not spec or spec.get("bg_key") or spec.get("source") == primary:
+        return ""
+    columns = next((d["columns"] for d in contract["datasets"] if d["name"] == primary), [])
+    return (f"ตารางหลัก feed_{domain}_{spec['source']} เป็นยอดรวมทางการต่องวด **ไม่มีมิติ** (หน่วยงาน/รายการ) — "
+            f"ถ้าคำถามระบุหน่วยงานหรือรายการ ห้ามใช้ตารางหลัก ให้ใช้ feed_{domain}_{primary} "
+            f"(คอลัมน์: {', '.join(c['name'] for c in columns)}) ตามกฎข้างล่าง\n")
+
+
 def register_context(conn, domain: str, contract: dict) -> str:
     """Upsert schema_contexts row for feed_<domain>."""
     context_name = f"feed_{domain}"
@@ -60,6 +75,7 @@ def register_context(conn, domain: str, contract: dict) -> str:
     instruction = (
         f"ข้อมูลจาก DataFeed (schema {contract['schema_version']}) — {contract.get('units', '')}\n"
         f"{period_line}\n"
+        f"{detail_table_line(domain, contract)}"
         f"กฎสำคัญ:\n{rules_text}"
     )
     params = {"name": context_name, "main_view": main_view, "desc": contract.get("title", ""),

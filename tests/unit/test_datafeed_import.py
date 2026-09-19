@@ -284,3 +284,17 @@ class TestControlTotalsFilterAndTotalOnly:
             f"SELECT {m} FROM feed_e_fact_total WHERE time_key = 202607"
             for m in ("sales_base_revenue", "expense", "ebt")]
         assert len({q for q, _ in examples}) == 3  # one distinct question per measure
+
+    def test_golden_asks_monthly_and_ytd_measures_differently(self):
+        """ebt 1.3.0: ebt = YTD, ebt_month = the month. A question that says 'เดือน' for a YTD
+        value scores a wrong-meaning answer as right."""
+        import pandas as pd
+        from scripts.datafeed.gen_golden_from_controls import build_examples
+
+        spec = {**self.EBT["control_totals"], "measures": [
+            {"name": "ebt", "agg": "sum"}, {"name": "ebt_month", "agg": "sum"},
+            {"name": "other_ytd", "agg": "point_in_time", "note": "ยอดอื่น, บาท"}]}
+        controls = pd.DataFrame({"time_key": [202607] * 3, "measure": ["ebt", "ebt_month", "other_ytd"], "value": [1.0, 2.0, 3.0]})
+        q = {sql.split()[1]: question for question, sql in build_examples(controls, "e", {**self.EBT, "control_totals": spec})}
+        assert "สะสม" in q["ebt"] and "สะสม" not in q["ebt_month"] and "ของเดือนกรกฎาคม 2569" in q["ebt_month"]
+        assert "สะสม" in q["other_ytd"] and q["other_ytd"].startswith("ยอดอื่น")  # unknown measure: note + agg
