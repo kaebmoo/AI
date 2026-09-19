@@ -29,3 +29,48 @@ def test_pin_unchanged_without_instructed_tables(tmp_path):
     assert hybrid_flow.table_rule("feed_e_total", engine) == "ต้องใช้ตาราง feed_e_total เท่านั้น"
     assert hybrid_flow.table_rule("revenue_search", engine) == "ต้องใช้ตาราง revenue_search เท่านั้น"  # legacy
     assert hybrid_flow.table_rule("t", create_engine("sqlite://")) == "ต้องใช้ตาราง t เท่านั้น"  # registry not migrated
+
+
+def _config_with_columns(tmp_path):
+    engine = _config(tmp_path, "ถ้าถามรายหน่วยงานให้ใช้ feed_e_fact")
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE source_tables ADD COLUMN columns TEXT"))
+        conn.execute(text("""UPDATE source_tables SET columns = CASE table_name
+            WHEN 'feed_e_total' THEN '[{"name": "time_key"}, {"name": "ebt"}]'
+            ELSE '[{"name": "time_key"}, {"name": "division"}, {"name": "cost_center"}, {"name": "amount"}]' END"""))
+    return engine
+
+
+def test_filter_the_main_view_cannot_apply_sends_the_query_to_the_table_that_can(tmp_path):
+    """Asked for one cost center, Pass 2 dropped the filter (the totals main view has no such
+    column) and answered the all-division total as that cost center's — silently."""
+    engine = _config_with_columns(tmp_path)
+    intent = {"filters": [{"column": "cost_center", "operator": "LIKE", "value": "%2P1%"},
+                          {"column": "time_key", "operator": "=", "value": 202607}], "dimensions": ["Division"]}
+    rule = hybrid_flow.unfilterable_rule(intent, "feed_e_total", engine)
+    assert "cost_center" in rule and "division" in rule and "time_key" not in rule.split("→")[0]
+    assert "feed_e_fact" in rule and "ห้ามทิ้ง" in rule
+
+
+def test_no_rule_when_the_main_view_has_every_column_or_the_context_is_legacy(tmp_path):
+    engine = _config_with_columns(tmp_path)
+    assert hybrid_flow.unfilterable_rule({"filters": [{"column": "time_key", "operator": "=", "value": 1}]}, "feed_e_total", engine) == ""
+    assert hybrid_flow.unfilterable_rule({"filters": [{"column": "anything", "operator": "=", "value": 1}]}, "revenue_search", engine) == ""
+    assert hybrid_flow.unfilterable_rule({"filters": [{"column": "x"}]}, "t", create_engine("sqlite://")) == ""
+
+
+def test_a_name_no_table_has_is_left_to_pass_2(tmp_path):
+    """Pass 1 names columns loosely (business_unit for bu) and Pass 2 maps them — not an error."""
+    engine = _config_with_columns(tmp_path)
+    intent = {"filters": [{"column": "region", "operator": "=", "value": "N"}]}
+    assert hybrid_flow.unfilterable_rule(intent, "feed_e_total", engine) == ""
+    assert hybrid_flow.unfilterable_columns(intent, "feed_e_total", engine) == ([], [])
+
+
+def test_sql_that_drops_the_filter_is_rejected():
+    """The prompt line alone did not hold: 'EBT of division 1' still came back as the total."""
+    total = "SELECT SUM(ebt) FROM feed_e_total WHERE time_key = 202607"
+    assert "division" in hybrid_flow.dropped_filter_error(total, ["division"], "feed_e_total")
+    assert hybrid_flow.dropped_filter_error("SELECT SUM(amount) FROM feed_e_fact WHERE Division LIKE '%1%'", ["division"], "feed_e_total") is None
+    assert hybrid_flow.dropped_filter_error(total, [], "feed_e_total") is None  # legacy / nothing required
+    assert hybrid_flow.dropped_filter_error(total, None, "feed_e_total") is None

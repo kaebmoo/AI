@@ -42,28 +42,80 @@ def build_history_context(history: Optional[List[Dict]]) -> str:
     return "\n\n**ประวัติสนทนาก่อนหน้า (ใช้เพื่อเข้าใจบริบท follow-up):**\n" + "\n".join(parts)
 
 
-def table_rule(context_table: str, config_engine=None) -> str:
-    """The prompt's table pin. A context is answered from its main view — plus any table of its own
-    source that its instruction names (a file source whose main view is a dimensionless totals
-    table sends per-division questions to the detail fact). No such table = the pin as it always was.
-    """
-    pin = f"ต้องใช้ตาราง {context_table} เท่านั้น"
+def _context_tables(context_table: str, config_engine=None) -> Dict[str, List[str]]:
+    """{table: columns} of the file source behind a main view: the main view itself plus the tables
+    its context's instruction names. Empty = legacy context / registry not migrated / config unreachable."""
     try:
         from sqlalchemy import text
 
         if config_engine is None:
             from app.db.session import config_engine
         with config_engine.connect() as conn:
-            extra = [row[0] for row in conn.execute(text(
+            names = [row[0] for row in conn.execute(text(
                 "SELECT st.table_name FROM schema_contexts sc JOIN source_tables st ON st.source_id = sc.source_id "
-                "WHERE sc.main_view = :t AND sc.is_active = 1 AND st.is_active = 1 AND st.table_name != :t "
-                "AND instr(sc.instruction_th, st.table_name) > 0 ORDER BY st.table_name"), {"t": context_table})]
-    except Exception:  # registry not migrated / config unreachable: keep the pin
-        return pin
+                "WHERE sc.main_view = :t AND sc.is_active = 1 AND st.is_active = 1 "
+                "AND (st.table_name = :t OR instr(sc.instruction_th, st.table_name) > 0) ORDER BY st.table_name"),
+                {"t": context_table})]
+            tables: Dict[str, List[str]] = {name: [] for name in names}
+            try:  # columns: only the unfilterable rule needs them
+                for name, columns in conn.execute(text(
+                        "SELECT st.table_name, st.columns FROM schema_contexts sc JOIN source_tables st "
+                        "ON st.source_id = sc.source_id WHERE sc.main_view = :t AND sc.is_active = 1"), {"t": context_table}):
+                    if name in tables:
+                        tables[name] = [c["name"] for c in json.loads(columns or "[]")]
+            except Exception:
+                pass
+            return tables
+    except Exception:
+        return {}
+
+
+def table_rule(context_table: str, config_engine=None) -> str:
+    """The prompt's table pin. A context is answered from its main view — plus any table of its own
+    source that its instruction names (a file source whose main view is a dimensionless totals
+    table sends per-division questions to the detail fact). No such table = the pin as it always was.
+    """
+    extra = [t for t in _context_tables(context_table, config_engine) if t != context_table]
     if not extra:
-        return pin
+        return f"ต้องใช้ตาราง {context_table} เท่านั้น"
     return (f"ใช้ตาราง {context_table} เป็นหลัก — ใช้ {', '.join(extra)} แทนได้เฉพาะกรณีที่คำแนะนำของ context "
             f"ระบุให้ใช้ (ห้ามใช้ตารางอื่นนอกจากนี้)")
+
+
+def unfilterable_columns(intent: Dict, context_table: str, config_engine=None) -> tuple[List[str], List[str]]:
+    """(columns, tables): intent filter/dimension columns the main view lacks but another table of
+    the context has, and those tables. A name no table has is left alone — Pass 1 often names a
+    column loosely (business_unit for bu) and Pass 2 maps it. Legacy contexts: always ([], [])."""
+    tables = _context_tables(context_table, config_engine)
+    main_columns = {c.lower() for c in tables.get(context_table, [])}
+    if not main_columns:
+        return [], []
+    wanted = {str(f.get("column", "")).lower() for f in intent.get("filters") or [] if isinstance(f, dict)}
+    wanted |= {str(d).lower() for d in intent.get("dimensions") or []}
+    others = {t: {c.lower() for c in cols} for t, cols in tables.items() if t != context_table}
+    missing = sorted(c for c in wanted - main_columns if c and any(c in cols for cols in others.values()))
+    return missing, [t for t, cols in others.items() if missing and set(missing) <= cols]
+
+
+def unfilterable_rule(intent: Dict, context_table: str, config_engine=None) -> str:
+    """Pass 2 line for those columns. Without it the model kept the main view and dropped the
+    filter: one cost center was answered with the all-division total."""
+    missing, fits = unfilterable_columns(intent, context_table, config_engine)
+    if not missing:
+        return ""
+    where = f"ต้องใช้ตาราง {', '.join(fits)} ตามกฎของ context" if fits else "ไม่มีตารางเดียวที่มีครบ"
+    return (f"- ⚠️ คอลัมน์ {', '.join(missing)} ไม่มีในตาราง {context_table} → {where} — **ห้ามทิ้ง filter/dimension นี้** "
+            f"แล้วตอบด้วยยอดรวมของ {context_table}; ถ้ากฎของ context ไม่บอกวิธีคำนวณ ให้ตอบว่าไม่มีตัวเลขที่รับรอง ห้ามเดา\n")
+
+
+def dropped_filter_error(sql_query: str, required_columns: Optional[List[str]], context_table: str) -> Optional[str]:
+    """The prompt line alone did not hold (the division filter was still dropped and the total
+    presented as that division's) — so the SQL is checked: every such column must appear in it."""
+    dropped = [c for c in required_columns or [] if c.lower() not in sql_query.lower()]
+    if not dropped:
+        return None
+    return (f"SQL ไม่ได้ใช้คอลัมน์ {', '.join(dropped)} ที่คำถามระบุ — ตาราง {context_table} ไม่มีคอลัมน์นี้ "
+            f"ยอดรวมของตารางนี้จึงไม่ใช่คำตอบ; ใช้ตารางของ context ที่มีคอลัมน์นี้และใส่ filter/GROUP BY ให้ครบ")
 
 
 def build_initial_user_prompt(
@@ -441,6 +493,7 @@ async def build_first_attempt_prompt(
     trace=None,
     conversation_id: Optional[str] = None,
     intent_state_enabled: bool = False,
+    required_columns: Optional[List[str]] = None,
 ) -> tuple[str, bool]:
     async def _rag_task() -> str:
         try:
@@ -509,6 +562,8 @@ async def build_first_attempt_prompt(
 
         if intent_json:
             logger.info("Two-Pass Mode: Pass 1 success. Building Pass 2 prompt.")
+            if required_columns is not None:
+                required_columns[:] = unfilterable_columns(intent_json, context_table)[0]
             user_prompt = build_pass2_prompt(
                 service=service,
                 question=question,
@@ -583,6 +638,7 @@ async def run_hybrid_attempt(
     start_request: float,
     trace=None,
     template_answers_enabled: bool = False,
+    required_columns: Optional[List[str]] = None,
 ) -> tuple[Optional[QueryResult], int, Optional[str]]:
     logger.info("Hybrid Mode: Generating SQL (attempt %s)", attempt + 1)
 
@@ -620,6 +676,12 @@ async def run_hybrid_attempt(
 
     logger.info("Extracted SQL: %s...", sql_query[:100])
     log_unmatched_like_patterns(sql_query, context_name, question)
+
+    dropped_error = dropped_filter_error(sql_query, required_columns, context_table)
+    if dropped_error:
+        logger.warning("Hybrid Mode: %s", dropped_error)
+        retry_history.append({"sql": sql_query, "error": dropped_error})
+        return None, total_tokens, sql_query
 
     if on_status:
         on_status(RetryStatus(attempt, max_retries, "validating", "Validating SQL"))
@@ -790,6 +852,7 @@ async def query_hybrid(
     sql_query = None
     total_tokens = 0
     retry_history = []
+    required_columns: List[str] = []  # filled by Pass 1: columns the SQL must use (dropped_filter_error)
     get_vanna_context_string = service.get_vanna_context_string
     lookup_values_from_question = service.lookup_values_from_question
     detect_hierarchy_level = service.detect_hierarchy_level
@@ -889,6 +952,7 @@ async def query_hybrid(
                 trace=trace,
                 conversation_id=conversation_id,
                 intent_state_enabled=intent_state_enabled,
+                required_columns=required_columns,
             )
         else:
             user_prompt = build_retry_user_prompt(
@@ -922,6 +986,7 @@ async def query_hybrid(
                 prepare_data_for_explanation=prepare_data_for_explanation,
                 start_request=start_request,
                 trace=trace,
+                required_columns=required_columns,
             )
             trace.attempts = attempt + 1
             if attempt_result:
@@ -1215,7 +1280,7 @@ def build_pass2_prompt(
 **สร้าง SQL จาก Structured Intent ข้างต้น:**
 สำคัญ:
 - {table_rule(context_table)}
-- **ยึดตาม Structured Intent เป็นหลัก** — Dimensions คือ GROUP BY, Filters คือ WHERE
+{unfilterable_rule(intent, context_table)}- **ยึดตาม Structured Intent เป็นหลัก** — Dimensions คือ GROUP BY, Filters คือ WHERE
 - ห้ามเพิ่ม WHERE filter ที่ไม่อยู่ใน Filters ข้างต้น (ยกเว้น time_range)
 - Dimensions (GROUP BY) columns ห้ามใช้เป็น WHERE filter
 - ถ้ามี "Actual Values Found" → ใช้เป็นค่าอ้างอิงสำหรับ filter ที่ระบุไว้แล้วเท่านั้น
