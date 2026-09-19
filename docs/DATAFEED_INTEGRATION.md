@@ -89,7 +89,7 @@ Importer เปิด write connection ของตัวเอง ไม่ผ�
 | `feed_revenue` | `datafeed_revenue` | 2.1.0 / 202608 | ✅ active | 14/14 |
 | `feed_expense` | `datafeed_expense` | 1.2.0 / 202608 | ✅ active | 12/12 |
 | `feed_sales` | `datafeed_sales` | 1.2.0 / 202608 | ✅ active (2026-09-19 — contract มีกฎ actual/target + `control_totals.filter`) | 12/12 |
-| `feed_ebt` | `datafeed_ebt` | 1.3.0 / 202607 | ⏸ ปิด (`is_active=0`) — มีทั้งรายเดือน (`*_month`) และสะสม แต่โมเดลยัง SUM คอลัมน์สะสมข้ามงวด / ใช้สะสมตอบรายเดือน รอกฎใน contract | 18/24 |
+| `feed_ebt` | `datafeed_ebt` | 1.3.1 / 202607 | ✅ active (2026-09-19 — contract มีรายเดือน `*_month` + สะสม `agg: point_in_time` + สูตรรายสายงาน/ศูนย์ต้นทุน; main view = ตารางยอดรวมทางการ, คำถามที่ระบุหน่วยงานถูกบังคับไป `fact_ebt`) | 22/24 |
 
 (รายละเอียด: `plan/archive/RESULT_P7_PHASE2.md` หัวข้ออัปเดต 2026-09-19, `plan/PLAN_REMAINING_ITEMS.md` REMAIN-11)
 

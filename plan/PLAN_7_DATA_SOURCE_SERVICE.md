@@ -1,6 +1,6 @@
 # Plan 7: Data Source as a Service — ถามข้อมูลจากแหล่งที่ผู้ใช้กำหนด โดยไม่ต้อง import
 
-**สถานะ:** 🟡 Phase 1 ✅ DONE (2026-09-18) — Phase 2 🟡 exit 3/4 โดเมน (2026-09-19: sales ✅ 12/12; ebt 1.3.0 มีทั้งรายเดือน/สะสมแล้ว แต่ eval 18/24 — ปิดไว้ รอ contract เพิ่มกฎ point-in-time §11.7) — Phase 3 ✅ DONE (2026-09-19) — Phase 4–7 ยังไม่เริ่ม | ผล: `plan/archive/RESULT_P7_PHASE{1,2,3}.md` | งานฝั่ง NT-Report: `plan/PROMPT_NT_REPORT_P7.md`
+**สถานะ:** 🟡 Phase 1 ✅ DONE (2026-09-18) — Phase 2 ✅ DONE (2026-09-19 — exit ครบ 4/4 โดเมน: revenue 14/14, expense 12/12, sales 12/12, ebt 22/24 บน contract 1.3.1) — Phase 3 ✅ DONE (2026-09-19) — Phase 4–7 ยังไม่เริ่ม | ผล: `plan/archive/RESULT_P7_PHASE{1,2,3}.md` | งานฝั่ง NT-Report: `plan/PROMPT_NT_REPORT_P7.md`
 **ความสัมพันธ์กับแผนเดิม:** ต่อยอด/แทนที่บางส่วนของ `PLAN_6_SAAS.md` (ดู §9), รวม Plan 1B-C (MCP SSE + API key) ไว้ใน Phase 6
 **ผู้ใช้รายแรก:** NT-Report portal (F11 dashboard Q&A) — ปัจจุบันถูก disable เพราะยังไม่ได้ตั้ง key และข้อมูลใน AI ค้างที่ revenue 202605
 
@@ -141,7 +141,7 @@ Response เพิ่ม `data_as_of` ต่อ context ที่ใช้ (จ�
 - ลงทะเบียน `feed_revenue` ใหม่เป็น file source ชี้ `DataFeed/dist/revenue/latest/`
 - **Exit:** eval `feed_revenue` จาก file source ได้ value match เท่า F10 (14/14) โดยไม่ import; latency P50 ไม่แย่กว่า F10 (10.5s) เกิน 20%; context เดิม (non-feed) ยังผ่าน test suite เดิมทั้งหมด
 
-### Phase 2 — Contract-driven knowledge + freshness (2–3 วัน) — 🟡 code DONE 2026-09-18, exit 2/4 โดเมน
+### Phase 2 — Contract-driven knowledge + freshness (2–3 วัน) — ✅ DONE 2026-09-19 (exit 4/4 โดเมน)
 > ผล (`plan/archive/RESULT_P7_PHASE2.md`): `data_as_of` ใน `/api/v1/query` (`deb0a7e`); knowledge จาก contract เป็น service
 > + re-sync อัตโนมัติเมื่อ contract/schema_version เปลี่ยน (`38ab63d`); ลงทะเบียน expense/sales/ebt + gate/golden อ่านจาก contract +
 > pin CSV dialect (`a2b8568`) — eval revenue **14/14**, expense **12/12**; publish build ใหม่แล้ว AI เห็นเอง (พิสูจน์บนสำเนา layout `builds/<id>`)
@@ -390,7 +390,7 @@ NT-Report ไม่ต้อง import อะไรเข้า AI อีก ห
 **ส่งต่อ Phase 2+:**
 - [x] runtime ตรวจ manifest ต่อ build (reconcile + sha256) + query cache ผูก build — `820052e` | [x] re-sync knowledge อัตโนมัติ (`38ab63d`) + `data_as_of` (`deb0a7e`) — Phase 2
 - [x] ลงทะเบียน expense/sales/ebt (`a2b8568`) — sales/ebt ตอบเลขผิดความหมาย เพราะ contract ขาดกฎ → ✅ **ตัดสิน 2026-09-19: ทางเลือก A** (แก้ contract ที่ NT-Report; เจ้าของกำหนด **EBT = ยอดขาย − ค่าใช้จ่าย** — ยอดขาย = กลุ่ม `01.รายได้` ใน fact_ebt = รายได้ฐานยอดขาย ซึ่ง**ไม่เท่ากับ**รายได้ในรายงานรายได้ เช่น รวมยอดขายบัตร prepaid ไม่ได้คิดจาก usage อย่างเดียว) และไป Phase 3 ได้เลย — [x] NT-Report ทำตาม `plan/PROMPT_NT_REPORT_P7.md` แล้ว; ฝั่ง AI: `control_totals.filter` + total-only ใน gate/golden (`dfce5d5`) → `feed_sales` เปิด, eval 12/12 (2026-09-19)
-- [ ] **ebt — รอเจ้าของตัดสิน (2026-09-19):** ebt 1.2.1 (`90fd787`) เปลี่ยน `fact_ebt_total_monthly` เป็นฐานรายงาน EBT (YTD, 2 สายงานขาย, ก.ค. 69 = +417.33 MB) ขัดกับ −1,088,133,452.03 ที่กำหนดไว้; AI ตอบยอดสะสมเป็น "ยอดเดือน" และตอบยอดรวมเมื่อถามรายสายงาน (main view = ตารางยอดรวม) → `feed_ebt` ปิดไว้ — ทางเลือก A/B/C ใน `plan/archive/RESULT_P7_PHASE2.md`
+- [x] **ebt ปิดแล้ว 2026-09-19:** เจ้าของเลือกมีทั้งสองฐาน → ebt 1.3.0 (`*_month` + สะสม) → 1.3.1 (`73ddc96`: สะสมเป็น `point_in_time`, กฎห้าม SUM/BETWEEN ข้ามงวด, สูตรรายสายงาน/ศูนย์ต้นทุน); ฝั่ง AI `c6e7cca`, `a458cda`, `ff34aab` → `feed_ebt` เปิด, eval 22/24 — ประวัติ: **ebt — รอเจ้าของตัดสิน (2026-09-19):** ebt 1.2.1 (`90fd787`) เปลี่ยน `fact_ebt_total_monthly` เป็นฐานรายงาน EBT (YTD, 2 สายงานขาย, ก.ค. 69 = +417.33 MB) ขัดกับ −1,088,133,452.03 ที่กำหนดไว้; AI ตอบยอดสะสมเป็น "ยอดเดือน" และตอบยอดรวมเมื่อถามรายสายงาน (main view = ตารางยอดรวม) → `feed_ebt` ปิดไว้ — ทางเลือก A/B/C ใน `plan/archive/RESULT_P7_PHASE2.md`
   - ✅ ตัดสินแล้ว (2026-09-19 บ่าย): มีทั้งสองฐาน — ebt **1.3.0** (`*_month` = รายเดือน, ไม่มี suffix = สะสม); ฝั่ง AI `c6e7cca`; eval **18/24** (SUM คอลัมน์สะสมข้ามงวด 4, ใช้คอลัมน์สะสมตอบรายเดือน 2) → ยังปิด รอ NT-Report เพิ่ม `agg: point_in_time` + กฎของตารางยอดรวม
 - [x] NT-Report รัน publish แบบ atomic จริงแล้ว (ตรวจ 2026-09-19: `latest` → `builds/<id>`, manifest มี `build_id`) — ฝั่ง AI ไม่ได้ลงทะเบียนใหม่ revenue/expense; build ใหม่ 06:54 ถูกเห็นเอง
 - [ ] schema เปลี่ยนแบบเพิ่ม/ลบคอลัมน์: knowledge re-sync เอง แต่ view (`source_tables`) ยังเป็นชุดคอลัมน์ตอนลงทะเบียน → ต้องรัน `register_file_source` ใหม่

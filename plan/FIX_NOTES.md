@@ -216,6 +216,13 @@
 - config.db จริง rebuild แล้ว → prompt ของ context legacy เปลี่ยน (block "Actual Values Found") — eval ก่อน/หลัง 30/63 → 31/63; ตัวเลขและ noise ที่เหลือใน `PLAN_REMAINING_ITEMS.md` REMAIN-10
 - อ่านตัวเลข eval: 30–31/63 รวม feed 26 ข้อ (26/26) — ส่วน legacy = 4/37 → 5/37 เท่าระดับเดิมของ 2026-09-18 (19/51 รวม feed_revenue 14) ; golden legacy ส่วนใหญ่ mismatch จากรูปผลลัพธ์/alias ไม่เกี่ยวกับงานนี้
 
+## จาก ebt 1.3.x + REMAIN-12 (2026-09-19)
+
+- **intent ของ Pass 1 เชื่อไม่ได้ทั้งสองทาง:** บางรอบเติม filter จากกฎของ context ที่คำถามไม่ได้ขอ, บางรอบไม่ดึง filter ที่คำถามระบุ — guard จึงต้อง (ก) ยึดเฉพาะ filter ที่ค่าอยู่ในคำถาม (ข) ให้ Pass 1 รู้คอลัมน์ของตารางอื่นก่อน; ตัวตรวจแบบ substring (`column in sql`) ตั้งใจให้หลวม
+- query cache 30 นาทีไม่รวมเวอร์ชัน code → ทดสอบ prompt ใหม่ต้อง `clear_query_cache()` (เจอคำตอบเก่าหลังแก้ guard)
+- main view = ตารางยอดรวมทางการดีกว่า = ตารางรายละเอียด (5–6/24: โมเดลคำนวณ KPI ทางการเองจาก `fact_ebt`)
+- ชื่อคอลัมน์ `expense` ชนกับคำทั่วไป → Pass 1 ใส่ metric `expense` แม้ถามรายเดือน (พลาดซ้ำ 1–2 ข้อทุกรอบ) — ชื่อแบบ `expense_ytd` จะไม่กำกวม (MAJOR ฝั่ง NT-Report — ไม่ได้ขอ)
+
 ## จาก REMAIN-9 (2026-09-19)
 - 9.4: DDL ที่ train เพิ่มจะมีผลเมื่อ admin กด Sync Brain — ยังไม่ได้วัดผลต่อ eval
 - 9.5: `extract_hierarchy.py` เลิกรับ `--db` (อ่านข้อมูลผ่าน source ของ context, config ผ่าน CONFIG_DB_URL) — ไม่มี caller ที่ส่ง `--db`

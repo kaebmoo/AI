@@ -78,3 +78,8 @@ ebt 1.3.0 (bebc797) ฝั่ง AI eval ได้ 18/24: โมเดล SUM �
 2. knowledge re-sync เอง (Phase 2) — ตรวจว่า rule ใหม่อยู่ใน instruction ของ context แล้วเปิด `feed_sales` / `feed_ebt` (`is_active=1`)
 3. `gen_golden_from_controls --domain sales|ebt` → eval ≥ 90% → ปิด REMAIN-11 และ Phase 2 exit
 4. `scope_columns` จาก contract ทับค่า period ที่ตั้งมือใน config (`feed_revenue`/`feed_expense`) อัตโนมัติ — ถ้ามี `scope_exempt` ต้องเพิ่ม support
+
+## สถานะ 2026-09-19 (ค่ำ)
+ebt 1.3.1 (`73ddc96`) ทำครบ 4 ข้อของ "ebt PATCH" → ฝั่ง AI เปิด `feed_ebt` แล้ว eval 22/24 — **ไม่มีงานค้างที่บล็อก**. ข้อเสนอ (ไม่บังคับ):
+- control totals ราย `division` ของ ebt (เช่น dataset ยอดรายสายงานต่องวด + `bg_key: division`) → ฝั่ง AI จะสร้าง golden รายสายงานและวัดสูตรหัก `08.รายได้อื่น`/ER ได้ (ตอนนี้โมเดลลืมหัก 1 ใน 2 รอบ และไม่มีอะไรวัด)
+- description ของ `expense` ให้ขึ้นต้นด้วย "สะสม (YTD)" ชัดกว่านี้ หรือกฎว่า "ค่าใช้จ่ายของเดือน = `expense_month`" ตรง ๆ — โมเดลยังหยิบ `expense` ตอบคำถามรายเดือนเป็นครั้งคราว
