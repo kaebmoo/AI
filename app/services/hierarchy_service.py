@@ -272,6 +272,11 @@ class HierarchyService:
             query_lower = query.lower().strip()
             if not query_lower:
                 return []
+            # Phase 4.5: hierarchy values are read from the rows — none for a source that isn't `full`
+            from app.core.llm_policy import FULL
+            from app.services.data_sources import policy_for_context
+            if policy_for_context(context_name) != FULL:
+                return []
 
             rows = conn.execute("""
                 SELECT v.value, v.level, v.parent_value, v.aliases,

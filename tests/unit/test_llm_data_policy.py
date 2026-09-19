@@ -351,3 +351,87 @@ class TestRegistry:
             conn.execute(text("CREATE TABLE data_sources (id INTEGER PRIMARY KEY, name TEXT, is_active BOOLEAN)"))
             conn.execute(text("CREATE TABLE source_tables (source_id INT, table_name TEXT, is_active BOOLEAN)"))
         assert policy_for_table("anything", config) == FULL
+
+
+class TestValuesAreNotCopiedOutOfARestrictedSource:
+    """Phase 4.5 item 7: onboarding, admin schema pages, keyword index and hierarchy lookup obey the same policy."""
+
+    @pytest.fixture
+    def legacy(self, tmp_path, monkeypatch):
+        biz = tmp_path / "biz.sqlite"
+        engine = create_engine(f"sqlite:///{biz}")
+        with engine.begin() as conn:
+            conn.execute(text("CREATE TABLE v_x (division TEXT, year INT, month INT, amount REAL)"))
+            conn.execute(text("INSERT INTO v_x VALUES (:a, 2026, 1, :n), (:b, 2026, 2, :n)"), {"a": S_DIV, "b": S_DIV2, "n": S_NUM})
+        config = create_engine(f"sqlite:///{tmp_path / 'config.db'}")
+        with config.begin() as conn:
+            conn.execute(text("CREATE TABLE schema_contexts (id INTEGER PRIMARY KEY, name TEXT, main_view TEXT, is_active BOOLEAN DEFAULT 1)"))
+            conn.execute(text("INSERT INTO schema_contexts (name, main_view) VALUES ('x', 'v_x')"))
+            conn.execute(text("CREATE TABLE keyword_value_index (keyword TEXT, column_name TEXT, column_value TEXT, "
+                              "table_name TEXT, context_name TEXT)"))
+        migrate(config)
+        monkeypatch.setattr("app.db.session.config_engine", config)
+        return str(biz), engine, config
+
+    @staticmethod
+    def tighten(config, policy=SCHEMA_ONLY):
+        with config.begin() as conn:
+            conn.execute(text("UPDATE data_sources SET llm_data_policy = :p WHERE name = 'legacy'"), {"p": policy})
+
+    def test_onboarding_inspection_carries_no_value(self, legacy):
+        from app.services.context_onboarding import DataInspector, LLMAnalyzer
+
+        biz, _engine, config = legacy
+        full = json.dumps(DataInspector(biz).inspect("v_x").to_dict(), ensure_ascii=False, default=str)
+        assert S_DIV in full and "918273645" in full  # as before for a `full` source
+        self.tighten(config)
+        inspection = DataInspector(biz).inspect("v_x")
+        told = json.dumps(inspection.to_dict(), ensure_ascii=False, default=str)
+        assert "division" in told and '"row_count": 2' in told  # the structure is still there to work with
+        prompt = LLMAnalyzer(biz).build_prompt(inspection)
+        for sentinel in (S_DIV, S_DIV2, "918273645"):
+            assert sentinel not in told and sentinel not in prompt, sentinel
+
+    def test_sample_values_for_admin_pages(self, legacy):
+        from app.services.schema.service import SchemaService
+
+        _biz, engine, config = legacy
+        service = SchemaService(db_engine=config, business_engine=engine)
+        assert S_DIV in service.get_sample_values("v_x")["division"]
+        self.tighten(config, AGGREGATED_ONLY)
+        assert service.get_sample_values("v_x") == {}  # suggest-mappings / dimension-families get nothing to send
+
+    def test_keyword_index_is_not_built_and_is_emptied(self, legacy):
+        from app.services.schema import keyword_index
+        from app.services.schema.service import SchemaService
+
+        _biz, engine, config = legacy
+        service = SchemaService(db_engine=config, business_engine=engine)
+        with patch.object(keyword_index, "get_searchable_columns", return_value=["division"]):
+            assert keyword_index.build_keyword_index(service, "x", "v_x") > 0
+            self.tighten(config)
+            assert keyword_index.build_keyword_index(service, "x", "v_x") == 0
+        with config.connect() as conn:
+            assert conn.execute(text("SELECT COUNT(*) FROM keyword_value_index")).scalar() == 0
+
+    def test_tightening_through_the_api_empties_the_index_at_once(self, legacy):
+        from sqlalchemy.orm import sessionmaker
+
+        from app.api.v1.admin import sources as api
+
+        _biz, _engine, config = legacy
+        with config.begin() as conn:
+            conn.execute(text("INSERT INTO keyword_value_index VALUES ('k', 'division', :v, 'v_x', 'x')"), {"v": S_DIV})
+        db = sessionmaker(bind=config)()
+        with patch.object(api, "clear_query_cache"):
+            done = api.set_source_policy("legacy", api.SourcePolicyRequest(llm_data_policy="schema_only"), MagicMock(), db)
+        assert done["keyword_index_rows_removed"] == 1
+
+    def test_policy_for_context(self, legacy):
+        from app.services.data_sources import policy_for_context
+
+        _biz, _engine, config = legacy
+        assert policy_for_context("x", config) == FULL and policy_for_context("unknown", config) == FULL
+        self.tighten(config)
+        assert policy_for_context("x", config) == SCHEMA_ONLY
+        assert policy_for_context("unknown", config) == SCHEMA_ONLY  # an unbound context reads the legacy DB

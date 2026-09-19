@@ -100,9 +100,19 @@ def set_source_policy(name: str, request: SourcePolicyRequest, _current_user: Us
         raise HTTPException(status_code=409, detail=f"config DB ยังไม่รองรับ — รัน scripts/migrate_data_sources.py ({exc})")
     if not updated:
         raise HTTPException(status_code=404, detail="ไม่พบ source")
+    removed = 0
+    if request.llm_data_policy != FULL:  # values already copied out of the source don't outlive the tightening
+        try:
+            with db.begin_nested():
+                removed = db.execute(text(
+                    "DELETE FROM keyword_value_index WHERE context_name IN (SELECT sc.name FROM schema_contexts sc "
+                    "JOIN data_sources ds ON ds.id = sc.source_id WHERE ds.name = :n)"), {"n": name}).rowcount
+        except Exception:  # no keyword index in this config DB
+            pass
     db.commit()
     clear_query_cache()
-    return {"source": name, "llm_data_policy": request.llm_data_policy, "llm_provider_allowlist": request.llm_provider_allowlist}
+    return {"source": name, "llm_data_policy": request.llm_data_policy,
+            "llm_provider_allowlist": request.llm_provider_allowlist, "keyword_index_rows_removed": removed}
 
 
 @router.post("/sources/register")

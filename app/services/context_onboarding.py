@@ -79,9 +79,14 @@ class InspectionResult:
     detected_category_columns: List[str] = field(default_factory=list)
     detected_dimension_columns: List[str] = field(default_factory=list)
     detected_time_columns: List[str] = field(default_factory=list)
+    # Phase 4.5: False for a source whose llm_data_policy isn't `full` — to_dict() (the LLM prompt, the
+    # admin-agent tool result, the script's JSON) then carries structure only, no value read from the rows
+    values_allowed: bool = True
 
     def to_dict(self) -> Dict:
         """Convert to dict for LLM prompt."""
+        if not self.values_allowed:
+            return self._to_dict_without_values()
         return {
             "view_name": self.view_name,
             "row_count": self.row_count,
@@ -130,6 +135,32 @@ class InspectionResult:
         }
 
 
+    def _to_dict_without_values(self) -> Dict:
+        return {
+            "view_name": self.view_name,
+            "row_count": self.row_count,
+            "detected_structure": self.detected_structure,
+            "values_withheld": "llm_data_policy ของ source นี้ไม่ใช่ full — ไม่มีค่าตัวอย่าง/สถิติจากข้อมูล",
+            "columns": [
+                {"name": c.name, "type": c.data_type, "distinct_count": c.distinct_count, "null_count": c.null_count,
+                 "is_numeric": c.is_numeric, "is_time_column": c.is_time_column,
+                 "has_numeric_prefix": c.has_numeric_prefix, "has_case_inconsistency": c.has_case_inconsistency,
+                 "has_empty_values": c.has_empty_values}
+                for c in self.columns
+            ],
+            "cross_column_analyses": [
+                {"value_column": ca.value_column, "category_column": ca.category_column,
+                 "has_mixed_signs": ca.has_mixed_signs, "likely_semi_crosstab": ca.likely_semi_crosstab}
+                for ca in self.cross_analyses
+            ],
+            "quality_issues": [{"column": qi.column, "type": qi.issue_type} for qi in self.quality_issues],
+            "detected_value_columns": self.detected_value_columns,
+            "detected_category_columns": self.detected_category_columns,
+            "detected_dimension_columns": self.detected_dimension_columns,
+            "detected_time_columns": self.detected_time_columns,
+        }
+
+
 @dataclass
 class ConfigBundle:
     """Generated config ready to apply."""
@@ -156,6 +187,12 @@ class ValidationResult:
 # ---------------------------------------------------------------------------
 # Phase 1: Data Inspection (SQL-only, no LLM)
 # ---------------------------------------------------------------------------
+
+def _values_allowed(view_name: str) -> bool:
+    from app.core.llm_policy import FULL
+    from app.services.data_sources import policy_for_table
+    return policy_for_table(view_name) == FULL
+
 
 class DataInspector:
     """Inspect a view/table and produce a detailed profile."""
@@ -228,6 +265,7 @@ class DataInspector:
                                            and c.distinct_count > 1 and c.distinct_count <= 50],
                 detected_dimension_columns=dimension_cols,
                 detected_time_columns=time_cols,
+                values_allowed=_values_allowed(view_name),
             )
             return result
         finally:

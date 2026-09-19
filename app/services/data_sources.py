@@ -193,6 +193,21 @@ def policy_for_table(table_name: Optional[str], config_engine=None) -> str:
     return normalize(row[0]) if row else FULL
 
 
+def policy_for_context(context_name: Optional[str], config_engine=None) -> str:
+    """Policy of a context's source without resolving it (no file is touched); an unbound context = legacy."""
+    if config_engine is None:
+        from app.db.session import config_engine
+    try:
+        with config_engine.connect() as conn:
+            row = conn.execute(text(
+                "SELECT ds.llm_data_policy FROM data_sources ds WHERE ds.id = COALESCE("
+                "(SELECT source_id FROM schema_contexts WHERE name = :c), (SELECT id FROM data_sources WHERE name = :l))"),
+                {"c": context_name or "", "l": LEGACY}).first()
+    except (OperationalError, ProgrammingError) as exc:
+        return FULL if _not_migrated(exc) else SCHEMA_ONLY
+    return normalize(row[0]) if row else FULL
+
+
 def _not_migrated(exc: Exception) -> bool:
     msg = str(exc).lower()
     return "no such" in msg or "does not exist" in msg

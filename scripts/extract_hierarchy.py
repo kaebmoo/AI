@@ -345,8 +345,11 @@ def main():
         print(f"{'='*60}")
 
         extract_hierarchy_levels(conn, ctx_name, ctx_def, dry_run=args.dry_run)
-        extract_hierarchy_values(conn, source_resolver.for_context(ctx_name).engine, ctx_name, ctx_def,
-                                 dry_run=args.dry_run)
+        source = source_resolver.for_context(ctx_name)
+        if source.llm_data_policy != "full":  # Phase 4.5: values of such a source are never copied into the config DB
+            print(f"  ข้าม values: llm_data_policy ของ source '{source.name}' = {source.llm_data_policy}")
+            continue
+        extract_hierarchy_values(conn, source.engine, ctx_name, ctx_def, dry_run=args.dry_run)
 
     if not args.dry_run:
         conn.commit()

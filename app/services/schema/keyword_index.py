@@ -70,6 +70,16 @@ def build_keyword_index(service: "SchemaService", context_name: str = "revenue",
     Reads the view on service.business_engine (the context's source), writes the index on the
     config engine. Scans before deleting: a failed or empty scan keeps the existing index.
     """
+    # Phase 4.5: the index is every distinct value of the source, stored in the config DB — a source
+    # whose policy isn't `full` has none, and a rebuild after tightening removes what was stored
+    from app.core.llm_policy import FULL
+    from app.services.data_sources import policy_for_table
+    if policy_for_table(table_name, service.engine) != FULL:
+        with service.engine.begin() as conn:
+            conn.execute(text("DELETE FROM keyword_value_index WHERE context_name = :ctx AND table_name = :tbl"),
+                         {"ctx": context_name, "tbl": table_name})
+        logger.info("Keyword index of %s not built: llm_data_policy of its source isn't full", table_name)
+        return 0
     columns = get_searchable_columns(service, context_name, table_name)
 
     inspector = inspect(service.business_engine)
