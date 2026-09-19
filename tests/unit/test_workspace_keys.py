@@ -369,3 +369,39 @@ class TestContextListing:
             everyone = asyncio.run(query_api.list_contexts(db=db, x_api_key=None, app_db=MagicMock()))
         assert {c.name for c in mine} == {"feed_sales", "transfer price"}
         assert {c.name for c in everyone} == {"revenue", "feed_sales", "transfer price", "hr_payroll"}  # public, as before
+
+
+class TestRefusalInsideATaskGroup:
+    """Without app.state.mcp_client the endpoint opens its own MCP session; anyio's TaskGroup wraps
+    whatever is raised inside in an ExceptionGroup, and the refusal came back as 200 + error text."""
+
+    @pytest.mark.parametrize("exc,status", [(ContextNotAllowed("no"), 403), (None, 400)])
+    def test_status_code_survives_the_wrapping(self, exc, status):
+        from contextlib import asynccontextmanager
+        from app.api.v1 import query as query_api
+        from app.services.data_sources import ScopeError
+
+        inner = exc or ScopeError("bad scope")
+
+        class Group(Exception):  # shape of (Base)ExceptionGroup on every supported Python
+            def __init__(self, exceptions):
+                super().__init__("unhandled errors in a TaskGroup")
+                self.exceptions = exceptions
+
+        @asynccontextmanager
+        async def connected():
+            try:
+                yield
+            except Exception as e:
+                raise Group([Group([e])]) from e
+
+        mcp = MagicMock()
+        mcp.connected = connected
+        engine = MagicMock()
+        engine.query = AsyncMock(side_effect=inner)
+        request = SimpleNamespace(state=SimpleNamespace(), app=SimpleNamespace(state=SimpleNamespace(mcp_client=None)))
+        with patch("app.services.query_engine.QueryEngine", return_value=engine), \
+             patch("app.services.mcp_client.MCPClientService", return_value=mcp), pytest.raises(HTTPException) as caught:
+            asyncio.run(query_api.simple_query(query_api.SimpleQueryRequest(question="q"), request,
+                                               current_user=SimpleNamespace(id=1), db=MagicMock(), admin_config=MagicMock()))
+        assert caught.value.status_code == status

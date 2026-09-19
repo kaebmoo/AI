@@ -61,6 +61,17 @@ class ContextInfo(BaseModel):
     description: str = ""
 
 
+def _find_refusal(exc: BaseException):
+    """A ScopeError / ContextNotAllowed anywhere inside (nested) exception groups, else None."""
+    if isinstance(exc, (ScopeError, ContextNotAllowed)):
+        return exc
+    for inner in getattr(exc, "exceptions", None) or ():
+        found = _find_refusal(inner)
+        if found is not None:
+            return found
+    return None
+
+
 # ── Endpoints ─────────────────────────────────────────────
 
 @router.post("/", response_model=SimpleQueryResponse)
@@ -142,6 +153,11 @@ async def simple_query(
     except ContextNotAllowed as e:  # outside the key's workspace/allowlist — refused, never re-routed silently
         raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
+        # the endpoint's own MCP session (no app.state.mcp_client) runs in an anyio TaskGroup, which
+        # wraps a refusal in an ExceptionGroup — it must still be 400 / 403, not 200 with an error text
+        refusal = _find_refusal(e)
+        if refusal is not None:
+            raise HTTPException(status_code=400 if isinstance(refusal, ScopeError) else 403, detail=str(refusal))
         execution_time_ms = (time.time() - start_time) * 1000
         logger.error(f"Simple query failed: {e}")
         return SimpleQueryResponse(
