@@ -426,6 +426,9 @@ context ของ file source มีหลายตาราง แต่ Pass 1
 (ebt: "EBT ของสายงาน 1" ขณะ main view = ตารางยอดรวมที่ไม่มี division) ถูกทิ้ง filter เงียบ ๆ แล้วตอบยอดรวม. `c6e7cca` แก้ได้เฉพาะกรณี GROUP BY ("แยกตามสายงาน").
 ข้อเสนอ: ให้ Pass 1 เห็นคอลัมน์ของทุกตารางที่ instruction ระบุ (ชุดเดียวกับ `hybrid_flow.table_rule`) และถ้า intent มี filter/dimension ที่ไม่อยู่ใน main view ให้ Pass 2 ใช้ตารางที่มีคอลัมน์นั้น; ถ้าไม่มีตารางไหนมี → ตอบว่าตอบไม่ได้ ไม่ตอบยอดรวม
 
+**สถานะ 2026-09-19:** ✅ ส่วน "ห้ามทิ้ง filter เงียบ ๆ" แก้แล้ว `a458cda` — Pass 2 ได้บรรทัดชี้ตารางที่มีคอลัมน์ + **ตรวจ SQL แบบ deterministic** (คอลัมน์ filter/dimension ของ intent ที่มีเฉพาะในตารางอื่นของ context ต้องปรากฏใน SQL ไม่งั้น attempt ถูกปฏิเสธแล้ว retry); prompt อย่างเดียวไม่พอ (ลองแล้วยังทิ้ง filter). ถามจริง: สายงาน 1 → `fact_ebt` + `division = …` (แถว COMPUTED 3.1), ศูนย์ต้นทุน 2P10200 → `fact_ebt` + `cost_center` = 124.93 M (เดิม 8,050 M); eval ebt เท่าเดิม 18/24, guard ยิง 0 ครั้งใน 24 ข้อยอดรวม; กระทบเฉพาะ context ที่ instruction ระบุตารางอื่น (config จริง: `feed_ebt` ตัวเดียว).
+⬜ ที่เหลือ: Pass 1 ยังเห็นเฉพาะคอลัมน์ของ main view (ตอนนี้ได้ชื่อคอลัมน์ถูกเพราะ instruction ของ ebt ระบุคอลัมน์ของ `fact_ebt`); ชื่อคอลัมน์ที่ไม่มีตารางไหนมี ยังปล่อยให้ Pass 2 map เอง (เช่น `business_unit` → `bu`)
+
 ---
 
 ## Backlog / Nice-to-Have
