@@ -95,7 +95,10 @@ def build_keyword_index(service: "SchemaService", context_name: str = "revenue",
                         f"WHERE {quote_identifier(matching_col)} IS NOT NULL"
                     )
                 )
-                values = [row[0] for row in result.fetchall() if row[0]]
+                # text values only: a numeric column (year, gl_code, quantity) would make '10'/'2025'
+                # known terms that match every number in a question. By value, not by declared
+                # type — a SQLite view's columns often have none. Text codes ('007') stay.
+                values = [row[0] for row in result.fetchall() if row[0] and isinstance(row[0], str)]
             except SQLAlchemyError as exc:
                 logger.error("Failed to scan %s, existing keyword index kept: %s", matching_col, exc)
                 return 0
@@ -158,7 +161,9 @@ def extract_keywords(value: str) -> List[str]:
     parts = re.split(r'[\s\-&/()（）,]+', value)
     for part in parts:
         part = part.strip()
-        if len(part) >= 2:
+        # a bare number out of a longer value ('700' of 'MY 5G 700 MHZ', '10' of '(8) + (9) - (10)')
+        # would match every such number in a question; a value that IS a number (gl_code) stays
+        if len(part) >= 2 and not re.fullmatch(r"[\d.]+", part):
             keywords.add(part)
 
     return list(keywords)

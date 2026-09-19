@@ -136,6 +136,32 @@ def test_rebuild_scans_business_db_and_replaces_index(tmp_path):
     assert any(m["column_value"] == "Trunk Radio" for m in service.search_keyword_index("trunk", context_name="revenue"))
 
 
+def test_rebuild_does_not_index_numeric_columns(tmp_path):
+    """REMAIN-10.2: a groupable numeric column (YEAR, gl_code, quantity) must not turn '2025'/'10'
+    into known terms that match numbers in a question; text codes ('007') stay searchable."""
+    config, business = _split_dbs(tmp_path)
+    with config.begin() as conn:
+        conn.execute(text("INSERT INTO schema_metadata (table_name, column_name, is_groupable) VALUES "
+                          "('revenue', 'YEAR', 1), ('revenue', 'AMOUNT', 1), ('revenue', 'CODE', 1)"))
+    with business.begin() as conn:
+        conn.execute(text("DROP TABLE revenue_search"))
+        conn.execute(text("CREATE TABLE revenue_search (PRODUCT_NAME TEXT, YEAR INTEGER, AMOUNT REAL, CODE TEXT)"))
+        conn.execute(text("INSERT INTO revenue_search VALUES ('Trunk Radio', 2025, 10.5, '007')"))
+    service = SchemaService(db_engine=config, business_engine=business)
+
+    service.build_keyword_index(context_name="revenue", table_name="revenue_search")
+
+    assert _index_values(config) == {"Trunk Radio", "007"}
+
+
+def test_numbers_inside_a_value_are_not_keywords():
+    from app.services.schema.keyword_index import extract_keywords
+
+    assert set(extract_keywords("บริการ MY 5G 700 MHZ")) == {"บริการ MY 5G 700 MHZ", "MY 5G 700 MHZ", "บริการ", "MY", "5G", "MHZ"}
+    assert set(extract_keywords("1.1 กลุ่มบริการท่อร้อยสาย")) == {"1.1 กลุ่มบริการท่อร้อยสาย", "กลุ่มบริการท่อร้อยสาย"}
+    assert extract_keywords("51010001") == ["51010001"]  # a code is searchable as a whole
+
+
 @pytest.mark.parametrize("failure", ["select_raises", "no_values"])
 def test_failed_scan_keeps_existing_index(tmp_path, failure):
     config, business = _split_dbs(tmp_path)
