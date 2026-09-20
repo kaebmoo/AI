@@ -136,6 +136,30 @@ SQL ต้องใส่เงื่อนไขงวดเสมอ (ขอ�
 scope ที่มีค่าเดียวไม่มีบรรทัด "งวดอ้างอิง" (เดือนเดียวเป็นงวดอ้างอิงของตัวเองอยู่แล้ว) และ key ที่ไม่ใช่ตัวเลข
 (เช่น `org_code`) ถูกแสดงเป็นรายการ ไม่ใช่ช่วง
 
+**พิสูจน์แล้วว่าคำขอที่ไม่มี scope ได้ prompt เดิมทุกไบต์** — โหลด `hybrid_flow.py` ของ commit ก่อนหน้า
+(`git show 308acb1^:…`) เป็นอีกโมดูลหนึ่ง แล้วเทียบผลลัพธ์ของทั้ง 4 จุดโดยไม่ตั้ง `request_scope`:
+prompt แรก / retry / pass 2 เท่ากันเป๊ะ และ `extract_intent` เรียก provider จำนวนครั้งเท่ากันด้วย prompt
+ที่เหมือนกันทุกตัวอักษร (ข้อสังเกตเดียวที่ review อิสระเปิดค้างไว้ เพราะ session นั้นไม่มี git)
+
+### 4.2 Review อิสระ (agent แยก อ่านอย่างเดียว)
+
+ตรวจ 6 มุม: การรั่วผ่าน `llm_data_policy` · prompt ของคำขอที่ไม่มี scope · cache key · ContextVar ข้าม
+request/task · scope ที่เป็นอันตราย (ชนิดปน, list 1000 ค่า) ทำให้ 500 ได้ไหม · ขอบเขตของ key ที่ออกจริง
+→ **ไม่พบข้อบกพร่องที่ระดับความมั่นใจ ≥ 80** จุดสำคัญที่ผู้ตรวจยืนยันพร้อมหลักฐาน:
+
+- `scope` เป็น**ค่าที่ผู้เรียกส่งมาเอง** ไม่ใช่ค่าที่อ่านจากแถวข้อมูล → ไม่เข้าเกณฑ์ที่ Phase 4.5 บังคับให้ผ่าน
+  `restricted()`; และ `data_sources._scope_note()` ใส่คู่ key/value ชุดเดียวกันลง **system prompt** อยู่ก่อนแล้ว
+  ตั้งแต่ Phase 3 — งานนี้แค่ขยายรูปแบบเดิมมาที่ user prompt
+- cache key มี `scope` อยู่แล้ว และ `scope_note()` เป็น pure function ของ `scope` เท่านั้น → ไม่มีอะไรที่
+  เปลี่ยนตาม request แต่ไม่อยู่ใน key (cache hit ไม่สร้าง prompt เลย)
+- `request_scope` ถูก set/reset คร่อม `QueryEngine.query()` ทั้งก้อน และ task/thread ที่แตกออกไปเกิด**หลัง**
+  set → ได้ค่าถูกต้องตาม semantics ของ `contextvars`; แต่ละ request เป็นคนละ Context
+- scope ที่ผิดรูปถูกปฏิเสธเป็น **400 ก่อน** ถึง AI (`data_sources._literal` / `_predicate` / `scope_filters`);
+  และ `scope_note()` ยังกัน `max()`/`min()` ด้วย `all(isinstance(v, int))` เองอีกชั้น → list ชนิดปนตกไปทาง `join`
+- `allowed_contexts=None` **ไม่ได้แปลว่าไม่จำกัด** เมื่อมี `workspace_id`: `allowed_contexts()` คืนเซตของ
+  context ใน workspace นั้น; `enforce_key_surface` จำกัด key ที่ `is_restricted()` ไว้ที่ `/api/v1/query*`
+  และ `/api/v1/mcp` เท่านั้น
+
 ---
 
 ## 5. ที่เหลือหลังแก้ — 11 ข้อ แยกเป็น 3 กลุ่ม ไม่ใช่ปัญหาเดียวกันอีกแล้ว
