@@ -1,7 +1,7 @@
 งานเปิดใช้จริง: NT-Report portal ถามตอบผ่าน AI (ผู้ใช้รายแรกของ Plan 7) — repo /Users/seal/Documents/GitHub/AI, branch main
 ไม่ใช่ phase ใหม่ของแผน — คือการเอาของที่ Phase 1–6 สร้างไว้ (ทั้งหมดวัดบน**สำเนา** DB) ไปเปิดบนของจริง แล้วพิสูจน์ปลายทางถึงปลายทางผ่าน portal
 ตรวจ `git status -sb` ก่อนเริ่ม (ตอนเขียน prompt: origin/main = 52c3ee8, local นำอยู่ด้วยงาน Phase 6 + prompt นี้); commit ใหม่ห้าม push จนกว่าจะสั่ง; ห้าม rebase / force-push; ถ้า main มี commit ใหม่จาก session อื่น ให้ทำต่อบนนั้น
-repo NT-Report (/Users/seal/Documents/GitHub/NT-Report) = **อ่านอย่างเดียว** — งานฝั่งนั้นเขียนเป็น prompt ต่อท้าย plan/PROMPT_NT_REPORT_P7.md ให้ session ของ NT-Report ทำ
+repo NT-Report (/Users/seal/Documents/GitHub/NT-Report) = **อ่านอย่างเดียว** — งานฝั่งนั้นอยู่ใน plan/PROMPT_NT_REPORT_GOLIVE.md (session คู่ขนานใน repo NT-Report); ถ้า NT-Report มี commit ใหม่ของงานนั้น ให้อ่านไฟล์ผลของเขาก่อนทำข้อ 1d / 6 / 7
 
 ## อ่านก่อน (บังคับ)
 - plan/PLAN_7_DATA_SOURCE_SERVICE.md — หัวสถานะ, §6.2–6.4 (ห้าชั้นของสิทธิ; กรณี NT-Report: "ถามได้เท่ากับข้อมูลของรายงานที่เปิดได้", ไม่มี config = ไม่แสดงปุ่ม), §8 (หน้าที่ที่เหลือของ NT-Report), §11.2–11.3 (**งานค้างจาก F11 ก่อนเปิดใช้จริง: key จริง, E2E ผ่าน PB, เทียบ 10 คำถาม vs dashboard → RESULT_F11.md**)
@@ -46,7 +46,7 @@ repo NT-Report (/Users/seal/Documents/GitHub/NT-Report) = **อ่านอย�
    - rate limit ทำงานจริง (รายวัน; รายนาทีถ้ามี Redis); ระหว่าง NT-Report publish → ผู้ใช้เห็น "ข้อมูลกำลังถูก publish" ไม่ใช่คำตอบผิด
 7. **เทียบตัวเลข 10 คำถามต่อ dashboard จริง** (ปิด F11): คำถามที่ผู้ใช้ portal จะถามจริงต่อ report_type, ถามผ่าน hook (scope จริงของรายงาน) เทียบกับตัวเลขบนหน้า dashboard ของรายงานนั้น → plan/archive/RESULT_F11.md; **Exit: ถูก ≥ 9/10 ต่อ report_type ที่เปิด; ข้อที่ผิดต้องรู้สาเหตุ (contract / scope / โมเดล)** — report_type ที่ไม่ผ่าน = ไม่เปิดปุ่ม (ตัดออกจาก context map)
 8. Runbook สั้น (docs/): ลำดับ start/stop, ตรวจสุขภาพ (source status, query-audit `has_error`), publish ล้ม / `reconcile.ok=false`, contract เพิ่มตาราง (ลงทะเบียนใหม่), หมุน/เพิกถอน key, อ่าน audit เมื่อมีข้อร้องเรียน, ถอยกลับ (ปิดปุ่ม = ลบ env ฝั่ง PB; เพิกถอน key); สิ่งที่ต้องดูสัปดาห์แรก (export `query_audit` ของ key นี้ → คำถามที่ผิด/ถูกปฏิเสธ → golden / ข้อเสนอ contract)
-9. prompt ฝั่ง NT-Report ต่อท้าย plan/PROMPT_NT_REPORT_P7.md: env + context map ที่ตกลง, ตาราง error ตาม status code จริง, ข้อเสนอ contract ที่ค้าง (Phase 5 ข้อ 1 "ebt ไม่ใช่ทั้งบริษัท" ฯลฯ), และ (ถ้าเจ้าของต้องการ multi-context ใน portal ภายหลัง) สิ่งที่ hook ต้องรองรับ: ไม่ส่ง `context`, อ่าน `parts[].data_as_of` แทนระดับบน
+9. prompt ฝั่ง NT-Report: **มีแล้วที่ plan/PROMPT_NT_REPORT_GOLIVE.md** (เจ้าของเปิด session คู่ขนานใน repo NT-Report ด้วยไฟล์นั้น — อ่านก่อนเริ่มข้อ 1d; ข้อสังเกต 1–7 ในไฟล์นั้นคือสิ่งที่ hook ทำกับ response ของ AI) — อัปเดตไฟล์นั้นตามผลจริงของงานนี้ (status code ที่เปลี่ยน, context map ที่ตกลง) และบันทึกสรุปต่อท้าย plan/PROMPT_NT_REPORT_P7.md: env + context map ที่ตกลง, ตาราง error ตาม status code จริง, ข้อเสนอ contract ที่ค้าง (Phase 5 ข้อ 1 "ebt ไม่ใช่ทั้งบริษัท" ฯลฯ), และ (ถ้าเจ้าของต้องการ multi-context ใน portal ภายหลัง) สิ่งที่ hook ต้องรองรับ: ไม่ส่ง `context`, อ่าน `parts[].data_as_of` แทนระดับบน
 10. อัปเดต RESULT_P7_GOLIVE.md, RESULT_F11.md, PLAN_7 (§8, §11.2–11.4, หัวสถานะ "ผู้ใช้รายแรก"), ROADMAP, FIX_NOTES, docs (PORTAL_INTEGRATION ให้ตรงของจริง, DEPLOYMENT_SECURITY, runbook), docs/changelogs; CLAUDE.md + AGENTS.md (sync กัน, gitignored); แล้วหยุด
     (ถ้า context ใกล้เต็มก่อนถึงข้อนี้ ให้หยุดแล้วเขียน prompt ส่งต่อ session ถัดไป)
 

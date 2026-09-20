@@ -121,3 +121,6 @@ feed_sales, feed_ebt. key ที่ผูก workspace: เรียก context 
 4. **sales ไม่มีสายงาน** (มี `sales_line / sales_group / sales_dept`) — เทียบกับ revenue / expense ของหน่วยงานเดียวกันได้เฉพาะผ่าน `cost_center`; ถ้า OrgReport เทียบรายสายงานอยู่แล้ว ขอ mapping เดียวกันใน feed (`dim_org` ของ sales มี `division` ไหม)
 5. **ebt `group_1` = `03.Mobile`** ขณะที่ revenue `bu` / sales `business_group` = `3.Mobile` — ถ้าจะให้ถามรายกลุ่มธุรกิจข้าม ebt ↔ revenue/sales ได้ ขอคอลัมน์รหัสกลุ่มธุรกิจแบบเดียวกัน (เช่น `bu_seq`)
 6. `description` ของ context (`contract.description`: "NT Revenue Data Feed" ฯลฯ) ถูกใช้เป็นคำอธิบายให้ตัวแตกคำถามเลือก context — ประโยคภาษาไทยสั้น ๆ ว่าชุดนี้ตอบอะไร/ไม่ตอบอะไร (เช่น ebt: "EBT ของ 2 สายงานขาย — ไม่ใช่ทั้งบริษัท") จะช่วยให้แตกถูกขึ้น
+
+## งานเปิดใช้จริง (go-live) — 2026-09-20
+prompt แยกสำหรับ session ใน repo NT-Report: `plan/PROMPT_NT_REPORT_GOLIVE.md` (contract ebt PATCH "ไม่ใช่ทั้งบริษัท" + description ภาษาไทยของทุก contract, hook: error 200 ที่ไม่มี `data_as_of` / คำเตือนงวด / status 401·403·429 / ไม่ส่งข้อความดิบถึง browser, เอกสาร + context map, E2E + ตัวเลขอ้างอิงจาก dashboard) — คู่กับ `plan/PROMPT_P7_GOLIVE_NT_REPORT.md` ฝั่ง AI
