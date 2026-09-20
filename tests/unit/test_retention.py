@@ -194,6 +194,11 @@ def test_the_answer_expires_on_the_same_clock_as_the_rows(dbs, monkeypatch):
     assert db.get(ChatHistory, short_old).ai_response == retention.EXPIRED_ANSWER
     assert db.get(ChatHistory, answer_only).ai_response == retention.EXPIRED_ANSWER
     assert db.get(ChatHistory, short_new).ai_response == "คำตอบ"
+    never_answered = add(db, 31)  # rows still there, no answer text: nothing to expire
+    db.get(ChatHistory, never_answered).ai_response = None
+    db.commit()
+    assert retention.purge_results(db, config, now=NOW)["chat_history"] == 1
+    assert db.get(ChatHistory, never_answered).ai_response is None
     assert not any(retention.purge_results(db, config, now=NOW).values())  # idempotent
 
     monkeypatch.setattr(retention, "_global_settings", lambda: (0, True))  # 0 = keep forever

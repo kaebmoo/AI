@@ -30,6 +30,8 @@ from mcp.server.stdio import stdio_server
 
 NAME = "nt-ai-assistant"
 DEFAULT_URL = "http://127.0.0.1:8000"
+# the server records the HTTP client in query_audit.channel; without this it would read "python-httpx"
+AGENT = "nt-ai-stdio-bridge/1.0"
 
 
 def _flatten(exc: BaseException):
@@ -66,7 +68,7 @@ def _die(exc: BaseException, url: str) -> None:
 async def upstream(url: str, key: str):
     """One request, one authenticated session — the facade is stateless, it keeps nothing between calls."""
     try:
-        async with streamablehttp_client(url, headers={"X-API-Key": key}) as (read, write, _):
+        async with streamablehttp_client(url, headers={"X-API-Key": key, "User-Agent": AGENT}) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 yield session

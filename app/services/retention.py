@@ -81,7 +81,9 @@ def purge_results(db, config_engine=None, now=None) -> Dict[str, int]:
     overrides = {ctx: days for ctx, (days, _store) in _workspace_overrides(config_engine).items() if days is not None}
     done = {"chat_history": 0, "chat_session_data": 0, "query_correction_log": 0, "temp_files": 0}
 
-    clear = ("UPDATE chat_history SET result_data = NULL, sql_result_summary = NULL, ai_response = :expired "
+    # CASE, not a plain assignment: a row that never carried an answer must not claim one expired
+    clear = ("UPDATE chat_history SET result_data = NULL, sql_result_summary = NULL, "
+             "ai_response = CASE WHEN ai_response IS NULL THEN NULL ELSE :expired END "
              "WHERE created_at < :cutoff AND (result_data IS NOT NULL OR sql_result_summary IS NOT NULL "
              "OR (ai_response IS NOT NULL AND ai_response <> :expired)) AND ")
     by_days: Dict[int, list] = {}
