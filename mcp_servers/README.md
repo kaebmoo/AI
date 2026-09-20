@@ -201,35 +201,17 @@ User: "รายได้ Mobile ปี 68"
 
 ## Integration
 
-### Claude Desktop — ⚠️ development เท่านั้น ห้ามใช้กับข้อมูลจริง
+### Claude Desktop / MCP client อื่น — ต่อที่ `/api/v1/mcp` เท่านั้น
 
-> config ด้านล่าง (และไฟล์ `claude_desktop_config.json` ใน directory นี้) ต่อ `nt-query` = **SQL ดิบ ไม่มี key / allowlist / scope / audit / `llm_data_policy`** เข้า desktop LLM ตรง ๆ —
-> ขัดกับกติกาของ Plan 7 Phase 6. ใช้ได้เฉพาะตอนพัฒนา / debug tool กับ **DB ทดสอบที่ไม่มีข้อมูลจริง** เท่านั้น. การใช้งานจริงจาก MCP client ให้ต่อ `/api/v1/mcp` ([คู่มือ](../docs/manuals/manual_mcp_external.md))
+Server ในไดเรกทอรีนี้เป็น **stdio ภายใน** ของแอป: `nt-query` รับ SQL ดิบ และไม่มี key / workspace /
+allowlist / scope / audit / `llm_data_policy` ต่อ client ภายนอกเข้ามาตรง ๆ ไม่ได้ ไม่ว่ากรณีใด
+(ไฟล์ตัวอย่าง `claude_desktop_config.json` ที่เคยสอนวิธีนั้นถูกลบแล้ว)
 
-เพิ่มใน `~/.claude/claude_desktop_config.json`:
+ทางเดียวคือ facade `POST /api/v1/mcp` ซึ่งมี 3 tool (`ask` / `list_contexts` / `source_status`) และบังคับกติกาครบ
+Claude Desktop เรียก HTTP เองไม่ได้ (มันรัน process ในเครื่องแล้วคุยทาง stdio) จึงต่อผ่านตัวแปลง
+`scripts/mcp_stdio_bridge.py` — key อยู่ใน env ไม่ได้อยู่ในไฟล์ config
 
-```json
-{
-  "mcpServers": {
-    "nt-metadata": {
-      "command": "python",
-      "args": ["-m", "mcp_servers.nt_metadata_mcp"],
-      "cwd": "/path/to/AI",
-      "env": {
-        "METADATA_DB_URL": "sqlite:///nt_fi_report.sqlite"
-      }
-    },
-    "nt-query": {
-      "command": "python",
-      "args": ["-m", "mcp_servers.nt_query_mcp"],
-      "cwd": "/path/to/AI",
-      "env": {
-        "METADATA_DB_URL": "sqlite:///nt_fi_report.sqlite"
-      }
-    }
-  }
-}
-```
+วิธีตั้งค่า + ตัวอย่าง config: [`docs/manuals/manual_mcp_external.md`](../docs/manuals/manual_mcp_external.md)
 
 ### Python Client
 
@@ -309,7 +291,6 @@ mcp_servers/
 ├── test_metadata_mcp.py     # Tests (7/7 passed)
 ├── test_query_mcp.py        # Tests (5/5 passed)
 ├── requirements.txt         # Dependencies
-├── claude_desktop_config.json # Claude Desktop config — development เท่านั้น ห้ามใช้กับข้อมูลจริง (ดูคำเตือนด้านบน)
 └── README.md                # This file
 ```
 

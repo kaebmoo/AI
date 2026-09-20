@@ -76,7 +76,37 @@ claude --mcp-config mcp.json --strict-mcp-config
 
 **Codex CLI:** ใส่ใน `~/.codex/config.toml` — `url = "…/api/v1/mcp"` + `env_http_headers = { "X-API-Key" = "NT_AI_API_KEY" }` (ตามเอกสาร — ยังไม่ได้ทดสอบต่อจริง)
 
-**Claude Desktop:** remote connector ของ Desktop ต่อออกจาก cloud ของ Anthropic — เข้า `localhost` / เครือข่ายภายในไม่ได้ และตั้ง header เองไม่ได้. ยังไม่รองรับใน phase นี้
+**Claude Desktop** — ผ่านตัวแปลง stdio (`scripts/mcp_stdio_bridge.py`):
+
+Desktop ต่อ HTTP เองไม่ได้ (remote connector ของมันออกจาก cloud ของ Anthropic จึงเข้า `localhost` ไม่ได้ และตั้ง header เองไม่ได้)
+แต่มันรัน process ในเครื่องแล้วคุยทาง stdio ได้ — bridge คือตัวแปลงระหว่างสองฝั่งนั้น ส่งต่อ tool ตามที่ server ประกาศ
+ไม่เพิ่ม tool ของตัวเอง และส่ง tool error ทั้งก้อน. key อยู่ใน `env` ของ config ไม่ได้ถูกเขียนลงที่อื่น
+
+⚠️ คำตอบ (รวมตัวเลข) จะไปถึงโมเดลของ Anthropic เหมือนกับตอนใช้ Claude Code — ใช้ key ของ workspace ที่ยอมรับได้
+
+แก้ `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) แล้ว**ปิด-เปิด Claude Desktop ใหม่**:
+
+```json
+{
+  "mcpServers": {
+    "nt-ai": {
+      "command": "/path/to/AI/venv/bin/python",
+      "args": ["/path/to/AI/scripts/mcp_stdio_bridge.py"],
+      "env": {
+        "NT_AI_API_KEY": "ntai_...",
+        "NT_AI_BASE_URL": "http://127.0.0.1:8000"
+      }
+    }
+  }
+}
+```
+
+(`command` = python ของ venv ที่มี `mcp` ติดตั้งอยู่ — ไม่ต้องลง npm package ใด ๆ; `NT_AI_BASE_URL` ไม่ใส่ = `http://127.0.0.1:8000`.
+ไฟล์นี้เป็น plaintext ในเครื่องผู้ใช้ → ใช้ key ที่ revoke ได้และผูก workspace เดียว)
+
+ตรวจก่อนเสียบ Desktop: `NT_AI_API_KEY=ntai_... venv/bin/python scripts/mcp_stdio_bridge.py` แล้วปล่อยค้างไว้ —
+ถ้า key ผิด / flag ปิด / server ไม่ขึ้น bridge จะจบทันทีพร้อมเหตุผลบรรทัดเดียว (Desktop แสดงข้อความนี้ใน log ของ server)
+
 
 **โปรแกรมของเราเอง (Python, MCP SDK):** ดู [`scripts/mcp_client_example.py`](../../scripts/mcp_client_example.py)
 
