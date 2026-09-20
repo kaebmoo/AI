@@ -27,7 +27,7 @@ class TestAPIKeyAuth:
         db_session.commit()
 
         client.headers["X-Session-Token"] = "classic_token"
-        # Test with query/contexts (public) to verify client setup works
+        # query/contexts takes a session token too — verifies the client setup works
         resp = client.get("/api/v1/query/contexts")
         assert resp.status_code == 200
 

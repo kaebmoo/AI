@@ -364,7 +364,7 @@ npm install && npm run build
 ### Verify หลัง Deploy
 
 - [ ] Backend: `curl https://api.your-domain.com/` → `{"message": "AI Assistant API"}`
-- [ ] Contexts: `curl https://api.your-domain.com/api/v1/query/contexts` → active contexts ครบ (ปัจจุบัน 5: revenue, expense, pl_costtype, transfer price, feed_revenue)
+- [ ] Contexts: `curl -H "X-API-Key: $NT_AI_API_KEY" https://api.your-domain.com/api/v1/query/contexts` → context ที่ key นั้นใช้ได้ (ต้องมี key หรือ session token — ไม่มี = 401)
 - [ ] Admin UI: เปิด browser → login ได้
 - [ ] User App: ถามคำถาม → ได้คำตอบ
 

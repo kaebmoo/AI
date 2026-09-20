@@ -213,19 +213,37 @@ def contexts_for(allowed, config_db) -> List[ContextInfo]:
             for name, display_name, description in rows if allowed is None or name in allowed]
 
 
+def _may_list(
+    request: Request,
+    x_api_key: Optional[str] = Depends(deps.api_key_header),
+    token: Optional[str] = Depends(deps.header_scheme),
+    bearer_token: Optional[str] = Depends(deps.oauth2_scheme),
+    app_db: Session = Depends(deps.get_db),
+):
+    """Who may list the contexts, and which ones they see. Credentials are required: an unusable key
+    used to fall through to `allowed_contexts(None)` — every context of every workspace.
+
+    The key is authenticated but NOT counted (`authenticate`, not `validate_key`): listing what you
+    may ask about is not a question, so it spends no quota and touches no counter."""
+    if x_api_key:
+        from app.services.api_key_service import APIKeyService
+
+        api_key = APIKeyService(app_db).authenticate(x_api_key)
+        owner = app_db.query(User).filter(User.id == api_key.user_id).first() if api_key else None
+        if api_key is None or owner is None or not owner.is_active:
+            raise HTTPException(status_code=401, detail="Invalid or missing API key")
+        return allowed_contexts(api_key)  # None only for a key issued before Phase 4a
+    deps.get_current_user(request, token=token, bearer_token=bearer_token, x_api_key=None, db=app_db)
+    return None  # a signed-in person sees the catalogue as before
+
+
 @router.get("/contexts", response_model=List[ContextInfo])
 async def list_contexts(
     db: Session = Depends(get_config_db),
-    x_api_key: Optional[str] = Depends(deps.api_key_header),
-    app_db: Session = Depends(deps.get_db),
+    allowed = Depends(_may_list),
 ):
-    """List available data contexts. Public — no auth required.
+    """List available data contexts — API key or session token required.
     Sent with a workspace-bound API key (Phase 4a) it lists only what that key can use."""
-    allowed = None
-    if x_api_key:
-        from app.services.api_key_service import APIKeyService
-        allowed = allowed_contexts(APIKeyService(app_db).validate_key(x_api_key))
-
     try:
         return contexts_for(allowed, db)
     except Exception as e:

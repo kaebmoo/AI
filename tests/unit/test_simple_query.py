@@ -208,14 +208,30 @@ class TestPortalFields:
 
 
 class TestQueryContextsEndpoint:
-    """GET /query/contexts."""
+    """GET /query/contexts — hardening: credentials required (it used to be public, and an unusable
+    key listed every context of every workspace)."""
 
-    def test_contexts_list(self, client):
-        """GET /query/contexts → list (public, no auth needed)."""
-        resp = client.get("/api/v1/query/contexts")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert isinstance(data, list)
+    def test_contexts_list_needs_credentials(self, client):
+        assert client.get("/api/v1/query/contexts").status_code == 401
+        assert client.get("/api/v1/query/contexts", headers={"X-API-Key": "ntai_" + "0" * 64}).status_code == 401
+        assert client.get("/api/v1/query/contexts", headers={"X-API-Key": "not-a-key"}).status_code == 401
+
+    def test_contexts_list_for_a_signed_in_person(self, query_client):
+        resp = query_client.get("/api/v1/query/contexts")
+        assert resp.status_code == 200 and isinstance(resp.json(), list)
+
+    def test_a_key_sees_its_own_workspace_and_spends_no_quota(self, client, test_user, db_session):
+        from app.services.api_key_service import APIKeyService
+
+        service = APIKeyService(db_session)
+        raw, key = service.create_key(user_id=test_user.id, name="portal", allowed_contexts='["feed_sales"]')
+        with patch("app.api.v1.query.contexts_for", return_value=[]) as listed:
+            assert client.get("/api/v1/query/contexts", headers={"X-API-Key": raw}).status_code == 200
+        assert listed.call_args.args[0] == frozenset({"feed_sales"})
+        assert service.usage_today(key.id) == 0  # listing is not a question
+
+        service.revoke_key(key.id)
+        assert client.get("/api/v1/query/contexts", headers={"X-API-Key": raw}).status_code == 401
 
 
 class TestMultiContextResponse:

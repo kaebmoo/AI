@@ -40,8 +40,9 @@ def _ws(engine, name):
         return conn.execute(text("SELECT id FROM workspaces WHERE name = :n"), {"n": name}).scalar_one()
 
 
-def _key(workspace_id=None, allowed=None):
-    return SimpleNamespace(workspace_id=workspace_id, allowed_contexts=json.dumps(allowed) if allowed is not None else None)
+def _key(workspace_id=None, allowed=None, user_id=1):
+    return SimpleNamespace(workspace_id=workspace_id, user_id=user_id,
+                           allowed_contexts=json.dumps(allowed) if allowed is not None else None)
 
 
 class TestMigration:
@@ -362,13 +363,31 @@ class TestContextListing:
             conn.execute(text("ALTER TABLE schema_contexts ADD COLUMN display_name TEXT DEFAULT ''"))
             conn.execute(text("ALTER TABLE schema_contexts ADD COLUMN description TEXT"))
         service = MagicMock()
-        service.validate_key.return_value = _key(_ws(config, "nt-report"))
+        service.authenticate.return_value = _key(_ws(config, "nt-report"))  # listing spends no quota
+        app_db = MagicMock()
+        request = SimpleNamespace(url=SimpleNamespace(path="/api/v1/query/contexts"), state=SimpleNamespace(), headers={})
         with patch("app.services.workspaces._config_engine", return_value=config), \
              patch("app.services.api_key_service.APIKeyService", return_value=service):
-            mine = asyncio.run(query_api.list_contexts(db=db, x_api_key="ntai_x", app_db=MagicMock()))
-            everyone = asyncio.run(query_api.list_contexts(db=db, x_api_key=None, app_db=MagicMock()))
-        assert {c.name for c in mine} == {"feed_sales", "transfer price"}
-        assert {c.name for c in everyone} == {"revenue", "feed_sales", "transfer price", "hr_payroll"}  # public, as before
+            mine = query_api._may_list(request, x_api_key="ntai_x", token=None, bearer_token=None, app_db=app_db)
+            with patch.object(query_api.deps, "get_current_user", return_value=MagicMock()):
+                everyone = query_api._may_list(request, x_api_key=None, token="s", bearer_token=None, app_db=app_db)
+        assert {c.name for c in asyncio.run(query_api.list_contexts(db=db, allowed=mine))} == {"feed_sales", "transfer price"}
+        assert everyone is None  # a signed-in person sees the catalogue
+        assert {c.name for c in asyncio.run(query_api.list_contexts(db=db, allowed=everyone))} == {
+            "revenue", "feed_sales", "transfer price", "hr_payroll"}
+        service.validate_key.assert_not_called()
+
+    def test_a_key_that_cannot_be_used_is_401_not_the_whole_catalogue(self):
+        from fastapi import HTTPException
+        from app.api.v1 import query as query_api
+
+        service = MagicMock()
+        service.authenticate.return_value = None
+        request = SimpleNamespace(url=SimpleNamespace(path="/api/v1/query/contexts"), state=SimpleNamespace(), headers={})
+        with patch("app.services.api_key_service.APIKeyService", return_value=service), \
+             pytest.raises(HTTPException) as exc:
+            query_api._may_list(request, x_api_key="ntai_revoked", token=None, bearer_token=None, app_db=MagicMock())
+        assert exc.value.status_code == 401
 
 
 class TestRefusalInsideATaskGroup:

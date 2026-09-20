@@ -101,8 +101,11 @@ class TestQueryEndpoint:
         data = resp.json()
         assert data.get("error") is not None
 
-    def test_query_contexts_public(self, client):
-        """GET /query/contexts → public endpoint, no auth."""
-        resp = client.get("/api/v1/query/contexts")
+    def test_query_contexts_without_credentials(self, client):
+        """GET /query/contexts → 401 (hardening: it used to be public)."""
+        assert client.get("/api/v1/query/contexts").status_code == 401
+
+    def test_query_contexts_signed_in(self, query_client):
+        resp = query_client.get("/api/v1/query/contexts")
         assert resp.status_code == 200
         assert isinstance(resp.json(), list)
