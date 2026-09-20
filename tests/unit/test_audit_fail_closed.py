@@ -167,3 +167,59 @@ class TestMultiContext:
     def test_one_sub_question_without_a_row_stops_the_whole_answer(self, writable):
         with pytest.raises(query_audit.AuditUnavailable):
             self._multi(writable, parent_written=True, part_exc=query_audit.AuditUnavailable("part"))
+
+
+class TestReviewFindings:
+    """Both from the independent review of the commit above."""
+
+    def test_the_failed_write_is_not_immediately_tried_again(self, unwritable):
+        """The raise sits inside the try that also audits failures, so the database that just refused
+        a write was asked for a second one — another wait on the same lock, for nothing."""
+        engine = _engine(unwritable)
+        with patch.object(query_audit, "record", return_value=False) as record:
+            with pytest.raises(query_audit.AuditUnavailable):
+                _ask(engine, api_key_id=7, channel="api:portal")
+        assert record.call_count == 1
+
+        record.reset_mock()  # an ordinary failure is still audited, exactly once
+        engine._query = AsyncMock(side_effect=RuntimeError("boom"))
+        with patch.object(query_audit, "record", record), pytest.raises(RuntimeError):
+            _ask(engine, api_key_id=7, channel="api:portal")
+        assert record.call_count == 1
+
+    def test_two_requests_can_migrate_the_table_at_once(self, tmp_path):
+        """record() runs in a worker thread. SQLite has no ADD COLUMN IF NOT EXISTS: the thread that
+        lost this race used to lose its audit row — and would now lose the answer with it."""
+        import threading
+
+        import app.models  # noqa: F401
+
+        engine = create_engine(f"sqlite:///{tmp_path / 'pre_phase5.db'}")
+        Base.metadata.create_all(engine)
+        with engine.begin() as conn:  # an app DB from before Phase 5
+            conn.execute(text("DROP INDEX IF EXISTS ix_query_audit_request_group"))
+            conn.execute(text("ALTER TABLE query_audit DROP COLUMN request_group"))
+        query_audit._tables_checked.clear()
+
+        slow, failures = threading.Event(), []
+
+        def create(*args, **kwargs):  # widen the window both threads used to run through together
+            slow.wait(0.2)
+            slow.set()
+
+        def go():
+            try:
+                query_audit.ensure_table(engine)
+            except Exception as exc:  # noqa: BLE001 — the point of the test
+                failures.append(exc)
+
+        with patch.object(QueryAudit.__table__, "create", create):
+            threads = [threading.Thread(target=go) for _ in range(2)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(10)
+
+        assert failures == []
+        with engine.connect() as conn:
+            assert "request_group" in {c["name"] for c in __import__("sqlalchemy").inspect(engine).get_columns("query_audit")}

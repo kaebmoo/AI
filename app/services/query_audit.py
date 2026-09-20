@@ -3,6 +3,7 @@ through GET /admin/query-audit. Separate from AuditService (config changes)."""
 
 import json
 import logging
+import threading
 from typing import Any, Dict, Optional
 
 from sqlalchemy import inspect, text
@@ -13,17 +14,24 @@ from app.models.query_audit import QueryAudit
 logger = logging.getLogger(__name__)
 
 _tables_checked = set()
+# record() runs in a worker thread: two requests arriving together on a not-yet-migrated table would
+# both find the column missing and both ALTER, and SQLite has no ADD COLUMN IF NOT EXISTS — the loser
+# used to lose only its audit row, and now would lose the answer with it
+_check_lock = threading.Lock()
 
 
 def ensure_table(bind) -> None:
     """query_audit exists with today's columns — once per process per database (idempotent)."""
     if str(bind.url) in _tables_checked:
         return
-    QueryAudit.__table__.create(bind, checkfirst=True)  # an app DB created before Phase 4.5
-    if "request_group" not in {c["name"] for c in inspect(bind).get_columns("query_audit")}:
-        with bind.begin() as conn:  # a table created before Phase 5
-            conn.execute(text("ALTER TABLE query_audit ADD COLUMN request_group VARCHAR"))
-    _tables_checked.add(str(bind.url))
+    with _check_lock:
+        if str(bind.url) in _tables_checked:  # someone did it while we waited
+            return
+        QueryAudit.__table__.create(bind, checkfirst=True)  # an app DB created before Phase 4.5
+        if "request_group" not in {c["name"] for c in inspect(bind).get_columns("query_audit")}:
+            with bind.begin() as conn:  # a table created before Phase 5
+                conn.execute(text("ALTER TABLE query_audit ADD COLUMN request_group VARCHAR"))
+        _tables_checked.add(str(bind.url))
 
 
 class AuditUnavailable(Exception):

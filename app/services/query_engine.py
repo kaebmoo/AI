@@ -429,6 +429,10 @@ class QueryEngine:
                 # audit row this answer would be untraceable, so it does not leave (NIST AU-5)
                 raise query_audit.AuditUnavailable(f"query_audit not written for api_key_id={api_key_id}")
             return engine_result
+        except query_audit.AuditUnavailable:
+            # record() already logged why; a second write to the database that just refused one is
+            # only a second wait on the same lock
+            raise
         except Exception as exc:  # refusals (scope / allowlist / policy) and failures are audited too
             await self._audit(None, scope, {**audit, "error": f"{type(exc).__name__}: {exc}"[:2000],
                                             "context_name": context}, context)
