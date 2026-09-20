@@ -70,3 +70,15 @@ repo AI (/Users/seal/Documents/GitHub/AI) = **อ่านอย่างเด�
 
 ## อัปเดตจากงาน hardening ฝั่ง AI (2026-09-20)
 สัญญาของ field ไม่เปลี่ยน แต่ `error` เป็น**รหัสคงที่**แล้ว (`query_failed` / `source_unavailable` / `duplicate_request` / `internal_error`), `answer` ไม่มี SQL เมื่อได้ 0 แถว, body ของ 400 / 403 เป็นข้อความตายตัว, เกินโควตา = 429, มี 503 ใหม่, และ `GET /api/v1/query/contexts` ต้องส่ง `X-API-Key` แล้ว — รายละเอียด: `docs/PORTAL_INTEGRATION.md` §"สิ่งที่ response บอก และไม่บอก" และ `plan/PROMPT_NT_REPORT_P7.md` ท้ายไฟล์
+
+## อัปเดตจากฝั่ง AI หลังทำ go-live จริง (2026-09-20 กลางคืน)
+ผลเต็ม: `plan/archive/RESULT_P7_GOLIVE.md` · ตัวเลข 10 คำถาม: `plan/archive/RESULT_F11.md` ·
+สรุปสำหรับ repo นี้: `plan/PROMPT_NT_REPORT_P7.md` ท้ายไฟล์ (4 หัวข้อ)
+
+1. **ออก key จริงแล้ว** (`nt-report-portal`, workspace `nt-report`, 20/นาที 2,000/วัน) — เจ้าของเป็นผู้ใส่ `.env` และ restart PB
+2. **ต้องแก้ hook 1 จุดก่อน E2E ผ่านเกณฑ์:** `mapUpstreamError` หา `/publish/i` ใน `payload.error` ซึ่งตอนนี้เป็น
+   **รหัส** `source_unavailable` → ระหว่าง publish ผู้ใช้ได้ "ถามใหม่ด้วยถ้อยคำอื่น" แทน "ข้อมูลกำลังอัปเดต"
+3. **ตัวเลขยังไม่ผ่าน 9/10** (revenue 8 · expense 8 · ebt 8 · sales 5 หลังฝั่ง AI แก้ต้นเหตุของ scope กว้าง)
+   → **ยังไม่ใส่ report_type ใดใน `ASSISTANT_CONTEXT_MAP`**; ที่เหลือแยกเป็น contract / sales knowledge / ถ้อยคำของกฎ
+4. `scopeMonths()` ถูกแล้ว — ขอให้คง "งวดของรายงานเป็นค่ามากสุดของ list" ไว้ ฝั่ง AI ใช้ค่ามากสุดเป็นงวดอ้างอิง
+5. **ต้อง restart PocketBase** — process ที่รันอยู่เก่ากว่าการแก้ hook ทั้งหมดของ session นี้
