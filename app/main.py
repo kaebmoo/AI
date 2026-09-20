@@ -19,7 +19,8 @@ setup_logging()
 async def lifespan(app: FastAPI):
     # Startup: Connect to MCP Servers
     mcp_client = MCPClientService()
-    async with mcp_client.connected():
+    # mcp_external: the facade's task group (Plan 7 Phase 6) — a routed ASGI app gets no lifespan of its own
+    async with mcp_client.connected(), mcp_external.session_manager.run():
         app.state.mcp_client = mcp_client
 
         # Startup: Background scheduler (auto-analyzer, config GC)
@@ -153,6 +154,13 @@ from app.api.v1.conversations import router as conversations_router
 from app.api.v1.admin_agent import router as admin_agent_router
 from app.api.v1.query import router as query_router
 from app.api.v1.reports import router as reports_router
+
+# External MCP facade (Plan 7 Phase 6): stateless Streamable HTTP behind its own API-key gate; answers 404
+# until admin_config.mcp_external_enabled is on. A route, not a mount: no 307 on the no-slash URL.
+from starlette.routing import Route
+from app.api.v1 import mcp_facade
+mcp_external, _mcp_asgi = mcp_facade.build()
+app.router.routes.append(Route(mcp_facade.PATH, endpoint=_mcp_asgi))
 
 app.include_router(auth_router, prefix=f"{settings.API_V1_STR}/auth", tags=["auth"])
 app.include_router(chat_router, prefix=f"{settings.API_V1_STR}/chat", tags=["chat"])

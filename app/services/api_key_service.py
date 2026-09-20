@@ -76,12 +76,9 @@ class APIKeyService:
         logger.info(f"API key created: {key_prefix}... for user {user_id}, name='{name}'")
         return raw_key, api_key
 
-    def validate_key(self, raw_key: str) -> Optional[APIKey]:
-        """Validate an API key and return the APIKey if valid.
-
-        Checks: exists, is_active, not expired, rate limits.
-        Returns None if invalid.
-        """
+    def authenticate(self, raw_key: str) -> Optional[APIKey]:
+        """The active, unexpired key — no rate-limit counting, no last_used_at (Plan 7 Phase 6: the MCP
+        gate checks every HTTP request with this; a tool call is then counted once by validate_key)."""
         if not raw_key or not raw_key.startswith(KEY_PREFIX):
             return None
 
@@ -98,6 +95,18 @@ class APIKeyService:
         # Check expiry
         if api_key.expires_at and api_key.expires_at < utcnow():
             logger.warning(f"API key {api_key.key_prefix} expired")
+            return None
+
+        return api_key
+
+    def validate_key(self, raw_key: str) -> Optional[APIKey]:
+        """Validate an API key and return the APIKey if valid.
+
+        Checks: exists, is_active, not expired, rate limits.
+        Returns None if invalid.
+        """
+        api_key = self.authenticate(raw_key)
+        if not api_key:
             return None
 
         # Check rate limits

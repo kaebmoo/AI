@@ -672,6 +672,8 @@ class AdminConfigService:
             ) == "true",
             # F9 flags (all default OFF — enabling requires measurements, see plan/RESULT_F9.md)
             "template_answers_enabled": self.get_config("template_answers_enabled", "false") == "true",
+            # Plan 7 Phase 6: the external MCP facade at /api/v1/mcp answers 404 until this is on
+            "mcp_external_enabled": self.get_config("mcp_external_enabled", "false") == "true",
             "intent_state_enabled": self.get_config("intent_state_enabled", "false") == "true",
             "escalation_ladder_enabled": self.get_config("escalation_ladder_enabled", "false") == "true",
             "escalation_tool_loop_enabled": self.get_config("escalation_tool_loop_enabled", "false") == "true",

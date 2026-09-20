@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     # Use "*" only for local development (not recommended for production)
     CORS_ORIGINS: str = ""
 
+    # External MCP facade (Plan 7 Phase 6) — Host / Origin the endpoint answers to (comma-separated, ':*' = any port).
+    # A deployment behind a real hostname must add it here; an Origin header (a browser) is refused unless listed.
+    MCP_ALLOWED_HOSTS: str = "127.0.0.1:*,localhost:*,[::1]:*"
+    MCP_ALLOWED_ORIGINS: str = ""
+    MCP_MAX_ROWS: int = 100  # cap of ask(include_data=true); rows land in the client's LLM context
+
     # Security
     # REQUIRED: Set a strong random secret key in production via SECRET_KEY env variable
     # Generate with: python -c "import secrets; print(secrets.token_hex(32))"

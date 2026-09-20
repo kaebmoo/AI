@@ -40,8 +40,9 @@ def enforce_key_surface(api_key, path: str) -> None:
     /chat, /admin, … take a context too and know nothing about allowlists."""
     from app.services.workspaces import is_restricted
 
-    prefix = f"{settings.API_V1_STR}/query"
-    if is_restricted(api_key) and not (path == prefix or path.startswith(prefix + "/")):
+    # /mcp (Phase 6) authenticates in its own gate (app/api/v1/mcp_facade.py) — listed so the rule reads whole
+    prefixes = (f"{settings.API_V1_STR}/query", f"{settings.API_V1_STR}/mcp")
+    if is_restricted(api_key) and not any(path == p or path.startswith(p + "/") for p in prefixes):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
                             detail="API key นี้ใช้ได้เฉพาะ /api/v1/query")
 
