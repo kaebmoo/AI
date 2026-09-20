@@ -63,6 +63,7 @@ AI Query Assistant สำหรับ NT (National Telecom) — แปลงค�
 | [manual_context_onboarding.md](manuals/manual_context_onboarding.md) | Context Onboarding — เพิ่ม view ใหม่อัตโนมัติ |
 | [manual_api_keys.md](manuals/manual_api_keys.md) | การจัดการ API Keys |
 | [manual_mcp_external.md](manuals/manual_mcp_external.md) | MCP สำหรับผู้เรียกภายนอก (`/api/v1/mcp`) — เปิดใช้, ออก key, ต่อ Claude Code / Gemini CLI / Codex / MCP SDK, tools, error, โควตา + audit |
+| [manual_portal_runbook.md](manuals/manual_portal_runbook.md) | Runbook ของช่องทาง portal — start/stop, ตรวจสุขภาพ, publish ล้ม, contract เปลี่ยน, หมุน/เพิกถอน key, อ่าน audit, ถอยกลับ |
 | [manual_telegram_bot.md](manuals/manual_telegram_bot.md) | Telegram Bot |
 
 ## Vanna (RAG / Vector DB)
@@ -86,6 +87,7 @@ AI Query Assistant สำหรับ NT (National Telecom) — แปลงค�
 | [PLAN_7_DATA_PROTECTION_P4_5.md](changelogs/PLAN_7_DATA_PROTECTION_P4_5.md) | Plan 7 Phase 4.5 — `llm_data_policy` + provider allowlist ต่อ source, retention ของผลลัพธ์, DSR, audit ของคำถาม |
 | [PLAN_7_MULTI_CONTEXT_P5.md](changelogs/PLAN_7_MULTI_CONTEXT_P5.md) | Plan 7 Phase 5 — คำถามข้ามหลาย context: แตกคำถามต่อ context, รวมคำตอบใน code พร้อมที่มาของทุกตัวเลข (flag ต่อ workspace, `/api/v1/query`) |
 | [PLAN_7_EXTERNAL_MCP_P6.md](changelogs/PLAN_7_EXTERNAL_MCP_P6.md) | Plan 7 Phase 6 — MCP สำหรับผู้เรียกภายนอก: facade `/api/v1/mcp` (stateless Streamable HTTP + API key, 3 tools, ไม่คืน SQL, policy `full` เท่านั้น; flag `mcp_external_enabled` ปิดเป็นค่าเริ่มต้น) |
+| [PORTAL_GOLIVE.md](changelogs/PORTAL_GOLIVE.md) | เปิดใช้จริง: NT-Report portal (2026-09-20) — ฝั่ง AI เปิดแล้ว (migrate, key จริงผูก workspace, allowlist matcha, retention รอบแรก), prompt บอกขอบเขตของ `scope` + งวดอ้างอิง; **ปุ่มฝั่ง portal ยังไม่เปิด** เพราะ 10 คำถาม/report_type ได้ 8/8/8/5 |
 | [EXTERNAL_CHANNEL_HARDENING.md](changelogs/EXTERNAL_CHANNEL_HARDENING.md) | Hardening ของช่องทางเดิม (2026-09-20) — `/api/v1/query` ไม่ส่ง SQL / ข้อความ exception ออก, เกินโควตา = 429, `/query/contexts` ต้อง auth, `ai_response` หมดอายุ, audit เขียนไม่ได้ = ไม่ส่งคำตอบ, Claude Desktop ผ่าน stdio bridge |
 | [ADMIN_WORKSPACE_REFRESH_2026_03_23.md](changelogs/ADMIN_WORKSPACE_REFRESH_2026_03_23.md) | Admin workspace refresh + Vanna ops |
 | [CACHING_AND_CONTEXT_IMPROVEMENTS.md](changelogs/CACHING_AND_CONTEXT_IMPROVEMENTS.md) | Caching & context improvements |
