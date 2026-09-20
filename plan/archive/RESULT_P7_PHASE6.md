@@ -258,3 +258,9 @@ Mutation check ของ test (10 mutant): ฆ่า 7 (ตัด policy filter,
 ## 10. Commits
 
 `8d67523` สำรวจ (session ก่อน) · `f868b91` ทางเข้าร่วม REST/MCP · `fd67d07` facade + gate + 29 test · `2bcd120` ตัวอย่าง client + latency · `69d896a` แก้ตาม review · (ถัดไป) เอกสาร — **ยังไม่ push**; หยุดก่อน Phase 7
+
+## 11. หลังปิด phase (2026-09-20 เย็น) — migrate DB จริง + ข้อตัดสินของงานถัดไป
+
+- **`config.db` จริง migrate แล้ว** (เจ้าของสั่ง): ซ้อมบนสำเนาสดก่อน → schema ต่างเฉพาะ 4 คอลัมน์ (`data_sources.llm_data_policy` = `full` ทั้ง 5 source, `llm_provider_allowlist`, `workspaces.result_retention_days`, `store_result_data`); `app.db` ไม่เปลี่ยน (SHA เท่าเดิม); รันซ้ำ = ไม่มีแถวเปลี่ยน (ขยับแค่ `sqlite_sequence`); `quick_check` ok; context ที่ MCP ใช้ได้บนของจริง = 8 ตัว. Backup ก่อน migrate: `~/nt-ai-backups/pre-migrate-20260920/`
+- ยังไม่ได้ทำ: เปิด flag, ออก key จริง, start server (start ครั้งแรกล้างผลลัพธ์เก่ากว่า 30 วัน ~1,285 แถว — เจ้าของรับแล้วโดยมี backup), Redis (เจ้าของรันเอง)
+- **เจ้าของตัดสินข้อค้างของ §9:** REST แก้ครบ 4 ข้อ (SQL ในคำตอบ 0 แถว, ข้อความ exception, `str(dict)`, เกินโควตา = 429) · `GET /query/contexts` ต้อง auth เสมอ · Claude Desktop ต่อ facade ผ่าน stdio bridge + ลบ `claude_desktop_config.json` · `ai_response` หมดอายุตาม `result_retention_days` · audit เขียนไม่ได้ = ไม่ส่งคำตอบออก เฉพาะช่องทางที่ถือ key → งานอยู่ใน `plan/PROMPT_P7_HARDENING.md` (ทำก่อน go-live ของ portal)

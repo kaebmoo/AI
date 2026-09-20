@@ -13,6 +13,7 @@ repo NT-Report (/Users/seal/Documents/GitHub/NT-Report) = **อ่านอย�
 
 ## สถานะตอนนี้ (2026-09-20)
 - Phase 1–6 ✅ บน code | pytest: **1035 passed, 3 skipped** — รันโดยชี้ `CONFIG_DB_URL` / `DATABASE_URL` / `DATA_SOURCE_CACHE_DIR` ไปสำเนา (full pytest บน DB จริงขยับ `admin_config.last_brain_relevant_change_at` — FIX_NOTES Phase 5); `venv/bin/python3.14 -m pytest -q -p no:cacheprovider` (python3.10 ใน venv ไม่มี pytest; server จริงรันด้วย interpreter ไหน — **ตรวจในข้อ 1**)
+- ⚠️ **อัปเดต 2026-09-20 เย็น:** `config.db` จริง **migrate แล้ว** (RESULT_P7_PHASE6 §11; backup `~/nt-ai-backups/pre-migrate-20260920/`) — ข้อ 1a / 4 เหลือแค่ตรวจยืนยัน; ข้อบกพร่องของ REST + `/query/contexts` เจ้าของตัดสินแล้ว และทำใน `plan/PROMPT_P7_HARDENING.md` **ก่อน** งานนี้ (ข้อ 3 ของ prompt นี้ = ตรวจว่างานนั้นจบ); retention รอบแรก = ปล่อยล้างตาม 30 วัน (มี backup)
 - **ของจริงยังไม่ได้เปิดอะไรเลย:** `config.db` / `app.db` จริงยังไม่ได้รัน migration ของ Phase 4.5 (ไม่มี `data_sources.llm_data_policy` ฯลฯ); ยังไม่มี API key จริงของ portal; multi-context ปิดทุก workspace; MCP ภายนอก (`mcp_external_enabled`) ปิด; Redis ไม่ได้รัน → limit รายนาที fail-open (เพดานรายวันใน DB เท่านั้นที่บังคับจริง)
 - config.db จริง: workspace `nt-report` = feed_revenue 2.3.0, feed_expense 1.2.0, feed_sales 1.3.0, feed_ebt 1.4.0 (file source → NT-Report/DataFeed/dist/<d>/latest); งวด: revenue / expense / sales 202608, ebt 202607 (ตรวจใหม่ด้วย source status — NT-Report publish เอง)
 - eval ล่าสุด (สำเนา): revenue 14/14, expense 12/12, sales 12/12, ebt 35/36; ข้ามโดเมน 8–9/10
