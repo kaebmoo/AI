@@ -63,8 +63,9 @@ def test_purge_drops_old_rows_keeps_metadata_and_is_idempotent(dbs, tmp_path):
     assert done == {"chat_history": 1, "chat_session_data": 1, "query_correction_log": 0, "temp_files": 1}
     purged, kept = db.get(ChatHistory, old), db.get(ChatHistory, fresh)
     assert purged.result_data is None and purged.sql_result_summary is None
-    assert (purged.question, purged.generated_sql, purged.ai_response, purged.render_meta) == \
-        ("q", "SELECT 1", "คำตอบ", '{"total_rows": 1}')  # what was asked and answered stays
+    # hardening: the answer is business data in prose and expires with the rows; the rest stays
+    assert (purged.question, purged.generated_sql, purged.render_meta) == ("q", "SELECT 1", '{"total_rows": 1}')
+    assert purged.ai_response == retention.EXPIRED_ANSWER and kept.ai_response == "คำตอบ"
     assert kept.result_data and kept.sql_result_summary
     assert [r.conversation_id for r in db.query(ChatSessionData)] == ["new"]
     assert not os.path.exists(stale) and os.path.exists(recent)
@@ -175,3 +176,44 @@ def test_query_cache_holds_no_rows_when_storing_is_off():
         assert len(qe._query_cache) == cached
     qe._query_cache.clear()
     qe._dedup_store.clear()
+
+
+def test_the_answer_expires_on_the_same_clock_as_the_rows(dbs, monkeypatch):
+    """The answer text is the business data written out in prose — it cannot outlive the rows."""
+    db, config = dbs
+    with config.begin() as conn:
+        conn.execute(text("UPDATE workspaces SET result_retention_days = 7 WHERE name = 'short'"))
+    short_old, short_new = add(db, 8, "feed_x"), add(db, 6, "feed_x")
+    # an old row whose result data was already purged before this change: only the answer is left to do
+    answer_only = add(db, 31)
+    db.get(ChatHistory, answer_only).result_data = None
+    db.get(ChatHistory, answer_only).sql_result_summary = None
+    db.commit()
+
+    assert retention.purge_results(db, config, now=NOW)["chat_history"] == 2
+    assert db.get(ChatHistory, short_old).ai_response == retention.EXPIRED_ANSWER
+    assert db.get(ChatHistory, answer_only).ai_response == retention.EXPIRED_ANSWER
+    assert db.get(ChatHistory, short_new).ai_response == "คำตอบ"
+    assert not any(retention.purge_results(db, config, now=NOW).values())  # idempotent
+
+    monkeypatch.setattr(retention, "_global_settings", lambda: (0, True))  # 0 = keep forever
+    ancient = add(db, 4000)
+    assert retention.purge_results(db, config, now=NOW)["chat_history"] == 0
+    assert db.get(ChatHistory, ancient).ai_response == "คำตอบ"
+
+
+def test_an_expired_answer_is_not_handed_to_the_model_as_the_previous_turn(dbs):
+    """It is a tombstone, not something the assistant said — a follow-up must not read it as context."""
+    from app.api.v1.chat import _get_conversation_history
+
+    db, _config = dbs
+    for minute, (answer, sql) in enumerate(((retention.EXPIRED_ANSWER, "SELECT 1"), ("รายได้ 5 บาท", "SELECT 2"),
+                                            (retention.EXPIRED_ANSWER, None))):
+        db.add(ChatHistory(user_id=1, conversation_id="c", question="q", generated_sql=sql,
+                           ai_response=answer, created_at=NOW + timedelta(minutes=minute)))
+    db.commit()
+
+    history, _rows = _get_conversation_history(db, "c", 1)
+    said = [turn["content"] for turn in history if turn["role"] == "assistant"]
+    assert retention.EXPIRED_ANSWER not in " ".join(said)
+    assert said == ["```sql\nSELECT 1\n```", "```sql\nSELECT 2\n```\n\nรายได้ 5 บาท"]  # no empty turn

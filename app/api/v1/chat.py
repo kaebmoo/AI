@@ -19,7 +19,7 @@ from app.services.ai_service import AIService
 from app.services.data_sources import SourceBoundMCPClient, source_resolver
 from app.services.schema_service import SchemaService
 from app.services.query_engine import QueryEngine, QueryEngineResult, detect_context_from_question
-from app.services.retention import stores_results
+from app.services.retention import EXPIRED_ANSWER, stores_results
 from app.services.intent_classifier import classify_intent
 from app.providers.chart_postprocessor import enrich_chart_config, resolve_max_series_warning
 from app.models.chat_session import ChatSessionData
@@ -161,13 +161,16 @@ def _get_conversation_history(
                 parts = []
                 if chat_entry.generated_sql:
                     parts.append(f"```sql\n{chat_entry.generated_sql}\n```")
-                if chat_entry.ai_response:
+                # an expired answer is a tombstone, not something "I said before": drop it from the
+                # history rather than let a model read it as the previous turn's content
+                if chat_entry.ai_response and chat_entry.ai_response != EXPIRED_ANSWER:
                     # Keep explanation concise — first 300 chars
                     explanation = chat_entry.ai_response[:300]
                     if len(chat_entry.ai_response) > 300:
                         explanation += "…"
                     parts.append(explanation)
-                history.append({"role": "assistant", "content": "\n\n".join(parts)})
+                if parts:  # an expired answer with no SQL leaves nothing to say — skip the turn
+                    history.append({"role": "assistant", "content": "\n\n".join(parts)})
 
     return history, previous_chats
 

@@ -1,7 +1,8 @@
 """
 Result retention (Plan 7 Phase 4.5)
 ====================================
-Stored result rows expire; the question, the SQL and the answer text stay.
+Stored result rows expire, and so does the answer text — it is the same business data in prose.
+The question, the SQL, the metadata and the audit row stay.
 
 Settings (admin_config, overridable per workspace in ``workspaces``):
 - ``result_retention_days``  rows older than this are purged; 0 = keep forever (default 30)
@@ -27,6 +28,11 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_RETENTION_DAYS = 30
 TEMP_EXPORT_DIR = os.path.join(tempfile.gettempdir(), "nt_reports")  # app/tools/report_export.py
+
+# What is left where an answer used to be. An answer is the business data in prose — it expires on
+# the same clock as the rows it was written from. The question, the SQL and the audit row stay.
+# Recognisable on purpose: the follow-up history must not hand this to a model as "what I said before".
+EXPIRED_ANSWER = "คำตอบหมดอายุตามนโยบายการเก็บข้อมูล — ถามใหม่ได้"
 
 
 def _global_settings() -> Tuple[int, bool]:
@@ -75,8 +81,9 @@ def purge_results(db, config_engine=None, now=None) -> Dict[str, int]:
     overrides = {ctx: days for ctx, (days, _store) in _workspace_overrides(config_engine).items() if days is not None}
     done = {"chat_history": 0, "chat_session_data": 0, "query_correction_log": 0, "temp_files": 0}
 
-    clear = ("UPDATE chat_history SET result_data = NULL, sql_result_summary = NULL WHERE created_at < :cutoff "
-             "AND (result_data IS NOT NULL OR sql_result_summary IS NOT NULL) AND ")
+    clear = ("UPDATE chat_history SET result_data = NULL, sql_result_summary = NULL, ai_response = :expired "
+             "WHERE created_at < :cutoff AND (result_data IS NOT NULL OR sql_result_summary IS NOT NULL "
+             "OR (ai_response IS NOT NULL AND ai_response <> :expired)) AND ")
     by_days: Dict[int, list] = {}
     for ctx, days in overrides.items():
         by_days.setdefault(max(0, int(days)), []).append(ctx)
@@ -84,14 +91,15 @@ def purge_results(db, config_engine=None, now=None) -> Dict[str, int]:
         if days:
             done["chat_history"] += db.execute(
                 text(clear + "context_name IN :ctx").bindparams(bindparam("ctx", expanding=True)),
-                {"cutoff": _stamp(now - timedelta(days=days)), "ctx": contexts}).rowcount
+                {"cutoff": _stamp(now - timedelta(days=days)), "ctx": contexts, "expired": EXPIRED_ANSWER}).rowcount
     if global_days:
         cutoff = _stamp(now - timedelta(days=global_days))
         rest = "(context_name IS NULL OR context_name NOT IN :ctx)" if overrides else "1 = 1"
         stmt = text(clear + rest)
         if overrides:
             stmt = stmt.bindparams(bindparam("ctx", expanding=True))
-        done["chat_history"] += db.execute(stmt, {"cutoff": cutoff, **({"ctx": list(overrides)} if overrides else {})}).rowcount
+        done["chat_history"] += db.execute(stmt, {"cutoff": cutoff, "expired": EXPIRED_ANSWER,
+                                                  **({"ctx": list(overrides)} if overrides else {})}).rowcount
         done["chat_session_data"] = db.execute(
             text("DELETE FROM chat_session_data WHERE updated_at < :cutoff"), {"cutoff": cutoff}).rowcount
         try:
