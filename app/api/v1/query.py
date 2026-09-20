@@ -104,6 +104,69 @@ def _part_answer(qr) -> str:
     return str(explanation or "")
 
 
+async def run_simple_query(request_body: SimpleQueryRequest, *, user_id, api_key_id, allowed, channel: str,
+                           db, admin_config, mcp_client=None):
+    """What POST /api/v1/query and the external MCP facade both run: (response, raw engine result).
+    A refusal is raised as itself (ScopeError / ContextNotAllowed / LLMPolicyError), unwrapped from any
+    ExceptionGroup; every other failure is the caller's to present."""
+    from app.services.query_engine import QueryEngine
+
+    async def ask(mcp):
+        from app.services import multi_context  # Phase 5: off unless the workspace is enabled in admin_config
+        engine = QueryEngine(mcp_client=mcp, db_session=db, admin_config=admin_config)
+        return await multi_context.ask(engine, request_body.question, request_body.context,
+                                       user_id=user_id, scope=request_body.scope,
+                                       allowed_contexts=allowed, api_key_id=api_key_id, channel=channel)
+
+    try:
+        if mcp_client:
+            result = await ask(mcp_client)
+        else:
+            from app.services.mcp_client import MCPClientService
+            mcp_client = MCPClientService()
+            async with mcp_client.connected():
+                result = await ask(mcp_client)
+    except Exception as e:
+        # the endpoint's own MCP session (no shared client) runs in an anyio TaskGroup, which
+        # wraps a refusal in an ExceptionGroup — it must still be 400 / 403, not 200 with an error text
+        refusal = _find_refusal(e)
+        if refusal is not None and refusal is not e:
+            raise refusal from e
+        raise
+
+    if not hasattr(result, "query_result"):
+        return _multi_response(result, request_body), result
+
+    # QueryEngineResult has .query_result (QueryResult) + .context_name + .execution_time_ms
+    qr = result.query_result
+    data_rows = qr.data if qr.data else []
+    row_count = len(data_rows)
+    if request_body.max_rows and len(data_rows) > request_body.max_rows:
+        data_rows = data_rows[:request_body.max_rows]
+
+    answer = qr.explanation or qr.error or "ไม่สามารถตอบได้"
+    if not isinstance(answer, str):
+        answer = str(answer)
+
+    return SimpleQueryResponse(
+        answer=answer,
+        context=result.context_name or request_body.context or "",
+        sql=qr.sql_query if request_body.include_sql else None,
+        data=data_rows if request_body.include_data else None,
+        row_count=row_count,
+        execution_time_ms=round(result.execution_time_ms, 1),
+        error=qr.error if qr.error else None,
+        data_as_of=result.data_as_of,
+    ), result
+
+
+def _rest_channel(source: Optional[str]) -> str:
+    """The caller's `source` is the audit channel — except names the server itself writes ('mcp…')."""
+    if source and source.strip().lower().startswith("mcp"):
+        return f"api:{source}"
+    return source or "api"
+
+
 # ── Endpoints ─────────────────────────────────────────────
 
 @router.post("/", response_model=SimpleQueryResponse)
@@ -125,69 +188,19 @@ async def simple_query(
         )
 
     try:
-        from app.services.query_engine import QueryEngine
-
         # Plan 7 Phase 4a: what this caller's API key may reach (None = session user / unrestricted key)
         api_key = getattr(http_request.state, "api_key", None)
-        allowed = allowed_contexts(api_key)
-        audit_as = {"api_key_id": getattr(api_key, "id", None), "channel": request_body.source or "api"}
-
-        async def ask(mcp):
-            from app.services import multi_context  # Phase 5: off unless the workspace is enabled in admin_config
-            engine = QueryEngine(mcp_client=mcp, db_session=db, admin_config=admin_config)
-            return await multi_context.ask(engine, request_body.question, request_body.context,
-                                           user_id=current_user.id, scope=request_body.scope,
-                                           allowed_contexts=allowed, **audit_as)
-
-        # Get MCP client from app state (same as chat endpoint)
-        mcp_client = getattr(http_request.app.state, "mcp_client", None)
-        if mcp_client:
-            result = await ask(mcp_client)
-        else:
-            from app.services.mcp_client import MCPClientService
-            mcp_client = MCPClientService()
-            async with mcp_client.connected():
-                result = await ask(mcp_client)
-
-        if not hasattr(result, "query_result"):
-            return _multi_response(result, request_body)
-
-        # QueryEngineResult has .query_result (QueryResult) + .context_name + .execution_time_ms
-        qr = result.query_result
-
-        # Extract data
-        data_rows = qr.data if qr.data else []
-        row_count = len(data_rows)
-
-        # Truncate data if needed
-        if request_body.max_rows and len(data_rows) > request_body.max_rows:
-            data_rows = data_rows[:request_body.max_rows]
-
-        answer = qr.explanation or qr.error or "ไม่สามารถตอบได้"
-        if not isinstance(answer, str):
-            answer = str(answer)
-
-        return SimpleQueryResponse(
-            answer=answer,
-            context=result.context_name or request_body.context or "",
-            sql=qr.sql_query if request_body.include_sql else None,
-            data=data_rows if request_body.include_data else None,
-            row_count=row_count,
-            execution_time_ms=round(result.execution_time_ms, 1),
-            error=qr.error if qr.error else None,
-            data_as_of=result.data_as_of,
-        )
-
+        response, _ = await run_simple_query(
+            request_body, user_id=current_user.id, api_key_id=getattr(api_key, "id", None),
+            allowed=allowed_contexts(api_key), channel=_rest_channel(request_body.source),
+            db=db, admin_config=admin_config,
+            mcp_client=getattr(http_request.app.state, "mcp_client", None))  # same as the chat endpoint
+        return response
     except ScopeError as e:  # never answered unscoped — the caller asked for a scope we can't enforce
         raise HTTPException(status_code=400, detail=str(e))
-    except ContextNotAllowed as e:  # outside the key's workspace/allowlist — refused, never re-routed silently
+    except (ContextNotAllowed, LLMPolicyError) as e:  # outside the key's rights / the source's policy — never re-routed silently
         raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
-        # the endpoint's own MCP session (no app.state.mcp_client) runs in an anyio TaskGroup, which
-        # wraps a refusal in an ExceptionGroup — it must still be 400 / 403, not 200 with an error text
-        refusal = _find_refusal(e)
-        if refusal is not None:
-            raise HTTPException(status_code=400 if isinstance(refusal, ScopeError) else 403, detail=str(refusal))
         execution_time_ms = (time.time() - start_time) * 1000
         logger.error(f"Simple query failed: {e}")
         return SimpleQueryResponse(
@@ -198,6 +211,16 @@ async def simple_query(
         )
 
 
+def contexts_for(allowed, config_db) -> List[ContextInfo]:
+    """Active contexts, in routing order — only the names in `allowed` when it is not None."""
+    from sqlalchemy import text
+    rows = config_db.execute(text(
+        "SELECT name, display_name, description FROM schema_contexts "
+        "WHERE is_active = 1 ORDER BY priority DESC, id")).fetchall()
+    return [ContextInfo(name=name or "", display_name=display_name or "", description=description or "")
+            for name, display_name, description in rows if allowed is None or name in allowed]
+
+
 @router.get("/contexts", response_model=List[ContextInfo])
 async def list_contexts(
     db: Session = Depends(get_config_db),
@@ -206,30 +229,13 @@ async def list_contexts(
 ):
     """List available data contexts. Public — no auth required.
     Sent with a workspace-bound API key (Phase 4a) it lists only what that key can use."""
-    from sqlalchemy import text
     allowed = None
     if x_api_key:
         from app.services.api_key_service import APIKeyService
         allowed = allowed_contexts(APIKeyService(app_db).validate_key(x_api_key))
 
     try:
-        # Actual columns: name, display_name, description (NOT context_name, display_name_th)
-        result = db.execute(text(
-            "SELECT name, display_name, description FROM schema_contexts "
-            "WHERE is_active = 1 ORDER BY priority DESC, id"
-        ))
-        rows = result.fetchall()
-        columns = list(result.keys())
-
-        return [
-            ContextInfo(
-                name=dict(zip(columns, r)).get("name", ""),
-                display_name=dict(zip(columns, r)).get("display_name", ""),
-                description=dict(zip(columns, r)).get("description", "") or "",
-            )
-            for r in rows
-            if allowed is None or dict(zip(columns, r)).get("name", "") in allowed
-        ]
+        return contexts_for(allowed, db)
     except Exception as e:
         logger.error(f"Failed to list contexts: {e}")
         return []
