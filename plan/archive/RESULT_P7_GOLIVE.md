@@ -1,7 +1,8 @@
 # RESULT — เปิดใช้จริง: NT-Report portal ถามตอบผ่าน AI (ผู้ใช้รายแรกของ Plan 7)
 
-**สถานะ:** 🟡 ข้อ 0–2 เสร็จ (สำรวจ + checklist) — **ยังไม่แตะของจริง**: ยังไม่ออก key, ยังไม่ start server จริง,
-ยังไม่แตะ `.env` ของ portal. ทุกตัวเลขข้างล่างวัดจาก**สำเนาสด**ของ DB จริง (backup ด้วย SQLite backup API)
+**สถานะ:** 🟡 ฝั่ง AI **เปิดแล้ว** (migrate ✅ · server รัน ✅ · key จริงออกแล้ว ✅ · allowlist = matcha ✅)
+— **ปุ่มฝั่ง portal ยังไม่เปิด** เพราะตัวเลขยังไม่ผ่านเกณฑ์ 9/10 ต่อ report_type (`RESULT_F11.md`)
+และ `pocketbase_0/.env` เป็นของเจ้าของ. §1 วัดจาก**สำเนาสด**ของ DB จริง · §5 คือสิ่งที่ทำบนของจริง
 **วันที่:** 2026-09-20 | **Branch:** `main` (ahead 2 ตอนเริ่ม: `345c661`, `3a74bcf`) | **คู่กับ:** session ฝั่ง NT-Report
 (`plan/PROMPT_NT_REPORT_GOLIVE.md` → ผลอยู่ที่ `NT-Report/pocketbase_0/docs/ASSISTANT_GOLIVE.md`)
 
@@ -254,3 +255,40 @@ schema_version ขยับจากที่ config.db จำไว้ (2.3.0 /
 3. **รายงาน sales งวด `2000-01`** (TEST — Univer workbook viewer) ยัง published → ผู้ใช้ที่เปิดจะได้ "ไม่พบข้อมูล"
    ทุกคำถาม (scope = 199901–200001)
 4. **ต้อง restart PocketBase** ก่อน E2E — process ที่รันอยู่ start ตั้งแต่ 2026-09-15 จึงยังใช้ hook ก่อนแก้
+
+---
+
+## 5. ทำอะไรไปแล้วบนของจริง (ตามคำสั่งของเจ้าของ 2026-09-20)
+
+ข้อตัดสิน 4 ข้อ: retention = ปล่อยล้างตาม 30 วัน · key = ทั้ง 4 context 20/นาที 2,000/วัน ·
+`.env` ของ PB = เจ้าของทำเอง · `llm_provider_allowlist` = `["matcha"]`
+
+| ขั้น | ทำ | หลักฐาน |
+|---|---|---|
+| backup สด | `<scratchpad>/golive/backup-prestart-20260920-205751/` | `quick_check=ok`, SHA-256 ของต้นฉบับเท่าเดิมก่อน/หลัง |
+| allowlist | `UPDATE data_sources SET llm_provider_allowlist='["matcha"]' WHERE source_type='duckdb_file'` (SQL + รูป JSON เดียวกับที่ `PUT /admin/sources/{name}/policy` เขียน; server หยุดอยู่ จึงไม่มี cache ให้ invalidate) | 4 แถว; `llm_data_policy` ยังเป็น `full` |
+| migrate | **ไม่ต้องทำ** — ทำไว้แล้ว (§1a) | diff ของ dump = เฉพาะ `sqlite_sequence` |
+| start server | `venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000` | — |
+| **retention รอบแรก** | รันเอง 30 วิหลัง start: `purged {'chat_history': 1513, 'chat_session_data': 55, …}` | **ตรงกับที่วัดบนสำเนาทุกตัวเลข** |
+| source status | ทั้ง 4 `ok=True` + schema ใหม่ (2.3.1 / 1.2.1 / 1.3.1 / 1.4.1) + `build_id` ตรง symlink | re-sync ของ contract ทำงาน: `feed_revenue.description` เปลี่ยนเป็นประโยคไทยของ contract เอง |
+| smoke | 1 คำถาม/context ผ่านครบ (revenue 3,434.07 · expense 3,060.28 · sales 3,480.99 · ebt 39.72 ล้านบาท) | ตรง control totals |
+| **ออก key จริง** | `nt-report-portal` id 4 · scope `query` · workspace 2 (`nt-report`) · `allowed_contexts=None` (= ทั้ง workspace) · 20/นาที 2,000/วัน · user 37 | raw key ส่งให้เจ้าของทาง terminal **ครั้งเดียว — ไม่มีในไฟล์ / log / commit ใด** |
+| เทียบตัวเลข 80 ครั้ง | ด้วย key จริง body รูปเดียวกับ hook | `RESULT_F11.md` |
+| แก้ต้นเหตุของ scope กว้าง | `308acb1` — prompt บอกขอบเขต + งวดอ้างอิง (4 จุด รวม pass 1 ของ two-pass) | pytest **1084 passed, 3 skipped** (baseline 1078); +6 test ที่ fail บน code เดิม |
+
+**ยังไม่ทำ (ของเจ้าของ / รอเกณฑ์ผ่าน):** ใส่ `ASSISTANT_*` ใน `pocketbase_0/.env` · restart PocketBase ·
+E2E ผ่าน PB จริง (ข้อ 6 ของ prompt) · เปิด multi-context · เปิด `mcp_external_enabled`
+
+### Exit criteria — สถานะ
+
+| | ผล |
+|---|---|
+| E1 source status | ✅ ทั้ง 4 ok, งวด + schema ตรง manifest |
+| E2 smoke 4 context | ✅ บนของจริง |
+| E3 ไม่มีสิทธิ์ → ไม่มี call ออก | ⏳ ต้องผ่าน PB (ต้องตั้ง `.env` + restart ก่อน) |
+| E4 คำตอบ + `data_as_of` | ✅ ฝั่ง AI (`data_as_of` มาครบทุกคำตอบที่สำเร็จ); ส่วนที่ผู้ใช้เห็นรอ PB |
+| E5 context นอก workspace → อ่านออก | ✅ 403 ข้อความตายตัว (ยิงจริง) |
+| E6 ระหว่าง publish | ⚠️ ฝั่ง AI ถูก (`source_unavailable`) แต่ **hook แปลผิด** → ต้องแก้ hook ก่อน |
+| E7 audit สองฝั่ง | ✅ ฝั่ง AI ครบ (key / channel `portal` / workspace / scope เต็ม / SQL / row_count, ไม่มีค่าผลลัพธ์); ฝั่ง PB รอ E2E |
+| E8 rate limit | ✅ รายวัน (429 ยืนยันแล้ว) และ **รายนาทีผ่าน Redis** (ยืนยันโดยบังเอิญตอนวัดรอบสอง) |
+| **E9 ≥ 9/10 ต่อ report_type** | ❌ **8 / 8 / 8 / 5** → ไม่เปิด type ใด |
