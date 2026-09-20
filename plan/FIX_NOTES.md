@@ -322,6 +322,16 @@
 - 9.5: `extract_hierarchy.py` เลิกรับ `--db` (อ่านข้อมูลผ่าน source ของ context, config ผ่าน CONFIG_DB_URL) — ไม่มี caller ที่ส่ง `--db`
 - 9.8: `get_business_rules(revenue)` ของ nt-metadata คืน 0 rule — ตารางอ่านได้แล้ว แต่ filter ของ tool อาจไม่ตรงกับข้อมูล (ไม่ได้ไล่ต่อ — tool-loop เท่านั้น)
 
+## จาก DataFeed contract → context description (2026-09-20)
+
+- `schema_contexts.description` ของ context `feed_*` คือสิ่งที่ **`multi_context._split` แสดงให้ LLM เลือก context** และที่
+  `GET /query/contexts` + MCP `list_contexts` คืนให้ผู้เรียก — ไม่ใช่ field ประดับ. `register_context` เคยเก็บ `contract["title"]`
+  (ป้ายชื่อ "NT EBT Data Feed") ทำให้ประโยคไทยใน `contract.description` ไม่มีผลกับอะไรเลย → แก้เป็น
+  `description or title` และบีบเหลือบรรทัดเดียว (splitter พิมพ์ 1 context ต่อบรรทัด; contract อาจใช้ literal block `|`)
+- ข้อเสนอ Phase 5 ข้อ 6 เขียนว่า "`contract.description` ถูกใช้อยู่แล้ว" — **ไม่จริง** ตอนนั้น; NT-Report ใส่ description มาถูกแล้ว ฝั่ง AI ต่างหากที่ไม่ได้อ่าน
+- re-sync เกิดเองเมื่อ sha ของไฟล์ contract หรือ schema_version ของ build เปลี่ยน (`knowledge_key`) — ไม่ต้องรัน script;
+  แต่ `description` ถูกเขียนทับทุกครั้งที่ re-sync (ต่างจาก keywords / priority ที่เป็น insert-only) → admin แก้ผ่าน UI แล้วจะหายเมื่อ contract เปลี่ยน
+
 ## จาก hardening ของช่องทางเดิม (2026-09-20)
 
 ผลลัพธ์/ตัวเลข/review: `plan/archive/RESULT_P7_HARDENING.md` | เอกสาร: `docs/PORTAL_INTEGRATION.md` (ตาราง status code), `docs/DEPLOYMENT_SECURITY.md`
