@@ -75,6 +75,8 @@ def world(tmp_path, monkeypatch):
                                         ("noscope", "nt-report", "reports")):
             raw, row = service.create_key(user.id, name, scopes=scopes, workspace_id=ws.get(workspace), rate_limit_per_minute=0)
             keys[name] = SimpleNamespace(raw=raw, id=row.id)
+        raw, row = service.create_key(user.id, "listed", allowed_contexts='["hr_payroll"]', rate_limit_per_minute=0)
+        keys["listed"] = SimpleNamespace(raw=raw, id=row.id)  # allowlist only, no workspace
         user_id = user.id
     return SimpleNamespace(config=config, Session=Session, keys=keys, user_id=user_id)
 
@@ -250,7 +252,7 @@ class TestTools:
         assert "secret_sql" not in result.model_dump_json() and "sql" not in payload
 
     def test_a_structured_explanation_is_returned_as_its_text(self, world):
-        structured = _result(explanation={"explanation": "รายได้ 5 บาท", "chart_config": {"x": 1}})
+        structured = _result(data=[{"v": 5}], explanation={"explanation": "รายได้ 5 บาท", "chart_config": {"x": 1}})
 
         async def check(app):
             async with _client(app, world.keys["a"].raw) as session:
@@ -389,3 +391,107 @@ class TestRestSideOfTheSameChange:
         for path in ("/api/v1/mcpx", "/api/v1/chat", "/api/v1/admin/mcp"):
             with pytest.raises(HTTPException):
                 enforce_key_surface(key, path)
+
+
+class TestReviewFindings:
+    """Independent review of fd67d07 — each of these passed through the first version."""
+
+    def _ask(self, world, engine_result, arguments=None, key="a"):
+        async def check(app):
+            async with _client(app, world.keys[key].raw) as session:
+                return await session.call_tool("ask", arguments or {"question": "q"})
+        with patch("app.services.multi_context.ask", AsyncMock(return_value=engine_result)), patch("app.services.query_engine.QueryEngine"):
+            return _run(check)
+
+    def test_the_no_data_text_of_the_engine_quotes_the_sql_and_never_leaves(self, world):
+        """hybrid_flow: a query that ran and matched nothing explains itself WITH the SQL, error=None."""
+        empty = _result(data=[], explanation="ไม่พบข้อมูลที่ตรงกับเงื่อนไข\n\nSQL ที่ใช้:\n```sql\nSELECT secret_sql FROM t\n```")
+        result = self._ask(world, empty)
+        assert not result.isError and result.structuredContent["answer"] == mcp_facade.NO_DATA
+        assert "secret_sql" not in result.model_dump_json()
+
+    def test_an_answer_with_rows_that_still_quotes_the_sql_is_discarded(self, world):
+        result = self._ask(world, _result(data=[{"v": 1}], explanation="ดูจาก SELECT secret_sql FROM t"))
+        assert result.isError and result.structuredContent["error"]["code"] == "query_failed"
+        fenced = self._ask(world, _result(data=[{"v": 1}], explanation="```SQL\nSELECT 1\n```"))
+        assert fenced.isError and "SELECT" not in fenced.model_dump_json()
+
+    def test_parts_a_failed_one_with_a_result_an_empty_one_and_the_row_cap_per_ask(self, world, monkeypatch):
+        from app.services.multi_context import MultiResult, Part
+        monkeypatch.setattr(mcp_facade.settings, "MCP_MAX_ROWS", 6)
+        rows = [{"v": i} for i in range(10)]
+        good = Part(context="feed_sales", question="a", display_name="a", result=_result(data=rows))
+        failed = Part(context="feed_sales", question="b", display_name="b", error="boom /Users/p",
+                      result=_result(data=rows, error="boom /Users/p", explanation="เกิดข้อผิดพลาด: boom /Users/p secret_tbl"))
+        empty = Part(context="feed_sales", question="c", display_name="c",
+                     result=_result(data=[], explanation="ไม่พบ\n```sql\nSELECT secret_sql FROM t\n```"))
+        multi = MultiResult(parts=[good, failed, empty], answer="1. ยอดขาย 10 บาท\n2. ⚠️ ส่วนนี้ตอบไม่ได้: boom /Users/p", computed=None,
+                            warnings=["ตอบได้ 1 จาก 3 ส่วน"], execution_time_ms=1.0, request_group="g")
+        result = self._ask(world, multi, {"question": "q", "include_data": True})
+        a, b, c = result.structuredContent["parts"]
+        assert not result.isError and len(a["data"]) == 2  # 6 rows per ask over 3 parts
+        assert b["answer"] == mcp_facade.ERRORS["query_failed"][1] and b["error"] == "query_failed" and "data" not in b
+        assert c["answer"] == mcp_facade.NO_DATA
+        dumped = result.model_dump_json()
+        assert "/Users" not in dumped and "secret" not in dumped
+
+    def test_an_empty_question_is_a_readable_error(self, world):
+        result = self._ask(world, _result(), {"question": ""})
+        assert result.isError and result.structuredContent["error"]["code"] == "invalid_arguments"
+
+    def test_closing_a_workspace_cuts_off_an_allowlist_only_key_too(self, world):
+        async def check(app):
+            async with _client(app, world.keys["listed"].raw) as session:
+                before = await session.call_tool("list_contexts", {})
+                with world.config.begin() as conn:
+                    conn.execute(text("UPDATE workspaces SET is_active = 0 WHERE name = 'hr'"))
+                return before, await session.call_tool("list_contexts", {}), await session.call_tool("source_status", {"context": "hr_payroll"})
+        before, after, status = _run(check)
+        assert [c["name"] for c in before.structuredContent["contexts"]] == ["hr_payroll"]
+        assert after.structuredContent["contexts"] == [] and status.structuredContent["error"]["code"] == "policy_refused"
+
+    def test_two_key_headers_are_refused(self, world):
+        async def check(app):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app)) as client:
+                headers = [("X-API-Key", world.keys["a"].raw), ("X-API-Key", world.keys["b"].raw),
+                           ("Accept", "application/json, text/event-stream")]
+                return (await client.post(URL, headers=headers, json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})).status_code
+        assert _run(check) == 401
+
+    def test_a_parallel_burst_is_counted_call_by_call_and_stops_at_the_daily_limit(self, world):
+        from app.models.api_key import APIKey
+
+        async def burst(app):
+            async def one():
+                async with _client(app, world.keys["a"].raw) as session:
+                    return (await session.call_tool("list_contexts", {})).isError
+            return await asyncio.gather(*(one() for _ in range(12)))
+        assert _run(burst) == [False] * 12 and _usage(world, "a") == 12  # no lost update, no IntegrityError on the first row
+        with world.Session() as db:
+            db.query(APIKey).filter_by(id=world.keys["b"].id).update({"rate_limit_per_day": 3})
+            db.commit()
+
+        async def limited(app):
+            async def one():
+                async with _client(app, world.keys["b"].raw) as session:
+                    return (await session.call_tool("list_contexts", {})).isError
+            return await asyncio.gather(*(one() for _ in range(12)))
+        assert _run(limited).count(False) <= 3
+
+    def test_an_expired_key_and_a_deactivated_owner_stop_at_the_gate(self, world):
+        from datetime import timedelta
+        from app.core.time_utils import utcnow
+        from app.models.api_key import APIKey
+
+        async def status(app):
+            return (await _raw_post(app, world.keys["a"].raw)).status_code
+        assert _run(status) == 200
+        with world.Session() as db:
+            db.query(APIKey).filter_by(id=world.keys["a"].id).update({"expires_at": utcnow() - timedelta(minutes=1)})
+            db.commit()
+        assert _run(status) == 401
+        with world.Session() as db:
+            db.query(APIKey).filter_by(id=world.keys["a"].id).update({"expires_at": None})
+            db.query(User).filter_by(id=world.user_id).update({"is_active": False})
+            db.commit()
+        assert _run(status) == 401

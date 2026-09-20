@@ -138,27 +138,18 @@ class APIKeyService:
         return True
 
     def track_usage(self, api_key_id: int, tokens: int = 0):
-        """Track API key usage for the current day."""
-        today = date.today().isoformat()
-
-        usage = self.db.query(APIKeyUsage).filter(
-            APIKeyUsage.api_key_id == api_key_id,
-            APIKeyUsage.date == today,
-        ).first()
-
-        if usage:
-            usage.request_count += 1
-            usage.token_count += tokens
-        else:
-            usage = APIKeyUsage(
-                api_key_id=api_key_id,
-                date=today,
-                request_count=1,
-                token_count=tokens,
-            )
-            self.db.add(usage)
-
+        """Track API key usage for the current day — one atomic upsert: parallel requests (MCP clients
+        call tools in bursts) neither lose increments nor collide on the first row of the day."""
+        self.db.execute(text(
+            "INSERT INTO api_key_usage (api_key_id, date, request_count, token_count, created_at) "
+            "VALUES (:key, :date, 1, :tokens, :now) ON CONFLICT (api_key_id, date) DO UPDATE SET "
+            "request_count = api_key_usage.request_count + 1, token_count = api_key_usage.token_count + :tokens"),
+            {"key": api_key_id, "date": date.today().isoformat(), "tokens": tokens, "now": utcnow()})
         self.db.commit()
+
+    def usage_today(self, api_key_id: int) -> int:
+        return self.db.execute(text("SELECT request_count FROM api_key_usage WHERE api_key_id = :key AND date = :date"),
+                               {"key": api_key_id, "date": date.today().isoformat()}).scalar() or 0
 
     def get_usage_stats(self, key_id: int, days: int = 30) -> Dict:
         """Get usage statistics for an API key."""

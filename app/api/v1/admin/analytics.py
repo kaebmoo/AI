@@ -289,9 +289,11 @@ def get_query_audit(
         raise HTTPException(status_code=400, detail="date_from / date_to ต้องเป็น ISO 8601")  # an audit never guesses the range
     for column, value in ((QueryAudit.user_id, user_id), (QueryAudit.api_key_id, api_key_id),
                           (QueryAudit.workspace, workspace), (QueryAudit.context_name, context),
-                          (QueryAudit.channel, channel), (QueryAudit.request_group, request_group)):
+                          (QueryAudit.request_group, request_group)):
         if value is not None:
             query = query.filter(column == value)
+    if channel is not None:  # 'mcp' also finds 'mcp:<client>' (Phase 6: the client's self-reported name)
+        query = query.filter((QueryAudit.channel == channel) | QueryAudit.channel.startswith(channel + ":", autoescape=True))
     if has_error:
         query = query.filter(QueryAudit.error.isnot(None))
     if q:

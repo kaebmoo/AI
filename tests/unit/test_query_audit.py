@@ -119,6 +119,10 @@ def test_search_and_csv_export(db):
     row = next(csv.DictReader(io.StringIO(search(format="csv", context="evil").body.decode("utf-8-sig"))))
     assert (row["question"][0], row["sql_query"][0], row["error"][0]) == ("'", "'", "'")  # text to a spreadsheet, not a formula
     assert search(context="evil")["items"][0]["question"].startswith("=")  # the stored row and the JSON are untouched
+    # Phase 6: the facade writes 'mcp:<client>' — channel=mcp finds them all, 'chat' does not start matching 'chatx'
+    query_audit.record(db, channel="mcp:claude-code/2.1", context_name="feed_sales", question="m")
+    query_audit.record(db, channel="mcpx", context_name="feed_sales", question="m")
+    assert search(channel="mcp")["total"] == 1 and search(channel="mcp:claude-code/2.1")["total"] == 1
 
 
 def test_query_endpoint_tells_the_engine_which_key_and_caller(tmp_path):

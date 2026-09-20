@@ -14,8 +14,11 @@ The caller is an LLM holding its own key, so on this channel:
   - a context whose source policy is not 'full' — or unreadable — does not exist here (fail closed):
     what we return enters a model we do not control
   - SQL is never returned, and no exception text reaches the client: fixed code + message only
+    (argument-type errors and unknown tool names are answered by the SDK before a tool runs: they
+    echo the caller's own input, nothing of ours, and cost no usage)
 """
 
+import json
 import logging
 import re
 from dataclasses import dataclass
@@ -26,6 +29,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.server import StreamableHTTPASGIApp
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import CallToolResult, TextContent
+from pydantic import ValidationError
 from sqlalchemy import text
 from starlette.responses import JSONResponse
 
@@ -46,11 +50,15 @@ ERRORS = {
     "invalid_scope": (400, "scope ใช้กับ context นี้ไม่ได้ (key ที่ context ไม่ได้ประกาศ หรือค่าไม่ถูกต้อง) — ไม่ตอบแบบไม่มี scope"),
     "context_not_allowed": (403, "API key นี้ไม่มีสิทธิ์ใช้ context ที่ขอ — ดู list_contexts"),
     "policy_refused": (403, "context นี้ไม่เปิดให้ใช้ผ่าน MCP (นโยบายข้อมูลของ source ไม่อนุญาตให้ส่งออกไปยังโมเดลภายนอก)"),
+    "invalid_arguments": (400, "argument ของ tool ไม่ถูกต้อง (เช่น question ว่าง)"),
     "duplicate_request": (409, "คำถามเดียวกันกำลังประมวลผลอยู่ — รอสักครู่แล้วถามใหม่"),
     "source_unavailable": (503, "แหล่งข้อมูลของ context นี้ยังไม่พร้อมใช้งาน"),
     "query_failed": (422, "ตอบคำถามนี้ไม่ได้ — ลองถามให้เจาะจงขึ้น หรือระบุ context"),
     "internal_error": (500, "เกิดข้อผิดพลาดภายใน"),
 }
+
+
+NO_DATA = "ไม่พบข้อมูลที่ตรงกับเงื่อนไข"
 
 
 class Refused(Exception):
@@ -69,7 +77,7 @@ class Principal:
 
 
 def full_policy_contexts(config_engine=None) -> FrozenSet[str]:
-    """Active contexts whose (active) source has llm_data_policy 'full'. Strict on purpose — unlike
+    """Active contexts of an active workspace whose (active) source has llm_data_policy 'full'. Strict on purpose — unlike
     data_sources.policy_for_context, an unmigrated registry, a missing row or any error = nothing."""
     if config_engine is None:
         from app.db.session import config_engine
@@ -78,7 +86,9 @@ def full_policy_contexts(config_engine=None) -> FrozenSet[str]:
             rows = conn.execute(text(
                 "SELECT sc.name, ds.llm_data_policy FROM schema_contexts sc JOIN data_sources ds "
                 "ON ds.id = COALESCE(sc.source_id, (SELECT id FROM data_sources WHERE name = :legacy)) "
-                "WHERE sc.is_active = 1 AND ds.is_active = 1"), {"legacy": LEGACY}).fetchall()
+                # an allowlist-only key is not tied to a workspace: closing the workspace must still cut it off
+                "JOIN workspaces w ON w.id = COALESCE(sc.workspace_id, (SELECT id FROM workspaces WHERE name = 'default')) "
+                "WHERE sc.is_active = 1 AND ds.is_active = 1 AND w.is_active = 1"), {"legacy": LEGACY}).fetchall()
     except Exception as exc:
         logger.error("MCP: source policies unreadable (%s) — every context refused", exc)
         return frozenset()
@@ -107,6 +117,8 @@ def authenticate(raw_key: Optional[str], count: bool) -> Principal:
             if service.validate_key(raw_key) is None:  # it authenticated a moment ago: this is the rate limit
                 raise Refused("rate_limited")
             service.track_usage(api_key.id)
+            if service.usage_today(api_key.id) > api_key.rate_limit_per_day:  # a parallel burst passed the check together
+                raise Refused("rate_limited")
         allowed = allowed_contexts(api_key)  # frozenset for a restricted key; unreadable = empty
         return Principal(api_key_id=api_key.id, user_id=api_key.user_id, allowed=allowed,
                          usable=allowed & full_policy_contexts())
@@ -141,9 +153,11 @@ class Gate:
         if scope["method"] != "POST":  # stateless: nothing to stream on GET, no session to DELETE
             return await JSONResponse({"detail": "Method Not Allowed"}, status_code=405,
                                       headers={"Allow": "POST"})(scope, receive, send)
-        headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope["headers"]}
+        keys = [v.decode("latin-1") for k, v in scope["headers"] if k.lower() == b"x-api-key"]
         try:
-            await anyio.to_thread.run_sync(authenticate, headers.get("x-api-key"), False)
+            if len(keys) != 1:  # two headers: the gate and the tool would each pick their own
+                raise Refused("unauthorized")
+            await anyio.to_thread.run_sync(authenticate, keys[0], False)
         except Refused:
             return await JSONResponse({"detail": "Invalid or missing API key"}, status_code=401)(scope, receive, send)
         except Exception as exc:  # fail closed
@@ -180,6 +194,8 @@ def _code_for(exc: BaseException, named_in_rights: bool) -> str:
 
     if isinstance(exc, Refused):
         return exc.code
+    if isinstance(exc, ValidationError):  # SimpleQueryRequest: empty question, …
+        return "invalid_arguments"
     if _find(exc, ScopeError):
         return "invalid_scope"
     if _find(exc, LLMPolicyError):
@@ -310,23 +326,40 @@ def _session_manager(server: FastMCP):
 
 def _answer(response, result) -> CallToolResult:
     """REST's response minus everything that must not leave on this channel: SQL, raw error text —
-    and any answer produced under a policy other than 'full' (defence in depth behind `usable`)."""
+    and any answer produced under a policy other than 'full' (defence in depth behind `usable`).
+    The engine's prose is kept only for a result WITH rows: its 'no data' text quotes the SQL, and
+    the text of a failed result quotes the exception."""
+    from app.api.v1.query import _part_answer
+
     parts = getattr(result, "parts", None)
     produced = [p.result for p in parts if p.result is not None] if parts is not None else [result]
     if any(getattr(r, "llm_policy", None) != FULL for r in produced):
         raise Refused("policy_refused")
-    if parts is None and response.error:  # the answer text of a failed query embeds the exception
+    if parts is None and response.error:
         raise Refused("duplicate_request" if response.error == "duplicate_request" else "query_failed")
 
-    from app.api.v1.query import _part_answer
-
     payload = response.model_dump(exclude={"sql", "error"}, exclude_none=True)
-    # a structured explanation (text + chart config) reaches REST as str(dict); an LLM client gets the text
-    answer = (parts is None and _part_answer(result.query_result)) or payload["answer"]
-    for entry, part in zip(payload.get("parts") or [], parts or []):
-        entry.pop("sql", None)
-        if part.error:
-            answer = answer.replace(part.error, ERRORS["query_failed"][1])
-            entry["error"] = "query_failed"
+    if parts is None:
+        # a structured explanation (text + chart config) reaches REST as str(dict); an LLM client gets the text
+        answer = (_part_answer(result.query_result) or payload["answer"]) if result.query_result.data else NO_DATA
+    else:
+        answer = payload["answer"]  # multi_context.combine: explanations of parts with rows + fixed templates
+        share = max(1, settings.MCP_MAX_ROWS // max(1, len(parts)))  # MCP_MAX_ROWS is per ask, not per part
+        for entry, part in zip(payload.get("parts") or [], parts):
+            entry.pop("sql", None)
+            if "data" in entry:
+                entry["data"] = entry["data"][:share]
+            if part.error:
+                answer = answer.replace(part.error, ERRORS["query_failed"][1])
+                entry.update(error="query_failed", answer=ERRORS["query_failed"][1])
+                entry.pop("data", None)
+            elif not part.ok:
+                entry["answer"] = NO_DATA
     payload["answer"] = answer
+
+    # last guard: whatever the prose above came from, the SQL that ran is not in what leaves
+    leaving = json.dumps(payload, ensure_ascii=False, default=str)
+    ran = [sql for sql in (getattr(getattr(r, "query_result", None), "sql_query", None) for r in produced) if sql]
+    if "```sql" in leaving.lower() or any(sql in leaving or sql in answer for sql in ran):
+        raise Refused("query_failed")
     return _ok(payload, answer)
