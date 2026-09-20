@@ -13,8 +13,23 @@ repo NT-Report (/Users/seal/Documents/GitHub/NT-Report) = **อ่านอย�
 
 ## สถานะตอนนี้ (2026-09-20)
 - Phase 1–6 ✅ บน code | pytest: **1035 passed, 3 skipped** — รันโดยชี้ `CONFIG_DB_URL` / `DATABASE_URL` / `DATA_SOURCE_CACHE_DIR` ไปสำเนา (full pytest บน DB จริงขยับ `admin_config.last_brain_relevant_change_at` — FIX_NOTES Phase 5); `venv/bin/python3.14 -m pytest -q -p no:cacheprovider` (python3.10 ใน venv ไม่มี pytest; server จริงรันด้วย interpreter ไหน — **ตรวจในข้อ 1**)
-- ⚠️ **อัปเดต 2026-09-20 เย็น:** `config.db` จริง **migrate แล้ว** (RESULT_P7_PHASE6 §11; backup `~/nt-ai-backups/pre-migrate-20260920/`) — ข้อ 1a / 4 เหลือแค่ตรวจยืนยัน; ข้อบกพร่องของ REST + `/query/contexts` เจ้าของตัดสินแล้ว และทำใน `plan/PROMPT_P7_HARDENING.md` **ก่อน** งานนี้ (ข้อ 3 ของ prompt นี้ = ตรวจว่างานนั้นจบ); retention รอบแรก = ปล่อยล้างตาม 30 วัน (มี backup)
-- **ของจริงยังไม่ได้เปิดอะไรเลย:** `config.db` / `app.db` จริงยังไม่ได้รัน migration ของ Phase 4.5 (ไม่มี `data_sources.llm_data_policy` ฯลฯ); ยังไม่มี API key จริงของ portal; multi-context ปิดทุก workspace; MCP ภายนอก (`mcp_external_enabled`) ปิด; Redis ไม่ได้รัน → limit รายนาที fail-open (เพดานรายวันใน DB เท่านั้นที่บังคับจริง)
+- ⚠️ **อัปเดต 2026-09-20 เย็น:** `config.db` จริง **migrate แล้ว** (RESULT_P7_PHASE6 §11; backup `~/nt-ai-backups/pre-migrate-20260920/`) — ข้อ 1a / 4 เหลือแค่ตรวจยืนยัน (`app.db` จริงไม่เปลี่ยน); retention รอบแรก = ปล่อยล้างตาม 30 วัน (มี backup)
+- ✅ **อัปเดต 2026-09-20 กลางคืน — ข้อ 3 (ข้อบกพร่องของ REST) ทำเสร็จแล้ว** ใน `plan/archive/RESULT_P7_HARDENING.md` (commit `eafc2e5`…`ca71357`): ไม่มี SQL ในคำตอบ 0 แถว, ไม่มีข้อความ exception ใน `answer`/`error`/`parts[]`/body ของ 400·403, explanation ที่เป็น dict คืนข้อความ, **เกินโควตา = 429**, `GET /query/contexts` ต้อง auth, `ai_response` หมดอายุตาม retention, audit เขียนไม่ได้ = ไม่ส่งคำตอบ (เฉพาะผู้เรียกที่ถือ key). pytest 1077 passed / 3 skipped; eval รายโดเมนไม่ลด → **ข้อ 3 ของ prompt นี้เหลือแค่ตรวจยืนยัน**; ข้อ 1f = อ่านตาราง status code ใน `docs/PORTAL_INTEGRATION.md` แล้วเทียบกับ hook
+- **ของจริงยังไม่ได้เปิดอะไรเลย:** ยังไม่มี API key จริงของ portal; multi-context ปิดทุก workspace; MCP ภายนอก (`mcp_external_enabled`) ปิด; Redis ไม่ได้รัน → limit รายนาที fail-open (เพดานรายวันใน DB เท่านั้นที่บังคับจริง)
+
+## ตาราง status code ที่ hook ต้องรองรับ (ของจริงหลัง hardening 2026-09-20 — ยิงจริงบนสำเนาแล้ว)
+
+| สถานการณ์ | HTTP | body |
+|---|---|---|
+| ตอบได้ / ไม่พบข้อมูล / ตอบไม่ได้ / ถามซ้ำ | 200 | `answer` + `error` เป็น `null` หรือรหัส (`query_failed`, `source_unavailable`, `duplicate_request`, `internal_error`) |
+| `scope` ที่ context ไม่ประกาศ หรือค่าไม่ถูกต้อง | **400** | `{"detail": "scope ใช้กับ context นี้ไม่ได้ …"}` — hook เดิมแปลงเป็นข้อความของตัวเองอยู่แล้ว ✅ |
+| context นอกสิทธิ์ / ไม่มีอยู่ / policy ปฏิเสธ | **403** | ข้อความตายตัวเดียวกันทั้งสามกรณี |
+| เกิน rate limit / โควตารายวัน | **429** | ข้อความตายตัว — **เดิมเป็น 401** (hook ตกเข้า "non-2xx → 502" เหมือนกัน แต่ควรแยกข้อความให้ผู้ใช้รู้ว่า "ใช้เยอะเกินวันนี้") |
+| `query_audit` เขียนไม่ได้ | **503** | ข้อความตายตัว — ไม่มีคำตอบออกไป (ของใหม่) |
+| key ไม่มี / ใช้ไม่ได้ | 401 | — |
+
+hook ปัจจุบันแยกเฉพาะ 400 และ "non-2xx อื่น → 502" ซึ่ง**ยังทำงานถูกต้อง**; ที่ควรเพิ่มคือข้อความเฉพาะของ 429 และ 503
+(ทั้งสองคือ "ลองใหม่ภายหลัง" ไม่ใช่ "ระบบพัง"). response ที่ล้มเหลวไม่มี `data_as_of` → ด่าน `upstream_invalid` ของ hook จับได้อยู่แล้ว
 - config.db จริง: workspace `nt-report` = feed_revenue 2.3.0, feed_expense 1.2.0, feed_sales 1.3.0, feed_ebt 1.4.0 (file source → NT-Report/DataFeed/dist/<d>/latest); งวด: revenue / expense / sales 202608, ebt 202607 (ตรวจใหม่ด้วย source status — NT-Report publish เอง)
 - eval ล่าสุด (สำเนา): revenue 14/14, expense 12/12, sales 12/12, ebt 35/36; ข้ามโดเมน 8–9/10
 - ฝั่ง portal (อ่านจาก code 2026-09-20): hook ส่ง `context` **เสมอ** (จาก `ASSISTANT_CONTEXT_MAP`: report_type → context เดียว) + `scope` = `{year_month: งวดของรายงาน, org_code?}` + `source`; ปุ่มแสดงเมื่อมี `ASSISTANT_API_URL` + `ASSISTANT_API_KEY`; **hook ปฏิเสธ response ที่ไม่มี `data_as_of` ที่ถูกต้อง** และเตือนเมื่อ `data_as_of.period` ≠ งวดของรายงาน; 400 จาก AI = ไม่ตอบ (ไม่ลองใหม่แบบไม่มี scope)
@@ -34,9 +49,9 @@ repo NT-Report (/Users/seal/Documents/GitHub/NT-Report) = **อ่านอย�
    c. server จริงรันอย่างไร (คำสั่ง / interpreter / port / ใครเป็นคน start / .env ที่ใช้: `DATA_SOURCE_ALLOWED_ROOTS`, `DATA_SOURCE_CACHE_DIR`, `MCP_ALLOWED_HOSTS`, provider keys, `REDIS_URL`), portal (PocketBase) รันที่ไหน เรียก AI ด้วย URL อะไร
    d. **สัญญาระหว่าง hook กับ AI ตรงกันทุก field ไหม:** request ที่ hook ส่ง vs `SimpleQueryRequest`; field ที่ hook อ่าน/บังคับ vs `SimpleQueryResponse` (รวม field ใหม่ `parts` / `computed` = null); status code ที่ hook แยกแยะ (400 / 403 / 401 / 429 / 5xx) vs ที่ AI คืนจริง — Phase 6 พบว่า **เกินโควตา = 401 ไม่ใช่ 429**
    e. report_type ทั้งหมดของ portal (ebt / expense / revenue / sales / presentation) → context ไหน; type ที่ไม่มี context (presentation) = ไม่แสดงปุ่ม; รายงานที่จำกัดหน่วยงานส่ง `org_code` แบบไหน และตารางหลักของแต่ละ context มี `cost_center` ไหม (ไม่มี = ใช้ไม่ได้ภายใต้ scope นั้น — Phase 3)
-   f. ข้อบกพร่องของ REST ที่ portal จะได้รับ (RESULT_P7_PHASE6 §9 "ของเดิมที่พบ"): SQL ในข้อความคำตอบเมื่อได้ 0 แถวแม้ `include_sql=false`, ข้อความ exception ใน `answer` / `error`, `str(dict)` เมื่อ explanation เป็น dict, `GET /query/contexts` เป็น public (key ผิด = เห็นทุก context), CORS เปิดทั้งแอปขณะที่เอกสารเขียนว่าไม่เปิด — ยืนยันแต่ละข้อด้วยการยิงจริงบนสำเนา และดูว่า hook ส่งต่ออะไรถึงผู้ใช้ portal
+   f. ✅ ข้อบกพร่องของ REST **ปิดแล้ว** (hardening 2026-09-20) — ที่เหลือคือ **ยืนยันด้วยการยิงจริงบนสำเนา** ตามตาราง status code ข้างบน แล้วดูว่า hook ส่งต่ออะไรถึงผู้ใช้ portal. ที่**ยังค้างจริง**: CORS เปิดทั้งแอปขณะที่เอกสารเขียนว่าไม่เปิด (เจ้าของยังไม่ตัดสิน) และ REST ไม่ตรวจ `has_scope('query')`
 2. เสนอ **checklist เปิดใช้ + แผนถอยกลับ (rollback) ต่อขั้น** + exit criteria แล้ว **หยุดถามเจ้าของ** (ข้างล่าง); ส่วนที่ไม่ขึ้นกับคำตอบทำต่อได้
-3. แก้ข้อบกพร่องของ REST ตามที่เจ้าของเลือกในข้อ 2 (test ที่ fail บน code เดิม; ช่องทาง MCP ที่ Phase 6 ทำไว้ต้องไม่ถอยหลัง) — eval รายโดเมนต้องไม่ลด
+3. ✅ **ทำแล้ว** (`plan/archive/RESULT_P7_HARDENING.md`) — เหลือแค่ยืนยันว่า working tree มี commit `ca71357` และ pytest ผ่าน; ถ้าเจ้าของอยากได้อะไรเพิ่มจากตารางใน §1f ให้ทำตรงนี้
 4. **migrate DB จริง** (หลังเจ้าของสั่ง): backup สด → ตั้งค่า retention ตามที่ตัดสิน**ก่อน** start → รัน migrate สองตัว → รันซ้ำ = ไม่มีอะไรเปลี่ยน → diff ของ dump ตรงกับที่วัดในข้อ 1a → start server → ทุก source `status` ok → คำถามควันหลง (smoke) 1 ข้อต่อ context ผ่าน `/api/v1/query` ด้วย session ของ admin
 5. **ออก key จริงของ portal** (หลังเจ้าของสั่ง): ผูก workspace `nt-report` (+ allowlist / rate limit ตามที่ตัดสิน); raw key แสดงครั้งเดียว — **ส่งให้เจ้าของทาง terminal เท่านั้น ห้ามลงไฟล์ / log / commit / RESULT / prompt**; ใส่ `.env` ของ pocketbase_0 เฉพาะเมื่อเจ้าของสั่งให้ทำแทน
 6. **E2E ผ่าน PocketBase จริง** (ปิด PLAN_7 §11.3):

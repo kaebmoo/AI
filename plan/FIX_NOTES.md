@@ -322,6 +322,28 @@
 - 9.5: `extract_hierarchy.py` เลิกรับ `--db` (อ่านข้อมูลผ่าน source ของ context, config ผ่าน CONFIG_DB_URL) — ไม่มี caller ที่ส่ง `--db`
 - 9.8: `get_business_rules(revenue)` ของ nt-metadata คืน 0 rule — ตารางอ่านได้แล้ว แต่ filter ของ tool อาจไม่ตรงกับข้อมูล (ไม่ได้ไล่ต่อ — tool-loop เท่านั้น)
 
+## จาก hardening ของช่องทางเดิม (2026-09-20)
+
+ผลลัพธ์/ตัวเลข/review: `plan/archive/RESULT_P7_HARDENING.md` | เอกสาร: `docs/PORTAL_INTEGRATION.md` (ตาราง status code), `docs/DEPLOYMENT_SECURITY.md`
+
+**เจ้าของตัดสิน (2026-09-20):** REST แก้ครบ 4 ข้อ (SQL ในคำตอบ 0 แถว / ข้อความ exception / `str(dict)` / เกินโควตา = 429) · `GET /query/contexts` ต้อง auth เสมอ · Claude Desktop ต่อผ่าน stdio bridge + ลบ `claude_desktop_config.json` · `ai_response` หมดอายุตาม `result_retention_days` เดิม (ไม่เพิ่ม config ใหม่) · audit เขียนไม่ได้ = ไม่ส่งคำตอบออก **เฉพาะช่องทางที่ถือ key**
+
+**สิ่งที่ session ถัดไปต้องรู้ (gotcha):**
+- ⚠️ **`app/core/outbound.py` คือชุดคำศัพท์ร่วมของ REST + MCP** — ช่องทางขาออกใหม่ใด ๆ ต้องใช้ตัวนี้ ไม่สร้างชุดที่สอง. `safe_answer()` ปล่อยข้อความของ engine เฉพาะผลที่**มีแถว** (0 แถว = SQL เต็มใน explanation, ล้ม = ข้อความ exception)
+- ⚠️ **body ของ 400 / 403 ก็รั่วได้** ไม่ใช่แค่ `answer` / `error`: `ScopeError` บอกชื่อคอลัมน์ scope ที่ context รองรับ และบอก `scripts/migrate_data_sources.py` เมื่อ config DB ยังไม่ migrate; `LLMPolicyError` บอกชื่อ source + `llm_provider_allowlist`; `ContextNotAllowed` มีสองสำนวน ("ไม่มีสิทธิ์" vs "ไม่พบ") = existence oracle → ทั้งหมดผ่าน `code_for()` + ข้อความตายตัว, เหตุผลจริงลง log + `query_audit.error`
+- `multi_context.Part` มีทั้ง `error` (ข้อความจริง — audit/log) และ `error_code` + property `code` (ของที่ส่งออก). ผู้สร้าง `Part` เองต้องตั้ง `error_code`; ถ้าลืม `code` fallback เป็น `query_failed` (ไม่ใช่ "ไม่พบข้อมูล")
+- `APIKeyService.check_key()` = `validate_key` ที่บอกเหตุผล (`unauthorized` / `rate_limited`); `validate_key` เป็น wrapper เดิม — ผู้เรียกเดิมไม่เปลี่ยน. test ที่ mock `validate_key` เพื่อให้ผ่าน dependency ต้องเปลี่ยนไป mock `check_key`
+- **429 อยู่ใน `get_current_user`** จึงมีผลกับทุก endpoint และมาก่อน `enforce_key_surface`: key ที่หมดโควตาไม่ตกไป session auth อีกแล้ว
+- ⚠️ **`query_audit.record()` คืน `bool` แล้ว** (ยัง never raises). ผู้เรียกที่ส่ง `api_key_id` ต้องถือว่า `False` = ไม่ส่งคำตอบ. `AuditUnavailable` ต้องอยู่ในรายการที่ `_find_refusal` แกะออกจาก ExceptionGroup ไม่งั้น `except AuditUnavailable` ที่ endpoint ไม่ทำงาน
+- ⚠️ **อย่า raise จากใน `try` ที่ except ของมัน audit failure ด้วย** — `QueryEngine.query` เคยยิงเขียนซ้ำใส่ DB ที่เพิ่งปฏิเสธ (รอ lock สองรอบ ต่อ sub-question)
+- ⚠️ **`ensure_table` ต้องมี lock:** `record()` รันใน worker thread; สองคำขอพร้อมกันบนตาราง `query_audit` ก่อน Phase 5 จะ `ALTER TABLE ADD COLUMN` ซ้ำ (SQLite ไม่มี `IF NOT EXISTS`) — เดิมเสียแค่แถว audit ตอนนี้เสียคำตอบด้วย
+- retention: `EXPIRED_ANSWER` เป็นข้อความตายตัวที่ **`chat.py::_get_conversation_history` ต้องกรองทิ้ง** ไม่งั้นโมเดลอ่านเป็น "คำตอบก่อนหน้า"; แถวที่ `ai_response IS NULL` ต้องคง NULL (ใช้ `CASE` ไม่ใช่ assignment ตรง) และเงื่อนไข WHERE ต้องกัน row เดิมไม่ให้แมตช์ซ้ำ (idempotent)
+- bridge (`scripts/mcp_stdio_bridge.py`): ใช้ **raw handler ของ `CallToolRequest`** — `@server.call_tool()` ประกอบผลใหม่เป็น `isError=False` และแปลง exception เป็นข้อความของตัวเอง (tool error จะไม่ถึง client ทั้งก้อน). ต้องตั้ง `User-Agent` เอง ไม่งั้น audit `channel` อ่านว่า `mcp:python-httpx/…`; client ที่อยู่หลัง bridge แยกไม่ได้ — ตัวที่ระบุ installation คือ key
+- test ของ bridge ใช้ `mcp.shared.memory.create_connected_server_and_client_session` + patch `streamablehttp_client` ให้ใส่ `httpx_client_factory` ที่เป็น ASGI transport
+- eval cross-domain **แกว่ง 6–9/10 ระหว่างรัน** ด้วย code เดียวกัน (วัด worktree ก่อนแก้ = 8/10 วันเดียวกัน DB เดียวกัน) — อย่าอ่านตัวเลขครั้งเดียวว่าเป็น regression
+
+**ของเดิมที่ยังไม่แก้:** CORS เปิดทั้งแอป (เจ้าของยังไม่ตัดสิน) · REST ไม่ตรวจ `has_scope('query')` · `execute_query(validate_first=False)` · dedup 5 วินาที · Redis ไม่ได้รัน · `error` ระดับบนของคำถามข้าม context ยังเป็นสรุปคำเตือน ไม่ใช่รหัส
+
 ## จาก Plan 7 Phase 6 — MCP สำหรับผู้เรียกภายนอก (2026-09-20)
 
 ผลลัพธ์/ตัวเลข/ตารางสำรวจ/review: `plan/archive/RESULT_P7_PHASE6.md` | คู่มือ: `docs/manuals/manual_mcp_external.md`

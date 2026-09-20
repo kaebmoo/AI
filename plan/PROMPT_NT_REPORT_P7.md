@@ -124,3 +124,26 @@ feed_sales, feed_ebt. key ที่ผูก workspace: เรียก context 
 
 ## งานเปิดใช้จริง (go-live) — 2026-09-20
 prompt แยกสำหรับ session ใน repo NT-Report: `plan/PROMPT_NT_REPORT_GOLIVE.md` (contract ebt PATCH "ไม่ใช่ทั้งบริษัท" + description ภาษาไทยของทุก contract, hook: error 200 ที่ไม่มี `data_as_of` / คำเตือนงวด / status 401·403·429 / ไม่ส่งข้อความดิบถึง browser, เอกสาร + context map, E2E + ตัวเลขอ้างอิงจาก dashboard) — คู่กับ `plan/PROMPT_P7_GOLIVE_NT_REPORT.md` ฝั่ง AI
+
+## สิ่งที่ response ของ `/api/v1/query` เปลี่ยนไป (hardening 2026-09-20) — ฝั่ง NT-Report ต้องรู้
+ที่มา: `plan/archive/RESULT_P7_HARDENING.md` · ตารางเต็ม: `docs/PORTAL_INTEGRATION.md` §"สิ่งที่ response บอก และไม่บอก"
+
+**contract ของ field ไม่เปลี่ยน** (`answer`, `context`, `sql`, `data`, `row_count`, `execution_time_ms`, `error`,
+`data_as_of`, `parts`, `computed` ครบเหมือนเดิม) — ที่เปลี่ยนคือ *เนื้อ* ของ `error` / ข้อความ และ status บางตัว:
+
+1. **`error` เป็นรหัสคงที่แล้ว** ไม่ใช่ข้อความ exception: `query_failed` · `source_unavailable` · `duplicate_request` ·
+   `internal_error` (คำถามข้าม context: `parts[].error` เป็นรหัสเดียวกัน, `parts[].answer` เป็นข้อความตายตัวของรหัสนั้น)
+   → hook branch ด้วยรหัสได้ตรง ๆ ไม่ต้อง match ข้อความ
+2. **`answer` ไม่มี SQL อีกแล้ว** เมื่อได้ 0 แถว (เดิมมี SQL เต็มแม้ส่ง `include_sql: false`) — ได้ `ไม่พบข้อมูลที่ตรงกับเงื่อนไข`;
+   SQL ยังอยู่ใน field `sql` ตามที่ hook ขอ (`include_sql: true`) เหมือนเดิม
+3. **เกินโควตา / rate limit = `429`** (เดิม **401**) — hook ปัจจุบันตกเข้าสาขา "non-2xx → 502" ซึ่งยังถูกต้อง
+   แต่ควรแยกข้อความให้ผู้ใช้รู้ว่า "วันนี้ถามเยอะเกินโควตา ลองใหม่ภายหลัง" ไม่ใช่ "ระบบขัดข้อง"
+4. **`503` ตัวใหม่:** ระบบบันทึกการใช้งาน (audit) เขียนไม่ได้ → ไม่ส่งคำตอบออก. เป็น "ลองใหม่ภายหลัง" เช่นกัน
+5. **400 / 403 คืนข้อความตายตัว** (เดิมเป็นข้อความ exception ที่บอกชื่อคอลัมน์ scope ที่รองรับ / ชื่อ data source /
+   path ของ script) — status เดิมทุกตัว, hook ที่แยก 400 ออกมาทำงานเหมือนเดิม.
+   **context นอกสิทธิ์ กับ context ที่ไม่มีอยู่ ได้ข้อความ 403 เดียวกัน** — ถ้า `ASSISTANT_CONTEXT_MAP` ตั้งผิด
+   จะไม่มีทางแยกจากข้อความ response ได้อีก ให้ดูที่ log ของ AI หรือ `GET /admin/query-audit`
+6. **`GET /api/v1/query/contexts` ต้องส่ง `X-API-Key` หรือ session token แล้ว** — ไม่มี = 401 (เดิมเป็น public).
+   hook ปัจจุบันไม่เรียก endpoint นี้ จึงไม่กระทบ; script/เอกสารฝั่ง NT-Report ที่เรียกอยู่ต้องเพิ่ม header
+
+**ไม่มีอะไรที่ portal ต้องรีบแก้เพื่อไม่ให้พัง** — ข้อ 3, 4, 5 เป็นการทำให้ข้อความถึงผู้ใช้ดีขึ้นเท่านั้น

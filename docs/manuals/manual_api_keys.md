@@ -95,7 +95,8 @@ Stateless query endpoint — ถามคำถามและรับคำต
 
 ### GET /api/v1/query/contexts
 
-Public endpoint — ไม่ต้อง auth
+ต้องมี `X-API-Key` หรือ session token — ไม่มี / key ใช้ไม่ได้ = **401** (เดิมเป็น public: key ผิดแล้วเห็นทุก context
+ของทุก workspace). key ที่ผูก workspace เห็นเฉพาะของตัวเอง; การ list **ไม่นับโควตา**
 
 ```json
 [
@@ -132,11 +133,14 @@ Public endpoint — ไม่ต้อง auth
 | Per-minute | 30 requests | ตั้งค่าได้ตอนสร้าง key |
 | Per-day | 1000 requests | ตั้งค่าได้ตอนสร้าง key |
 
-เมื่อเกิน limit จะได้รับ response:
+เมื่อเกิน limit จะได้รับ response (ก่อนงาน hardening 2026-09-20 ได้ 401 ซึ่งทำให้ผู้เรียกไปหาสาเหตุผิดที่):
 
 ```
 HTTP 429 Too Many Requests
+{"detail": "API key เกิน rate limit หรือโควตารายวัน — ลองใหม่ภายหลัง"}
 ```
+
+> Redis ไม่ทำงาน = limit รายนาที **fail-open** (ของเดิม) — เพดานรายวันคือเพดานที่บังคับจริง
 
 ## ดู Usage Statistics
 

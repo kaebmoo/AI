@@ -243,15 +243,18 @@ Mutation check ของ test (10 mutant): ฆ่า 7 (ตัด policy filter,
 - ชื่อ client อยู่ใน `channel` (`mcp:<user-agent>`) ไม่เพิ่มคอลัมน์ใหม่ใน `query_audit`
 - refusal จาก policy ของ context ที่ระบุชื่อ ลง audit เป็น `ContextNotAllowed` (engine เป็นผู้ปฏิเสธจากเซต `usable`) — client เห็น `policy_refused`
 
-**ของเดิมที่พบ — ไม่ได้แก้เพราะเป็นพฤติกรรมของช่องทางเดิม:**
-- REST `/api/v1/query` คืน**SQL ในข้อความคำตอบ**เมื่อได้ 0 แถว แม้ `include_sql=false`, คืนข้อความ exception ใน `answer` / `error` / `parts[].error`, และคืน `str(dict)` เมื่อ explanation เป็น dict — portal ได้ของเหล่านี้อยู่วันนี้
-- `GET /api/v1/query/contexts` เป็น public: key ผิด = เห็นทุก context ของทุก workspace
-- REST เกินโควตา = 401 (คู่มือเขียนว่า 429); REST ไม่ตรวจ `has_scope('query')`
-- `mcp_servers/claude_desktop_config.json` + README สอนต่อ `nt-query` (SQL ดิบ ไม่มี key / audit) เข้า Claude Desktop ตรง ๆ — ขัดกับกติกาของ phase นี้; `execute_query(validate_first=False)`
+**ของเดิมที่พบ — ✅ ปิดแล้วในงาน hardening 2026-09-20 (`plan/archive/RESULT_P7_HARDENING.md`):**
+- ~~REST `/api/v1/query` คืน**SQL ในข้อความคำตอบ**เมื่อได้ 0 แถว แม้ `include_sql=false`, คืนข้อความ exception ใน `answer` / `error` / `parts[].error`, และคืน `str(dict)` เมื่อ explanation เป็น dict~~ → รหัส + ข้อความตายตัวจาก `app/core/outbound.py` (รวม body ของ 400 / 403 ที่ review พบเพิ่ม)
+- ~~`GET /api/v1/query/contexts` เป็น public: key ผิด = เห็นทุก context ของทุก workspace~~ → ต้อง auth เสมอ, ไม่นับโควตา
+- ~~REST เกินโควตา = 401 (คู่มือเขียนว่า 429)~~ → **429**; REST ยังไม่ตรวจ `has_scope('query')` (ยังค้าง)
+- ~~`mcp_servers/claude_desktop_config.json` + README สอนต่อ `nt-query` (SQL ดิบ ไม่มี key / audit) เข้า Claude Desktop ตรง ๆ~~ → ลบไฟล์แล้ว, Desktop ต่อผ่าน `scripts/mcp_stdio_bridge.py`; `execute_query(validate_first=False)` ยังค้าง
+- เพิ่มในงานเดียวกัน: `ai_response` หมดอายุตาม `result_retention_days`; audit เขียนไม่ได้ = ไม่ส่งคำตอบออก (เฉพาะช่องทางที่ถือ key)
 - `app/main.py` เปิด CORS ทั้งแอป ขณะที่ `docs/PORTAL_INTEGRATION.md` เขียนว่าไม่เปิด
 - dedup 5 วินาทีผูกกับ user + คำถาม (ไม่มี context / key): LLM client ที่ถามซ้ำเร็ว ๆ ได้ `duplicate_request`
 - client ตัดการเชื่อมต่อกลางคำถาม: pipeline ทำงานจนจบ (เสีย provider call)
 - `chroma_db__<workspace>/` เกิดใน root ของ repo เมื่อมีคำถามแรกของ workspace (Phase 4b) — เพิ่มใน `.gitignore` แล้ว
+
+**ยังค้างจริง ๆ:** CORS เปิดทั้งแอป (เจ้าของยังไม่ตัดสิน), dedup 5 วินาที, client ตัดการเชื่อมต่อกลางคำถาม, Redis ไม่ได้รัน, `execute_query(validate_first=False)`, REST ไม่ตรวจ scope `query`
 
 **ค้างจาก phase ก่อน (ไม่เปลี่ยน):** เปิด multi-context กับ `nt-report`; admin UI ของ workspaces / sources / policy / audit / flag นี้; D4 / DPO; entitlement v2 (D7) สำหรับสิทธิระดับแถว
 
