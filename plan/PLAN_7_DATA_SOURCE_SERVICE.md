@@ -2,7 +2,7 @@
 
 **สถานะ:** 🟡 Phase 1 ✅ DONE (2026-09-18) — Phase 2 ✅ DONE (2026-09-19 — exit ครบ 4/4 โดเมน: revenue 14/14, expense 12/12, sales 12/12, ebt 22/24 บน contract 1.3.1) — Phase 3 ✅ DONE (2026-09-19) — Phase 4 ✅ DONE (2026-09-19; API ครบ, admin UI ยังไม่ทำ) — Phase 4.5 ✅ DONE (2026-09-19; `llm_data_policy` + provider allowlist ต่อ source, retention, DSR, audit ของคำถาม — API ครบ, admin UI ยังไม่ทำ, classification ต่อคอลัมน์เลื่อน) — Phase 5 ✅ DONE (2026-09-19; orchestrator หลัง flag ต่อ workspace ที่ `/api/v1/query`, eval ข้ามโดเมน 8–9/10 จาก baseline 0/10) — Phase 6 ✅ DONE (2026-09-20; MCP facade `/api/v1/mcp` หลัง flag `mcp_external_enabled` ปิดเป็นค่าเริ่มต้น, ต่อ Claude Code จริงผ่านแล้วบนสำเนา DB — **ยังไม่เปิดบน DB จริง / ยังไม่ออก key จริง**, widget ไม่ทำ) — Phase 7 ยังไม่เริ่ม | ผล: `plan/archive/RESULT_P7_PHASE{1,2,3,4,45,5,6}.md` | งานฝั่ง NT-Report: `plan/PROMPT_NT_REPORT_P7.md`
 **ความสัมพันธ์กับแผนเดิม:** ต่อยอด/แทนที่บางส่วนของ `PLAN_6_SAAS.md` (ดู §9), รวม Plan 1B-C (MCP SSE + API key) ไว้ใน Phase 6
-**ผู้ใช้รายแรก:** NT-Report portal (F11 dashboard Q&A) — ปัจจุบันถูก disable เพราะยังไม่ได้ตั้ง key และข้อมูลใน AI ค้างที่ revenue 202605
+**ผู้ใช้รายแรก:** NT-Report portal (F11 dashboard Q&A) — **go-live 2026-09-20: ฝั่ง AI เปิดแล้ว** (config.db migrate, server รัน, key จริงผูก workspace `nt-report` ออกแล้ว, `llm_provider_allowlist` = `["matcha"]`, ทุก source ok ที่ contract 2.3.1 / 1.2.1 / 1.3.1 / 1.4.1) — **ปุ่มฝั่ง portal ยังไม่เปิด**: เทียบ 10 คำถามต่อ report_type ได้ 8 / 8 / 8 / 5 ยังไม่ถึงเกณฑ์ 9/10 · ผล: `plan/archive/RESULT_P7_GOLIVE.md`, `plan/archive/RESULT_F11.md`
 
 ---
 
@@ -383,10 +383,16 @@ NT-Report ไม่ต้อง import อะไรเข้า AI อีก ห
 - [ ] เอกสารรวมของ assistant ฝั่ง portal (ตอนนี้กระจายอยู่ใน `.env.example`, `DEPLOY_NOTES.md`, `CHANGELOG.md`)
 - [ ] (หลัง Phase 3) assistant config ต่อรายงาน แทน `ASSISTANT_CONTEXT_MAP` — §8 ข้อ 3–4
 
-### 11.3 งานค้างจาก F11 (ยังต้องทำก่อนเปิดใช้จริง — จาก `FIX_NOTES.md`)
-- [ ] ออก API key จริงให้ portal (`docs/PORTAL_INTEGRATION.md`) — ควรออกหลัง Phase 4 เพื่อให้ผูก workspace/allowed_contexts ได้เลย
-- [ ] E2E ผ่าน PB: ผู้ใช้ไม่มีสิทธิ → 403 และไม่มี call ออก, audit ครบ, rate limit ทำงานจริง
-- [ ] เทียบตัวเลข 10 คำถาม vs dashboard → `plan/archive/RESULT_F11.md`
+### 11.3 งานค้างจาก F11 (อัปเดต 2026-09-20)
+- [x] ออก API key จริงให้ portal — `nt-report-portal` ผูก workspace `nt-report`, 20/นาที 2,000/วัน (2026-09-20)
+- [~] E2E ผ่าน PB: ฝั่ง AI ครบ (403 นอกสิทธิ, audit ครบทุกคำถาม, rate limit รายวัน **และรายนาทีผ่าน Redis**);
+      ส่วนที่ต้องผ่าน PocketBase ยังไม่ทำ — เจ้าของเป็นผู้ใส่ `ASSISTANT_*` ใน `pocketbase_0/.env` + restart PB
+      (process ที่รันอยู่เก่ากว่าการแก้ hook ของ 2026-09-20)
+- [x] เทียบตัวเลข 10 คำถาม vs dashboard → `plan/archive/RESULT_F11.md` — **ไม่ผ่าน**: revenue 8 · expense 8 ·
+      ebt 8 · sales 5 (ก่อนแก้ 4 / 3 / 4 / 3). ต้นเหตุหลักคือ scope 13–24 เดือนที่ไม่มีงวดยึด — แก้แล้ว
+      (`308acb1`: prompt บอกขอบเขต + งวดอ้างอิง) ที่เหลือเป็นความรู้รายโดเมน ไม่ใช่เรื่อง scope อีก
+- [ ] **ก่อนเปิดปุ่ม:** แก้ `mapUpstreamError` ฝั่ง hook (รหัส `source_unavailable` ไม่ match `/publish/i` อีกแล้ว),
+      ปิดช่องว่างที่เหลือ 11 ข้อ แล้ววัดซ้ำ **มากกว่าหนึ่งรอบ** (เห็นความผันผวนของโมเดล ±1 ข้อ)
 
 ### 11.4 สถานะข้อมูล ณ วันที่เขียนแผน
 - business DB ของ AI มีแค่ `feed_revenue` 202605 (import 2026-07-11) ขณะที่ DataFeed มี revenue/expense 202608, sales/ebt 202607 — ถ้าต้องการเปิดใช้ก่อน Phase 1 เสร็จ ต้อง import ด้วยมือ (โหมดเดิม) ไปก่อน

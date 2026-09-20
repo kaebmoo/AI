@@ -394,3 +394,29 @@
 - Redis ไม่ได้รันบนเครื่องนี้ → limit รายนาที fail-open; เพดานรายวันคือเพดานเดียวที่บังคับจริง
 
 **ข้อค้าง (ก่อนเปิดกับ DB จริง — ต้องสั่ง):** migrate `config.db` จริง (`migrate_data_sources.py` + `migrate_workspaces.py`) → เปิด flag `mcp_external_enabled` + ออก key จริงที่ผูก workspace + ตั้ง `MCP_ALLOWED_HOSTS` → รัน Redis. ค้างจาก phase ก่อน: เปิด multi-context กับ `nt-report`; admin UI ของ workspaces / sources / policy / audit / flag นี้; D4 / DPO; entitlement v2 (D7) สำหรับสิทธิระดับแถว. Widget ไม่ทำ (ไม่มี client ที่ 2)
+
+## จาก go-live ของ portal (2026-09-20)
+
+ผล: `plan/archive/RESULT_P7_GOLIVE.md`, `plan/archive/RESULT_F11.md` · runbook: `docs/manuals/manual_portal_runbook.md`
+
+1. **scope เป็นตัวกรอง ไม่ใช่จุดยึด — และโมเดลไม่เคยเห็นมัน** (`308acb1`)
+   `request_scope` ถูกอ่านแค่ใน `data_sources.py` เพื่อห่อ view. ตอน portal ส่งเดือนเดียวไม่มีใครรู้สึก:
+   SQL ที่ลืมใส่เงื่อนไขงวดยังถูก **เพราะ view มีเดือนเดียว**. พอ portal ขยายเป็น 13–24 เดือน
+   (entitlement ใหม่เพื่อให้ถามแนวโน้มได้) view มีเดือนสิงหาคมสองครั้ง → SQL เดิมรวมสองปีหรือเลือกปีผิด
+   → คะแนนตกจาก 7–8/10 เหลือ 3–4/10 ทั้งสี่โดเมน
+   **แก้:** `hybrid_flow.scope_note()` เติมขอบเขต + "ค่ามากสุด = งวดอ้างอิง" ลง prompt; คำขอที่ไม่มี scope
+   ได้ prompt เดิมทุกไบต์
+   ⚠️ **ต้องเติม 4 จุด** — จุดที่สำคัญที่สุดคือ **pass 1 ของ two-pass (`extract_intent`)** เพราะ
+   `two_pass_enabled = true` บน config จริง → intent เลือกปีก่อนที่ prompt ของ SQL จะถูกสร้าง;
+   ใส่แต่ pass 2 แล้ววัด sales / ebt ยังตอบจาก ส.ค. 2568 เหมือนเดิม
+2. **`error` เป็นรหัสแล้ว ผู้เรียกที่ match ข้อความจะเงียบ ๆ พัง** — hook ของ portal หา `/publish/i`
+   ใน `payload.error` ซึ่งตอนนี้คือ `source_unavailable` → ระหว่าง publish ผู้ใช้ได้คำแนะนำผิด
+   บทเรียน: เปลี่ยน field จาก "ข้อความ" เป็น "รหัส" ต้องไล่ผู้เรียกที่ match ข้อความด้วย ไม่ใช่แค่ที่ match status
+3. **retention รอบแรกซ้อมได้แม่นยำ** — รันบนสำเนาสดก่อน ได้ 1,513 / 55 เท่ากับของจริงทุกตัวเลข
+   (job รัน 30 วินาทีหลัง start จึงตั้ง `result_retention_days` ก่อน start เท่านั้น)
+4. **วัดคุณภาพคำตอบรอบเดียวไม่พอ** — รอบยืนยันกลายเป็น cache hit ทั้งหมด (query cache ผูก scope + key)
+   แล้ว cache hit 20 ครั้งในไม่กี่วินาทีก็ชน rate limit 20/นาที (Redis) → 429
+   ถ้าจะวัดซ้ำจริงต้องเว้นให้พ้น 30 นาที หรือเปลี่ยนคำถาม; และโมเดลผันผวน ±1 ข้อระหว่างรอบ
+5. **process เก่ากิน config ใหม่ไม่ได้** — PocketBase ที่รันมาตั้งแต่ 15 ก.ย. ยังใช้ `pb_hooks/*.js` ตัวเก่า
+   ทั้งที่ไฟล์ถูกแก้แล้ว; ฝั่ง AI ก็เช่นกัน (query cache 30 นาทีไม่ผูกกับเวอร์ชันของ code) → restart หลัง deploy
+6. **`export_cleanup` ล้มทุกรอบ** บน `app.db` จริง: `no such table: report_exports` — ของเดิม ไม่เกี่ยวกับ go-live
