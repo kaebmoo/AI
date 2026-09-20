@@ -249,6 +249,16 @@ class TestTools:
         assert payload["data_as_of"]["period"] == 202608
         assert "secret_sql" not in result.model_dump_json() and "sql" not in payload
 
+    def test_a_structured_explanation_is_returned_as_its_text(self, world):
+        structured = _result(explanation={"explanation": "รายได้ 5 บาท", "chart_config": {"x": 1}})
+
+        async def check(app):
+            async with _client(app, world.keys["a"].raw) as session:
+                return await session.call_tool("ask", {"question": "q"})
+        with patch("app.services.multi_context.ask", AsyncMock(return_value=structured)), patch("app.services.query_engine.QueryEngine"):
+            result = _run(check)
+        assert result.structuredContent["answer"] == "รายได้ 5 บาท" == result.content[0].text
+
     @pytest.mark.parametrize("raised, context, code", [
         (ScopeError("คอลัมน์ภายใน [secret_col] scripts/x.py"), None, "invalid_scope"),
         (ContextNotAllowed("hr_payroll"), "hr_payroll", "context_not_allowed"),

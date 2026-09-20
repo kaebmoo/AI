@@ -318,8 +318,11 @@ def _answer(response, result) -> CallToolResult:
     if parts is None and response.error:  # the answer text of a failed query embeds the exception
         raise Refused("duplicate_request" if response.error == "duplicate_request" else "query_failed")
 
+    from app.api.v1.query import _part_answer
+
     payload = response.model_dump(exclude={"sql", "error"}, exclude_none=True)
-    answer = payload["answer"]
+    # a structured explanation (text + chart config) reaches REST as str(dict); an LLM client gets the text
+    answer = (parts is None and _part_answer(result.query_result)) or payload["answer"]
     for entry, part in zip(payload.get("parts") or [], parts or []):
         entry.pop("sql", None)
         if part.error:
