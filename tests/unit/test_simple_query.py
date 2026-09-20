@@ -378,3 +378,31 @@ class TestNothingInternalLeaves:
 
         assert service.check_key(raw) == (None, "rate_limited")
         assert service.check_key("ntai_" + "0" * 64) == (None, "unauthorized")
+
+    @pytest.mark.parametrize("exc,code,status,secret", [
+        ("scope_unknown", "invalid_scope", 400, "year_month"),
+        ("scope_unmigrated", "invalid_scope", 400, "scripts/migrate_data_sources.py"),
+        ("policy", "policy_refused", 403, "llm_provider_allowlist"),
+        ("forbidden", "context_not_allowed", 403, "feed_secret"),
+        ("missing", "context_not_allowed", 403, "feed_secret"),
+    ])
+    def test_a_refusal_is_not_explained_in_the_words_it_was_refused_in(self, query_client, exc, code, status, secret):
+        """400/403 keep their status — the portal branches on it — but the reason names the context's
+        scope columns, an internal source and its policy, a migration script, and whether a context
+        exists at all. Two different ContextNotAllowed wordings were an existence oracle."""
+        from app.core.llm_policy import LLMPolicyError
+        from app.core.outbound import ERRORS
+        from app.services.data_sources import ScopeError
+        from app.services.workspaces import ContextNotAllowed
+
+        raised = {
+            "scope_unknown": ScopeError("scope ไม่รู้จัก ['division'] — context นี้รองรับ ['year_month', 'org_code']"),
+            "scope_unmigrated": ScopeError("config DB ยังไม่รองรับ scope — รัน scripts/migrate_data_sources.py"),
+            "policy": LLMPolicyError("provider 'claude' ไม่อยู่ใน llm_provider_allowlist ของ source 'feed_secret'"),
+            "forbidden": ContextNotAllowed("API key นี้ไม่มีสิทธิ์ใช้ context 'feed_secret'"),
+            "missing": ContextNotAllowed("ไม่พบ context 'feed_secret' สำหรับ API key นี้"),
+        }[exc]
+
+        resp = self._ask(query_client, exc=raised)
+        assert resp.status_code == status and resp.json()["detail"] == ERRORS[code][1]
+        assert secret not in resp.text

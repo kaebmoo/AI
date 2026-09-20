@@ -189,10 +189,15 @@ async def simple_query(
             db=db, admin_config=admin_config,
             mcp_client=getattr(http_request.app.state, "mcp_client", None))  # same as the chat endpoint
         return response
-    except ScopeError as e:  # never answered unscoped — the caller asked for a scope we can't enforce
-        raise HTTPException(status_code=400, detail=str(e))
-    except (ContextNotAllowed, LLMPolicyError) as e:  # outside the key's rights / the source's policy — never re-routed silently
-        raise HTTPException(status_code=403, detail=str(e))
+    except (ScopeError, ContextNotAllowed, LLMPolicyError) as e:
+        # a scope we can't enforce (400) or a request outside the key's rights / the source's policy
+        # (403) — never re-routed silently, and never explained in the words it was refused in: those
+        # name the context's scope columns, an internal source and its policy, a migration script, and
+        # they say whether a context exists at all. The reason is logged, not answered.
+        code = outbound.code_for(e)
+        logger.info("Query refused [%s] source=%s context=%s: %s: %s", code, request_body.source or "-",
+                    request_body.context or "-", type(e).__name__, e)
+        raise HTTPException(status_code=outbound.status(code), detail=outbound.message(code))
     except AuditUnavailable:  # the answer exists; without its audit row it is not sent (this key's channel only)
         logger.error("query_audit unavailable — answer withheld from api_key_id=%s",
                      getattr(getattr(http_request.state, "api_key", None), "id", None))
