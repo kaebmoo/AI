@@ -139,6 +139,40 @@ def dropped_filter_error(sql_query: str, required_columns: Optional[List[str]], 
             f"ยอดรวมของตารางนี้จึงไม่ใช่คำตอบ; ใช้ตารางของ context ที่มีคอลัมน์นี้และใส่ filter/GROUP BY ให้ครบ")
 
 
+def scope_note() -> str:
+    """What the caller's `scope` confines this request to, in words for the prompt — "" when unscoped.
+
+    Scope is enforced by wrapping every table in a filtered view, and the model was never told about
+    it. While a portal sent one month that cost nothing: SQL that forgot a period filter was still
+    right, because the view held one month. A window of two years holds two Augusts, and the same SQL
+    then sums both or picks the wrong one (RESULT_F11 §2). The filter still does the enforcing — this
+    only says which period the question is being asked about.
+    """
+    from app.services.data_sources import request_scope
+
+    scope = request_scope.get()
+    if not scope:
+        return ""
+    lines, anchored = [], None
+    for key, value in scope.items():
+        values = value if isinstance(value, (list, tuple)) else [value]
+        if len(values) > 6 and all(isinstance(v, int) for v in values):
+            newest = max(values)
+            lines.append(f"- {key}: {min(values)}–{newest} ({len(values)} ค่า) — ค่าล่าสุด/งวดอ้างอิง = {newest}")
+            anchored = anchored or newest
+        else:
+            lines.append(f"- {key}: {', '.join(str(v) for v in values)}"
+                         + (f" — ค่าล่าสุด/งวดอ้างอิง = {max(values)}" if len(values) > 1
+                            and all(isinstance(v, int) for v in values) else ""))
+            if len(values) > 1 and all(isinstance(v, int) for v in values):
+                anchored = anchored or max(values)
+    note = ("\n**ขอบเขตข้อมูลของคำขอนี้ — ทุกตารางถูกกรองไว้แล้วเท่านี้:**\n" + "\n".join(lines))
+    if anchored is not None:
+        note += (f"\nSQL ต้องใส่เงื่อนไขงวดเสมอ (ขอบเขตนี้ไม่ได้เจาะจงงวดให้) — "
+                 f"คำถามที่เอ่ยถึงเดือนหรือ \"ล่าสุด\" โดยไม่ระบุปี หมายถึงงวดอ้างอิง {anchored}")
+    return note + "\n"
+
+
 def build_initial_user_prompt(
     question: str,
     context_table: str,
@@ -149,7 +183,7 @@ def build_initial_user_prompt(
     return f"""คำถาม: {question}
 
 **บริบท:** ข้อมูล{context_thai} (ใช้ตาราง {context_table})
-
+{scope_note()}
 {rag_context}
 
 {value_lookup_text}
@@ -178,7 +212,7 @@ def build_retry_user_prompt(question: str, context_table: str, context_thai: str
     return f"""คำถาม: {question}
 
 **บริบท:** ข้อมูล{context_thai} (ใช้ตาราง {context_table})
-
+{scope_note()}
 SQL ก่อนหน้ามีปัญหา:
 ```sql
 {last_error.get('sql', '')}
@@ -1132,6 +1166,7 @@ async def extract_intent(
 คำถามใหม่ (follow-up): {question}
 
 **บริบท:** ข้อมูล{context_thai} (ใช้ตาราง {context_table}){intent_table_hint(context_table)}
+{scope_note()}
 
 ---
 **Task:** อัปเดต intent เดิมตามคำถามใหม่ — คงค่า filter/dimension ที่ไม่ถูกกล่าวถึงไว้ตามเดิม (inherit) และเปลี่ยนเฉพาะส่วนที่คำถามใหม่ระบุ
@@ -1141,7 +1176,7 @@ async def extract_intent(
         prompt_header = f"""คำถาม: {question}
 
 **บริบท:** ข้อมูล{context_thai} (ใช้ตาราง {context_table}){intent_table_hint(context_table)}{history_context}
-
+{scope_note()}
 {rag_context}
 
 ---
@@ -1285,7 +1320,7 @@ def build_pass2_prompt(
     return f"""คำถาม: {question}
 
 **บริบท:** ข้อมูล{context_thai} (ใช้ตาราง {context_table})
-
+{scope_note()}
 ---
 **Structured Intent (วิเคราะห์จากคำถามแล้ว):**
 - Intent Type: {intent.get('intent_type', 'aggregation')}
