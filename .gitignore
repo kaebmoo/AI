@@ -215,3 +215,5 @@ eval_results/*
 
 # Plan 7: DuckDB file-source view definitions (rebuilt at startup)
 .source_cache/
+# Vanna brain per workspace (Plan 7 Phase 4b)
+chroma_db__*/

@@ -1,6 +1,6 @@
 # Plan 7: Data Source as a Service — ถามข้อมูลจากแหล่งที่ผู้ใช้กำหนด โดยไม่ต้อง import
 
-**สถานะ:** 🟡 Phase 1 ✅ DONE (2026-09-18) — Phase 2 ✅ DONE (2026-09-19 — exit ครบ 4/4 โดเมน: revenue 14/14, expense 12/12, sales 12/12, ebt 22/24 บน contract 1.3.1) — Phase 3 ✅ DONE (2026-09-19) — Phase 4 ✅ DONE (2026-09-19; API ครบ, admin UI ยังไม่ทำ) — Phase 4.5 ✅ DONE (2026-09-19; `llm_data_policy` + provider allowlist ต่อ source, retention, DSR, audit ของคำถาม — API ครบ, admin UI ยังไม่ทำ, classification ต่อคอลัมน์เลื่อน) — Phase 5 ✅ DONE (2026-09-19; orchestrator หลัง flag ต่อ workspace ที่ `/api/v1/query`, eval ข้ามโดเมน 8–9/10 จาก baseline 0/10) — Phase 6 🟡 สำรวจ/แผนย่อยแล้ว รอเจ้าของระบุผู้ใช้และ MCP client — Phase 7 ยังไม่เริ่ม | ผล: `plan/archive/RESULT_P7_PHASE{1,2,3,4,45,5}.md` | งานฝั่ง NT-Report: `plan/PROMPT_NT_REPORT_P7.md`
+**สถานะ:** 🟡 Phase 1 ✅ DONE (2026-09-18) — Phase 2 ✅ DONE (2026-09-19 — exit ครบ 4/4 โดเมน: revenue 14/14, expense 12/12, sales 12/12, ebt 22/24 บน contract 1.3.1) — Phase 3 ✅ DONE (2026-09-19) — Phase 4 ✅ DONE (2026-09-19; API ครบ, admin UI ยังไม่ทำ) — Phase 4.5 ✅ DONE (2026-09-19; `llm_data_policy` + provider allowlist ต่อ source, retention, DSR, audit ของคำถาม — API ครบ, admin UI ยังไม่ทำ, classification ต่อคอลัมน์เลื่อน) — Phase 5 ✅ DONE (2026-09-19; orchestrator หลัง flag ต่อ workspace ที่ `/api/v1/query`, eval ข้ามโดเมน 8–9/10 จาก baseline 0/10) — Phase 6 ✅ DONE (2026-09-20; MCP facade `/api/v1/mcp` หลัง flag `mcp_external_enabled` ปิดเป็นค่าเริ่มต้น, ต่อ Claude Code จริงผ่านแล้วบนสำเนา DB — **ยังไม่เปิดบน DB จริง / ยังไม่ออก key จริง**, widget ไม่ทำ) — Phase 7 ยังไม่เริ่ม | ผล: `plan/archive/RESULT_P7_PHASE{1,2,3,4,45,5,6}.md` | งานฝั่ง NT-Report: `plan/PROMPT_NT_REPORT_P7.md`
 **ความสัมพันธ์กับแผนเดิม:** ต่อยอด/แทนที่บางส่วนของ `PLAN_6_SAAS.md` (ดู §9), รวม Plan 1B-C (MCP SSE + API key) ไว้ใน Phase 6
 **ผู้ใช้รายแรก:** NT-Report portal (F11 dashboard Q&A) — ปัจจุบันถูก disable เพราะยังไม่ได้ตั้ง key และข้อมูลใน AI ค้างที่ revenue 202605
 
@@ -185,12 +185,19 @@ Response เพิ่ม `data_as_of` ต่อ context ที่ใช้ (จ�
   2. **Orchestrator:** แตกคำถามเป็นคำถามย่อยต่อ context → รันแยก → LLM รวมคำตอบ (ไม่ JOIN ข้าม source ใน SQL เพราะ key ของแต่ละโดเมนไม่ตรงกัน)
 - **Exit:** ชุดคำถามข้ามโดเมน 10 ข้อ เทียบตัวเลขกับ dashboard ถูก ≥ 8 ข้อ; ข้อที่ตอบไม่ได้ต้องบอกว่าไม่ได้ ไม่เดาตัวเลข
 
-### Phase 6 — ช่องทางใช้งาน (2–3 วัน) — 🟡 สำรวจแล้ว รอเจ้าของตัดสิน
-> ผลสำรวจและแผนย่อย: [`archive/RESULT_P7_PHASE6.md`](archive/RESULT_P7_PHASE6.md) — baseline 997 passed / 3 skipped บนสำเนา DB; MCP ภายใน 35 tools ห้ามเปิดตรง; SDK 1.26.0 mount ASGI/ส่ง request header ผ่าน tool ได้จริง (in-process proof).
-> ยังไม่เริ่ม implementation: รอเจ้าของระบุผู้ใช้/client รายแรก พร้อมขอบเขตข้อมูลที่ส่งให้ client ได้ ตาม prompt ข้อ 2. Scope ที่ desktop ส่งเองไม่ใช่ entitlement และ `llm_data_policy` ฝั่ง server ไม่คุม LLM ของ client.
-- facade บาง ๆ (`ask`, `list_contexts`, `source_status`) ผ่านทางเข้าเดียวกับ REST; auth/usage เดิม + workspace/allowlist + audit `mcp`
-- transport รอ client: เสนอ stateless Streamable HTTP; legacy SSE เฉพาะเมื่อจำเป็น (Plan 1B-C / REMAIN-8 ยังไม่ปิด)
-- (ตัวเลือก) embeddable chat widget ที่ client ฝังเองได้ — ทำเมื่อมี client ที่ 2 ต้องการ; NT-Report ใช้ panel ของตัวเองผ่าน PB proxy อยู่แล้ว
+### Phase 6 — ช่องทางใช้งาน (2–3 วัน) — ✅ DONE 2026-09-20 (ยังไม่เปิดบน DB จริง)
+> ผล ([`archive/RESULT_P7_PHASE6.md`](archive/RESULT_P7_PHASE6.md)): สำรวจก่อน — MCP ภายใน 35 tools (metadata 13 / query 5 / validation 4 / admin 13) **ห้ามเปิดตรง** (SQL ดิบ, sample values, เขียน config; ไม่มี key / allowlist / scope / audit) → สร้าง **facade ไฟล์เดียว** `app/api/v1/mcp_facade.py` ที่ `/api/v1/mcp`:
+> stateless Streamable HTTP ใน FastAPI เดิม, `X-API-Key` **ทุก request** (gate หน้า transport; ไม่ผ่าน = 401), 3 tools `ask` / `list_contexts` / `source_status` ผ่าน `run_simple_query` ตัวเดียวกับ `POST /api/v1/query` → `multi_context.ask` → `QueryEngine.query`;
+> ขาออกไม่มี SQL / ข้อความ exception / path — refusal เป็น tool error (code + ข้อความตายตัว + `request_id`); ปิดเป็นค่าเริ่มต้น (`admin_config.mcp_external_enabled`, ปิด = 404).
+> Exit: pytest **1035 passed / 3 skipped** (+38 ใน `tests/unit/test_mcp_facade.py`, SDK client จริงผ่าน ASGI; test เดิมของ `/api/v1/query` 71 ข้อผ่านโดยไม่แก้); **Claude Code 2.1.270** ต่อจริงบนสำเนา DB ครบ 3 tools + refusal, audit `channel = mcp:claude-code/2.1.270`; overhead เส้นทาง cache (n=12) +6.6 ms P50 / +11.4 ms P95 (เป้า ≤100 ms); review อิสระ: high 2 / medium 2 / low 4 แก้ครบใน `69d896a` (low 1 ข้อบันทึกไว้ไม่แก้).
+> **ก่อนเปิดกับ DB จริง (ยังไม่ได้ทำ — RESULT §9):** รัน `migrate_data_sources.py` + `migrate_workspaces.py` บน `config.db` จริง (ไม่มีคอลัมน์ `llm_data_policy` = MCP ปฏิเสธทุก context), เปิด flag + ออก key จริงที่ผูก workspace + ตั้ง `MCP_ALLOWED_HOSTS`, รัน Redis (limit รายนาที fail-open อยู่). คู่มือ: `docs/manuals/manual_mcp_external.md`
+- เจ้าของตัดสิน (2026-09-20): client รายแรก = **Claude Code บนเครื่องนี้ + สำเนา DB** และตัวอย่าง client ใน repo (`scripts/mcp_client_example.py`); transport = stateless Streamable HTTP ที่ `/api/v1/mcp` — **ไม่ทำ legacy SSE**, ไม่แยก process; history = stateless เหมือน `/api/v1/query`
+- tools 3 ตัวเท่านั้น; `ask` มี `include_data` (แถวถูก cap ที่ `MCP_MAX_ROWS`) — **ไม่มี `include_sql`, ไม่คืน SQL**
+- สิทธิของ key = workspace / allowlist เท่านั้น — `scope` ที่ client ส่งกรองให้แคบลงได้ แต่**ไม่ใช่สิทธิระดับแถว** (ผู้ถือ key อ่านได้ทุกแถวของ context ที่ key เห็น; สิทธิระดับแถว = entitlement v2, D7)
+- source ที่ policy ≠ `full` **ถูกปฏิเสธบนช่องทางนี้**; อ่าน policy ไม่ได้ / registry ยังไม่ migrate = ปฏิเสธ (ตัวอ่านแบบเข้มของ facade — ไม่ใช้ `policy_for_context` ที่ fail open)
+- ที่เลือกเข้มกว่า REST (ผ่อนได้ถ้าเจ้าของต้องการ): รับเฉพาะ key ที่ผูก workspace / allowlist + scope `query` / `full`; 1 tool call = 1 usage (handshake ไม่นับ, ตัวนับเดียวกับ REST); ชื่อ client อยู่ใน `channel` (`mcp:<user-agent>`) ไม่เพิ่มคอลัมน์ใน `query_audit`
+- Plan 1B-C / REMAIN-8 **ปิดด้วย phase นี้**; MCP ภายในยังเป็น stdio หลัง pipeline เดิม ไม่มี passthrough
+- embeddable chat widget — **ไม่ทำ**: ไม่มี client ที่ 2 ที่ต้องการ; NT-Report ใช้ panel + PB proxy ของตัวเอง — เพิ่มเมื่อเจ้าของยืนยัน use case จริง
 
 ### Phase 7 — เปิดให้ภายนอก = private deployment ต่อลูกค้า (อนาคต — ปรับตาม D8 2026-09-18)
 - เงื่อนไขเริ่ม: มีลูกค้าจริงนอก NT อย่างน้อย 1 ราย

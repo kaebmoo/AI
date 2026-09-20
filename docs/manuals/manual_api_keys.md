@@ -45,10 +45,20 @@ POST /api/v1/admin/api-keys
 
 - binding ที่เป็นไปไม่ได้ (workspace ไม่มี/ปิด, context ไม่มี, context ของ workspace อื่น, list ว่าง) = **400 ตอนสร้าง key**
 - context นอกสิทธิ์ = **HTTP 403** ทั้งที่ระบุ `context` เองและที่ระบบเลือกให้ — ไม่มีการสลับไป context อื่นเงียบ ๆ; ไม่ส่ง `context` = ระบบเลือกภายในสิทธิ์ของ key
-- key แบบนี้ใช้ได้เฉพาะ `/api/v1/query` และ `/api/v1/query/contexts` (endpoint อื่น = 403 แม้เจ้าของ key เป็น admin)
+- key แบบนี้ใช้ได้เฉพาะ `/api/v1/query`, `/api/v1/query/contexts` และ `/api/v1/mcp` (Phase 6) — endpoint อื่น = 403 แม้เจ้าของ key เป็น admin
 - context แบบ legacy (business DB เดิม) ของ key ที่ถูกจำกัด: SQL อ่านได้เฉพาะ main view ของ context นั้น — ตาราง/ view อื่นถูกปฏิเสธที่ชั้น SQL
 - อ่านค่าไม่ได้ (JSON เสีย, config DB ล่ม) = ใช้ context ใดไม่ได้เลย (fail closed)
 - หน้า admin UI ยังไม่มีช่อง workspace — ใช้ API หรือ `docs/PORTAL_INTEGRATION.md`
+
+### Key สำหรับ MCP (Plan 7 Phase 6)
+
+ช่องทาง MCP สำหรับผู้เรียกภายนอก (`/api/v1/mcp` — ปิดเป็นค่าเริ่มต้น) ใช้ key ชุดเดียวกัน แต่เข้มกว่า REST — ดู [manual_mcp_external.md](manual_mcp_external.md)
+
+- key ต้อง**ผูก `workspace` หรือ `allowed_contexts`** และมี scope `query` หรือ `full`; เจ้าของ key ต้อง active — key ที่ไม่ผูกอะไรเลย = **401** ที่ `/api/v1/mcp` (ยังใช้กับ REST ได้ตามเดิม)
+- key ที่ผูกแล้วใช้ได้เฉพาะ `/api/v1/query*` และ `/api/v1/mcp` เท่านั้น
+- โควตาใช้ตัวนับเดียวกับ REST: 1 tool call = 1 usage (`initialize` / `tools/list` ไม่นับ)
+- ⚠️ ผู้ถือ key อ่านได้**ทุกแถว**ของทุก context ที่ key เข้าถึง — `scope` ที่ client ส่งกรองให้แคบลงได้ แต่**ไม่ใช่สิทธิระดับแถว (entitlement)**. key นี้อยู่ในเครื่องของผู้ใช้ → ผูก workspace / allowlist ให้แคบที่สุด; ผู้ใช้ที่ควรเห็นบางหน่วยงาน ให้ใช้ REST ผ่าน server ที่เป็นผู้ใส่ `scope`
+- context ที่ source มี `llm_data_policy` ≠ `full` ใช้ผ่าน MCP ไม่ได้ แม้อยู่ในสิทธิ์ของ key
 
 ## ใช้งาน API Key
 
@@ -147,7 +157,7 @@ HTTP 429 Too Many Requests
 | DELETE | `/api/v1/admin/workspaces/{id}` | ปิด workspace (soft) — key ที่ผูกอยู่ใช้อะไรไม่ได้จนกว่าจะเปิดคืน; ปิด `default` ไม่ได้ |
 | PUT | `/api/v1/admin/workspaces/{id}/retention` | (Phase 4.5) override ของ workspace: `result_retention_days` (null = ค่ากลาง, 0 = ไม่ลบ), `store_result_data` (false = ไม่เก็บแถวผลลัพธ์) |
 | PUT | `/api/v1/admin/workspaces/{id}/multi-context` | (Phase 5) `{"enabled": true}` = ตอบคำถามที่ข้ามหลาย context ของ workspace นี้ที่ `/api/v1/query` (ปิดเป็นค่าเริ่มต้น; ดู `docs/PORTAL_INTEGRATION.md`) |
-| GET | `/api/v1/admin/query-audit` | (Phase 4.5) audit ของทุกคำถาม — filter `api_key_id`, `user_id`, `workspace`, `context`, `channel` (เช่น `report_download`), `request_group` (Phase 5: คำถามข้าม context + คำถามย่อยของมัน), `date_from/to`, `has_error`, `q`; `format=csv` = export |
+| GET | `/api/v1/admin/query-audit` | (Phase 4.5) audit ของทุกคำถาม — filter `api_key_id`, `user_id`, `workspace`, `context`, `channel` (เช่น `report_download`; `mcp` = ทุก `mcp:<client>` ของช่องทาง MCP — Phase 6), `request_group` (Phase 5: คำถามข้าม context + คำถามย่อยของมัน), `date_from/to`, `has_error`, `q`; `format=csv` = export |
 
 ## Audit ของคำถามที่มาจาก API key (Plan 7 Phase 4.5)
 

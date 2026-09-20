@@ -334,15 +334,21 @@ Design เสร็จ (PLAN_6_SAAS.md) แต่ยังไม่เริ่�
 
 ## REMAIN-8: Plan 1B Phase C — MCP SSE + Auth
 
-**Plan:** 1B | **Priority:** 📋 Future | **Effort:** 1-2 วัน
+**Plan:** 1B → Plan 7 Phase 6 | **Priority:** ✅ DONE 2026-09-20 | **Effort:** —
 
 ### สถานะ
-🟡 รวมใน Plan 7 Phase 6 — สำรวจ + แผนย่อยแล้ว (2026-09-19), **รอเจ้าของระบุผู้ใช้/client และขอบเขตข้อมูล**; ยังไม่ implement / ยังไม่ปิด
+✅ ปิดด้วย Plan 7 Phase 6 — ผลและหลักฐาน: [`archive/RESULT_P7_PHASE6.md`](archive/RESULT_P7_PHASE6.md) | คู่มือ: `docs/manuals/manual_mcp_external.md`
 
-### เนื้อหา
-- External facade แยกจาก MCP ภายใน (ห้ามเปิด raw SQL/sample/admin tools ตรง)
-- API key auth/usage เดิม + workspace/allowlist/scope/audit; transport ตาม client (เสนอ Streamable HTTP, ไม่เปลี่ยน internal stdio)
-- ต้องต่อ client จริงอย่างน้อยหนึ่งตัวและผ่าน exit ก่อนปิด — ดู [`archive/RESULT_P7_PHASE6.md`](archive/RESULT_P7_PHASE6.md)
+### สิ่งที่ได้
+- External facade `/api/v1/mcp` (`app/api/v1/mcp_facade.py`) แยกจาก MCP ภายใน — 3 tools (`ask`, `list_contexts`, `source_status`); raw SQL / sample / admin tools ไม่ถูกเปิดออก
+- stateless Streamable HTTP ใน FastAPI เดิม + API key เดิม (`X-API-Key` ทุก request) + workspace / allowlist / scope / audit (`channel = mcp:<client>`); MCP ภายในคง stdio; **ไม่ทำ legacy SSE** (client ที่ตรวจไม่ต้องใช้)
+- ต่อ client จริงแล้ว: Claude Code 2.1.270 บนสำเนา DB ครบ 3 tools + refusal; pytest 1035 passed / 3 skipped (+38)
+- ปิดเป็นค่าเริ่มต้น (flag `mcp_external_enabled`) — **ยังไม่เปิดบน DB จริง / ยังไม่ออก key จริง**
+
+### เหลือก่อนใช้กับ DB จริง (RESULT §9 — ต้องสั่ง)
+1. รัน `scripts/migrate_data_sources.py` + `scripts/migrate_workspaces.py` บน `config.db` จริง (ค้างจาก Phase 4.5) — ไม่มีคอลัมน์ `llm_data_policy` = MCP ปฏิเสธทุก context
+2. เปิด flag `mcp_external_enabled`, ออก key จริงที่ผูก workspace, ตั้ง `MCP_ALLOWED_HOSTS` ถ้าไม่ใช่ localhost
+3. รัน Redis ในเครื่องที่ให้บริการ — ตอนนี้ limit รายนาที fail-open (ของเดิม); เพดานรายวันคือเพดานเดียวที่บังคับจริง
 
 ---
 

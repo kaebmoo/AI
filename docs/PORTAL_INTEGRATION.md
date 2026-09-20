@@ -7,7 +7,7 @@ Endpoint: `POST /api/v1/query/` (stateless) — auth ด้วย `X-API-Key`
 Request เพิ่มเติมสำหรับ portal (optional ทั้งหมด — contract เดิมไม่เปลี่ยน):
 - `scope` (dict) — **ขอบเขตข้อมูลที่บังคับที่ชั้น SQL** (Plan 7 Phase 3) เช่น `{"year_month": 202607}` หรือ `{"org_code": ["1L00201"]}`
 - `pinned_filters` (dict) — log เพื่อ audit เท่านั้น ไม่มีผลกับคำตอบ (ช่วงเปลี่ยนผ่าน — ใช้ `scope` แทน)
-- `source` (str) — เช่น `"portal"` สำหรับ audit trail
+- `source` (str) — เช่น `"portal"` สำหรับ audit trail (`query_audit.channel`); ค่าที่ขึ้นต้นด้วย `mcp` ถูกบันทึกเป็น `api:mcp…` — channel `mcp:<client>` สงวนไว้ให้ช่องทาง MCP (`/api/v1/mcp`) เท่านั้น
 
 ตัวอย่าง:
 ```json
@@ -94,4 +94,4 @@ print(raw_key)  # เก็บใส่ .env ของ pocketbase_0 (ASSISTANT_A
 - key เดิมที่ไม่ผูก workspace ทำงานเหมือนเดิมทุกอย่าง
 
 - per-minute limit enforce ผ่าน Redis (F4.4) — Redis ล่ม = fail-open + warning
-- **ไม่เปิด CORS** — portal เรียกผ่าน PB hook proxy (same-origin) เท่านั้น
+- **CORS:** `app/main.py` เปิด `CORSMiddleware` ทั้งแอปตาม `CORS_ORIGINS` (.env) และเมื่อไม่ใช่ production จะรับทุก origin ของ `localhost` / `127.0.0.1` ด้วย — portal ไม่ได้อาศัย CORS: เรียกผ่าน PB hook proxy (same-origin) เท่านั้น

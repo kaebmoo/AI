@@ -62,6 +62,37 @@ reminder at startup when `engine=mssql`.
   - ไม่ JOIN ข้าม source; อัตราส่วน/ส่วนต่างคำนวณใน code จากผลของคำถามย่อย เฉพาะเมื่องวดล่าสุดของ source เท่ากัน
 - audit: แถวแม่ + แถวคำถามย่อยใช้ `request_group` เดียวกัน (`GET /admin/query-audit?request_group=…`)
 
+## Plan 7 Phase 6 — MCP สำหรับผู้เรียกภายนอก (2026-09-20)
+
+Endpoint `/api/v1/mcp` (`app/api/v1/mcp_facade.py`) — stateless Streamable HTTP, 3 tools (`ask`, `list_contexts`, `source_status`). คู่มือเชื่อมต่อ: [`docs/manuals/manual_mcp_external.md`](manuals/manual_mcp_external.md) | ผล/หลักฐาน: `plan/archive/RESULT_P7_PHASE6.md`
+
+**Threat model:**
+- ผู้เรียกคือ **LLM / agent ที่ถือ key เองในเครื่องของผู้ใช้ นอกเครือข่ายที่เราคุม** — ไม่ใช่ trusted server แบบ portal; argument ทุกตัว (`context`, `scope`) เป็นสิ่งที่โมเดลเลือกเอง
+- **`scope` ไม่ใช่ entitlement:** ผู้ถือ key อ่านได้**ทุกแถว**ของทุก context ที่ key เห็น — `scope` กรองให้แคบลงได้ (บังคับที่ชั้น SQL) แต่ไม่ใช่สิทธิระดับแถว. ผู้ใช้ที่ควรเห็นบางหน่วยงาน/บางรายงาน → ใช้ REST ผ่าน server ที่เชื่อถือได้ซึ่งเป็นผู้ใส่ `scope` ไม่ใช่แจก key
+- **คำตอบเข้า LLM ของ client** ที่เราไม่ได้คุม — `llm_data_policy` / `llm_provider_allowlist` คุมได้เฉพาะ provider ฝั่ง server
+- ข้อความของ engine (explanation / error) มี SQL, path, ข้อความ exception ได้ และ FastMCP ส่ง `str(exception)` ให้ client ตรง ๆ ถ้าไม่จับ
+- stateless transport ไม่ต้อง `initialize` — `tools/call` เป็น request แรกได้; ชื่อ client เป็นข้อมูลที่ client แจ้งเอง ไม่ใช่หลักฐานตัวตน
+- request จาก browser (DNS rebinding / cross-origin) ไปยัง server ที่รันบน localhost
+
+**สิ่งที่บังคับ:**
+- **ปิดเป็นค่าเริ่มต้น:** flag `admin_config.mcp_external_enabled` (ปิด = 404); GET / DELETE = 405
+- **Gate ทุก HTTP request หน้า transport:** `X-API-Key` (ตัวเดียว — มากกว่าหนึ่ง = 401) ต้อง active / ไม่หมดอายุ, เจ้าของ active, มี scope `query` หรือ `full`, และ**ผูก workspace หรือ allowlist** — ไม่ผ่าน = 401; key ใน query string / Bearer / session token ใช้แทนไม่ได้; revoke มีผลใน request ถัดไป
+- **Key ที่ผูกแล้วใช้ได้เฉพาะ** `/api/v1/query*` และ `/api/v1/mcp` (`enforce_key_surface`) — ไม่ได้สิทธิ์ `/chat`, `/admin` เพิ่ม; ปิด workspace = context ของ workspace นั้นหายจากช่องทางนี้ทันที (รวม key ที่ผูกด้วย allowlist อย่างเดียว)
+- **policy `full` เท่านั้น:** context ที่ source ≠ `full` ไม่อยู่ใน `list_contexts`, ระบุชื่อ = `policy_refused`, ผลลัพธ์ (และทุก part) ที่ `llm_policy` ≠ `full` ถูกทิ้งก่อนส่งออก; ตัวอ่าน policy ของ facade เป็นแบบเข้ม — registry ยังไม่ migrate / config อ่านไม่ได้ = **ปฏิเสธทุก context** (ต่างจาก `policy_for_context` ที่ถือว่า `full`)
+- **ไม่มี SQL / ข้อความ exception / path ขาออก:** ไม่มี `include_sql`; ข้อความของ engine ออกได้เฉพาะผลที่มีแถว; ไม่มีแถว / part ที่ล้ม / error ทุกชนิด = code + ข้อความตายตัว + `request_id` (รายละเอียดอยู่ใน log / `query_audit` ฝั่ง server); context ที่ไม่มีอยู่กับ context นอกสิทธิ์ได้คำตอบเดียวกัน; `source_status` ไม่คืน path / ชื่อ source / สาเหตุ
+- **Host / Origin** (DNS rebinding guard ของ SDK เปิดอยู่): `MCP_ALLOWED_HOSTS` — Host นอกรายการ = 421 (reverse proxy ต้องส่ง `Host` เดิม หรือเพิ่ม host ของ proxy); `MCP_ALLOWED_ORIGINS` — **ว่าง = request ที่มี `Origin` ถูกปฏิเสธ 403 ทั้งหมด**
+- **แถวขาออก:** `ask(include_data=true)` ไม่เกิน `MCP_MAX_ROWS` (default 100) ต่อ ask — ผู้เรียกเพิ่มเองไม่ได้
+- **โควตา:** **1 tool call = 1 usage** ตัวนับเดียวกับ REST (`api_key_usage` รายวัน + Redis รายนาที); `initialize` / `tools/list` ตรวจ key ทุกครั้งแต่ไม่นับ; เกิน = tool error `rate_limited` (ไม่ใช่ HTTP error — non-2xx ทำให้ session ของ MCP client ล้ม)
+- **Audit:** ทุก `ask` ลง `query_audit` ด้วย `channel = mcp:<user-agent ของ client>`; REST เขียน channel ที่ขึ้นต้น `mcp` ไม่ได้ (บันทึกเป็น `api:mcp…`); ค้น: `GET /admin/query-audit?channel=mcp` (จับ prefix `mcp:`). การปฏิเสธที่ gate (401) เกิดก่อนถึง engine จึงไม่มีแถว audit
+- facade ไม่มี provider call ของตัวเอง — ทุกคำถามผ่าน `QueryEngine.query` (scope / allowlist / pinned / `llm_data_policy` / audit ตามเดิม)
+
+**Checklist ก่อนเปิดใช้กับ DB จริง (ยังไม่ได้ทำ ณ 2026-09-20):**
+1. รัน `scripts/migrate_data_sources.py` + `scripts/migrate_workspaces.py` บน `config.db` จริง — ไม่มีคอลัมน์ `llm_data_policy` = MCP ปฏิเสธทุก context
+2. เปิด flag `mcp_external_enabled`, ออก key จริงที่**ผูก workspace** (scope `query`), ตั้ง `MCP_ALLOWED_HOSTS` ถ้าไม่ได้เรียกผ่าน localhost
+3. รัน Redis ในเครื่องที่ให้บริการ — ไม่มี Redis = limit รายนาที fail-open; เพดานรายวันคือเพดานเดียวที่บังคับจริง
+
+⚠️ **MCP server ภายใน (`mcp_servers/*.py` — stdio) ห้ามเปิดให้ client ภายนอกเด็ดขาด** ไม่ว่าจะด้วยการเปลี่ยน transport (`--transport sse`) หรือ config ของ desktop client: มี `execute_query` (SQL ดิบ), `get_sample_values` / `get_table_stats` (ค่าจริง), admin tools ที่เขียน config DB และอ่านคำถามของผู้ใช้อื่น — ไม่มี key, allowlist, scope, audit หรือ `llm_data_policy`. `mcp_servers/claude_desktop_config.json` เป็นของ development เท่านั้น ห้ามใช้กับข้อมูลจริง. ผู้เรียกภายนอกใช้ `/api/v1/mcp` ทางเดียว
+
 ## API Key Rate Limiting (F4.4)
 
 - Daily limit: enforced in DB (`api_key_usage`).

@@ -23,7 +23,7 @@
 | [PLAN_7_DATA_SOURCE_SERVICE.md](PLAN_7_DATA_SOURCE_SERVICE.md) | 🟡 **Phase 1–4 ✅ (2026-09-19)** — zero-import file source, knowledge จาก contract, scope ที่ชั้น SQL, workspace + scoped API key + admin sources API; ผล: `archive/RESULT_P7_PHASE{1,2,3,4}.md`; ถัดไป Phase 4.5 (data protection) — prompt: [PROMPT_P7_PHASE45.md](PROMPT_P7_PHASE45.md); งานฝั่ง NT-Report: [PROMPT_NT_REPORT_P7.md](PROMPT_NT_REPORT_P7.md) |
 | [PLAN_PENDING_BGE_M3.md](PLAN_PENDING_BGE_M3.md) | **รออนุมัติ** — เปลี่ยน Vanna embedding เป็น BGE-M3 (ห้าม execute จนกว่าจะอนุมัติ) |
 
-หมายเหตุ: Plan 1B-C (MCP SSE + API key auth) deferred ไปทำพร้อม Plan 6 — รายละเอียดใน `archive/PLAN_1B_MCP_CONSOLIDATION.md` และ REMAIN-8
+หมายเหตุ: Plan 1B-C (MCP สำหรับผู้เรียกภายนอก + API key auth) ✅ ปิดแล้ว 2026-09-20 ด้วย Plan 7 Phase 6 (facade `/api/v1/mcp` — stateless Streamable HTTP, ไม่ทำ SSE) — ผล: `archive/RESULT_P7_PHASE6.md`; แผนเดิม: `archive/PLAN_1B_MCP_CONSOLIDATION.md`, REMAIN-8
 
 ## archive/ — แผนที่เสร็จแล้ว (historical record)
 

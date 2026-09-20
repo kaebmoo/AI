@@ -62,6 +62,7 @@ AI Query Assistant สำหรับ NT (National Telecom) — แปลงค�
 | [manual_context_management.md](manuals/manual_context_management.md) | การจัดการบริบทข้อมูล (Context Management) |
 | [manual_context_onboarding.md](manuals/manual_context_onboarding.md) | Context Onboarding — เพิ่ม view ใหม่อัตโนมัติ |
 | [manual_api_keys.md](manuals/manual_api_keys.md) | การจัดการ API Keys |
+| [manual_mcp_external.md](manuals/manual_mcp_external.md) | MCP สำหรับผู้เรียกภายนอก (`/api/v1/mcp`) — เปิดใช้, ออก key, ต่อ Claude Code / Gemini CLI / Codex / MCP SDK, tools, error, โควตา + audit |
 | [manual_telegram_bot.md](manuals/manual_telegram_bot.md) | Telegram Bot |
 
 ## Vanna (RAG / Vector DB)
@@ -84,6 +85,7 @@ AI Query Assistant สำหรับ NT (National Telecom) — แปลงค�
 | [PLAN_7_DATA_SOURCE_SERVICE_P1_4.md](changelogs/PLAN_7_DATA_SOURCE_SERVICE_P1_4.md) | Plan 7 Phase 1–4 — file source (zero-import), scope, workspace + scoped API key, admin sources API |
 | [PLAN_7_DATA_PROTECTION_P4_5.md](changelogs/PLAN_7_DATA_PROTECTION_P4_5.md) | Plan 7 Phase 4.5 — `llm_data_policy` + provider allowlist ต่อ source, retention ของผลลัพธ์, DSR, audit ของคำถาม |
 | [PLAN_7_MULTI_CONTEXT_P5.md](changelogs/PLAN_7_MULTI_CONTEXT_P5.md) | Plan 7 Phase 5 — คำถามข้ามหลาย context: แตกคำถามต่อ context, รวมคำตอบใน code พร้อมที่มาของทุกตัวเลข (flag ต่อ workspace, `/api/v1/query`) |
+| [PLAN_7_EXTERNAL_MCP_P6.md](changelogs/PLAN_7_EXTERNAL_MCP_P6.md) | Plan 7 Phase 6 — MCP สำหรับผู้เรียกภายนอก: facade `/api/v1/mcp` (stateless Streamable HTTP + API key, 3 tools, ไม่คืน SQL, policy `full` เท่านั้น; flag `mcp_external_enabled` ปิดเป็นค่าเริ่มต้น) |
 | [ADMIN_WORKSPACE_REFRESH_2026_03_23.md](changelogs/ADMIN_WORKSPACE_REFRESH_2026_03_23.md) | Admin workspace refresh + Vanna ops |
 | [CACHING_AND_CONTEXT_IMPROVEMENTS.md](changelogs/CACHING_AND_CONTEXT_IMPROVEMENTS.md) | Caching & context improvements |
 | [WEB_VISUALIZATION_ECHARTS.md](changelogs/WEB_VISUALIZATION_ECHARTS.md) | WebDataRocks + ECharts |

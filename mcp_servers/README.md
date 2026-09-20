@@ -1,5 +1,12 @@
 # AI Assistant - MCP Servers
 
+> ⚠️ **Server ทั้งสี่ตัวใน directory นี้เป็นของ "ภายใน" (INTERNAL)** — รันแบบ stdio subprocess ให้ pipeline ของแอปใช้ (`app/services/mcp_client.py`)
+> **ห้ามต่อ client ภายนอก / desktop LLM (Claude Desktop, Claude Code, Gemini CLI, Codex ฯลฯ) เข้ากับ server เหล่านี้ตรง ๆ กับข้อมูลจริง** และห้ามเปิดออกด้วยการเปลี่ยน transport (`--transport sse`):
+> มี tool ที่รับ **SQL ดิบ** (`execute_query` — ผู้เรียกปิด validator ได้ด้วย `validate_first=False`), คืน**ค่าจริงจากข้อมูล** (`get_sample_values`, `get_table_stats`, `get_column_info`), และ **admin tools ที่เขียน config DB / อ่านคำถามของผู้ใช้อื่น** —
+> โดย**ไม่มี** API key, workspace / allowlist, `scope`, audit (`query_audit`) หรือ `llm_data_policy` คุมเลย (`mode=ro` กันการเขียน business DB เท่านั้น ไม่ได้จำกัดสิทธิ์อ่าน)
+>
+> **ผู้เรียกภายนอกใช้ `/api/v1/mcp` ทางเดียว** (facade 3 tools: `ask`, `list_contexts`, `source_status` — Plan 7 Phase 6) — ดู [`docs/manuals/manual_mcp_external.md`](../docs/manuals/manual_mcp_external.md) และ [`docs/DEPLOYMENT_SECURITY.md`](../docs/DEPLOYMENT_SECURITY.md)
+
 ## Overview
 
 MCP (Model Context Protocol) Servers สำหรับ AI Assistant ช่วยให้ AI สามารถ:
@@ -14,8 +21,12 @@ MCP (Model Context Protocol) Servers สำหรับ AI Assistant ช่ว�
 
 | Server | Tools | Description |
 |--------|-------|-------------|
-| `nt_metadata_mcp.py` | 14 | Metadata, schema, mappings, business rules |
+| `nt_metadata_mcp.py` | 13 | Metadata, schema, mappings, business rules |
 | `nt_query_mcp.py` | 5 | SQL validation, execution, explanation |
+| `nt_validation_mcp.py` | 4 | Business-rule check, confidence score, result validation |
+| `nt_admin_mcp.py` | 13 | Admin: search/add mappings-rules-examples, cache, hierarchy, inspect view, query logs / feedback (เขียน config DB — ไม่อยู่ในรายการ startup อัตโนมัติของ `MCPClientService`) |
+
+รวม **35 tools** (13 + 5 + 4 + 13) — ทั้งหมดเป็น tool ภายใน ไม่มีตัวใดเป็น external API
 
 **รองรับ Database:** SQLite, PostgreSQL, MSSQL
 
@@ -52,7 +63,7 @@ python mcp_servers/test_query_mcp.py     # 5/5 tests
 
 ---
 
-## Metadata MCP (14 Tools)
+## Metadata MCP (13 Tools)
 
 ### Context Management
 
@@ -190,7 +201,10 @@ User: "รายได้ Mobile ปี 68"
 
 ## Integration
 
-### Claude Desktop
+### Claude Desktop — ⚠️ development เท่านั้น ห้ามใช้กับข้อมูลจริง
+
+> config ด้านล่าง (และไฟล์ `claude_desktop_config.json` ใน directory นี้) ต่อ `nt-query` = **SQL ดิบ ไม่มี key / allowlist / scope / audit / `llm_data_policy`** เข้า desktop LLM ตรง ๆ —
+> ขัดกับกติกาของ Plan 7 Phase 6. ใช้ได้เฉพาะตอนพัฒนา / debug tool กับ **DB ทดสอบที่ไม่มีข้อมูลจริง** เท่านั้น. การใช้งานจริงจาก MCP client ให้ต่อ `/api/v1/mcp` ([คู่มือ](../docs/manuals/manual_mcp_external.md))
 
 เพิ่มใน `~/.claude/claude_desktop_config.json`:
 
@@ -288,12 +302,14 @@ METADATA_DB_URL="mssql://user:pass@localhost:1433/dbname"
 ```
 mcp_servers/
 ├── __init__.py              # Package init
-├── nt_metadata_mcp.py       # Metadata server (14 tools)
+├── nt_metadata_mcp.py       # Metadata server (13 tools)
 ├── nt_query_mcp.py          # Query server (5 tools)
+├── nt_validation_mcp.py     # Validation server (4 tools)
+├── nt_admin_mcp.py          # Admin server (13 tools — เขียน config DB)
 ├── test_metadata_mcp.py     # Tests (7/7 passed)
 ├── test_query_mcp.py        # Tests (5/5 passed)
 ├── requirements.txt         # Dependencies
-├── claude_desktop_config.json # Claude Desktop config
+├── claude_desktop_config.json # Claude Desktop config — development เท่านั้น ห้ามใช้กับข้อมูลจริง (ดูคำเตือนด้านบน)
 └── README.md                # This file
 ```
 

@@ -22,10 +22,10 @@
 | **Plan 4B** | ✅ DONE | 95% | 13 tests | Query endpoint ทำงาน, mock-heavy tests |
 | **Plan 5** | ✅ DONE | 100% | 7 tests | 3-DB live, ConfigBase แยก, business_engine ครบทุก call path |
 | **Plan 6** | ⏸ DEFERRED | 0% | 0 | multi-tenant เลื่อนเป็น Tier 3 — ตัดสิน 2026-09-18 ใช้แบบผสม (ภายใน NT หลาย workspace / ลูกค้าภายนอก private deployment) ดู PLAN_7 §12 |
-| **Plan 7** | 🟡 Phase 1 ✅ · Phase 2 ✅ · Phase 3 ✅ · Phase 4 ✅ · Phase 4.5 ✅ · Phase 5 ✅ | 6/8 phases | +352 tests | Data Source as a Service (zero-import) — Phase 1 เสร็จ 2026-09-18; Phase 2: `data_as_of`, knowledge re-sync อัตโนมัติ, 4 โดเมนลงทะเบียน (revenue 14/14, expense 12/12, sales 12/12 — 2026-09-19; ebt 1.3.0 eval 18/24 ปิดไว้ รอกฎ point-in-time ใน contract); Phase 3 (2026-09-19): `scope` บังคับที่ชั้น SQL ทั้ง file/legacy — ดู archive/RESULT_P7_PHASE{2,3}.md, PROMPT_NT_REPORT_P7.md; Phase 4.5 (2026-09-19): `llm_data_policy` + provider allowlist ต่อ source (บังคับที่ชั้น provider, test ดัก sentinel), retention 30 วัน, DSR, `query_audit` ทุกช่องทาง — archive/RESULT_P7_PHASE45.md; Phase 5 (2026-09-19): คำถามข้ามหลาย context — แตกคำถามต่อ context → `QueryEngine.query` เดิม → รวมด้วย template + คำนวณใน code, flag ต่อ workspace ที่ `/api/v1/query`; eval ข้ามโดเมน 0/10 → 8–9/10 — archive/RESULT_P7_PHASE5.md |
-| **Plan 1B-C** | 🟡 SURVEY | 0% implementation | SDK probe | รวม Plan 7 Phase 6; สำรวจแล้ว รอเจ้าของระบุ MCP client/ขอบเขตข้อมูล — archive/RESULT_P7_PHASE6.md; ยังไม่ปิด |
+| **Plan 7** | 🟡 Phase 1 ✅ · Phase 2 ✅ · Phase 3 ✅ · Phase 4 ✅ · Phase 4.5 ✅ · Phase 5 ✅ · Phase 6 ✅ | 7/8 phases | suite 1035 passed / 3 skipped (+38 ใน Phase 6) | Data Source as a Service (zero-import) — Phase 1 เสร็จ 2026-09-18; Phase 2: `data_as_of`, knowledge re-sync อัตโนมัติ, 4 โดเมนลงทะเบียน (revenue 14/14, expense 12/12, sales 12/12 — 2026-09-19; ebt 1.3.0 eval 18/24 ปิดไว้ รอกฎ point-in-time ใน contract); Phase 3 (2026-09-19): `scope` บังคับที่ชั้น SQL ทั้ง file/legacy — ดู archive/RESULT_P7_PHASE{2,3}.md, PROMPT_NT_REPORT_P7.md; Phase 4.5 (2026-09-19): `llm_data_policy` + provider allowlist ต่อ source (บังคับที่ชั้น provider, test ดัก sentinel), retention 30 วัน, DSR, `query_audit` ทุกช่องทาง — archive/RESULT_P7_PHASE45.md; Phase 5 (2026-09-19): คำถามข้ามหลาย context — แตกคำถามต่อ context → `QueryEngine.query` เดิม → รวมด้วย template + คำนวณใน code, flag ต่อ workspace ที่ `/api/v1/query`; eval ข้ามโดเมน 0/10 → 8–9/10 — archive/RESULT_P7_PHASE5.md; Phase 6 (2026-09-20): MCP สำหรับผู้เรียกภายนอก — facade `/api/v1/mcp` (stateless Streamable HTTP + `X-API-Key` ทุก request, 3 tools `ask` / `list_contexts` / `source_status` ผ่านทางเข้าเดียวกับ `/api/v1/query`, ไม่คืน SQL / ข้อความ exception, policy ≠ `full` ถูกปฏิเสธ), flag `mcp_external_enabled` ปิดเป็นค่าเริ่มต้น; ต่อ Claude Code 2.1.270 จริงบนสำเนา DB, overhead เส้นทาง cache +6.6 / +11.4 ms (P50 / P95); **ยังไม่เปิดบน DB จริง / ยังไม่ออก key จริง**; widget ไม่ทำ — archive/RESULT_P7_PHASE6.md; Phase 7 ยังไม่เริ่ม |
+| **Plan 1B-C** | ✅ DONE (ผ่าน Plan 7 Phase 6) | 100% | 38 tests | ปิด 2026-09-20 ด้วย external facade `/api/v1/mcp` — stateless Streamable HTTP + API key เดิม ผ่าน query pipeline เดิม; MCP ภายในคง stdio ไม่เปิดออก; **ไม่ทำ SSE โดยตั้งใจ** (Claude Code เลิกแนะนำ SSE, Codex ไม่มี SSE, และ legacy SSE ต้องครอบ auth สองทาง GET/POST); ยังไม่เปิดบน DB จริง — archive/RESULT_P7_PHASE6.md |
 
-**Current verification note:** `pytest -q` on this workspace = `997 passed, 3 skipped` (2026-09-19, `main` หลัง Plan 7 Phase 5; ก่อน Plan 7 = 635).
+**Current verification note:** `pytest -q` on this workspace = `1035 passed, 3 skipped` (2026-09-20, `main` หลัง Plan 7 Phase 6 — รันบนสำเนา DB; หลัง Phase 5 = 997 / 3; ก่อน Plan 7 = 635).
 
 ### ข้อจำกัดที่ยังมี (honest assessment)
 - End-to-end tests ส่วนใหญ่ mock-heavy — ยืนยัน contract แต่ไม่ยืนยัน behavior ครบ
@@ -193,8 +193,8 @@ ConfigSessionLocal = sessionmaker(bind=config_engine)
 **Effort:** 2-4 สัปดาห์
 
 #### PLAN-REMAIN-8: Plan 1B Phase C — MCP SSE + Auth
-**Status:** Survey + proposal (Plan 7 Phase 6); รอเจ้าของระบุผู้ใช้/client และขอบเขตข้อมูล
-**Detail:** External facade + API key auth ผ่าน query pipeline เดิม; transport ตาม client. Internal MCP คง stdio; ยังไม่ปิด — `archive/RESULT_P7_PHASE6.md`
+**Status:** ✅ DONE 2026-09-20 — ปิดด้วย Plan 7 Phase 6 (`archive/RESULT_P7_PHASE6.md`)
+**Detail:** External facade `/api/v1/mcp` — stateless Streamable HTTP + API key เดิม (`X-API-Key` ทุก request) ผ่าน query pipeline เดิม, 3 tools; Internal MCP คง stdio. **ไม่ทำ SSE โดยตั้งใจ** — client ที่ตรวจ (Claude Code, Codex) ไม่ต้องใช้ และ legacy SSE ต้องครอบ auth สองทาง. ปิดเป็นค่าเริ่มต้น (flag `mcp_external_enabled`); ก่อนเปิดกับ DB จริงดู RESULT §9 และ `docs/manuals/manual_mcp_external.md`
 
 ---
 
@@ -209,7 +209,7 @@ ConfigSessionLocal = sessionmaker(bind=config_engine)
 | 5 | PLAN-REMAIN-5: Scheduled Jobs | 4-6 ชม. | REMAIN-1 |
 | 6 | PLAN-REMAIN-6: DB Config Separation | 4-6 ชม. | — |
 | 7 | PLAN-REMAIN-7: Plan 6 SaaS | 2-4 สัปดาห์ | REMAIN-6 |
-| 8 | PLAN-REMAIN-8: External MCP + Auth | 1-2 วัน | Plan 7 Phase 6 / owner client decision |
+| 8 | PLAN-REMAIN-8: External MCP + Auth | ✅ DONE 2026-09-20 | ปิดด้วย Plan 7 Phase 6 |
 
 **Total remaining effort: ~20-25 ชม. สำหรับ Items 1-6**
 
@@ -229,7 +229,7 @@ ConfigSessionLocal = sessionmaker(bind=config_engine)
 | 6 | Plan 4: Telegram Interface | 3-5 วัน | 🟡 70% |
 | 7 | Plan 5: DB Separation | 2-3 วัน | 🟡 40% |
 | 8 | Plan 6: SaaS Architecture | 2-4 สัปดาห์ | ⬜ DESIGN |
-| 8.5 | Plan 1B Phase C: External MCP + Auth | 1-2 วัน | 🟡 สำรวจแล้ว รอ client (P7-6) |
+| 8.5 | Plan 1B Phase C: External MCP + Auth | 1-2 วัน | ✅ DONE (P7-6, 2026-09-20) |
 
 ---
 
@@ -239,7 +239,7 @@ ConfigSessionLocal = sessionmaker(bind=config_engine)
 |------|---------|
 | `archive/PLAN_0_FIX_LEGACY_TESTS.md` | ✅ Done |
 | `archive/PLAN_1_ADMIN_AGENT.md` | ✅ Done |
-| `archive/PLAN_1B_MCP_CONSOLIDATION.md` | 🟡 Phase A partial, Phase B done, Phase C survey under P7-6 |
+| `archive/PLAN_1B_MCP_CONSOLIDATION.md` | 🟡 Phase A partial, Phase B done, Phase C done under P7-6 (facade แทนแผน SSE เดิม) |
 | `archive/PLAN_2_FEEDBACK_QUERYLOG.md` | ✅ Done |
 | `archive/PLAN_3_SELF_LEARNING.md` | 🟡 Dedup+Analyzer done, Audit+Scheduler pending |
 | `archive/PLAN_4_TELEGRAM.md` | 🟡 Files done, registration pending |

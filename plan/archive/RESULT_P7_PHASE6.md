@@ -1,6 +1,6 @@
 # RESULT Plan 7 Phase 6 — MCP สำหรับผู้เรียกภายนอก
 
-**สถานะ:** สำรวจก่อนออกแบบ — ยังไม่เปิด endpoint; รอเจ้าของระบุผู้ใช้/client รายแรกตามข้อ 2 ของ prompt
+**สถานะ:** ✅ facade ใช้งานได้หลัง flag (ปิดเป็นค่าเริ่มต้น) — ข้อ 0–5 และ 7 เสร็จ, ข้อ 6 (widget) ไม่ทำ; ต่อ Claude Code จริงผ่านแล้วบนสำเนา DB; **ยังไม่เปิดบน DB จริง / ยังไม่ออก key จริง** (ดู §9)
 **วันที่:** 2026-09-19–20 | **Branch:** `main` | **เริ่มจาก:** `c11df30` (`origin/main` ในเครื่อง = `52c3ee8`; ahead 2 เป็น commit เอกสาร prompt)
 **แผน:** `plan/PLAN_7_DATA_SOURCE_SERVICE.md` §5 Phase 6; รวม Plan 1B-C / REMAIN-8 เมื่อผ่าน exit จริง
 
@@ -136,3 +136,125 @@ Internal stdio MCP tools ยังอยู่หลัง pipeline เดิม
 - **ยังไม่มี external endpoint หรือ production config เปลี่ยน**; SDK probe เป็นของทดลองแยก ไม่ใช่ facade ที่ส่งมอบ
 - Plan 1B-C / REMAIN-8 **ยังไม่ปิด**; ยังไม่ทำข้อ 3–7 และยังไม่เริ่ม Phase 7
 - การหยุดนี้มาจาก **คำสั่งเจ้าของใน prompt ข้อ 2** โดยตรง ไม่ใช่ skill หรือข้อจำกัดเครื่องมือ
+
+---
+
+## 4. เจ้าของตัดสิน (2026-09-20) — ตอบข้อค้างของ prompt ข้อ 2
+
+| เรื่อง | ตัดสิน |
+|---|---|
+| Client รายแรก | **Claude Code บนเครื่องนี้ + สำเนา DB** (key ทดสอบบนสำเนา, อ่าน `feed_*` จริง) และ**ตัวอย่าง client ใน repo** (Python, MCP SDK) |
+| Transport / ที่รัน | **stateless Streamable HTTP ใน FastAPI เดิม** ที่ `/api/v1/mcp`; ไม่ทำ legacy SSE, ไม่แยก process |
+| Tools | `ask` / `list_contexts` / `source_status` เท่านั้น; `ask` มี `include_data` (แถวถูก cap); **ไม่มี `include_sql` — ไม่คืน SQL** |
+| `scope` | (ก) สิทธิของ key = workspace / allowlist เท่านั้น — scope ที่ส่งมากรองให้แคบลงได้ แต่ไม่ใช่สิทธิระดับแถว |
+| policy ≠ `full` | (ก) **ปฏิเสธบนช่องทาง MCP** — อ่าน policy ไม่ได้ = ปฏิเสธ |
+| History | stateless เหมือน `/api/v1/query` |
+
+## 5. ตรวจทานผลสำรวจ §1–2 ด้วย agent อิสระ 6 + ตรวจซ้ำ 6 (อ่านอย่างเดียว)
+
+ข้อเท็จจริงใน §1–2: **82 ยืนยัน / 16 ไม่แม่น / 1 ตรวจไม่ได้ / 0 ผิด**. สิ่งที่ §1–2 ไม่ได้พูดถึงและมีผลกับการออกแบบ (ทุกข้อผ่านการตรวจซ้ำ):
+
+1. **`policy_for_context` fail open** สำหรับกติกา "อ่านไม่ได้ = ปฏิเสธ": registry ที่ยังไม่ migrate / ไม่มีแถว = `full`, จับชื่อแบบ exact ไม่กรอง `is_active`. **config.db จริงยังไม่มีคอลัมน์ `llm_data_policy`** → facade ต้องมีตัวอ่านแบบเข้มของตัวเอง
+2. **FastMCP ส่ง `str(exception)` ให้ client ตรง ๆ** (`Error executing tool ask: …`) และ REST เองก็ใส่ข้อความ exception ใน `answer` / `error` / `parts[].error` (`query.py`, `hybrid_flow.py:925-928`, `multi_context.py:320`) — มี path ไฟล์และ SQL ได้
+3. **HTTP non-2xx ฆ่า session ของ MCP client** (ไม่ใช่ error ที่อ่านออก) → 401 ใช้กับ key ที่ใช้ไม่ได้เท่านั้น; โควตา / refusal ต้องเป็น tool error
+4. **stateless ไม่ต้อง `initialize`**: `tools/call` เป็น request แรกได้ → "ปฏิเสธก่อนเปิด session" ต้องเป็น "ทุก HTTP request"; GET เปิด stream ค้างไม่มีกำหนด
+5. หน่วยโควตาที่ §2 เสนอ (1 HTTP request = 1 usage) ทำให้ 1 คำถาม = 3–4 usage และไม่ตรงกับ "rate limit เดียวกับ REST" → เปลี่ยนเป็น **1 tool call = 1 usage**
+6. `APIKey` (ORM) ใช้นอก session ที่ commit แล้วไม่ได้ (`DetachedInstanceError`) → principal ต้องเป็นค่าธรรมดา
+7. `app/main.py` **เปิด CORS ทั้งแอป** (dev: ทุก origin ของ localhost + credentials + ทุก header) — prompt เข้าใจว่าไม่เปิด; `docs/PORTAL_INTEGRATION.md` ก็เขียนว่าไม่เปิด
+8. Mount ที่ `/api/v1/mcp` = 307 บน URL ไม่มี `/` ท้าย และ `request.app` ใน sub-app ไม่ใช่ FastAPI ตัวแม่ → ใช้ `Route` ตรงไปที่ ASGI handler ของ SDK แทน
+9. `channel` ของ REST มาจาก `source` ที่ผู้เรียกส่งเอง → `channel='mcp'` ปลอมได้
+10. ของเดิมที่พบระหว่างทาง (ไม่ได้แก้ — ดู §9; ส่วน `track_usage` ที่ไม่ atomic แก้แล้วใน §8): `mcp_servers/claude_desktop_config.json` + README สอนต่อ `nt-query` (SQL ดิบ) เข้า Claude Desktop ตรง ๆ; `execute_query(validate_first=False)` ผู้เรียกปิด validator ได้; Redis ไม่ได้รันบนเครื่องนี้ (limit รายนาที fail-open)
+
+Client (ตรวจกับ binary + เอกสารทางการ): Claude Code 2.1.270 รองรับ HTTP + header + ขยาย `${VAR}`; Claude Desktop remote connector ออกจาก cloud ของ Anthropic → เข้า localhost ไม่ได้; Claude Code เลิกแนะนำ SSE และ Codex ไม่มี SSE → ยืนยันการไม่ทำ legacy SSE
+
+## 6. สิ่งที่สร้าง
+
+```text
+MCP client ──POST /api/v1/mcp (X-API-Key ทุก request)──▶ Gate (ASGI ล้วน, หน้า transport)
+   flag admin_config.mcp_external_enabled (ปิด = 404) · GET/DELETE = 405
+   APIKeyService.authenticate (ไม่มี side effect) + เจ้าของ active + scope query/full + key ต้องผูก workspace/allowlist → ไม่ผ่าน = 401
+        ▼ SDK transport (stateless, ตรวจ Host/Origin จาก MCP_ALLOWED_HOSTS / MCP_ALLOWED_ORIGINS)
+   tool call: validate_key + track_usage (= 1 usage ของ REST) → Principal(allowed, usable = allowed ∩ source policy 'full' แบบอ่านเข้ม)
+   ask → run_simple_query (ตัวเดียวกับ POST /api/v1/query) → multi_context.ask → QueryEngine.query   [allowed_contexts = usable]
+   list_contexts → contexts_for(usable) · source_status → canonical_context(usable) แล้วจึง resolve
+        ▼ ขาออก: ตัด SQL, ตัดข้อความ error, ทิ้งคำตอบที่ llm_policy ≠ full → code + ข้อความตายตัว + request_id
+```
+
+- `app/api/v1/mcp_facade.py` (ใหม่, ไฟล์เดียว) — ไม่มี provider call ของตัวเอง, ไม่แตะ ContextVar, ไม่ proxy MCP ภายใน
+- `app/api/v1/query.py` — แยก `run_simple_query` / `contexts_for` ให้ REST กับ MCP ใช้ร่วม (สัญญาของ REST เดิม — test เดิม 71 ข้อผ่านโดยไม่แก้); `_rest_channel`: REST เขียน channel ที่ขึ้นต้น `mcp` ไม่ได้ (`api:mcp…`)
+- `APIKeyService.authenticate` = ครึ่งที่ไม่มี side effect ของ `validate_key` (พฤติกรรม `validate_key` เดิม)
+- `deps.enforce_key_surface` รู้จัก `/api/v1/mcp`; `config.py`: `MCP_ALLOWED_HOSTS`, `MCP_ALLOWED_ORIGINS` (ว่าง = ปฏิเสธทุก Origin), `MCP_MAX_ROWS=100`; flag โผล่ใน `get_feature_flags`
+- `app/main.py`: `Route` (ไม่ใช่ mount — ไม่มี 307, `request.app.state.mcp_client` ใช้ได้) + `session_manager.run()` ใน lifespan
+- policy ≠ full: ใช้ **เซต `usable` เป็น `allowed_contexts` ของ engine** → routing อัตโนมัติ, ผู้สมัครของ multi-context, cache key (`|allow:`), `request_pinned` อยู่ในเซตนี้ด้วยกลไกเดิม; ระบุชื่อ context ที่อยู่ในสิทธิ์แต่ไม่ `full` = `policy_refused`; ตรวจ `llm_policy` ของผลลัพธ์ (และทุก part) ซ้ำก่อนส่งออก
+- `scripts/mcp_client_example.py` — ตัวอย่าง client + ตัววัด latency; `docs/manuals/manual_mcp_external.md`
+
+## 7. Exit criteria — ตัวเลข
+
+| Exit | ผล |
+|---|---|
+| pytest | **1035 passed, 3 skipped** (baseline 997/3; +38 ใน `tests/unit/test_mcp_facade.py` — SDK client จริงผ่าน ASGI, DB ชั่วคราว); รันบนสำเนา, SHA-256 ของ `config.db` / `app.db` จริงเท่าเดิม |
+| REST ไม่เปลี่ยน | test เดิมของ `/api/v1/query` 71 ข้อผ่านโดยไม่แก้ |
+| tools/list | 3 ชื่อพอดี; คำอธิบาย tool + `list_contexts` ไม่มีชื่อ context นอกสิทธิ์ |
+| ไม่มี key / key ผิด / key ไม่ผูก workspace / ไม่มี scope `query` | 401 ที่ `tools/call` **โดยไม่มี handshake**; SDK client ไม่ได้ tool list |
+| revoke กลาง session | request ถัดไป = 401 |
+| โควตา | handshake + tools/list = 0 usage, 2 tool calls = 2 usage; โควตารายวันที่ใช้หมดทาง REST → `rate_limited` ทาง MCP |
+| refusal อ่านออก | `invalid_scope` / `context_not_allowed` / `policy_refused` / `rate_limited` / `duplicate_request` / `query_failed` / `internal_error` — รวม refusal ที่ถูกห่อใน ExceptionGroup; context ที่ไม่มีอยู่กับ context นอกสิทธิ์ได้คำตอบเดียวกัน |
+| ไม่มี SQL / ข้อความ exception / path | ตรวจด้วย sentinel ใน result ทั้งก้อน (single, part ของ multi-context, exception, `source_status`) |
+| policy ≠ full | ไม่อยู่ใน `list_contexts`; ระบุชื่อ = `policy_refused`; ผลลัพธ์ที่ `llm_policy` ≠ full / None ถูกทิ้ง; registry ไม่ migrate / config อ่านไม่ได้ = เซตว่าง |
+| สอง key พร้อมกัน | `QueryEngine.query` ตัวจริง: แต่ละ call เห็น scope ของตัวเอง, `request_pinned=True`, หลังจบค่ากลับเป็น default |
+| Host / Origin | Host แปลก = 421, มี Origin = 403 |
+| Client จริง | **Claude Code 2.1.270** (`claude -p --mcp-config … --strict-mcp-config`, key จาก `${NT_AI_API_KEY}`): `list_contexts` → `feed_*` 4 ตัว; `source_status feed_sales` → ok / 202608 / schema 1.3.0; `ask` (feed_sales, LLM จริง) → 3,480.99 ล้านบาท; `source_status revenue` → `context_not_allowed`. audit: `channel = mcp:claude-code/2.1.270`, `api_key_id`, workspace `nt-report` |
+| Latency (uvicorn py3.10, สำเนา DB, key + คำถามเดียวกัน, สลับกัน, เว้น 5.1 s กัน dedup) | เส้นทาง cache n=12: REST P50 **12.9** / P95 **17.6** ms — MCP P50 **19.5** / P95 **29.0** ms → overhead +6.6 / +11.4 ms (เป้า ≤100 ms); คำตอบแรก LLM จริง: REST 7.4 s, MCP 8.1 s (คนละคำถาม — provider เป็นตัวกำหนด) |
+| ข้อ 6 widget | **ไม่ทำ** — ไม่มี client ที่ 2 ที่ต้องการ; NT-Report ใช้ panel + PB proxy ของตัวเอง |
+
+## 8. Review อิสระ (agent แยก อ่านอย่างเดียว) — commit `f868b91` + `fd67d07`
+
+5 มุม (gate / ข้อมูลขาออก / concurrency-lifecycle / REST regression / ความแข็งของ test), finding แต่ละข้อส่งให้ agent อีกตัวพยายามหักล้าง. ผู้ตรวจ 4 จาก 5 มุมจบ; มุม test และการหักล้าง 6 ข้อหยุดเพราะโควตา session — ข้อที่ไม่ได้หักล้างผม reproduce เองเป็น test ที่ **fail บน code เดิมทุกข้อ** (8 test) และทำ mutation check แทนมุม test. แก้ครบใน `69d896a`:
+
+| ระดับ | Finding | แก้ |
+|---|---|---|
+| **high** | query ที่รันสำเร็จแต่ได้ 0 แถว: `hybrid_flow.py:776` ใส่ **SQL เต็ม** ไว้ใน explanation (`error=None`) → ออกไปเป็น `answer` | ข้อความของ engine ออกได้เฉพาะผลที่**มีแถว**; ไม่มีแถว = ข้อความตายตัว; ด่านสุดท้ายทิ้งคำตอบที่ยังมี SQL ที่รันจริงหรือ ```` ```sql ```` อยู่ |
+| **high** | multi-context: `parts[].answer` ของ part ที่ fail (มี result) พาข้อความ exception / path ออกไป; part 0 แถวพา SQL ออกไป | part ที่ fail = ข้อความตายตัว + ตัด `data`; part ไม่มีแถว = ข้อความตายตัว |
+| medium | `track_usage` เป็น read-modify-write: ยิงพร้อมกัน 30 call → นับได้ 3–6, เกินโควตารายวัน, `IntegrityError` แถวแรกของวัน (ของเดิม กระทบ REST ด้วย) | upsert อะตอมมิกคำสั่งเดียว (`app.db` จริงมี `UNIQUE(api_key_id, date)`); facade ตรวจเพดานซ้ำหลังนับ |
+| medium | ปิด workspace ไม่ตัด key ที่ผูกด้วย allowlist อย่างเดียว | เซต context ของช่องทางนี้ต้องอยู่ใน workspace ที่ active |
+| low | `X-API-Key` สองตัว: gate กับ tool เลือกคนละตัว | มากกว่าหนึ่ง = 401 |
+| low | cap ของ `include_data` เป็นต่อ part (สูงสุด 4×) | แบ่งเพดานต่อ ask |
+| low | `question` ว่าง = `internal_error` | `invalid_arguments` (400) |
+| low | `GET /admin/query-audit?channel=mcp` ไม่เจอ `mcp:<client>` | filter ด้วย prefix `mcp:` |
+| low — ไม่แก้ | argument ผิดชนิด / ชื่อ tool ที่ไม่มี ถูก SDK ตอบก่อนถึง tool: ข้อความของ pydantic (สะท้อน input ของผู้เรียกเอง ไม่มีข้อมูลของเรา) และไม่นับ usage | บันทึกใน docstring + คู่มือ; แก้ต้องแตะ API ภายในของ SDK |
+
+ที่ผู้ตรวจลองแล้วผ่าน (ตัวอย่าง): key ใน query string / Bearer / session token = 401; key หมดอายุ / revoke / เจ้าของถูกปิด / scope อื่น = 401; allowlist `[]` หรืออ่านไม่ได้ = เซตว่าง; context ถูกปิดระหว่าง session มีผล call ถัดไป; websocket scope ไม่ถึง transport; path แปลก = 404; JSON-RPC batch ถูก SDK ปฏิเสธ (ไม่มีทาง N call ใน 1 request); `authenticate` ไม่มี side effect และ `validate_key` เหมือนเดิมทุกบรรทัด; context นอกสิทธิ์ / legacy / ไม่มีอยู่ ได้ `context_not_allowed` เหมือนกันโดย provider ไม่ถูกเรียก; ผู้เรียกเพิ่ม `max_rows` เองไม่ได้; python3.10 รันได้
+
+Mutation check ของ test (10 mutant): ฆ่า 7 (ตัด policy filter, ตัด post-check `llm_policy`, ตัด scope check, ไม่นับ usage, ข้าม `canonical_context`, เปิด GET, ตัด row cap); 2 เทียบเท่า (ตัด `is_restricted` ยังได้ 401 จากชั้นถัดไป, `exclude sql` ซ้ำซ้อนกับ `include_sql=False`); 1 รอด (เจ้าของถูกปิด) → เพิ่ม test แล้ว
+
+ตรวจกับ engine จริงหลังแก้: "ยอดขายรวมของปี 2099" (feed_sales) → คำตอบไม่มี SQL; คำถามปกติ + `include_data` → 3,480.99 ล้านบาท + แถว
+
+## 9. ข้อค้าง — รอเจ้าของตัดสิน
+
+**ก่อนเปิดใช้กับ DB จริง (ไม่ได้ทำ — ต้องสั่ง):**
+1. รัน `scripts/migrate_data_sources.py` + `scripts/migrate_workspaces.py` บน `config.db` จริง (ค้างจาก Phase 4.5) — ไม่มีคอลัมน์ `llm_data_policy` = MCP ปฏิเสธทุก context
+2. เปิด flag `mcp_external_enabled`, ออก key จริงที่ผูก workspace, ตั้ง `MCP_ALLOWED_HOSTS` ถ้าไม่ใช่ localhost
+3. รัน Redis ในเครื่องที่ให้บริการ — ตอนนี้ limit รายนาที fail-open (ของเดิม); เพดานรายวันคือเพดานเดียวที่บังคับจริง
+
+**การตัดสินใจที่ผมเลือกไปก่อน (เข้มกว่า REST — ผ่อนได้ถ้าต้องการ):**
+- MCP รับเฉพาะ key ที่ผูก workspace / allowlist และมี scope `query` / `full` (REST ไม่ตรวจ scope `query`, รับ key ไม่ผูก)
+- registry ที่ยังไม่ migrate = อ่าน policy ไม่ได้ = ปฏิเสธ (ต่างจาก `policy_for_context` ที่ถือว่า `full`)
+- 1 tool call = 1 usage (handshake ไม่นับ) แทนข้อเสนอเดิม 1 HTTP request = 1 usage
+- ชื่อ client อยู่ใน `channel` (`mcp:<user-agent>`) ไม่เพิ่มคอลัมน์ใหม่ใน `query_audit`
+- refusal จาก policy ของ context ที่ระบุชื่อ ลง audit เป็น `ContextNotAllowed` (engine เป็นผู้ปฏิเสธจากเซต `usable`) — client เห็น `policy_refused`
+
+**ของเดิมที่พบ — ไม่ได้แก้เพราะเป็นพฤติกรรมของช่องทางเดิม:**
+- REST `/api/v1/query` คืน**SQL ในข้อความคำตอบ**เมื่อได้ 0 แถว แม้ `include_sql=false`, คืนข้อความ exception ใน `answer` / `error` / `parts[].error`, และคืน `str(dict)` เมื่อ explanation เป็น dict — portal ได้ของเหล่านี้อยู่วันนี้
+- `GET /api/v1/query/contexts` เป็น public: key ผิด = เห็นทุก context ของทุก workspace
+- REST เกินโควตา = 401 (คู่มือเขียนว่า 429); REST ไม่ตรวจ `has_scope('query')`
+- `mcp_servers/claude_desktop_config.json` + README สอนต่อ `nt-query` (SQL ดิบ ไม่มี key / audit) เข้า Claude Desktop ตรง ๆ — ขัดกับกติกาของ phase นี้; `execute_query(validate_first=False)`
+- `app/main.py` เปิด CORS ทั้งแอป ขณะที่ `docs/PORTAL_INTEGRATION.md` เขียนว่าไม่เปิด
+- dedup 5 วินาทีผูกกับ user + คำถาม (ไม่มี context / key): LLM client ที่ถามซ้ำเร็ว ๆ ได้ `duplicate_request`
+- client ตัดการเชื่อมต่อกลางคำถาม: pipeline ทำงานจนจบ (เสีย provider call)
+- `chroma_db__<workspace>/` เกิดใน root ของ repo เมื่อมีคำถามแรกของ workspace (Phase 4b) — เพิ่มใน `.gitignore` แล้ว
+
+**ค้างจาก phase ก่อน (ไม่เปลี่ยน):** เปิด multi-context กับ `nt-report`; admin UI ของ workspaces / sources / policy / audit / flag นี้; D4 / DPO; entitlement v2 (D7) สำหรับสิทธิระดับแถว
+
+## 10. Commits
+
+`8d67523` สำรวจ (session ก่อน) · `f868b91` ทางเข้าร่วม REST/MCP · `fd67d07` facade + gate + 29 test · `2bcd120` ตัวอย่าง client + latency · `69d896a` แก้ตาม review · (ถัดไป) เอกสาร — **ยังไม่ push**; หยุดก่อน Phase 7
