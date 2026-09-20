@@ -18,6 +18,7 @@ from app.db.session import get_config_db
 from app.core import outbound
 from app.core.llm_policy import LLMPolicyError
 from app.services.data_sources import ScopeError
+from app.services.query_audit import AuditUnavailable
 from app.services.workspaces import ContextNotAllowed, allowed_contexts
 from app.models.user import User
 
@@ -68,8 +69,9 @@ class ContextInfo(BaseModel):
 
 
 def _find_refusal(exc: BaseException):
-    """A ScopeError / ContextNotAllowed / LLMPolicyError anywhere inside (nested) exception groups, else None."""
-    return outbound.find(exc, (ScopeError, ContextNotAllowed, LLMPolicyError))
+    """What the caller must be told as itself, dug out of any (nested) exception group: a refusal
+    (ScopeError 400 / ContextNotAllowed / LLMPolicyError 403) or a missing audit row (503)."""
+    return outbound.find(exc, (ScopeError, ContextNotAllowed, LLMPolicyError, AuditUnavailable))
 
 
 def _multi_response(multi, request_body: SimpleQueryRequest) -> SimpleQueryResponse:
@@ -101,8 +103,9 @@ _part_answer = outbound.explanation_text  # kept: the name this module exported 
 async def run_simple_query(request_body: SimpleQueryRequest, *, user_id, api_key_id, allowed, channel: str,
                            db, admin_config, mcp_client=None):
     """What POST /api/v1/query and the external MCP facade both run: (response, raw engine result).
-    A refusal is raised as itself (ScopeError / ContextNotAllowed / LLMPolicyError), unwrapped from any
-    ExceptionGroup; every other failure is the caller's to present."""
+    A refusal (ScopeError / ContextNotAllowed / LLMPolicyError) and a missing audit row
+    (AuditUnavailable) are raised as themselves, unwrapped from any ExceptionGroup; every other
+    failure is the caller's to present."""
     from app.services.query_engine import QueryEngine
 
     async def ask(mcp):
@@ -190,6 +193,11 @@ async def simple_query(
         raise HTTPException(status_code=400, detail=str(e))
     except (ContextNotAllowed, LLMPolicyError) as e:  # outside the key's rights / the source's policy — never re-routed silently
         raise HTTPException(status_code=403, detail=str(e))
+    except AuditUnavailable:  # the answer exists; without its audit row it is not sent (this key's channel only)
+        logger.error("query_audit unavailable — answer withheld from api_key_id=%s",
+                     getattr(getattr(http_request.state, "api_key", None), "id", None))
+        raise HTTPException(status_code=outbound.status("audit_unavailable"),
+                            detail=outbound.message("audit_unavailable"))
     except Exception as e:
         execution_time_ms = (time.time() - start_time) * 1000
         # the reason stays here and in query_audit.error — it names paths, tables and the SQL that ran

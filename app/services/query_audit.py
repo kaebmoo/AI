@@ -26,13 +26,20 @@ def ensure_table(bind) -> None:
     _tables_checked.add(str(bind.url))
 
 
-def record(db: Optional[Session], engine_result=None, scope: Optional[Dict[str, Any]] = None, **fields: Any) -> None:
-    """Never raises — but a lost audit row is an ERROR in the log, not a silent pass.
+class AuditUnavailable(Exception):
+    """The audit row of a request that holds an API key could not be written, so the answer does not
+    leave (NIST AU-5: no auditing, no auditable action). Channels without a key keep answering —
+    chat_history is their trace — and the loss is an ERROR in the log."""
+
+
+def record(db: Optional[Session], engine_result=None, scope: Optional[Dict[str, Any]] = None, **fields: Any) -> bool:
+    """True when the row is in the database. Never raises — but a lost audit row is an ERROR in the
+    log, not a silent pass, and a caller that holds an API key must act on a False.
 
     Own short session on the caller's engine: the caller's transaction is not committed by us.
     No session (scripts, eval) = nothing to write to."""
     if db is None:
-        return
+        return False
     try:
         if engine_result is not None:
             fields.update(_from_result(engine_result))
@@ -43,8 +50,10 @@ def record(db: Optional[Session], engine_result=None, scope: Optional[Dict[str, 
         with Session(bind=bind) as session:
             session.add(QueryAudit(**fields))
             session.commit()
+        return True
     except Exception as exc:
         logger.error("query audit NOT written (%s): %s", fields.get("context_name"), exc)
+        return False
 
 
 def _from_result(engine_result) -> Dict[str, Any]:

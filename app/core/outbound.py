@@ -26,6 +26,8 @@ ERRORS: Dict[str, Tuple[int, str]] = {
     # the source is mid-publish or failed verification: the reason names file paths, the meaning does not
     "source_unavailable": (503, "แหล่งข้อมูลของ context นี้ยังไม่พร้อมใช้งาน (ข้อมูลอาจกำลังถูก publish) — กรุณาถามใหม่อีกครั้ง"),
     "query_failed": (422, "ตอบคำถามนี้ไม่ได้ — ลองถามให้เจาะจงขึ้น หรือระบุ context"),
+    # the answer exists but could not be recorded: an answer nobody can trace is not sent (NIST AU-5)
+    "audit_unavailable": (503, "ระบบบันทึกการใช้งานไม่พร้อม จึงไม่ส่งคำตอบออก — กรุณาลองใหม่ภายหลัง"),
     "internal_error": (500, "เกิดข้อผิดพลาดภายใน"),
 }
 
@@ -67,10 +69,13 @@ def code_for(exc: BaseException, named_in_rights: bool = False) -> str:
     from app.core.llm_policy import LLMPolicyError
     from app.services.data_sources import ScopeError
     from app.services.database_adapter import SourceUnavailable
+    from app.services.query_audit import AuditUnavailable
     from app.services.workspaces import ContextNotAllowed
 
     if isinstance(exc, Refused):
         return exc.code
+    if find(exc, AuditUnavailable):
+        return "audit_unavailable"
     if isinstance(exc, ValidationError):  # SimpleQueryRequest: empty question, …
         return "invalid_arguments"
     if find(exc, ScopeError):

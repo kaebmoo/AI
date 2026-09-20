@@ -322,6 +322,8 @@ async def answer(engine, question: str, *, scope: Optional[Dict[str, Any]] = Non
                      user_id=user_id, api_key_id=api_key_id, channel=channel, request_group=group)
         for p in parts), return_exceptions=True)
     refusal = next((r for r in results if isinstance(r, _REFUSALS)), None)
+    # one sub-question without its audit row makes the whole answer untraceable: none of it leaves
+    unaudited = next((r for r in results if isinstance(r, query_audit.AuditUnavailable)), None)
     for part, result in zip(parts, results):
         if isinstance(result, BaseException):
             if not isinstance(result, Exception):
@@ -337,8 +339,9 @@ async def answer(engine, question: str, *, scope: Optional[Dict[str, Any]] = Non
     elapsed = (time.time() - start) * 1000
     computed = None if refusal else compute(parts, split["operation"], split["operands"])
     text_, warnings = combine(parts, computed, split["operation"])
+    written = True
     if engine.db is not None:  # the parent row; the sub-questions wrote theirs under the same request_group
-        await asyncio.to_thread(
+        written = await asyncio.to_thread(
             query_audit.record, engine.db, None, scope, user_id=user_id, api_key_id=api_key_id, channel=channel,
             question=question, context_name="+".join(p.context for p in parts), request_group=group,
             workspace=engine._workspace(parts[0].context), execution_time_ms=elapsed,
@@ -347,6 +350,10 @@ async def answer(engine, question: str, *, scope: Optional[Dict[str, Any]] = Non
                    else "; ".join(f"{p.context}: {p.error}" for p in parts if p.error)[:2000] or None))
     if refusal:
         raise refusal
+    if unaudited is not None:
+        raise unaudited
+    if not written and api_key_id is not None:
+        raise query_audit.AuditUnavailable(f"query_audit (parent row) not written for api_key_id={api_key_id}")
     return MultiResult(parts=parts, answer=text_, computed=computed, warnings=warnings,
                        execution_time_ms=elapsed, request_group=group)
 

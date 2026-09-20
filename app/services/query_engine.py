@@ -423,7 +423,11 @@ class QueryEngine:
         try:
             engine_result = await self._query(question, provider, context, mode, history, max_retries,
                                               conversation_id, provider_kwargs, on_status, user_id, scope, allowed_contexts)
-            await self._audit(engine_result, scope, audit, getattr(engine_result, "context_name", None))
+            written = await self._audit(engine_result, scope, audit, getattr(engine_result, "context_name", None))
+            if not written and api_key_id is not None:
+                # a channel that holds a key answers a caller we cannot ask afterwards: without the
+                # audit row this answer would be untraceable, so it does not leave (NIST AU-5)
+                raise query_audit.AuditUnavailable(f"query_audit not written for api_key_id={api_key_id}")
             return engine_result
         except Exception as exc:  # refusals (scope / allowlist / policy) and failures are audited too
             await self._audit(None, scope, {**audit, "error": f"{type(exc).__name__}: {exc}"[:2000],
@@ -716,13 +720,14 @@ class QueryEngine:
                 raise LLMPolicyError(f"ไม่มี provider ใน llm_provider_allowlist ของ source '{source_name}' ที่พร้อมใช้")
         return provider_instance, selected_provider
 
-    async def _audit(self, engine_result, scope, fields: Dict[str, Any], context_name: Optional[str]) -> None:
+    async def _audit(self, engine_result, scope, fields: Dict[str, Any], context_name: Optional[str]) -> bool:
+        """True when the row is in the database — a caller holding an API key acts on a False."""
         if self.db is None:
-            return
+            return False
         import asyncio
         # off the event loop: a second writer on the app DB may wait for SQLite's lock
-        await asyncio.to_thread(query_audit.record, self.db, engine_result, scope,
-                                **fields, workspace=self._workspace(context_name))
+        return await asyncio.to_thread(query_audit.record, self.db, engine_result, scope,
+                                       **fields, workspace=self._workspace(context_name))
 
     @staticmethod
     def _workspace(context_name: Optional[str]) -> Optional[str]:
