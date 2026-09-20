@@ -16,8 +16,8 @@ scope คืออะไร → โมเดลไม่มีอะไรยึ
 
 **วันที่:** 2026-09-20 | ถามผ่าน `POST /api/v1/query/` ด้วย **key จริงของ portal** (`nt-report-portal`, id 4)
 ด้วย body รูปเดียวกับที่ `assistant.pb.js` สร้าง (`context`, `include_sql`, `include_data`, `max_rows: 20`,
-`source: "portal"`, `scope.year_month`) — ยังไม่ได้ผ่าน PocketBase จริง เพราะ `.env` ของ portal ยังไม่ได้ตั้ง
-(เจ้าของเป็นผู้ใส่) และ PB ที่รันอยู่ยังใช้ hook ตัวเก่า
+`source: "portal"`, `scope.year_month`) — §1–§6 วัดก่อน portal เปิด; **§7 คือคำถามที่ผู้ใช้ถามผ่าน
+PocketBase จริงหลังเปิดปุ่ม `revenue`** (2026-09-20 22:33 เป็นต้นไป)
 
 **ตัวเลขอ้างอิง:** `NT-Report/DataFeed/handoff/assistant_reference_202608.md` (ฝั่ง NT-Report เตรียม
 พร้อมเกณฑ์และ oracle ที่ตกลงแล้วทั้ง 4 ข้อของ §⚠) — build `20260920T130347Z` / `…0407Z` / `…0417Z` / `…0423Z`,
