@@ -85,6 +85,20 @@ class TestSyncKnowledge:
         _sync(config_engine)
         assert _knowledge(config_engine) == first
 
+    def test_the_contracts_own_sentence_is_the_context_description(self, config_engine):
+        """The splitter and list_contexts read schema_contexts.description to choose a context, so it
+        must be the owner's sentence about what this feed answers — not the label in `title`."""
+        thai = "EBT ของ 2 สายงานขาย (รายได้ฐานยอดขาย − ค่าใช้จ่าย)\n— ไม่ใช่กำไรของทั้งบริษัท"
+        _sync(config_engine, {**CONTRACT, "description": thai})
+        with config_engine.connect() as conn:
+            stored = conn.execute(text("SELECT description FROM schema_contexts")).scalar_one()
+        # one line: the splitter lists one context per line
+        assert stored == "EBT ของ 2 สายงานขาย (รายได้ฐานยอดขาย − ค่าใช้จ่าย) — ไม่ใช่กำไรของทั้งบริษัท"
+
+        _sync(config_engine, {**CONTRACT, "description": ""})  # a contract without one falls back
+        with config_engine.connect() as conn:
+            assert conn.execute(text("SELECT description FROM schema_contexts")).scalar_one() == "X feed"
+
     def test_update_keeps_admin_keywords_but_refreshes_rules(self, config_engine):
         _sync(config_engine)
         with config_engine.begin() as conn:

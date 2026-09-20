@@ -81,7 +81,12 @@ def register_context(conn, domain: str, contract: dict) -> str:
         f"{tables_section(domain, contract)}"
         f"กฎสำคัญ:\n{rules_text}"
     )
-    params = {"name": context_name, "main_view": main_view, "desc": contract.get("title", ""),
+    # `description` is the owner's sentence about what this feed answers and what it does not
+    # ("EBT ของ 2 สายงานขาย — ไม่ใช่กำไรของทั้งบริษัท"); `title` is a label ("NT EBT Data Feed").
+    # The description is what the cross-context splitter and list_contexts read, so prefer it —
+    # on one line, because the splitter lists one context per line.
+    description = " ".join((contract.get("description") or contract.get("title") or "").split())
+    params = {"name": context_name, "main_view": main_view, "desc": description,
               "instruction": instruction}
     updated = conn.execute(text(
         "UPDATE schema_contexts SET main_view=:main_view, description=:desc, instruction_th=:instruction, "
