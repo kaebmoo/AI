@@ -99,26 +99,32 @@ class APIKeyService:
 
         return api_key
 
-    def validate_key(self, raw_key: str) -> Optional[APIKey]:
-        """Validate an API key and return the APIKey if valid.
-
-        Checks: exists, is_active, not expired, rate limits.
-        Returns None if invalid.
-        """
+    def check_key(self, raw_key: str) -> Tuple[Optional[APIKey], Optional[str]]:
+        """(key, None) when the key may be used now, else (None, reason): 'unauthorized' when the key
+        itself cannot be used (unknown, revoked, expired) and 'rate_limited' when it exists but is over
+        a limit. Two different answers to the caller — 401 vs 429 — so they are told apart here."""
         api_key = self.authenticate(raw_key)
         if not api_key:
-            return None
+            return None, "unauthorized"
 
         # Check rate limits
         if not self._check_rate_limits(api_key):
             logger.warning(f"API key {api_key.key_prefix} rate limited")
-            return None
+            return None, "rate_limited"
 
         # Update last_used_at
         api_key.last_used_at = utcnow()
         self.db.commit()
 
-        return api_key
+        return api_key, None
+
+    def validate_key(self, raw_key: str) -> Optional[APIKey]:
+        """Validate an API key and return the APIKey if valid.
+
+        Checks: exists, is_active, not expired, rate limits.
+        Returns None if invalid — use check_key() when the reason matters.
+        """
+        return self.check_key(raw_key)[0]
 
     def revoke_key(self, key_id: int, user_id: Optional[int] = None) -> bool:
         """Revoke an API key (soft delete)."""

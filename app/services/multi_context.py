@@ -23,6 +23,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, FrozenSet, List, Optional
 
+from app.core import outbound
 from app.core.llm_policy import AGGREGATED_ONLY, FULL, SCHEMA_ONLY, LLMPolicyError, RequestPolicy, normalize, request_llm_policy
 from app.services import query_audit
 from app.services.data_sources import ScopeError, source_resolver
@@ -67,7 +68,13 @@ class Part:
     question: str
     display_name: str = ""
     result: Any = None  # QueryEngineResult
-    error: Optional[str] = None
+    error: Optional[str] = None       # the engine's own words — for the audit row and the log only
+    error_code: Optional[str] = None  # … the same failure as one outbound code (app/core/outbound.py)
+
+    @property
+    def code(self) -> Optional[str]:
+        """The failure as an outside caller sees it — a failure whose code nobody set is still a failure."""
+        return self.error_code or ("query_failed" if self.error else None)
 
     @property
     def ok(self) -> bool:
@@ -256,7 +263,9 @@ def combine(parts: List[Part], computed: Optional[Dict[str, Any]], wanted: str) 
         if part.ok:
             lines.append(_text(part.result.query_result.explanation) or f"พบข้อมูล {len(part.result.query_result.data)} รายการ")
         else:
-            lines.append(f"⚠️ ส่วนนี้ตอบไม่ได้: {part.error or 'ไม่พบข้อมูลที่ตรงกับเงื่อนไข'}")
+            # the text of the failure stays in part.error (audit, log): this answer leaves the process
+            lines.append("⚠️ ส่วนนี้ตอบไม่ได้: "
+                         + (outbound.message(part.code) if part.code else outbound.NO_DATA))
     if computed:
         x, y = computed["values"]
         a, b = computed["operands"]
@@ -318,10 +327,12 @@ async def answer(engine, question: str, *, scope: Optional[Dict[str, Any]] = Non
             if not isinstance(result, Exception):
                 raise result  # cancellation
             part.error = str(result) or type(result).__name__  # as the single-context endpoint reports it
+            part.error_code = outbound.code_for(result)
             logger.warning("multi-context part %s failed: %s", part.context, result)
         else:
             part.result = result
             part.error = result.query_result.error or None
+            part.error_code = outbound.result_code(part.error) if part.error else None
 
     elapsed = (time.time() - start) * 1000
     computed = None if refusal else compute(parts, split["operation"], split["operands"])

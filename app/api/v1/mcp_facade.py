@@ -29,13 +29,13 @@ from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.server import StreamableHTTPASGIApp
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import CallToolResult, TextContent
-from pydantic import ValidationError
 from sqlalchemy import text
 from starlette.responses import JSONResponse
 
 from app.config import settings
-from app.core.llm_policy import FULL, LLMPolicyError, normalize
-from app.services.data_sources import LEGACY, ScopeError
+from app.core.llm_policy import FULL, normalize
+from app.core.outbound import ERRORS, NO_DATA, Refused, code_for  # noqa: F401  (NO_DATA: this channel's vocabulary)
+from app.services.data_sources import LEGACY
 from app.services.workspaces import ContextNotAllowed, allowed_contexts, canonical_context, is_restricted
 
 logger = logging.getLogger(__name__)
@@ -43,28 +43,7 @@ logger = logging.getLogger(__name__)
 PATH = f"{settings.API_V1_STR}/mcp"
 FLAG = "mcp_external_enabled"  # admin_config feature flag, default off: POST /admin/config/features/{FLAG}/toggle
 
-# code → (HTTP-equivalent status, message). The only error texts a client ever sees.
-ERRORS = {
-    "unauthorized": (401, "API key ใช้ไม่ได้"),
-    "rate_limited": (429, "API key เกิน rate limit หรือโควตารายวัน — ลองใหม่ภายหลัง"),
-    "invalid_scope": (400, "scope ใช้กับ context นี้ไม่ได้ (key ที่ context ไม่ได้ประกาศ หรือค่าไม่ถูกต้อง) — ไม่ตอบแบบไม่มี scope"),
-    "context_not_allowed": (403, "API key นี้ไม่มีสิทธิ์ใช้ context ที่ขอ — ดู list_contexts"),
-    "policy_refused": (403, "context นี้ไม่เปิดให้ใช้ผ่าน MCP (นโยบายข้อมูลของ source ไม่อนุญาตให้ส่งออกไปยังโมเดลภายนอก)"),
-    "invalid_arguments": (400, "argument ของ tool ไม่ถูกต้อง (เช่น question ว่าง)"),
-    "duplicate_request": (409, "คำถามเดียวกันกำลังประมวลผลอยู่ — รอสักครู่แล้วถามใหม่"),
-    "source_unavailable": (503, "แหล่งข้อมูลของ context นี้ยังไม่พร้อมใช้งาน"),
-    "query_failed": (422, "ตอบคำถามนี้ไม่ได้ — ลองถามให้เจาะจงขึ้น หรือระบุ context"),
-    "internal_error": (500, "เกิดข้อผิดพลาดภายใน"),
-}
-
-
-NO_DATA = "ไม่พบข้อมูลที่ตรงกับเงื่อนไข"
-
-
-class Refused(Exception):
-    def __init__(self, code: str):
-        super().__init__(code)
-        self.code = code
+# The error vocabulary, NO_DATA and Refused are shared with REST: app/core/outbound.py
 
 
 @dataclass(frozen=True)
@@ -114,8 +93,9 @@ def authenticate(raw_key: Optional[str], count: bool) -> Principal:
                 or not is_restricted(api_key)):
             raise Refused("unauthorized")
         if count:
-            if service.validate_key(raw_key) is None:  # it authenticated a moment ago: this is the rate limit
-                raise Refused("rate_limited")
+            _, refusal = service.check_key(raw_key)  # it authenticated a moment ago: a refusal here is the limit
+            if refusal:
+                raise Refused(refusal)
             service.track_usage(api_key.id)
             if service.usage_today(api_key.id) > api_key.rate_limit_per_day:  # a parallel burst passed the check together
                 raise Refused("rate_limited")
@@ -179,36 +159,6 @@ def _ok(payload: Dict[str, Any], text_: str) -> CallToolResult:
     return CallToolResult(content=[TextContent(type="text", text=text_)], structuredContent=payload)
 
 
-def _find(exc: BaseException, kinds) -> Optional[BaseException]:
-    if isinstance(exc, kinds):
-        return exc
-    for inner in getattr(exc, "exceptions", None) or ():
-        found = _find(inner, kinds)
-        if found is not None:
-            return found
-    return None
-
-
-def _code_for(exc: BaseException, named_in_rights: bool) -> str:
-    from app.services.database_adapter import SourceUnavailable
-
-    if isinstance(exc, Refused):
-        return exc.code
-    if isinstance(exc, ValidationError):  # SimpleQueryRequest: empty question, …
-        return "invalid_arguments"
-    if _find(exc, ScopeError):
-        return "invalid_scope"
-    if _find(exc, LLMPolicyError):
-        return "policy_refused"
-    if _find(exc, ContextNotAllowed):
-        # inside the key's rights but not 'full' → say so; anything else gets ONE answer, whether the
-        # context exists or not (no existence oracle)
-        return "policy_refused" if named_in_rights else "context_not_allowed"
-    if _find(exc, SourceUnavailable):
-        return "source_unavailable"
-    return "internal_error"
-
-
 def _client_label(request) -> str:
     """Self-reported, for the audit trail only — never for a decision."""
     agent = (request.headers.get("user-agent") or "").split(" ")[0]
@@ -234,7 +184,7 @@ async def _run(ctx: Context, body, context: Optional[str] = None) -> CallToolRes
         principal = await anyio.to_thread.run_sync(authenticate, request.headers.get("x-api-key"), True)
         return await body(principal, request)
     except Exception as exc:
-        code = _code_for(exc, _in_rights(context, principal))
+        code = code_for(exc, _in_rights(context, principal))
         log = logger.error if code == "internal_error" else logger.info
         log("MCP tool refused/failed [%s] request_id=%s: %s: %s", code, request_id, type(exc).__name__, exc)
         return _error(code, request_id)
@@ -325,41 +275,33 @@ def _session_manager(server: FastMCP):
 
 
 def _answer(response, result) -> CallToolResult:
-    """REST's response minus everything that must not leave on this channel: SQL, raw error text —
-    and any answer produced under a policy other than 'full' (defence in depth behind `usable`).
-    The engine's prose is kept only for a result WITH rows: its 'no data' text quotes the SQL, and
-    the text of a failed result quotes the exception."""
-    from app.api.v1.query import _part_answer
-
+    """What is left after REST's own sanitising (app/core/outbound.py — fixed messages, no SQL in the
+    prose, a code instead of the engine's error text): the three things that belong to THIS channel —
+    a failure is a tool error rather than an answer, an answer produced under a policy other than
+    'full' is dropped (defence in depth behind `usable`), and the row cap is per ask, not per part."""
     parts = getattr(result, "parts", None)
     produced = [p.result for p in parts if p.result is not None] if parts is not None else [result]
     if any(getattr(r, "llm_policy", None) != FULL for r in produced):
         raise Refused("policy_refused")
     if parts is None and response.error:
-        raise Refused("duplicate_request" if response.error == "duplicate_request" else "query_failed")
+        raise Refused(response.error)  # already one of the outbound codes
 
     payload = response.model_dump(exclude={"sql", "error"}, exclude_none=True)
-    if parts is None:
-        # a structured explanation (text + chart config) reaches REST as str(dict); an LLM client gets the text
-        answer = (_part_answer(result.query_result) or payload["answer"]) if result.query_result.data else NO_DATA
-    else:
-        answer = payload["answer"]  # multi_context.combine: explanations of parts with rows + fixed templates
+    if parts is not None:
         share = max(1, settings.MCP_MAX_ROWS // max(1, len(parts)))  # MCP_MAX_ROWS is per ask, not per part
         for entry, part in zip(payload.get("parts") or [], parts):
             entry.pop("sql", None)
-            if "data" in entry:
-                entry["data"] = entry["data"][:share]
-            if part.error:
-                answer = answer.replace(part.error, ERRORS["query_failed"][1])
-                entry.update(error="query_failed", answer=ERRORS["query_failed"][1])
+            if part.code:
                 entry.pop("data", None)
-            elif not part.ok:
-                entry["answer"] = NO_DATA
-    payload["answer"] = answer
+            elif "data" in entry:
+                entry["data"] = entry["data"][:share]
+    answer = payload["answer"]
 
-    # last guard: whatever the prose above came from, the SQL that ran is not in what leaves
+    # last guard: whatever the prose above came from, neither the SQL that ran nor a part's own
+    # failure text is in what leaves — a leak refuses the whole ask, it is not patched up
     leaving = json.dumps(payload, ensure_ascii=False, default=str)
-    ran = [sql for sql in (getattr(getattr(r, "query_result", None), "sql_query", None) for r in produced) if sql]
-    if "```sql" in leaving.lower() or any(sql in leaving or sql in answer for sql in ran):
+    quoted = [sql for sql in (getattr(getattr(r, "query_result", None), "sql_query", None) for r in produced) if sql]
+    quoted += [p.error for p in (parts or ()) if p.error]
+    if "```sql" in leaving.lower() or any(text_ in leaving or text_ in answer for text_ in quoted):
         raise Refused("query_failed")
     return _ok(payload, answer)

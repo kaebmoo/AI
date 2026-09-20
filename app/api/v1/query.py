@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.api import deps
 from app.db.session import get_config_db
+from app.core import outbound
 from app.core.llm_policy import LLMPolicyError
 from app.services.data_sources import ScopeError
 from app.services.workspaces import ContextNotAllowed, allowed_contexts
@@ -68,13 +69,7 @@ class ContextInfo(BaseModel):
 
 def _find_refusal(exc: BaseException):
     """A ScopeError / ContextNotAllowed / LLMPolicyError anywhere inside (nested) exception groups, else None."""
-    if isinstance(exc, (ScopeError, ContextNotAllowed, LLMPolicyError)):
-        return exc
-    for inner in getattr(exc, "exceptions", None) or ():
-        found = _find_refusal(inner)
-        if found is not None:
-            return found
-    return None
+    return outbound.find(exc, (ScopeError, ContextNotAllowed, LLMPolicyError))
 
 
 def _multi_response(multi, request_body: SimpleQueryRequest) -> SimpleQueryResponse:
@@ -82,8 +77,10 @@ def _multi_response(multi, request_body: SimpleQueryRequest) -> SimpleQueryRespo
     for part in multi.parts:
         qr = part.result.query_result if part.result is not None else None
         rows = (qr.data or []) if qr is not None else []
-        entry = {"context": part.context, "question": part.question, "answer": _part_answer(qr),
-                 "row_count": len(rows), "error": part.error,
+        # a part that failed carries the engine's own words in part.error — the caller gets its code
+        entry = {"context": part.context, "question": part.question,
+                 "answer": outbound.message(part.code) if part.code else outbound.safe_answer(qr),
+                 "row_count": len(rows), "error": part.code,
                  "data_as_of": part.result.data_as_of if part.result is not None else None}
         if request_body.include_sql:
             entry["sql"] = qr.sql_query if qr is not None else None
@@ -93,15 +90,12 @@ def _multi_response(multi, request_body: SimpleQueryRequest) -> SimpleQueryRespo
     return SimpleQueryResponse(
         answer=multi.answer, context=multi.context_name, row_count=sum(p["row_count"] for p in parts),
         execution_time_ms=round(multi.execution_time_ms, 1), parts=parts, computed=multi.computed,
+        # the warnings are ours (how many parts answered, mismatched periods) — never an engine message
         error="; ".join(multi.warnings) if any(p["error"] for p in parts) else None,
     )
 
 
-def _part_answer(qr) -> str:
-    explanation = getattr(qr, "explanation", None)
-    if isinstance(explanation, dict):
-        explanation = explanation.get("explanation")
-    return str(explanation or "")
+_part_answer = outbound.explanation_text  # kept: the name this module exported before app/core/outbound.py
 
 
 async def run_simple_query(request_body: SimpleQueryRequest, *, user_id, api_key_id, allowed, channel: str,
@@ -144,18 +138,14 @@ async def run_simple_query(request_body: SimpleQueryRequest, *, user_id, api_key
     if request_body.max_rows and len(data_rows) > request_body.max_rows:
         data_rows = data_rows[:request_body.max_rows]
 
-    answer = qr.explanation or qr.error or "ไม่สามารถตอบได้"
-    if not isinstance(answer, str):
-        answer = str(answer)
-
     return SimpleQueryResponse(
-        answer=answer,
+        answer=outbound.safe_answer(qr),
         context=result.context_name or request_body.context or "",
-        sql=qr.sql_query if request_body.include_sql else None,
+        sql=qr.sql_query if request_body.include_sql else None,  # asked for = its own field, never inside the answer
         data=data_rows if request_body.include_data else None,
         row_count=row_count,
         execution_time_ms=round(result.execution_time_ms, 1),
-        error=qr.error if qr.error else None,
+        error=outbound.result_code(qr.error) if qr.error else None,
         data_as_of=result.data_as_of,
     ), result
 
@@ -202,12 +192,14 @@ async def simple_query(
         raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
         execution_time_ms = (time.time() - start_time) * 1000
-        logger.error(f"Simple query failed: {e}")
+        # the reason stays here and in query_audit.error — it names paths, tables and the SQL that ran
+        code = outbound.code_for(e)
+        logger.error("Simple query failed [%s]: %s: %s", code, type(e).__name__, e)
         return SimpleQueryResponse(
-            answer=f"เกิดข้อผิดพลาด: {str(e)}",
+            answer=outbound.message(code),
             context=request_body.context or "",
             execution_time_ms=round(execution_time_ms, 1),
-            error=str(e),
+            error=code,
         )
 
 

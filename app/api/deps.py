@@ -63,7 +63,12 @@ def get_current_user(
         try:
             from app.services.api_key_service import APIKeyService, KEY_PREFIX
             api_key_service = APIKeyService(db)
-            api_key = api_key_service.validate_key(x_api_key)
+            api_key, refusal = api_key_service.check_key(x_api_key)
+            if refusal == "rate_limited":
+                # a real key over its quota is not "unauthenticated": say so instead of falling through to 401
+                from app.core.outbound import ERRORS
+                raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                                    detail=ERRORS["rate_limited"][1])
             if api_key:
                 enforce_key_surface(api_key, request.url.path)
                 # Track usage

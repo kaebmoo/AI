@@ -17,6 +17,7 @@ from sqlalchemy import create_engine, text
 
 from app.core.llm_policy import FULL, SCHEMA_ONLY, LLMPolicyError
 from app.providers.base import QueryResult
+from app.core import outbound
 from app.services import multi_context as mc
 from app.services.data_sources import ScopeError, SourceResolver
 from app.services.query_engine import QueryEngineResult
@@ -125,7 +126,9 @@ class TestComputeAndCombine:
         parts = [part("a", [{"v": 300.0}]), part("b", [], error="ข้อมูลกำลังถูก publish")]
         assert mc.compute(parts, "difference", [0, 1]) is None
         text_, warnings = mc.combine(parts, None, "difference")
-        assert "ตอบได้ 1 จาก 2 ส่วน" in text_ and "ส่วนนี้ตอบไม่ได้: ข้อมูลกำลังถูก publish" in text_
+        # hardening: the part's own words stay in part.error (audit / log) — the answer leaves the process
+        assert "ตอบได้ 1 จาก 2 ส่วน" in text_ and "ข้อมูลกำลังถูก publish" not in text_
+        assert "ส่วนนี้ตอบไม่ได้: " + outbound.message("query_failed") in text_
         assert "คำนวณจากผลข้างต้น" not in text_ and warnings
 
     def test_every_part_carries_its_origin(self):
@@ -232,7 +235,10 @@ class TestAnswer:
     def test_a_failed_sub_question_is_reported_not_guessed(self):
         engine = fake_engine(SPLIT, {"feed_revenue": part("feed_revenue", [{"v": 300.0}]).result, "feed_expense": RuntimeError("gateway timeout")})
         multi = run(engine)
-        assert multi.computed is None and "ตอบได้ 1 จาก 2 ส่วน" in multi.answer and "gateway timeout" in multi.answer
+        assert multi.computed is None and "ตอบได้ 1 จาก 2 ส่วน" in multi.answer
+        # hardening: the exception's text is reported in the audit row and the log, never in the answer
+        assert "gateway timeout" not in multi.answer and outbound.message("internal_error") in multi.answer
+        assert multi.parts[1].error == "gateway timeout" and multi.parts[1].code == "internal_error"
 
     def test_split_that_names_one_context_routes_there_with_the_original_question(self):
         one = {"parts": [{"context": "feed_expense", "question": "เขียนใหม่"}], "operation": "none"}

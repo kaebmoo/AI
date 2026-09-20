@@ -254,7 +254,7 @@ class TestRestrictedKeyStaysOnTheQueryApi:
 
         request = SimpleNamespace(url=SimpleNamespace(path="/api/v1/chat/stream"), state=SimpleNamespace(), headers={})
         service = MagicMock()
-        service.validate_key.return_value = _key(1)
+        service.check_key.return_value = (_key(1), None)
         with patch("app.services.api_key_service.APIKeyService", return_value=service), pytest.raises(HTTPException) as exc:
             deps.get_current_user(request, token=None, bearer_token=None, x_api_key="ntai_x", db=MagicMock())
         assert exc.value.status_code == 403

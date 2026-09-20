@@ -263,3 +263,102 @@ class TestMultiContextResponse:
         for refusal, status in ((ScopeError("scope"), 400), (ContextNotAllowed("นอกสิทธิ์"), 403)):
             with patch("app.services.multi_context.ask", AsyncMock(side_effect=refusal)):
                 assert query_client.post("/api/v1/query/", json={"question": "รายได้และค่าใช้จ่าย"}).status_code == status
+
+
+class TestNothingInternalLeaves:
+    """Plan 7 hardening: /api/v1/query answers a caller outside the process. The engine's prose
+    quotes the SQL it ran (a result with no rows) and the text of the exception that stopped it —
+    neither leaves here. Chat / telegram are unchanged: there the person needs to see both."""
+
+    # the shape hybrid_flow.py:313/776 produces for a query that ran and matched nothing
+    NO_ROWS = ("ไม่พบข้อมูลที่ตรงกับเงื่อนไข\n\nSQL ที่ใช้:\n```sql\nSELECT SUM(x) FROM secret_table\n```\n\n"
+               "อาจเป็นเพราะ:\n- ไม่มีข้อมูลที่ตรงกับคำค้นหา")
+
+    @staticmethod
+    def _ask(query_client, result=None, exc=None, **body):
+        with patch("app.services.query_engine.QueryEngine") as MockEngine:
+            MockEngine.return_value.query = AsyncMock(return_value=result, side_effect=exc)
+            return query_client.post("/api/v1/query/", json={"question": "q", **body})
+
+    def test_a_result_with_no_rows_never_carries_the_sql(self, query_client):
+        from app.core.outbound import NO_DATA
+
+        empty = _mock_query_engine_result(explanation=self.NO_ROWS, data=[], sql="SELECT SUM(x) FROM secret_table")
+        body = self._ask(query_client, empty).json()
+        assert body["answer"] == NO_DATA and "secret_table" not in body["answer"] and "```sql" not in body["answer"]
+        assert body["sql"] is None and body["error"] is None
+
+        asked = self._ask(query_client, empty, include_sql=True).json()  # asked for = its own field, not the prose
+        assert asked["sql"] == "SELECT SUM(x) FROM secret_table" and asked["answer"] == NO_DATA
+
+    def test_a_failed_result_gives_a_code_not_the_exception(self, query_client):
+        from app.core.outbound import ERRORS
+
+        failed = _mock_query_engine_result(
+            explanation="เกิดข้อผิดพลาด: no such table: secret_table (/Users/seal/nt_fi_report.sqlite)",
+            error="OperationalError: no such table: secret_table", data=[])
+        body = self._ask(query_client, failed).json()
+        assert body["error"] == "query_failed" and body["answer"] == ERRORS["query_failed"][1]
+        assert "secret_table" not in str(body) and "/Users" not in str(body)
+
+    def test_a_raised_failure_gives_a_code_not_the_exception(self, query_client):
+        from app.core.outbound import ERRORS
+
+        body = self._ask(query_client, exc=RuntimeError("boom at /Users/seal/app/services/x.py")).json()
+        assert body["error"] == "internal_error" and body["answer"] == ERRORS["internal_error"][1]
+        assert "/Users" not in str(body) and "boom" not in str(body)
+
+    def test_a_source_being_published_keeps_its_meaning_without_the_path(self, query_client):
+        from app.core.outbound import ERRORS
+        from app.services.database_adapter import SourceUnavailable
+
+        body = self._ask(query_client, exc=SourceUnavailable(
+            "ไม่พบโฟลเดอร์ของ source 'feed_sales' (/Users/seal/DataFeed/dist/sales/latest) — ข้อมูลอาจกำลังถูก publish")).json()
+        assert body["error"] == "source_unavailable" and body["answer"] == ERRORS["source_unavailable"][1]
+        assert "publish" in body["answer"] and "/Users" not in str(body)
+
+    def test_a_structured_explanation_is_text_not_str_of_a_dict(self, query_client):
+        structured = _mock_query_engine_result(
+            explanation={"explanation": "รายได้รวม 100 บาท", "chart_config": {"type": "bar"}}, data=[{"v": 100}])
+        answer = self._ask(query_client, structured).json()["answer"]
+        assert answer == "รายได้รวม 100 บาท" and "chart_config" not in answer
+
+    def test_duplicate_request_keeps_its_own_code(self, query_client):
+        from app.core.outbound import ERRORS
+
+        blocked = _mock_query_engine_result(explanation="คำถามซ้ำ", error="duplicate_request", data=[])
+        body = self._ask(query_client, blocked).json()
+        assert body["error"] == "duplicate_request" and body["answer"] == ERRORS["duplicate_request"][1]
+
+    def test_a_failed_part_of_a_multi_context_answer_reports_a_code(self, query_client):
+        from app.core.outbound import ERRORS
+        from app.services.multi_context import MultiResult, Part
+
+        good = Part(context="feed_revenue", question="a", result=_mock_query_engine_result(
+            explanation="รายได้ 5 บาท", data=[{"v": 5}], context="feed_revenue"))
+        bad = Part(context="feed_expense", question="b", error="Binder Error: secret_col (/Users/seal/x)",
+                   error_code="query_failed")
+        multi = MultiResult(parts=[good, bad], answer="รวม", warnings=["ตอบได้ 1 จาก 2 ส่วน"], execution_time_ms=1.0)
+
+        with patch("app.services.multi_context.ask", AsyncMock(return_value=multi)), \
+                patch("app.services.query_engine.QueryEngine"):
+            body = query_client.post("/api/v1/query/", json={"question": "q"}).json()
+
+        parts = body["parts"]
+        assert parts[1]["error"] == "query_failed" and parts[1]["answer"] == ERRORS["query_failed"][1]
+        assert "secret_col" not in str(body) and "/Users" not in str(body)
+
+    def test_a_key_over_its_quota_is_429_not_401(self, client, test_user, db_session):
+        """An existing key that is simply out of budget is not 'unauthenticated' — 401 sent the caller
+        looking for a bad key (and let the portal retry with the same one)."""
+        from app.services.api_key_service import APIKeyService
+
+        service = APIKeyService(db_session)
+        raw, key = service.create_key(user_id=test_user.id, name="portal", rate_limit_per_day=1)
+        service.track_usage(key.id)  # the day's budget is now spent
+
+        resp = client.post("/api/v1/query/", json={"question": "q"}, headers={"X-API-Key": raw})
+        assert resp.status_code == 429 and "rate limit" in resp.json()["detail"]
+
+        assert service.check_key(raw) == (None, "rate_limited")
+        assert service.check_key("ntai_" + "0" * 64) == (None, "unauthorized")

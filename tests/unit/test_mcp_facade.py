@@ -307,7 +307,9 @@ class TestTools:
                 return await session.call_tool("ask", {"question": "q"})
         with patch("app.services.multi_context.ask", AsyncMock(return_value=multi)), patch("app.services.query_engine.QueryEngine"):
             result = _run(check)
-        assert not result.isError and result.structuredContent["parts"][1]["error"] == "query_failed"
+        # combine() no longer quotes a part's failure (app/core/outbound.py); if anything ever does,
+        # the last guard refuses the whole ask rather than patching the text up
+        assert result.isError and result.structuredContent["error"]["code"] == "query_failed"
         assert "secret_sql" not in result.model_dump_json() and "/Users" not in result.model_dump_json()
 
     def test_source_status_checks_rights_before_resolving_and_hides_the_reason(self, world):
@@ -425,7 +427,8 @@ class TestReviewFindings:
                       result=_result(data=rows, error="boom /Users/p", explanation="เกิดข้อผิดพลาด: boom /Users/p secret_tbl"))
         empty = Part(context="feed_sales", question="c", display_name="c",
                      result=_result(data=[], explanation="ไม่พบ\n```sql\nSELECT secret_sql FROM t\n```"))
-        multi = MultiResult(parts=[good, failed, empty], answer="1. ยอดขาย 10 บาท\n2. ⚠️ ส่วนนี้ตอบไม่ได้: boom /Users/p", computed=None,
+        multi = MultiResult(parts=[good, failed, empty],  # as combine() writes it: fixed messages, no raw text
+                            answer="1. ยอดขาย 10 บาท\n2. ⚠️ ส่วนนี้ตอบไม่ได้: " + mcp_facade.ERRORS["query_failed"][1], computed=None,
                             warnings=["ตอบได้ 1 จาก 3 ส่วน"], execution_time_ms=1.0, request_group="g")
         result = self._ask(world, multi, {"question": "q", "include_data": True})
         a, b, c = result.structuredContent["parts"]
