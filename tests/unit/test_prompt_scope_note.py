@@ -46,6 +46,12 @@ def test_window_and_anchor_reach_the_prompt(scoped):
     assert "202608" in prompt and "งวดอ้างอิง" in prompt
     # the instruction that makes a period-less query wrong
     assert "SQL ต้องใส่เงื่อนไขงวดเสมอ" in prompt
+    # and the one for a question with no time words at all — "รายได้รวม" on a 202608 report came
+    # back as all twenty months added together before this line existed (RESULT_F11 §7)
+    assert "ไม่เอ่ยถึงช่วงเวลาเลย" in prompt and "ห้ามรวมทุกงวดในขอบเขตเป็นคำตอบเดียว" in prompt
+    # a question that DOES name a period keeps it: saying only the above narrowed "ปี 69" to
+    # August as well, and the case that outranks it has to be stated first
+    assert prompt.index("ห้ามแคบลงเป็นงวดอ้างอิงเอง") < prompt.index("ไม่เอ่ยถึงช่วงเวลาเลย")
 
 
 def test_a_single_period_needs_no_anchor(scoped):

@@ -168,8 +168,17 @@ def scope_note() -> str:
                 anchored = anchored or max(values)
     note = ("\n**ขอบเขตข้อมูลของคำขอนี้ — ทุกตารางถูกกรองไว้แล้วเท่านี้:**\n" + "\n".join(lines))
     if anchored is not None:
-        note += (f"\nSQL ต้องใส่เงื่อนไขงวดเสมอ (ขอบเขตนี้ไม่ได้เจาะจงงวดให้) — "
-                 f"คำถามที่เอ่ยถึงเดือนหรือ \"ล่าสุด\" โดยไม่ระบุปี หมายถึงงวดอ้างอิง {anchored}")
+        # The three cases are ordered on purpose. Saying only "no period mentioned means the reference
+        # period" made the model narrow "ปี 69" to that one month as well (RESULT_F11 §7), so the case
+        # where the question does name a period has to come first and say "do not narrow it".
+        note += (
+            f"\nSQL ต้องใส่เงื่อนไขงวดเสมอ (ขอบเขตนี้ไม่ได้เจาะจงงวดให้) ตามลำดับนี้:"
+            f"\n1. คำถามระบุช่วงเวลาไว้แล้ว (ปี / เดือน / ช่วง) → **ใช้ตามที่ระบุ ห้ามแคบลงเป็นงวดอ้างอิงเอง** "
+            f"(เช่น \"ปี 2569\" = ทั้งปี ไม่ใช่เฉพาะเดือนของงวดอ้างอิง)"
+            f"\n2. เอ่ยถึงเดือนหรือ \"ล่าสุด\" แต่ไม่ระบุปี → งวดอ้างอิง {anchored}"
+            f"\n3. ไม่เอ่ยถึงช่วงเวลาเลย → งวดอ้างอิง {anchored} (หรือยอดสะสมถึงงวดนั้น)"
+            f"\n**ห้ามรวมทุกงวดในขอบเขตเป็นคำตอบเดียว** เว้นแต่คำถามขอช่วงนั้นจริง — "
+            f"ขอบเขตมีไว้ให้เทียบงวดกันได้ ไม่ใช่ช่วงเวลาของคำตอบ")
     return note + "\n"
 
 

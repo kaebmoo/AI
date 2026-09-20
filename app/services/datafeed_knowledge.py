@@ -108,12 +108,21 @@ def register_context(conn, domain: str, contract: dict) -> str:
 def sync_schema_metadata(conn, domain: str, contract: dict) -> int:
     """Column metadata for all feed tables (delete + reinsert = idempotent)."""
     count = 0
+    # The contract declares how each measure may be aggregated (control_totals.measures): `agg: sum`
+    # adds up, `agg: point_in_time` does not — revenue_ytd is the year to date AT that period, and
+    # adding the periods gives several times the real figure (so does ebt's `ebt` / `expense`).
+    # Summability was derived from the dtype alone, which said the opposite of the column's own
+    # description, and a portal question came back with SUM(revenue_ytd) = 115,090 MB against a real
+    # 26,036 MB even though the prompt already carried the rule in words (RESULT_F11 §7).
+    agg = {m["name"]: m.get("agg") for m in (contract.get("control_totals") or {}).get("measures", [])
+           if m.get("name")}
     for dataset in contract["datasets"]:
         table = f"feed_{domain}_{dataset['name']}"
         conn.execute(text("DELETE FROM schema_metadata WHERE table_name = :t"), {"t": table})
         keys = set(dataset.get("keys", []))
         for col in dataset["columns"]:
-            is_summable = 1 if col["dtype"] == "double" else 0
+            summable_agg = agg.get(col["name"], "sum") == "sum"
+            is_summable = 1 if (col["dtype"] == "double" and summable_agg) else 0
             is_groupable = 1 if (col["dtype"] == "string" or col["name"] in keys) else 0
             desc = col.get("description") or ""
             if col.get("unit"):

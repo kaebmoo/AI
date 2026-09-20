@@ -264,3 +264,33 @@ class TestRouterDefaults:
         svc = MagicMock()
         svc.get_all_contexts.return_value = self.LEGACY + feeds
         assert detect_context_from_question(question, svc) == expected
+
+
+def test_point_in_time_measures_are_not_summable(tmp_path):
+    """`agg: point_in_time` means the column is a running total AT that period, so adding the
+    periods up multiplies it. Summability came from the dtype alone, which said the opposite of
+    the column's own description — and a portal answer summed revenue_ytd (RESULT_F11 §7)."""
+    from sqlalchemy import create_engine, text
+
+    from app.services import datafeed_knowledge
+
+    contract = {
+        "control_totals": {"measures": [{"name": "revenue", "agg": "sum"},
+                                        {"name": "revenue_ytd", "agg": "point_in_time"}]},
+        "datasets": [{
+        "name": "fact_x", "keys": ["year_month"],
+        "columns": [{"name": "year_month", "dtype": "bigint"},
+                    {"name": "revenue", "dtype": "double"},
+                    {"name": "revenue_ytd", "dtype": "double"},
+                    {"name": "other_amount", "dtype": "double"}],  # no measure entry: unchanged
+    }]}
+    engine = create_engine(f"sqlite:///{tmp_path / 'c.db'}")
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE schema_metadata (table_name TEXT, column_name TEXT, description TEXT,"
+                          " data_type TEXT, is_summable INT, is_groupable INT)"))
+        datafeed_knowledge.sync_schema_metadata(conn, "r", contract)
+        got = dict(conn.execute(text("SELECT column_name, is_summable FROM schema_metadata")).all())
+
+    assert got["revenue"] == 1
+    assert got["revenue_ytd"] == 0, "a point-in-time total must not be marked summable"
+    assert got["other_amount"] == 1, "a double with no declared agg keeps the old behaviour"
