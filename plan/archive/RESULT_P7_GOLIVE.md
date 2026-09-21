@@ -1,8 +1,8 @@
 # RESULT — เปิดใช้จริง: NT-Report portal ถามตอบผ่าน AI (ผู้ใช้รายแรกของ Plan 7)
 
 **สถานะ:** 🟡 ฝั่ง AI **เปิดแล้ว** (migrate ✅ · server รัน ✅ · key จริงออกแล้ว ✅ · allowlist = matcha ✅)
-— **ปุ่มฝั่ง portal ยังไม่เปิด** เพราะตัวเลขยังไม่ผ่านเกณฑ์ 9/10 ต่อ report_type (`RESULT_F11.md`)
-และ `pocketbase_0/.env` เป็นของเจ้าของ. §1 วัดจาก**สำเนาสด**ของ DB จริง · §5 คือสิ่งที่ทำบนของจริง
+— อัปเดต 2026-09-21: **ปุ่มเปิดเฉพาะ `revenue`** (2026-09-20 ดึก — `ASSISTANT_CONTEXT_MAP=revenue=feed_revenue` ใน `pocketbase_0/.env`, PB restart ด้วย `scripts/serve.sh`) และมีผู้ใช้จริงถามแล้ว; expense / sales / ebt ยังไม่เปิด (`RESULT_F11.md` §7–§8)
+§1 วัดจาก**สำเนาสด**ของ DB จริง · §5 คือสิ่งที่ทำบนของจริง · §6 คือสิ่งที่เกิดหลังเปิดปุ่ม
 **วันที่:** 2026-09-20 | **Branch:** `main` (ahead 2 ตอนเริ่ม: `345c661`, `3a74bcf`) | **คู่กับ:** session ฝั่ง NT-Report
 (`plan/PROMPT_NT_REPORT_GOLIVE.md` → ผลอยู่ที่ `NT-Report/pocketbase_0/docs/ASSISTANT_GOLIVE.md`)
 
@@ -292,3 +292,22 @@ E2E ผ่าน PB จริง (ข้อ 6 ของ prompt) · เปิด 
 | E7 audit สองฝั่ง | ✅ ฝั่ง AI ครบ (key / channel `portal` / workspace / scope เต็ม / SQL / row_count, ไม่มีค่าผลลัพธ์); ฝั่ง PB รอ E2E |
 | E8 rate limit | ✅ รายวัน (429 ยืนยันแล้ว) และ **รายนาทีผ่าน Redis** (ยืนยันโดยบังเอิญตอนวัดรอบสอง) |
 | **E9 ≥ 9/10 ต่อ report_type** | ❌ **8 / 8 / 8 / 5** → ไม่เปิด type ใด |
+
+---
+
+## 6. หลังเปิดปุ่ม `revenue` (2026-09-20 ดึก → 2026-09-21)
+
+| เวลา | เหตุการณ์ | หลักฐาน |
+|---|---|---|
+| 09-20 22:0x | เขียน `ASSISTANT_*` ลง `pocketbase_0/.env` (ใช้ key id 4 ใบเดิม — ตามที่เจ้าของสั่ง) · restart PB ด้วย `scripts/serve.sh` | env ทั้ง 3 ตัวอยู่ใน process ของ PB; ยิงด้วย key จากไฟล์ได้ 200 |
+| 09-20 22:12–22:23 | ผู้ใช้กดถาม → **`ReferenceError: scopeMonths is not defined`** ×3 — PB รัน handler ใน goja runtime แยกที่มองไม่เห็น function ระดับไฟล์; test ของ hook เป็น node จึงไม่เคยดักได้ | `pb_data/auxiliary.db` `_logs` |
+| 09-20 22:31 | NT-Report แก้ (`adf9da6` helper ใน handler, `407eb81` map รหัส error ตรง ๆ, `83fad4e` บังคับ smoke test ผ่าน PB) | commit ฝั่ง NT-Report |
+| 09-20 22:33 → 23:01 | **ผู้ใช้จริงถาม 12 คำถาม** — ถูก 4/12 → แก้ฝั่ง AI 3 สาเหตุ → **10/12** | `RESULT_F11.md` §7 |
+| 09-21 | NT-Report publish contract PATCH (`agg` ต่อคอลัมน์, ถ้อยคำ ebt, เกณฑ์ EBT9 = ตอบพร้อมป้าย) · ฝั่ง AI แก้ 4 จุดที่ไม่อ่านคำอธิบายข้อมูล | `RESULT_F11.md` §8 |
+
+**Exit criteria — อัปเดตจาก §5:** E3 / E4 / E7 **ผ่านบนของจริง** (คำถามจริงลง audit ครบทั้ง PB `assistant_ask` = `ok`
+และ AI `query_audit` channel `portal` พร้อม scope 20 งวด) · E6 ฝั่ง hook แก้แล้ว (`407eb81`) ยังไม่ได้ยิงจริงระหว่าง publish ·
+E8 รายนาที: **Redis หยุดไปแล้ว** ณ 2026-09-21 → fail-open อีกครั้ง · E9: `revenue` ผ่านด้วยคำถามจริง 10/12 แต่ชุดของทีมยัง 8/10
+
+**ค้าง:** Redis · การตัดสินเรื่อง OpenAPI เต็มที่เปิดโดยไม่ต้อง login (`PLAN_8` §2) · commit ฝั่ง AI 20+ ตัวยังไม่ push ·
+คุณภาพ 4 ข้อ (`RESULT_F11` §7–§8) → ย้ายไปเป็น `PLAN_8` Phase 8.0

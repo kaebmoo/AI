@@ -154,7 +154,7 @@ prompt แยกสำหรับ session ใน repo NT-Report: `plan/PROMPT_N
 
 **สถานะของจริง:** migrate แล้ว · server รันแล้ว · `llm_provider_allowlist` ของทุก source `datafeed_*` = `["matcha"]` ·
 **ออก key จริงของ portal แล้ว** (`nt-report-portal`, ผูก workspace `nt-report`, 20/นาที 2,000/วัน — raw key ส่งให้เจ้าของแล้ว) ·
-**ยังไม่เปิดปุ่ม**: `pocketbase_0/.env` ยังไม่ตั้ง และตัวเลขยังไม่ผ่านเกณฑ์ 9/10
+~~ยังไม่เปิดปุ่ม~~ → **อัปเดต 2026-09-21:** **ปุ่มเปิดเฉพาะ `revenue`** (2026-09-20 ดึก — `ASSISTANT_CONTEXT_MAP=revenue=feed_revenue` ใน `pocketbase_0/.env`, PB restart ด้วย `scripts/serve.sh`) และมีผู้ใช้จริงถามแล้ว; expense / sales / ebt ยังไม่เปิด
 
 ### 1. ⚠️ ต้องแก้ที่ hook: `mapUpstreamError` ไม่รู้จักรหัสใหม่ (บล็อก exit criteria ข้อ "ระหว่าง publish")
 
