@@ -47,11 +47,11 @@ def answer_years(question: str, sql: str, rows: Optional[Iterable[dict]]) -> Set
 
 
 def fix_text(text: str, years: Set[int]) -> str:
-    said = [int(y) for y in _BE_IN_TEXT.findall(text or "")]
-    if not said or not years or set(said) <= years:
+    said = {int(y) for y in _BE_IN_TEXT.findall(text or "")}
+    if not said or not years or said <= years:
         return text
 
-    def hits(shift: int) -> int:
+    def hits(shift: int) -> int:  # distinct years: a prior year named three times is still one year
         return sum(1 for y in said if y + shift in years)
 
     # most years landed; then no change; then the smallest slip (the model's slip runs low: +k first)

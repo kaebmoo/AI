@@ -49,6 +49,9 @@ def test_the_prior_year_of_a_comparison_keeps_its_place():
     assert fix_text("เดือน 8 ปี 2568 เทียบ เดือน 8 ปี 2567", years) == "เดือน 8 ปี 2569 เทียบ เดือน 8 ปี 2568"
     # already right: nothing moves, although 2568 is not a literal of the SQL
     assert fix_text("เดือน 8 ปี 2569 เทียบ เดือน 8 ปี 2568", years) == "เดือน 8 ปี 2569 เทียบ เดือน 8 ปี 2568"
+    # ...even when the prior year is named more often than the current one (it was shifted to 2570)
+    right = "ส.ค. 2569 เทียบ ส.ค. 2568 | ปี 2569 | ปี 2568 ติดลบ | ปี 2568 ฐานต่ำ"
+    assert fix_text(right, years) == right
 
 
 def test_a_year_the_user_typed_is_left_alone():
