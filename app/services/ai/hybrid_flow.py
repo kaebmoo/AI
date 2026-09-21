@@ -426,7 +426,7 @@ async def build_explanation(
         )
         # the model converts ค.ศ. → พ.ศ. by itself and slips (2026 → "2566") — the years in the text are
         # checked against the years of this answer in code, not asked for (RESULT_F11 §9)
-        explanation = fix_explanation(explanation, question, sql_query, data)
+        explanation = fix_explanation(explanation, question, sql_query, data, schema_metadata)
 
         t_explain = time.perf_counter() - t0
         logger.debug("Hybrid Mode: Explanation Generation took %.4fs", t_explain)

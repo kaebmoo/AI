@@ -445,6 +445,12 @@ _TIME_HINTS = ("year", "month", "date", "time", "period", "quarter", "week",
                "ปี", "เดือน", "งวด", "ไตรมาส")
 
 
+def is_time_column(name: str, is_measure: bool = False) -> bool:
+    """A period column by its name — never one that carries an amount, however it is named (`ebt_month`
+    is baht for the month). The same rule reads the years of an answer (`ai/thai_year.py`)."""
+    return not is_measure and any(hint in name.lower() for hint in _TIME_HINTS)
+
+
 def _table_columns(service: "SchemaService", table_name: str) -> List[tuple]:
     """[(column, is_measure)] from the table's metadata first and the database itself second — the
     same two steps build_schema_text takes, so it works for a file source and for a legacy view.
@@ -484,7 +490,7 @@ def build_date_instructions(service: "SchemaService", table_name: str, scope_col
             declared = []
 
     found = [c for c, is_measure in _table_columns(service, table_name)
-             if not is_measure and (c in declared or any(hint in c.lower() for hint in _TIME_HINTS))]
+             if not is_measure and (c in declared or is_time_column(c))]
     found += [c for c in declared if c not in found]  # declared but absent here: the caller still filters on it
 
     thai_year = "ถ้าผู้ใช้ถามเป็นปี พ.ศ. ให้แปลงเป็น ค.ศ. ก่อน (พ.ศ. − 543) เว้นแต่คอลัมน์นั้นเก็บ พ.ศ. อยู่แล้ว"

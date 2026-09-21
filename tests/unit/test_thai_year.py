@@ -12,7 +12,7 @@ import pytest
 
 from app.services.ai.hybrid_flow import build_explanation
 from app.services.ai.response_utils import prepare_data_for_explanation
-from app.services.ai.thai_year import answer_years, fix_text
+from app.services.ai.thai_year import answer_years, fix_explanation, fix_text
 
 
 async def _explain(text: str, question: str, sql: str, data: list) -> dict:
@@ -71,3 +71,44 @@ def test_amounts_and_period_keys_are_not_years():
 def test_a_column_that_stores_buddhist_years_counts_as_it_is():
     years = answer_years("รายได้ปีนี้", 'WHERE "ปี" = 2569', [{"ปี": 2569, "s": 1.0}])
     assert fix_text("รายได้ปี 2569", years) == "รายได้ปี 2569"
+
+
+@pytest.mark.asyncio
+async def test_an_amount_is_never_rewritten_as_a_year():
+    # "2500" after รายได้รวม is 2,500 million baht — rewriting every 25xx made it "2569 ล้านบาท"
+    text = "รายได้รวม 2500 ล้านบาท"
+    result = await _explain(text, "รายได้รวม", "SELECT SUM(revenue) AS total FROM revenue_search WHERE year = 2026",
+                            [{"total": 2500000000}])
+    assert result["explanation"] == text
+    years = answer_years("รายได้", "WHERE year = 2026", [])
+    assert fix_text("ค่าธรรมเนียมต่อปี 2500 บาท", years) == "ค่าธรรมเนียมต่อปี 2500 บาท"  # its unit says amount
+    # a year next to an amount: only the year moves
+    assert fix_text("รายได้ปี 2568 รวม 2568 ล้านบาท", years) == "รายได้ปี 2569 รวม 2568 ล้านบาท"
+
+
+def test_an_amount_in_the_rows_names_no_year():
+    # SQL chose 2026, the total was 2,568: that total made "ปี 2568" look like a year of the answer
+    sql = "SELECT SUM(revenue) AS total FROM revenue_search WHERE year = 2026"
+    assert fix_explanation("รายได้ปี 2568 รวม 2,568 บาท", "รายได้ปีนี้", sql, [{"total": 2568}]) == \
+        "รายได้ปี 2569 รวม 2,568 บาท"
+    # a measure named like a period (feed_ebt's ebt_month is baht) is known from the metadata
+    meta = [{"column_name": "time_key", "is_summable": 0}, {"column_name": "ebt_month", "is_summable": 1}]
+    assert answer_years("กำไรเดือนนี้", "SELECT ebt_month FROM t WHERE time_key = 202608", [{"ebt_month": 2568.0}],
+                        meta) == {2569}
+
+
+def test_only_the_sqls_period_conditions_count():
+    sql = "SELECT gl_code, SUM(revenue) FROM t WHERE gl_code = 2025 AND revenue > 2568 AND year = 2026 LIMIT 2000"
+    assert answer_years("รายได้", sql, []) == {2569}
+    between = "SELECT SUM(x) FROM t WHERE time_key BETWEEN 202501 AND 202608 GROUP BY 1"
+    assert answer_years("รายได้", between, []) == {2568, 2569}
+    case = 'SELECT SUM(CASE WHEN "งวด" = 202508 THEN x END), SUM(CASE WHEN CAST(year_month AS INT) = 202608 THEN x END)'
+    assert answer_years("เทียบปีก่อน", case, []) == {2568, 2569}
+
+
+def test_every_year_the_text_marks_moves_together():
+    years = answer_years("เทียบปีก่อน", "WHERE year_month IN (202608, 202508)", [])
+    assert fix_text("ระหว่างปี 2566 กับ 2565 และช่วง ส.ค.2566", years) == "ระหว่างปี 2569 กับ 2568 และช่วง ส.ค.2569"
+    assert fix_text("ปี 2566-2565 เพิ่มขึ้น", years) == "ปี 2569-2568 เพิ่มขึ้น"
+    assert fix_text("รายได้รวมเดือนสิงหาคม 2568.", answer_years("", "WHERE year = 2026", [])) == \
+        "รายได้รวมเดือนสิงหาคม 2569."  # a year that ends a sentence is still a year
