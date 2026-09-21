@@ -81,7 +81,6 @@ def _create_prompt_service():
         },
         service,
     )
-    service.get_date_format = MethodType(lambda self, table_name="revenue_search": "unix_timestamp_ms", service)
     service.build_hierarchy_rule_text = MethodType(
         lambda self, context_name: "STEP 1.5: HIERARCHY RULE (ห้าม OR ข้ามระดับ)",
         service,

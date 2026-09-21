@@ -430,11 +430,6 @@ class SchemaService:
         
         return samples
     
-    def get_date_format(self, table_name: str = "revenue_search") -> str:
-        """Detect DATE column format (TEXT or INTEGER)"""
-        _ = table_name
-        return "year_month_only"
-    
     # =========================================================
     # Prompt Building Methods
     # =========================================================
@@ -482,8 +477,6 @@ class SchemaService:
     def _build_english_prompt(self, ai_provider: str, main_view: str, context_name: str, context_info: Optional[Dict] = None) -> str:
         return prompt_builder.build_english_prompt(self, ai_provider, main_view, context_name, context_info)
     
-    def _get_date_instructions(self, date_format: str) -> str:
-        return prompt_builder.get_date_instructions(date_format)
 
     def refresh_cache(self):
         """Clear cache when schema changes"""

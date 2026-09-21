@@ -1,3 +1,4 @@
+import json
 import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Dict, List, Optional
@@ -214,8 +215,7 @@ def get_schema_context(
             context_text += f"\n\n## Available Values\n**Data Range:** {date_range.get('min_year')}/{date_range.get('min_month')} - {date_range.get('max_year')}/{date_range.get('max_month')}\n"
         context_text += "\n(Detailed sample values omitted for RAG optimization - relevant items will be injected)"
 
-    date_format = service.get_date_format(main_view)
-    context_text += "\n\n" + _get_date_instructions(date_format)
+    context_text += "\n\n" + build_date_instructions(service, main_view, context_info.get("scope_columns"))
     context_text += f"\n\n## Current Date\nวันที่ปัจจุบัน: {datetime.now().strftime('%Y-%m-%d')}\n"
     context_text += f"ปี พ.ศ. ปัจจุบัน: {datetime.now().year + 543}\n"
     return context_text
@@ -437,13 +437,60 @@ def build_english_prompt(
     return _build_english_prompt(service, ai_provider, main_view, context_name, context_info)
 
 
-def _get_date_instructions(date_format: str) -> str:
-    if date_format == "unix_timestamp_ms":
-        return """## Date Handling
-DATE column is Unix Timestamp (ms). Use YEAR/MONTH columns instead."""
-    return """## Date Handling
-ใช้ YEAR และ MONTH สำหรับ filter เวลา (CAST เป็น INTEGER เสมอ)"""
+# Baseline detection of a table's time columns, so a view is usable the moment it is registered and
+# before anyone writes metadata for it. It is a naming hint, nothing more: what the context DECLARES
+# in scope_columns always wins, and when nothing here matches, the section is left out rather than
+# naming columns that may not exist.
+_TIME_HINTS = ("year", "month", "date", "time", "period", "quarter", "week",
+               "ปี", "เดือน", "งวด", "ไตรมาส")
 
 
-def get_date_instructions(date_format: str) -> str:
-    return _get_date_instructions(date_format)
+def _table_columns(service: "SchemaService", table_name: str) -> List[tuple]:
+    """[(column, is_measure)] from the table's metadata first and the database itself second — the
+    same two steps build_schema_text takes, so it works for a file source and for a legacy view.
+    Without metadata nothing is known to be a measure."""
+    try:
+        metadata = service.get_schema_metadata(table_name)
+        if metadata:
+            return [(c["column_name"], bool(c.get("is_summable"))) for c in metadata if c.get("column_name")]
+    except Exception:
+        pass
+    try:
+        return [(c["name"], False) for c in service.get_table_info(table_name) if c.get("name")]
+    except Exception:
+        return []
+
+
+def build_date_instructions(service: "SchemaService", table_name: str, scope_columns=None) -> str:
+    """How to filter time in THIS table, in its own column names.
+
+    Every context used to be told "ใช้ YEAR และ MONTH" whatever its columns were — a constant left
+    over from the days of one revenue view. feed_ebt has only `time_key`, feed_expense has
+    `time_key` / `year_ce` / `month_no`, pl_costtype has `report_year` / `report_month`: none of
+    them has a YEAR or a MONTH to use (plan/archive/RESULT_F11.md §8).
+
+    A column the context declares as its period scope counts even if its name says nothing (a
+    customer may call it `fiscal_key`); a column that carries an amount never does, however it is
+    named — `ebt_month` is baht for the month, not the month.
+    """
+    declared = []
+    if scope_columns:
+        try:
+            mapping = json.loads(scope_columns) if isinstance(scope_columns, str) else scope_columns
+            # the caller's key says what the column means; org_code → cost_center is not a period
+            declared = [v for k, v in mapping.items()
+                        if isinstance(v, str) and any(hint in str(k).lower() for hint in _TIME_HINTS)]
+        except (TypeError, ValueError):
+            declared = []
+
+    found = [c for c, is_measure in _table_columns(service, table_name)
+             if not is_measure and (c in declared or any(hint in c.lower() for hint in _TIME_HINTS))]
+    found += [c for c in declared if c not in found]  # declared but absent here: the caller still filters on it
+
+    thai_year = "ถ้าผู้ใช้ถามเป็นปี พ.ศ. ให้แปลงเป็น ค.ศ. ก่อน (พ.ศ. − 543) เว้นแต่คอลัมน์นั้นเก็บ พ.ศ. อยู่แล้ว"
+    if not found:
+        return f"## Date Handling\n{thai_year}"
+    return ("## Date Handling\n"
+            f"คอลัมน์เวลาของตาราง {table_name}: {', '.join(found)} — ใช้คอลัมน์เหล่านี้ในการกรอง/จัดกลุ่มเวลาเท่านั้น "
+            f"(CAST เป็น INTEGER เมื่อเทียบกับตัวเลข) ห้ามอ้างคอลัมน์เวลาชื่ออื่นที่ไม่ได้อยู่ในรายการนี้\n"
+            f"{thai_year}")

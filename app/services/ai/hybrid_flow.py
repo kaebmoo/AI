@@ -1338,7 +1338,7 @@ def build_pass2_prompt(
 ---
 **Structured Intent (วิเคราะห์จากคำถามแล้ว):**
 - Intent Type: {intent.get('intent_type', 'aggregation')}
-- Metrics: {intent.get('aggregate_function', 'SUM')}({', '.join(intent.get('metrics', ['REVENUE_VALUE']))})
+- Metrics: {intent.get('aggregate_function', 'SUM')}({', '.join(intent.get('metrics') or ['(ไม่ระบุ — เลือกคอลัมน์ measure ของตารางนี้)'])})
 - Dimensions (GROUP BY): {dimensions_text}
 - Filters:
 {filters_text}
