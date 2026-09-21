@@ -113,11 +113,12 @@ async def _start_telegram_polling(bot):
     except Exception as e:
         logger.error(f"Telegram polling failed: {e}")
 
+_docs = settings.API_DOCS_ENABLED  # app.openapi() still works either way; only the routes go
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    openapi_url=f"{settings.API_V1_STR}/openapi.json",
-    docs_url=f"{settings.API_V1_STR}/docs",
-    redoc_url=f"{settings.API_V1_STR}/redoc",
+    openapi_url=f"{settings.API_V1_STR}/openapi.json" if _docs else None,
+    docs_url=f"{settings.API_V1_STR}/docs" if _docs else None,
+    redoc_url=f"{settings.API_V1_STR}/redoc" if _docs else None,
     lifespan=lifespan
 )
 

@@ -374,10 +374,14 @@ npm install && npm run build
 
 ### API Documentation
 
-Once the backend is running, visit:
+**ปิดเป็นค่าเริ่มต้น** (2026-09-21) — เอกสาร OpenAPI เต็มมีทุก route รวม admin 90 จาก 115 จึงไม่เปิดให้ใครก็ได้ดู
+เปิดเฉพาะเครื่องนักพัฒนา: ใส่ `API_DOCS_ENABLED=true` ใน `.env` แล้ว restart จะได้
 
-- **Swagger UI:** http://localhost:8000/docs
-- **ReDoc:** http://localhost:8000/redoc
+- **Swagger UI:** http://localhost:8000/api/v1/docs
+- **ReDoc:** http://localhost:8000/api/v1/redoc
+- **OpenAPI JSON:** http://localhost:8000/api/v1/openapi.json
+
+ผู้เรียกภายนอกใช้ `docs/PORTAL_INTEGRATION.md` (REST) และ `docs/manuals/manual_mcp_external.md` (MCP)
 
 ### Project Documentation
 

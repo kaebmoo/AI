@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     MCP_ALLOWED_HOSTS: str = "127.0.0.1:*,localhost:*,[::1]:*"
     MCP_ALLOWED_ORIGINS: str = ""
     MCP_MAX_ROWS: int = 100  # cap of ask(include_data=true); rows land in the client's LLM context
+    # The full OpenAPI document and its Swagger / ReDoc pages. Off unless a developer turns it on: served
+    # without a login it listed all 115 routes, 90 of them admin - a map of the surface for anyone who
+    # asks. Callers outside get the curated public reference of Plan 8.5, not this.
+    API_DOCS_ENABLED: bool = False
 
     # Security
     # REQUIRED: Set a strong random secret key in production via SECRET_KEY env variable

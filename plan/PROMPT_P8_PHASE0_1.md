@@ -17,7 +17,7 @@ repo NT-Report (/Users/seal/Documents/GitHub/NT-Report) = **อ่านอย�
 - pytest **1092 passed, 3 skipped** — `venv/bin/python3.14 -m pytest -q -p no:cacheprovider` โดยชี้ `CONFIG_DB_URL` / `DATABASE_URL` /
   `DATA_SOURCE_CACHE_DIR` ไป**สำเนา** เสมอ (`venv/bin/python` = 3.10 ไม่มี pytest; แต่ server และ vanna ใช้ 3.10)
 - **ของจริงมีผู้ใช้อยู่:** portal เปิดปุ่มเฉพาะ `revenue` (`ASSISTANT_CONTEXT_MAP=revenue=feed_revenue`); key ของ portal = id 4 `nt-report-portal`
-  → **ห้ามเพิกถอน / หมุน / ใช้ key นี้ทดสอบ**; AI server รันที่ port 8000 (`pgrep -f "uvicorn app.main"`); Redis **หยุดอยู่** (limit รายนาที fail-open)
+  → **ห้ามเพิกถอน / หมุน / ใช้ key นี้ทดสอบ**; AI server รันที่ port 8000 (`pgrep -f "uvicorn app.main"`); Redis รันอยู่ (เจ้าของ start 2026-09-21)
 - `admin_config.two_pass_enabled = true` บนของจริง → **pass 1 (`extract_intent`) คือที่ที่งวด/ปีถูกเลือก** — แก้ prompt ต้องครอบคลุม pass 1 เสมอ
 - ความรู้ของ `feed_*` เทียบ legacy: `schema_semantic_mapping` 0 vs 192 · `master_hierarchy` 0 vs 10 ระดับ · `master_hierarchy_values` 0 vs 3,475 ·
   `schema_business_rules` 0 vs 72 · `data_warnings` 0 vs 1 · `unmatched_keywords` ของ `feed_*` = 39 คำจากการใช้งานจริง
@@ -63,8 +63,8 @@ repo NT-Report (/Users/seal/Documents/GitHub/NT-Report) = **อ่านอย�
     (ถ้า context ใกล้เต็มก่อนถึงข้อนี้ ให้หยุดแล้วเขียน prompt ส่งต่อ session ถัดไป)
 
 ## ข้อค้างที่รอเจ้าของตัดสิน (ไม่บล็อก 8.0 / 8.1 — ถามเมื่อถึงจุดที่ต้องใช้)
-- **OpenAPI เต็มเปิดโดยไม่ต้อง login** (`/api/v1/openapi.json`, `/api/v1/docs` — 90 จาก 115 endpoint เป็นของ admin): ปิด / ต้อง auth ตอนนี้ หรือรอ 8.5
-- Redis (หยุดอยู่ → limit รายนาที fail-open) · push commit ที่ค้าง
+- ~~OpenAPI เต็มเปิดโดยไม่ต้อง login~~ — **ปิดแล้ว 2026-09-21** (`API_DOCS_ENABLED` ค่าเริ่มต้นปิด)
+- push commit ที่ค้าง (Redis เจ้าของ start แล้ว 2026-09-21)
 - D-D (BYOK ค่าเริ่มต้น), D-E (เกณฑ์ "พร้อมใช้"), D-F (REST เป็น source) — ของ 8.3 / 8.5 / 8.4 ไม่ใช่งานนี้
 - oracle ของคำถามจริงข้อใหม่ที่คำนวณเอง (ข้อ 1) — ส่งให้เจ้าของข้อมูล (NT-Report) ยืนยัน
 

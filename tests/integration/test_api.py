@@ -117,11 +117,14 @@ class TestHealthEndpoints:
         # Should return something (docs redirect or info)
         assert response.status_code in [200, 307]
 
-    def test_docs_endpoint(self, client):
-        """Test docs endpoint"""
-        response = client.get("/api/v1/docs")
+    def test_docs_are_closed_by_default(self, client):
+        """The full OpenAPI document listed every route, 90 of 115 admin, to anyone without a login.
+        Closed unless API_DOCS_ENABLED is set; the schema itself is still built for code that needs it."""
+        from app.main import app
 
-        assert response.status_code == 200
+        for path in ("/api/v1/openapi.json", "/api/v1/docs", "/api/v1/redoc"):
+            assert client.get(path).status_code == 404, path
+        assert "/api/v1/query/" in app.openapi()["paths"]  # tests and tooling still get it in-process
 
 
 class TestAuthenticatedChat:

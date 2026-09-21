@@ -30,6 +30,7 @@ reminder at startup when `engine=mssql`.
 - **`DATA_SOURCE_ALLOWED_ROOTS`** (.env, คั่นด้วย `,`; ค่าเริ่มต้นว่าง): directory ที่ `POST /admin/sources/register` อ่าน bundle **ใหม่**ได้ (เทียบด้วย realpath) — ว่าง = API ลงทะเบียนซ้ำได้เฉพาะโดเมนที่ลงไว้แล้ว; CLI ไม่ถูกจำกัด. เป็นค่าใน .env โดยตั้งใจ (ขอบเขตความปลอดภัยของ admin API เอง ไม่ให้แก้ผ่าน UI)
 - **Key ที่ผูก workspace/allowlist:** ใช้ได้เฉพาะ `/api/v1/query*`; context นอกสิทธิ์ = 403; context legacy อ่านได้เฉพาะ main view ที่ชั้น SQL — ออก key ของระบบภายนอกแบบนี้เสมอ (`docs/manuals/manual_api_keys.md`)
 - **`scope`** ใน `/api/v1/query`: บังคับที่ชั้น SQL; key ที่ context ไม่ประกาศ = 400 (`docs/PORTAL_INTEGRATION.md`)
+- **เอกสาร OpenAPI เต็มปิดเป็นค่าเริ่มต้น** (2026-09-21): `/api/v1/openapi.json`, `/docs`, `/redoc` = 404 เว้นแต่ตั้ง `API_DOCS_ENABLED=true` — เดิมเปิดโดยไม่ต้อง login และมีทุก route (admin 90 จาก 115) = แผนที่ของพื้นผิวที่โจมตีได้; endpoint ของ admin ยังต้อง auth ทุกตัวอยู่แล้ว ที่ปิดคือแผนที่ **ห้ามเปิดบน server ที่คนนอกเข้าถึงได้**; เอกสารสาธารณะที่คัดแล้วเป็นงานของ Plan 8.5
 - **Vanna brain ต่อ workspace:** `<VANNA_CHROMA_PATH>__<workspace>` (default ใช้ path เดิม) — backup/restore ต้องรวม directory เหล่านี้
 
 ## Plan 7 Phase 4.5 — Data protection (2026-09-19)
