@@ -1,5 +1,5 @@
 Plan 8 Phase 8.0 + 8.1 — ใช้เครื่องมือที่มีอยู่กับ `feed_*` ให้ครบ แล้ววางฐานโมเดลความรู้ (ที่มา + ความมั่นใจ + สถานะ)
-repo /Users/seal/Documents/GitHub/AI, branch main — ตรวจ `git status -sb` ก่อนเริ่ม (ตอนเขียน: **ahead 22 ยังไม่ push**, HEAD `421e9bb`)
+repo /Users/seal/Documents/GitHub/AI, branch main — ตรวจ `git status -sb` ก่อนเริ่มแล้วทำต่อบน HEAD ล่าสุดของ main (ตอนส่งมอบ 2026-09-21: push ครบแล้ว local = origin/main)
 commit ใหม่ห้าม push จนกว่าจะสั่ง; ห้าม rebase / force-push; ถ้า main มี commit ใหม่จาก session อื่นให้ทำต่อบนนั้น
 repo NT-Report (/Users/seal/Documents/GitHub/NT-Report) = **อ่านอย่างเดียว**
 
