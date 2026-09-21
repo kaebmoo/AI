@@ -211,3 +211,53 @@ sqlite3 "file:config.db?mode=ro" "PRAGMA quick_check; SELECT source, status, COU
 - ผลที่ควรเห็น = ตัวเลข §8.1 (ถ้า config ไม่ได้เปลี่ยนตั้งแต่ 18:02) · ไม่ต้อง restart เพื่อ migration อย่างเดียว (code ที่รันอยู่ไม่อ่านคอลัมน์ใหม่ — §8.2)
 - รันซ้ำหลัง restart ด้วย code ของ 8.1 เพื่อติดป้ายแถวที่ code เก่าเขียนระหว่างนั้น (idempotent) · ถ้าเจอ `database is locked` (server กำลังเขียน) = รันซ้ำได้
 - **ถอยกลับ:** ถอย code ไม่ต้องถอย DB · ถ้าจำเป็นต้องถอย DB จริง: หยุด server → `cp $D/config.db config.db` (เสียการแก้ config หลัง backup) → start server
+
+---
+
+## 9. กฎเดียวของตัวเขียนทุกตัว — ข้อ 9 (`ae1b1ad`, `fa37c24`, `c4dcce3`, `0a05000`)
+
+`app/services/provenance.py` — กฎเดียวที่ตัวเขียนทุกตัวเรียก:
+
+| ผู้เขียน | เปลี่ยนแถวที่มีอยู่ได้เมื่อ | ไม่ได้ = |
+|---|---|---|
+| คน (`manual`) | เสมอ — แถวเป็นของคนนั้น (แก้เฉพาะช่องที่ contract ไม่ประกาศ เช่น keywords / priority / กลุ่มคอลัมน์ = แถว `declared` ยังเป็น `declared`) | — |
+| contract (`declared`) | แถว `declared` ของตัวเอง หรือแถวของเครื่อง | ข้อเสนอเข้าคิว (D-C) — แถวของคนใช้ต่อ |
+| เครื่อง (`inferred` / `learned`) | แถวของเครื่องเท่านั้น | ข้อเสนอเข้าคิว |
+| ทุกคนยกเว้นคน | ไม่แตะแถว `rejected` | — |
+
+ที่มาไม่รู้ (NULL / `auto` เดิม) = ของคน · คิว `knowledge_proposals`: หนึ่งข้อเสนอที่รออยู่ต่อคีย์ต่อผู้เสนอ — ข้อเสนอใหม่**รวมทีละช่อง**เข้ากับที่รออยู่
+(ตัวเขียนของเครื่องสองตัวเสนอคนละช่องของแถวเดียวกันได้ — analyzer กับตัวตรวจกลุ่มคอลัมน์) · ข้อเสนอที่คนปฏิเสธแล้ว หรือที่รออยู่ด้วยเนื้อหาเดิม = ไม่เขียนซ้ำ
+
+| ตัวเขียน | ก่อน | หลัง |
+|---|---|---|
+| admin API ทุกตาราง, admin agent tools, hierarchy CRUD, context CRUD | ไม่บอกที่มา (hierarchy บังคับ `manual`) | `manual` / `active` · สร้าง keyword ที่เครื่องแค่เสนอไว้ = คนรับไป · รับระดับที่รออยู่ = ค่าที่ extract ไว้ใช้ได้ด้วย |
+| `datafeed_knowledge` (3 ฟังก์ชัน) | ลบแล้วใส่ใหม่ทุกครั้ง, ตั้ง `is_active=1` กลับ | `declared` ตามกฎ · ค่าไม่เปลี่ยน = ไม่เขียน (re-sync contract เดิมไม่เปลี่ยนแม้แต่เวลา) · ช่องของ admin ไม่แตะ · ที่ contract เลิกประกาศ = ลบเฉพาะแถวของ contract |
+| `gen_golden_from_controls.py` | ลบทั้ง category | `save_examples` — แถวของคนในหมวดเดียวกันอยู่ต่อ (golden 8 ข้อของ F11) |
+| `bootstrap_from_view` | ทับ level ของคนโดยไม่เปลี่ยนป้าย | `inferred` / **`proposed`** — รอคนรับ; ระดับของคน = ข้อเสนอ |
+| `extract_hierarchy.py` | เขียน label + `updated_at` ของ level ทุกรอบ | level: ใส่เมื่อยังไม่มีเท่านั้น · value: `inferred` ตามสถานะของ level; ของคนไม่แตะ |
+| context onboarding | `INSERT OR REPLACE` (แถวใหม่ — `workspace_id` / `source_id` หาย), golden ซ้ำทุกรอบ | upsert ที่แก้ได้เฉพาะแถวของเครื่อง + คำสั่งเสนอเข้าคิวเมื่อแถวเป็นของคน (ยังเป็นข้อความ SQL — หน้า admin preview แล้วส่งกลับ) · golden ใช้คำถามเป็นคีย์ · hierarchy / warnings ยังล้มด้วย NOT NULL เหมือนเดิม (8.2 เขียนใหม่) |
+| metadata propagation, analyzer import, กลุ่มคอลัมน์อัตโนมัติ | เติม / ทับ | แถวของเครื่องเติมได้, แถวของคน = ข้อเสนอ · analyzer import ย้ายไป session ของ config.db (ล้มมาตั้งแต่แยก DB) |
+| ตัวเรียนรู้ (scheduler) | auto-apply ≥ 0.8 (ไม่เคยถึง) + session ผิด DB | ไม่ auto-apply แล้ว: keyword ใหม่ = แถว `learned` / `proposed`; keyword ของคน = ข้อเสนอ |
+| `/chat/train` | session ผิด DB; user ทั่วไปปิด + ทับ golden ของ admin ได้ | config.db · admin = `manual` / `active` · user = `learned` / `proposed` ไม่แตะของคนอื่น |
+| feedback review, thumbs-up ของ admin | session ผิด DB, อ่าน `chat.sql_query` ที่ไม่มี / train โดยไม่มีแถว | config.db, `generated_sql` / สร้างแถว golden `manual` ก่อน train (อยู่รอด Sync Brain) |
+
+**ทำไม extract ไม่เสนอเมื่อค่าแม่ในข้อมูลไม่ตรงกับของคน** (ข้อความใน `scripts/extract_hierarchy.py` อ้างหมวดนี้): รุ่นแรกเสนอ — บนสำเนาของจริงได้ 123 ข้อเสนอ
+ใน `revenue_org` / `revenue` ซึ่ง **122 ข้อเป็นขยะ**: `parent_column` ของ `revenue_org` คือ `"GROUP"` ที่ `revenue_search` ไม่มี — SQLite อ่านชื่อในเครื่องหมายคำพูดที่ไม่ใช่คอลัมน์
+เป็น**ข้อความ** จึงได้ค่าแม่ `'GROUP'` ทุกแถว; ที่เหลือคือค่าที่มีหลายค่าแม่ในข้อมูล (ข้อมูลอ่านได้แถวละหนึ่งคู่) → ค่าแม่ที่อ่านจากข้อมูลไม่ใช่ข้อเท็จจริงแบบที่คนตัดสิน
+จึงไม่เสนอ (คิวที่ยาวด้วยขยะ = ไม่มีคิว, PLAN_8 §7) · **`parent_column = "GROUP"` ของ `revenue_org` เป็นบั๊กของข้อมูล config เดิม — เสนอแก้แยก**
+
+**test:** `tests/unit/test_provenance_{people,contract,machines,learner}.py` — ตัวเขียนแต่ละตัวรันซ้ำแล้วแถวของคน/contract เท่าเดิมทุกคอลัมน์
+
+## 10. ตัวอ่านใช้เฉพาะ `active` — ข้อ 10 (`c75af27`, `38b69c8`)
+
+- **กรอง `status = 'active'` เพิ่มจาก `is_active`:** ส่วนของ system prompt (metadata, กฎ, mapping, กฎลำดับชั้น), การตรวจระดับชั้น + ชื่อที่ระดับอื่นถือ
+  (ตัวอ่านใหม่ของ `e05b0f6`), value lookup, พจนานุกรมคำ, ตารางที่ context ใช้ได้, กฎตรวจ SQL, คำเตือนข้อมูล, Sync Brain (กฎ, mapping, doc, golden,
+  สรุปลำดับชั้นต่อ context), สิทธิ์ของ key (`allowed_contexts`, การผูก key, `GET /query/contexts`, allowlist ของ MCP facade), MCP metadata server (11 จุด)
+- **ไม่กรอง:** หน้า admin (ต้องเห็นข้อเสนอ — hierarchy คืน `status` ด้วยแล้ว), การผูก source / retention / workspace ของ context, dedup, config GC
+- **ด่านตอนเริ่ม server:** config DB ที่ยังไม่มีคอลัมน์ = ไม่ยอมเริ่ม พร้อมบอกคำสั่ง migrate — ตัวอ่านหลายตัวกลืน error แล้วคืนค่าว่าง
+  (ถ้าไม่มีด่าน DB ที่ลืม migrate จะทำให้ prompt ขาด schema / กฎ / mapping แบบเงียบ)
+- **ค่าคงที่ใน prompt path** (`38b69c8`): กฎข้อ 5 "ใช้ `year` และ `month` … `CAST(month AS INTEGER)`" (ไทย) / ข้อ 4 (อังกฤษ) → ชี้ไปที่หัวข้อ Date Handling
+  ที่บอกคอลัมน์เวลาของตารางนั้นเอง + คงวินัย CAST แบบทั่วไป · ตัวอย่างในprompt อธิบายผลไม่มีปีตายตัวแล้ว ("เดือนมกราคม", "รายไตรมาส") —
+  prompt ทุก context เปลี่ยน จึงวัดคำถามจริง + legacy ก่อน/หลัง (§11)
+- **test ที่ล้มบน code เดิม:** `tests/unit/test_provenance_readers.py` (ตัวอ่านทุกกลุ่มกับแถว active / proposed / rejected — ล้ม 4/4 บน `4eb2bbf`, ผ่านหลังแก้)
+  · `test_prompt_date_instructions.py` +2 (ล้ม 2/2 บน code เดิม)
