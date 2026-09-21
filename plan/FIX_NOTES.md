@@ -420,3 +420,20 @@
 5. **process เก่ากิน config ใหม่ไม่ได้** — PocketBase ที่รันมาตั้งแต่ 15 ก.ย. ยังใช้ `pb_hooks/*.js` ตัวเก่า
    ทั้งที่ไฟล์ถูกแก้แล้ว; ฝั่ง AI ก็เช่นกัน (query cache 30 นาทีไม่ผูกกับเวอร์ชันของ code) → restart หลัง deploy
 6. **`export_cleanup` ล้มทุกรอบ** บน `app.db` จริง: `no such table: report_exports` — ของเดิม ไม่เกี่ยวกับ go-live
+
+## จากคำถามจริงของ portal + การไล่ของที่ "ไม่อ่านคำอธิบายข้อมูล" (2026-09-20 ดึก → 2026-09-21)
+
+ผล: `plan/archive/RESULT_F11.md` §7–§8, `plan/archive/RESULT_P7_GOLIVE.md` §6 · แผนต่อ: `plan/PLAN_8_SELF_SERVICE_ONBOARDING.md`
+
+1. **ค่าคงที่ใน prompt path ชนะ metadata ทั้งชั้น** — `get_date_format()` รับชื่อตารางแล้วโยนทิ้ง คืน "ใช้ YEAR และ MONTH"
+   ให้ทุก context มาตั้งแต่ยุคที่มี context เดียว → 3 ใน 7 context ถูกสั่งให้ใช้คอลัมน์ที่ไม่มี. **ก่อนเติม metadata ให้ context ใหม่
+   ให้ค้นค่าคงที่ใน prompt path ก่อน** (เจออีกตัว: `REVENUE_VALUE` เป็น metric ปริยายของ pass 2)
+2. **contract ประกาศแล้ว แต่ตัวอ่านเดาเอง** — `is_summable` มาจาก dtype ทั้งที่ contract ประกาศ `agg: point_in_time` →
+   `SUM(revenue_ytd)` = 115,090 MB ทั้งที่กฎในข้อความก็อยู่ใน prompt แล้ว: **metadata ที่ขัดกับข้อความมีน้ำหนักกว่าข้อความ**.
+   `agg` อยู่ที่ `columns[].agg` (contract 2.3.2+) — `control_totals.measures` มีแค่ measure ที่ใช้กระทบยอด; key ไม่มี agg จึงยังต้องเช็ก dtype
+3. **ชื่อ scope key ≠ ชื่อคอลัมน์** — expense / ebt map `year_month` → `time_key`; prompt ที่เรียกด้วยชื่อ key พินงวดไว้กับคอลัมน์ที่ไม่มี
+4. **PocketBase:** handler ของ `routerAdd` รันใน goja runtime แยก **มองไม่เห็น function ระดับไฟล์** (`ReferenceError`) และ test แบบ node
+   ดักไม่ได้ → หลังแก้ hook ต้องยิงผ่าน PB จริง · PB **ไม่โหลด `.env` เอง** ต้อง start ผ่าน `scripts/serve.sh`
+5. **ชุดคำถามที่ทีมเขียนเองให้คะแนนเกินจริง** — ระบุเดือน/ปีครบเกือบทุกข้อ ได้ 8/10; ผู้ใช้จริงพิมพ์สั้น ไม่ระบุเวลา ใช้คำว่า "บริการ" ได้ 4/12
+6. **ยิงซ้ำแล้วได้เหมือนเดิม ≠ นิ่ง** — query cache 30 นาทีผูก scope + key: รอบที่ 2–3 เป็น cache hit (และ cache hit 20 ครั้งติดกันชน limit 20/นาที)
+7. **code ที่อ้างเอกสารต้องตรวจตอนเขียนเอกสาร** — code 5 จุดอ้าง `RESULT_F11 §8` ที่ยังไม่ได้เขียน อยู่หนึ่งวันเต็ม

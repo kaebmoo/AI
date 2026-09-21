@@ -302,12 +302,12 @@ E2E ผ่าน PB จริง (ข้อ 6 ของ prompt) · เปิด 
 | 09-20 22:0x | เขียน `ASSISTANT_*` ลง `pocketbase_0/.env` (ใช้ key id 4 ใบเดิม — ตามที่เจ้าของสั่ง) · restart PB ด้วย `scripts/serve.sh` | env ทั้ง 3 ตัวอยู่ใน process ของ PB; ยิงด้วย key จากไฟล์ได้ 200 |
 | 09-20 22:12–22:23 | ผู้ใช้กดถาม → **`ReferenceError: scopeMonths is not defined`** ×3 — PB รัน handler ใน goja runtime แยกที่มองไม่เห็น function ระดับไฟล์; test ของ hook เป็น node จึงไม่เคยดักได้ | `pb_data/auxiliary.db` `_logs` |
 | 09-20 22:31 | NT-Report แก้ (`adf9da6` helper ใน handler, `407eb81` map รหัส error ตรง ๆ, `83fad4e` บังคับ smoke test ผ่าน PB) | commit ฝั่ง NT-Report |
-| 09-20 22:33 → 23:01 | **ผู้ใช้จริงถาม 12 คำถาม** — ถูก 4/12 → แก้ฝั่ง AI 3 สาเหตุ → **10/12** | `RESULT_F11.md` §7 |
+| 09-20 22:33 → 23:01 | **ผู้ใช้จริงถาม 12 คำถาม** — ถูก 4/12 → แก้ฝั่ง AI 3 สาเหตุ → ตัวเลขถูก 9–10/12 · **แต่ปี พ.ศ. ในข้อความผิด 7/12 → ถูกครบ 4/12** (`RESULT_F11` §9) | `RESULT_F11.md` §7 |
 | 09-21 | NT-Report publish contract PATCH (`agg` ต่อคอลัมน์, ถ้อยคำ ebt, เกณฑ์ EBT9 = ตอบพร้อมป้าย) · ฝั่ง AI แก้ 4 จุดที่ไม่อ่านคำอธิบายข้อมูล | `RESULT_F11.md` §8 |
 
 **Exit criteria — อัปเดตจาก §5:** E3 / E4 / E7 **ผ่านบนของจริง** (คำถามจริงลง audit ครบทั้ง PB `assistant_ask` = `ok`
 และ AI `query_audit` channel `portal` พร้อม scope 20 งวด) · E6 ฝั่ง hook แก้แล้ว (`407eb81`) ยังไม่ได้ยิงจริงระหว่าง publish ·
-E8 รายนาที: **Redis หยุดไปแล้ว** ณ 2026-09-21 → fail-open อีกครั้ง · E9: `revenue` ผ่านด้วยคำถามจริง 10/12 แต่ชุดของทีมยัง 8/10
+E8 รายนาที: **Redis หยุดไปแล้ว** ณ 2026-09-21 → fail-open อีกครั้ง · E9: **ยังไม่ผ่าน** — คำถามจริงถูกครบทั้งตัวเลขและปีแค่ 4/12 (ตัวเลข 9/12, ปีในข้อความผิด 7/12), ชุดของทีม 8/10
 
 **ค้าง:** Redis · การตัดสินเรื่อง OpenAPI เต็มที่เปิดโดยไม่ต้อง login (`PLAN_8` §2) · commit ฝั่ง AI 20+ ตัวยังไม่ push ·
 คุณภาพ 4 ข้อ (`RESULT_F11` §7–§8) → ย้ายไปเป็น `PLAN_8` Phase 8.0
