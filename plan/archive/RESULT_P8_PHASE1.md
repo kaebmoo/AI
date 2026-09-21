@@ -1,6 +1,6 @@
 # RESULT Plan 8 Phase 8.1 — โมเดลความรู้: ที่มา + ความมั่นใจ + สถานะ
 
-**สถานะ (2026-09-21):** ⏸ ข้อ 7 เสร็จ (สำรวจ อ่านอย่างเดียว) — **รอเจ้าของตัดสิน §7.6 ก่อนข้อ 8** · ของจริงไม่ถูกแตะ
+**สถานะ (2026-09-21):** ข้อ 7 ✅ (เจ้าของตัดสิน §7.6 แล้ว) · ข้อ 8 migration ซ้อมบนสำเนาแล้ว (§8) — ของจริงยังไม่รัน · ของจริงไม่ถูกแตะ
 **prompt:** `plan/PROMPT_P8_PHASE1.md` · **แผน:** `plan/PLAN_8_SELF_SERVICE_ONBOARDING.md` §3, §5 8.1
 
 ---
@@ -129,7 +129,9 @@
 code เก่ายังทำงานได้ (ถอย code ไม่ต้องถอย DB) · DEFAULT ของ `master_hierarchy*.source` เดิม (`'auto'`) แก้ไม่ได้ถ้าไม่สร้างตารางใหม่ →
 code ใหม่ต้องเขียน `source` เองทุกครั้ง, ตัวอ่านถือ `auto` = `inferred`, และรัน migration ซ้ำหลัง restart เพื่อเก็บแถวที่ code เก่าเขียนระหว่างนั้น
 
-### 7.6 ต้องตัดสินก่อนข้อ 8
+### 7.6 ต้องตัดสินก่อนข้อ 8 — **เจ้าของตัดสินแล้ว 2026-09-21: ข้อ 1 = ก · ข้อ 2 = ก · ข้อ 3 = ก**
+
+(และ: ทำต่อได้ แต่รอ session อื่นที่แก้ `prompt_builder.py` / `hybrid_flow.py` / `hierarchy_context.py` / `thai_year.py` ค้างไว้ commit ก่อนถึงข้อ 10)
 
 1. **ข้อเสนอที่ชนแถวเดิมอยู่ที่ไหน** — PLAN §3.2–3.3 ให้ทุกแถวมี `status` และ "ขัดกัน = `proposed` เข้าคิว ระหว่างรอแถว `active` ใช้ต่อ"
    แต่ 8 ใน 9 ตารางมี UNIQUE ของคีย์ในตัวตาราง (§7.1) → แถว `proposed` ที่คีย์ซ้ำกับแถว `active` ใส่ตารางเดียวกันไม่ได้ (SQLite ถอด UNIQUE ไม่ได้ถ้าไม่สร้างตารางใหม่)
@@ -158,3 +160,54 @@ code ใหม่ต้องเขียน `source` เองทุกคร�
 - admin API ลบจริง 7 ตาราง (ขัดหลัก soft delete ของ `CLAUDE.md`); ลบ context ไม่ cascade
 - dead code: `context_router.py`, `vanna_service_draft.py`, `check_rule_violation` (อ่านกฎแล้วไม่ใช้)
 - scripts legacy ที่อันตรายถ้ารัน (`setup_rules_db.py`, `migrate_config_to_separate_db.py`) — §7.3
+
+---
+
+## 8. Migration — ข้อ 8 (ซ้อมบนสำเนาแล้ว · ของจริงยังไม่รัน)
+
+`scripts/migrate_knowledge_provenance.py` — idempotent, ตรวจคอลัมน์จริงก่อน ALTER (แบบ `migrate_workspaces.py`):
+- 9 ตารางได้ `source` / `status` (`NOT NULL DEFAULT 'active'`) / `confidence` — `master_hierarchy*` มี `source` อยู่แล้วจึงได้ 2 คอลัมน์ · **ADD COLUMN อย่างเดียว**
+- เติม `source` เฉพาะแถวที่ยังไม่รู้ที่มา (NULL / `auto`) ตาม §7.5 ด้วยกฎที่อ่านจาก registry — ไม่มีชื่อ context ในสคริปต์:
+  context ที่ผูก source ซึ่งมี contract = `declared` · metadata ของตารางที่ contract ลงทะเบียน = `declared` ·
+  doc `category='datafeed'` ของ context นั้น = `declared` · golden ที่ `added_by` ว่างใน category ของ context นั้น = `declared` ·
+  ระดับ hierarchy = `manual` · ค่า hierarchy `auto` = `inferred` · ที่เหลือ = `manual`
+- ตารางคิว `knowledge_proposals` (`table_name`, `row_key` JSON, `proposed` JSON, `source`, `confidence`, `reason`, `status`, `created_at`)
+  + unique index บางส่วน **หนึ่งข้อเสนอที่รออยู่ต่อคีย์ต่อผู้เสนอ** (`WHERE status = 'proposed'`)
+- test: `tests/unit/test_migrate_knowledge_provenance.py` (3 ข้อ — ค่าของแต่ละกลุ่ม, รันซ้ำไม่เปลี่ยน + trigger, คิวรับหนึ่งข้อเสนอต่อคีย์ต่อผู้เสนอ)
+
+### 8.1 ซ้อมบนสำเนาสด (จาก backup §0)
+
+| | ผล |
+|---|---|
+| รอบ 1 | +25 คอลัมน์ · ติดป้าย 2,444 แถว · ทุกแถว `active`, `confidence` NULL · คิว 0 แถว |
+| ค่าที่ได้ | contexts declared 4 / manual 5 · metadata declared 348 / manual 159 · rules manual 72 · golden declared 74 / manual 58 · mapping manual 192 · hierarchy manual 22 · values inferred 1,444 / manual 2,246 · warnings manual 1 · docs declared 71 / manual 5 |
+| รอบ 2 | ติดป้าย 0 แถว · dump ทั้งไฟล์เท่ากับหลังรอบ 1 |
+| เทียบก่อน/หลังทีละตาราง ทีละแถว | ทุกคอลัมน์เดิมของทุกแถวเท่าเดิม (รวม `updated_at`) — ต่างเฉพาะ `source` ของ hierarchy ตามที่ประกาศ (`auto`→`manual` 11, `auto`→`inferred` 1,444) · schema ต่างเฉพาะคอลัมน์ใหม่ + ตารางคิว + index · ตารางอื่นเท่าเดิมทุกแถว · `integrity_check` ok |
+
+**ที่เจอระหว่างซ้อมแล้วแก้:** `vanna_documentation` มี trigger ที่ตั้ง `updated_at` ใหม่ทุกครั้งที่ UPDATE → รุ่นแรกทำให้ `updated_at` ของ doc 76 แถวเปลี่ยน
+(ตัวตรวจจับได้) → migration ถอด trigger ระหว่างติดป้ายแล้วใส่กลับด้วย SQL เดิมใน transaction เดียวกัน (SQL ของ trigger เท่าเดิม, การแก้จริงยังประทับเวลา — มี test)
+
+### 8.2 code ที่รันอยู่ + DB ที่ migrate แล้ว = prompt เท่าเดิมทุกไบต์
+
+รัน `QueryEngine.query` จริงแบบ in-process (code ของ HEAD ใน worktree แยก = code บนของจริง) บนสำเนา — ดักที่ `httpx.AsyncClient.post`
+(ทางเดียวที่ provider ส่งออก) เก็บ body ที่จะส่งให้ LLM ทุกครั้ง แล้วตอบด้วยค่าตายตัว: คำถามจริงของ portal 15 ข้อ (scope ตาม hook) + golden legacy 49 ข้อ
+= **64 คำถาม / 159 LLM calls** (pass 1, pass 2, อธิบายผล) → **ก่อน vs หลัง migrate: 64/64 เท่ากันทุกไบต์** · รันซ้ำ DB เดิม: 64/64
+
+→ migration ขึ้นของจริงก่อน code ได้โดยคำตอบไม่เปลี่ยน · ถอย code ของ 8.1 **ไม่ต้องถอย DB**
+
+**บทเรียนการวัด — RAG ไม่นิ่งเอง:** Chroma ดึงเอกสารไม่เหมือนกันระหว่างรอบแม้ DB และ store เดียวกัน (golden legacy 4–6 ใน 14 ข้อได้ "Relevant Rules & Dictionary"
+ต่างกัน — ลำดับ/เอกสารที่ขอบ top-10 / threshold) → การเทียบรอบแรกโดยไม่ตรึง RAG เห็น "ต่าง" 14/64 ซึ่งเป็นเสียงรบกวนทั้งหมด ·
+วิธีเทียบ: บันทึกข้อความ RAG รอบแรก (คีย์ = brain ของ workspace + คำถาม — คำถาม "รายได้รวม" มีทั้งใน brain `nt-report` และ `default`) แล้วเล่นซ้ำในรอบถัดไป ·
+ข้อนี้ใช้กับ Exit ข้อ 11 ด้วย และอธิบายส่วนหนึ่งของ "โมเดลผันผวน ±1 ข้อ" ในการวัดคำถามจริง / legacy
+
+### 8.3 ของจริง — คำสั่งให้เจ้าของรัน (ยังไม่รัน)
+
+```bash
+cd /Users/seal/Documents/GitHub/AI
+D=~/nt-ai-backups/p8-1-migrate-$(date +%Y%m%d-%H%M%S) && mkdir -p $D && sqlite3 "file:config.db?mode=ro" ".backup $D/config.db" && sqlite3 $D/config.db "PRAGMA quick_check" && echo $D
+venv/bin/python scripts/migrate_knowledge_provenance.py
+sqlite3 "file:config.db?mode=ro" "PRAGMA quick_check; SELECT source, status, COUNT(*) FROM master_hierarchy_values GROUP BY 1, 2;"
+```
+- ผลที่ควรเห็น = ตัวเลข §8.1 (ถ้า config ไม่ได้เปลี่ยนตั้งแต่ 18:02) · ไม่ต้อง restart เพื่อ migration อย่างเดียว (code ที่รันอยู่ไม่อ่านคอลัมน์ใหม่ — §8.2)
+- รันซ้ำหลัง restart ด้วย code ของ 8.1 เพื่อติดป้ายแถวที่ code เก่าเขียนระหว่างนั้น (idempotent) · ถ้าเจอ `database is locked` (server กำลังเขียน) = รันซ้ำได้
+- **ถอยกลับ:** ถอย code ไม่ต้องถอย DB · ถ้าจำเป็นต้องถอย DB จริง: หยุด server → `cp $D/config.db config.db` (เสียการแก้ config หลัง backup) → start server
