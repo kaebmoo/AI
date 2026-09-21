@@ -33,6 +33,14 @@ reminder at startup when `engine=mssql`.
 - **เอกสาร OpenAPI เต็มปิดเป็นค่าเริ่มต้น** (2026-09-21): `/api/v1/openapi.json`, `/docs`, `/redoc` = 404 เว้นแต่ตั้ง `API_DOCS_ENABLED=true` — เดิมเปิดโดยไม่ต้อง login และมีทุก route (admin 90 จาก 115) = แผนที่ของพื้นผิวที่โจมตีได้; endpoint ของ admin ยังต้อง auth ทุกตัวอยู่แล้ว ที่ปิดคือแผนที่ **ห้ามเปิดบน server ที่คนนอกเข้าถึงได้**; เอกสารสาธารณะที่คัดแล้วเป็นงานของ Plan 8.5
 - **Vanna brain ต่อ workspace:** `<VANNA_CHROMA_PATH>__<workspace>` (default ใช้ path เดิม) — backup/restore ต้องรวม directory เหล่านี้
 
+## Plan 8.1 — ที่มา + สถานะของความรู้ (2026-09-21)
+
+- **Upgrade:** รัน `python scripts/migrate_knowledge_provenance.py` (idempotent) **ก่อน** start code ของ 8.1 — server ไม่ยอมเริ่มถ้า config DB ยังไม่มีคอลัมน์
+  (`config DB has no provenance columns on … — run: …`); รันซ้ำหลัง restart เพื่อติดป้ายแถวที่ code เดิมเขียนระหว่างนั้น · ลำดับที่ซ้อมแล้ว: `plan/archive/RESULT_P8_PHASE1.md` §12
+- ตัวอ่านที่ถึง prompt / RAG / routing / สิทธิ์ของ key ใช้เฉพาะแถว `status='active'` — ข้อเสนอของเครื่อง (`proposed`) และที่คนปฏิเสธ (`rejected`) ไม่ถึง LLM
+- **restart = ขึ้นทุก commit ของสาขาที่ server รัน** (server รันจาก working tree) — ก่อน restart ไล่ `git log <commit ที่รันอยู่>..HEAD` ว่ามี commit ที่ต้อง migrate ก่อนไหม
+- ถอย code ไม่ต้องถอย DB (เพิ่มคอลัมน์อย่างเดียว) แต่ code ก่อน 8.1 อ่าน `is_active` ไม่อ่าน `status` → ซ่อนข้อเสนอก่อน (`RESULT_P8_PHASE1` §12.3)
+
 ## Plan 7 Phase 4.5 — Data protection (2026-09-19)
 
 - **Upgrade:** รัน `python scripts/migrate_data_sources.py` + `python scripts/migrate_workspaces.py` อีกครั้ง (idempotent — เพิ่ม `data_sources.llm_data_policy` / `llm_provider_allowlist`, `workspaces.result_retention_days` / `store_result_data`); ตาราง `query_audit` (app DB) ถูกสร้างเองตอนใช้ครั้งแรก. Source เดิมและ source ใหม่ทุกตัว = `full` → พฤติกรรมไม่เปลี่ยนจนกว่า admin จะตั้ง

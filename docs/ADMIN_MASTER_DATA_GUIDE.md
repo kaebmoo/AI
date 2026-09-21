@@ -186,7 +186,7 @@ Keywords ที่ AI ใช้ LIKE ค้นหาแต่ไม่มี ali
 |---|---|---|
 | **ข้อมูลมาจาก** | ฐานข้อมูลจริง (view/table) | ไฟล์ CSV ที่ upload |
 | **ใช้เมื่อ** | ข้อมูลใน DB เปลี่ยน (เพิ่ม product ใหม่) | มีไฟล์ master data จากแหล่งอื่น |
-| **source** | `auto` | `manual` |
+| **source** | `inferred` (เดิม `auto`) | `manual` |
 | **ทับข้อมูลเก่า** | ไม่ทับ manual | ทับทุกอย่าง (เป็น manual) |
 | **ต้องกำหนด column** | ไม่ต้อง (อ่านจาก DB config) | ต้องกำหนดเอง |
 
@@ -212,7 +212,11 @@ python scripts/extract_hierarchy.py
 ```
 
 ### Q: กด Extract from Data แล้วข้อมูลหาย
-**A:** ไม่หาย — Extract เพิ่มเฉพาะค่าใหม่ (source=auto) ค่าที่ admin แก้เอง (source=manual) จะไม่ถูกทับ
+**A:** ไม่หาย — Extract เพิ่มเฉพาะค่าใหม่ (source=inferred) ค่าที่ admin แก้เอง (source=manual) จะไม่ถูกทับ
+
+### Q: ระดับที่ "Bootstrap from view" สร้าง ทำไม AI ยังไม่ใช้
+**A:** (Plan 8.1) ระดับที่เครื่องเดาเป็น `inferred` / `status='proposed'` — prompt ใช้เฉพาะ `active` จนกว่า admin จะรับ (บันทึกระดับนั้น = รับ;
+ค่าที่ extract ไว้ของระดับนั้นใช้ได้ด้วย) · ระดับที่คนทำไว้แล้วไม่ถูก bootstrap ทับ — ฉบับของเครื่องเข้าคิว `knowledge_proposals`
 
 ### Q: Import CSV ต้องทำทีละ level จริงหรือ?
 **A:** ผ่าน Web UI ต้องทำทีละ level เพราะต้องระบุ column mapping ถ้าต้องการ import ทั้ง hierarchy ทีเดียว ใช้ command line

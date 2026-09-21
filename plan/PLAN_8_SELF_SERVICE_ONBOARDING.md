@@ -1,6 +1,6 @@
 # Plan 8: Self-service — ต่อแหล่งข้อมูลเอง พร้อมตอบอัตโนมัติ คนตัดสินเฉพาะที่ระบบไม่แน่ใจ
 
-**สถานะ:** ✅ **8.0 เสร็จ + ขึ้นของจริง 2026-09-21** — คำถามจริง 4/12 → 8/12 (วัดบนสำเนา), legacy eval ไม่ลด, hierarchy `feed_revenue` + code ใหม่อยู่บนของจริง (`plan/archive/RESULT_P8_PHASE0.md`) · 8.1 ยังไม่เริ่ม · ข้อตัดสิน D-A / D-B / D-C ตัดสินแล้ว 2026-09-21 (§6) · prompt: 8.0 `plan/PROMPT_P8_PHASE0_1.md` · **8.1 `plan/PROMPT_P8_PHASE1.md`**
+**สถานะ:** ✅ **8.0 เสร็จ + ขึ้นของจริง 2026-09-21** — คำถามจริง 4/12 → 8/12 (วัดบนสำเนา), legacy eval ไม่ลด, hierarchy `feed_revenue` + code ใหม่อยู่บนของจริง (`plan/archive/RESULT_P8_PHASE0.md`) · ✅ **8.1 เสร็จบนสำเนา 2026-09-21** (`plan/archive/RESULT_P8_PHASE1.md`) — ของจริง: server ที่ restart 19:57 รัน 8.1 ครึ่งหนึ่งบน DB ที่ยังไม่ migrate (คำถามปกติ, หน้า admin 6 ตารางเสีย) → คำสั่งที่ซ้อมแล้วรอเจ้าของรัน (RESULT §12) · ข้อตัดสิน D-A / D-B / D-C ตัดสินแล้ว 2026-09-21 (§6) · prompt: 8.0 `plan/PROMPT_P8_PHASE0_1.md` · **8.1 `plan/PROMPT_P8_PHASE1.md`**
 **ต่อจาก:** Plan 7 — ครึ่งหลังของเส้นทางผู้ใช้ (ถามตอบผ่าน REST / MCP / Claude Desktop พร้อม scope, policy, audit, quota) **ทำเสร็จแล้ว**
 **เป็นฐานให้:** Plan 6 (Tier 3 multi-tenant / สมัครใช้เอง) — ยังเลื่อนตาม D8 (`PLAN_7` §12); แผนนี้ออกแบบให้ "tenant = workspace" จึงใช้ได้ทั้ง Tier 1 (ภายใน NT), Tier 2 (private deployment ต่อราย) และเป็นฐานของ Tier 3 เมื่อถึง trigger
 **หลักฐาน:** ทุกตัวเลขใน §2 วัดจาก `config.db` / code / server จริง 2026-09-21
@@ -99,6 +99,7 @@
 - ตัวเขียนทุกตัว (onboarding, `datafeed_knowledge`, hierarchy, ตัวเรียนรู้) ผ่านกฎเดียว: เครื่องไม่ทับคน, ขัดกัน = `proposed`
 - prompt ใช้เฉพาะ `active`
 - **Exit:** รันตัวเติมทุกตัวซ้ำสองรอบ → แถวของคน (`declared` / `manual`) ไม่เปลี่ยนแม้แต่ตัวเดียว (test)
+- ✅ **ผล (2026-09-21, บนสำเนา):** 9 ตาราง (รวม `vanna_documentation`) มี `source` / `status` / `confidence` + คิว `knowledge_proposals` สำหรับข้อเสนอที่ชนแถวเดิม (UNIQUE ในตัวตาราง — ข้อตัดสินของเจ้าของ) · ตัวเขียนทุกตัวผ่าน `app/services/provenance.py` · ตัวอ่านที่ถึง prompt / RAG / routing / สิทธิ์ของ key กรอง `active` + server ไม่ยอมเริ่มถ้า DB ยังไม่ migrate · ตัวเติมรันสองรอบแถวของคนไม่เปลี่ยน (test) · prompt เท่าเดิมทุกไบต์เมื่อทุกแถว active (ยกเว้นกฎข้อ 5 ที่แก้ตั้งใจ) · pytest 1161 · คำถามจริง 8/12 สองรอบ · legacy 7–8/37 = base วันเดียวกัน · ค่าคงที่ในตัวอย่างของ prompt อธิบายผลแก้แล้วทำให้ P11 หลุด → ถอย, ยังค้าง (RESULT §13)
 
 ### 8.2 — Pipeline เดียว ทุก source ทั้งสองโหมด (5–7 วัน) — หัวใจของ "อัตโนมัติตั้งแต่ต้นจนจบ"
 - `context_onboarding` อ่านผ่าน `source_resolver` (แบบที่ `hierarchy_service` ทำแล้ว) แทน `sqlite3.connect()`

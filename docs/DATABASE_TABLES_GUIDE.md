@@ -27,6 +27,26 @@
 
 ---
 
+## ที่มา + สถานะของความรู้ (Plan 8.1, 2026-09-21)
+
+9 ตาราง — `schema_contexts`, `schema_metadata`, `schema_business_rules`, `golden_examples`, `schema_semantic_mapping`,
+`master_hierarchy`, `master_hierarchy_values`, `data_warnings`, `vanna_documentation` — มี 3 คอลัมน์ (`scripts/migrate_knowledge_provenance.py`):
+
+| คอลัมน์ | ค่า |
+|---|---|
+| `source` | `declared` (contract / เจ้าของข้อมูล) · `manual` (คน) · `inferred` (ข้อมูล / profile / LLM) · `learned` (จากการใช้งานจริง) — NULL / `auto` เดิม = ของคน |
+| `status` | `active` (prompt / RAG / routing อ่าน) · `proposed` (รอคน) · `rejected` (คนปฏิเสธ) — `NOT NULL DEFAULT 'active'` |
+| `confidence` | 0–1 จากเครื่องที่เขียน · NULL = ไม่ได้บันทึก |
+
+- **กฎเดียวของตัวเขียน** (`app/services/provenance.py`): คนแก้ได้เสมอ · contract ทับได้เฉพาะแถว `declared` ของตัวเองหรือของเครื่อง ·
+  เครื่องทับได้เฉพาะของเครื่อง · ที่ทับไม่ได้ = ข้อเสนอเข้าคิว · ไม่มีใครยกเว้นคนแตะแถว `rejected`
+- **`knowledge_proposals`** — ข้อเสนอที่ชนแถวที่มีอยู่ (8 ใน 9 ตารางมีคีย์ UNIQUE จึงเก็บ `proposed` คู่กับ `active` คีย์เดียวกันไม่ได้):
+  `table_name`, `row_key` (JSON ของคีย์), `proposed` (JSON ของช่องที่เสนอ), `source`, `confidence`, `reason`, `status`, `created_at` ·
+  หนึ่งข้อเสนอที่รออยู่ต่อคีย์ต่อผู้เสนอ (partial unique index) — ฉบับใหม่รวมทีละช่อง · หน้า admin ของคิว = Plan 8.3
+- `is_active` ยังเป็นสวิตช์เปิด/ปิดของ admin แยกจาก `status` (`schema_metadata` ไม่มี `is_active`)
+
+---
+
 ## Multi-Context Architecture
 
 The system supports multiple data contexts (revenue, expense, pl_costtype, etc.) via the `schema_contexts` table. Each context has:
@@ -531,7 +551,7 @@ CREATE TABLE master_hierarchy (
     level_columns TEXT NOT NULL,        -- JSON array: คอลัมน์ที่เกี่ยวข้อง ["BUSINESS_GROUP"]
     detection_keywords TEXT NOT NULL,   -- JSON array: keywords สำหรับ detect level
     is_active BOOLEAN DEFAULT 1,
-    source TEXT DEFAULT 'auto',         -- 'auto' (extracted) หรือ 'manual' (admin)
+    source TEXT DEFAULT 'auto',         -- 'manual' (admin) · 'inferred' · 'declared' · 'learned' — DEFAULT เดิม 'auto' = ที่มาไม่รู้ (Plan 8.1)
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     parent_column TEXT,                 -- คอลัมน์ของ parent level (NULL สำหรับ top level)
@@ -579,7 +599,7 @@ WHERE BUSINESS_GROUP = 'Digital' AND PRODUCT_NAME = 'บริการ NT CLOUD
 
 - ป้องกัน "OR across levels" ที่ทำให้ตัวเลขพอง
 - DB-driven — admin เพิ่ม/แก้ hierarchy ได้โดยไม่ต้องแก้ code
-- `source` field แยก auto-extracted vs manual override
+- `source` / `status` แยกของคนกับที่เครื่องเดา — ระดับที่ bootstrap เสนอ = `proposed` จนกว่า admin รับ (Plan 8.1)
 - `detection_keywords` ช่วย AI detect ว่า user ถามเกี่ยวกับ level ไหน
 
 ---
@@ -600,7 +620,7 @@ CREATE TABLE master_hierarchy_values (
     value TEXT NOT NULL,                -- ค่าจริง (เช่น "Fixed Line & Broadband")
     parent_value TEXT,                  -- ค่า parent (NULL สำหรับ top level)
     aliases TEXT,                       -- JSON array: ชื่ออื่นๆ/keywords (เช่น ["digital"])
-    source TEXT DEFAULT 'auto',         -- 'auto' หรือ 'manual'
+    source TEXT DEFAULT 'auto',         -- 'inferred' (extract จากข้อมูล) หรือ 'manual' — status ตามระดับของมัน (Plan 8.1)
     is_active BOOLEAN DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(context_name, level, value)

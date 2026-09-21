@@ -1,6 +1,8 @@
 # RESULT Plan 8 Phase 8.1 — โมเดลความรู้: ที่มา + ความมั่นใจ + สถานะ
 
-**สถานะ (2026-09-21):** ข้อ 7 ✅ (เจ้าของตัดสิน §7.6 แล้ว) · ข้อ 8 migration ซ้อมบนสำเนาแล้ว (§8) — ของจริงยังไม่รัน · ของจริงไม่ถูกแตะ
+**สถานะ (2026-09-21 ค่ำ):** ข้อ 7–11 ✅ บนสำเนา (Exit §11 — legacy 7–8/37 เท่ากับ base วันเดียวกัน) · ยังไม่ push ·
+**ของจริง: server ที่ restart 19:57 รัน 8.1 ข้อ 8–9 บน config DB ที่ยังไม่ migrate — คำถามปกติ, หน้า admin 6 ตารางเสีย (§12.1)** →
+คำสั่งขึ้น + ถอยกลับ ซ้อมครบลำดับบนสำเนาของสภาพนั้นแล้ว (§12.2–12.3) — รอเจ้าของรัน
 **prompt:** `plan/PROMPT_P8_PHASE1.md` · **แผน:** `plan/PLAN_8_SELF_SERVICE_ONBOARDING.md` §3, §5 8.1
 
 ---
@@ -200,7 +202,9 @@ code ใหม่ต้องเขียน `source` เองทุกคร�
 วิธีเทียบ: บันทึกข้อความ RAG รอบแรก (คีย์ = brain ของ workspace + คำถาม — คำถาม "รายได้รวม" มีทั้งใน brain `nt-report` และ `default`) แล้วเล่นซ้ำในรอบถัดไป ·
 ข้อนี้ใช้กับ Exit ข้อ 11 ด้วย และอธิบายส่วนหนึ่งของ "โมเดลผันผวน ±1 ข้อ" ในการวัดคำถามจริง / legacy
 
-### 8.3 ของจริง — คำสั่งให้เจ้าของรัน (ยังไม่รัน)
+### 8.3 ของจริง — คำสั่งให้เจ้าของรัน (ยังไม่รัน) — **ใช้ §12.2 แทน**
+
+> เขียนตอน server ยังรัน code ก่อน 8.1 · ตั้งแต่ 19:57 server รัน `4eb2bbf` ซึ่ง ORM อ่านคอลัมน์ใหม่แล้ว — ข้อ "ไม่ต้อง restart / code ที่รันอยู่ไม่อ่านคอลัมน์ใหม่" ข้างล่างจึงไม่จริงอีก (§12.1)
 
 ```bash
 cd /Users/seal/Documents/GitHub/AI
@@ -257,7 +261,170 @@ sqlite3 "file:config.db?mode=ro" "PRAGMA quick_check; SELECT source, status, COU
 - **ด่านตอนเริ่ม server:** config DB ที่ยังไม่มีคอลัมน์ = ไม่ยอมเริ่ม พร้อมบอกคำสั่ง migrate — ตัวอ่านหลายตัวกลืน error แล้วคืนค่าว่าง
   (ถ้าไม่มีด่าน DB ที่ลืม migrate จะทำให้ prompt ขาด schema / กฎ / mapping แบบเงียบ)
 - **ค่าคงที่ใน prompt path** (`38b69c8`): กฎข้อ 5 "ใช้ `year` และ `month` … `CAST(month AS INTEGER)`" (ไทย) / ข้อ 4 (อังกฤษ) → ชี้ไปที่หัวข้อ Date Handling
-  ที่บอกคอลัมน์เวลาของตารางนั้นเอง + คงวินัย CAST แบบทั่วไป · ตัวอย่างในprompt อธิบายผลไม่มีปีตายตัวแล้ว ("เดือนมกราคม", "รายไตรมาส") —
-  prompt ทุก context เปลี่ยน จึงวัดคำถามจริง + legacy ก่อน/หลัง (§11)
+  ที่บอกคอลัมน์เวลาของตารางนั้นเอง + คงวินัย CAST แบบทั่วไป — prompt ทุก context เปลี่ยน จึงวัดคำถามจริง + legacy ก่อน/หลัง (§11)
+- **ตัวอย่าง "เดือนมกราคม 2568" / "Q1/2567" ใน prompt อธิบายผล — แก้แล้วถอยกลับ (`d06d497`):** เอาปีออกแล้ว P11 ("บริการใดมีการเติบโตมากสุด") ไม่บอกงวดที่เทียบ
+  2 รอบจาก 2 · คงตัวอย่างเดิมผ่าน 4 จาก 4 (§11.1) → ยังเป็นค่าคงที่ใน prompt path — ค้าง (§13 ข้อ 2)
 - **test ที่ล้มบน code เดิม:** `tests/unit/test_provenance_readers.py` (ตัวอ่านทุกกลุ่มกับแถว active / proposed / rejected — ล้ม 4/4 บน `4eb2bbf`, ผ่านหลังแก้)
-  · `test_prompt_date_instructions.py` +2 (ล้ม 2/2 บน code เดิม)
+  · `test_prompt_date_instructions.py` +1 (ล้มบน code เดิม)
+
+---
+
+## 11. Exit 8.1 — วัดบนสำเนา (`d06d497` + test `7e929c0`)
+
+| เกณฑ์ | ผล |
+|---|---|
+| ตัวเติมทุกตัวรันซ้ำสองรอบ → แถว `declared` / `manual` ไม่เปลี่ยนแม้แต่ตัวเดียว | ✅ test ของตัวเติม 10 ตัว: contract (`sync_knowledge` — dump ทั้งไฟล์หลังรอบสองเท่ารอบแรก ไม่เปลี่ยนแม้แต่เวลา), `save_examples` (รอบสอง = 0 / 0 / 0), bootstrap, extract, onboarding, คัดลอก metadata ไป view, analyzer import, กลุ่มคอลัมน์อัตโนมัติ, ตัวเรียนรู้, `/chat/train` ของ user → แถวของคน / contract เท่าเดิมทุกคอลัมน์ (`tests/unit/test_provenance_{contract,machines,learner}.py` — 3 ตัวที่เดิมรันรอบเดียวได้รอบสองใน `7e929c0`) |
+| prompt ของคำขอเดิมเท่าเดิมทุกไบต์เมื่อทุกแถว `active` | ✅ วิธี §8.2 (in-process, ดักที่ `httpx`, RAG ตรึงด้วยบันทึก/เล่นซ้ำ) 64 คำถาม / 159 calls บน DB ที่ migrate แล้ว: code เดิมสองรอบ 64/64 · **ตัวอ่าน `c75af27` เทียบ `4eb2bbf` 64/64 เท่ากันทุกไบต์** · **`d06d497` เทียบ `4eb2bbf`: ต่างเฉพาะ 2 บรรทัดของกฎข้อ 5 (ไทย) ใน 106 จาก 159 calls** — ที่เหลือรวม prompt อธิบายผลเท่าเดิมทุกไบต์ (prompt อังกฤษไม่อยู่ในเส้นทางของ provider ที่ใช้ — ไม่มีใน 159 calls) |
+| pytest ผ่าน | ✅ **1161 passed, 3 skipped** (1110 ก่อน 8.1) · lint ของ CI (`ruff check app mcp_servers --select E9,F63,F7,F82`) ผ่าน · unused import ในไฟล์ที่ 8.1 แตะไม่เพิ่มแม้แต่ตัวเดียว |
+| คำถามจริงไม่ต่ำกว่า 8/12 | ✅ `d06d497` **8/12 · 10/15 ทั้งสองรอบ** (F3, F4) + บนสำเนาของจริงหลังซ้อมขึ้น 8/12 · 10/15 (L1) · code เดียวกันก่อน commit 7, 7 (F1, F2 — ข้อที่หลุดเป็นข้อความอธิบายผล §11.1) · base วันเดียวกัน 9, 8, 7, 8 |
+| legacy ไม่ต่ำกว่า 8/37 | ⚠ **7/37, 8/37** — base บนสำเนาเดียวกันวันเดียวกัน **7/37, 7/37** · ข้อที่ผ่านชุดเดียวกันทุกรอบ (#25 #26 #29 #30 #32 #35 #38) + #27 ผ่านหนึ่งรอบของ 8.1 → ไม่มี regression; 8/37 ของ 8.0 อยู่ในช่วงผันผวน ±1 ของ base (§11.2) |
+
+### 11.1 คำถามจริง — ทุกรอบ (server ซ้อม restart ก่อนทุกรอบ · สำเนาที่ migrate แล้ว · key ซ้อม)
+
+B = base (`0078dcf` + fix 8.0 สาม commit = branch `p8.0-without-8.1`) · X = `38b69c8` (กฎข้อ 5 + ตัวอย่างไม่มีปี) · F1–F2 = code ของ `d06d497` ก่อน commit ·
+F3–F4 = `d06d497` · L0 / L1 / R1 / R2 = รอบบนสำเนาของจริง §12 (L0 = สภาพของจริงตอนนี้ · L1 = หลังซ้อมขึ้น · R1 / R2 = ถอยกลับระดับ 1 / 2)
+
+| ข้อ | B1 | B2 | B3 | B4 | X1 | X2 | F1 | F2 | F3 | F4 | L0 | L1 | R1 | R2 |
+|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
+| P01 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| P02 | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| P03 | ✓ | ✓ | ✗ | ✗ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ |
+| P04 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| P05 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| P06 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| P07 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| P08 | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| P09 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| P10 | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| P11 | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ |
+| P12 | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
+| P13 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| P14 | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| P15 | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **P01–P12** | **9** | **8** | **7** | **8** | **7** | **7** | **7** | **7** | **8** | **8** | **8** | **8** | **6** | **9** |
+| ทั้ง 15 | 11 | 10 | 9 | 9 | 9 | 9 | 9 | 9 | 10 | 10 | 10 | 10 | 8 | 11 |
+
+- **หลุดทุกรอบทุก code:** P02, P08, P10, P14 (ข้อค้างจาก 8.0)
+- **P11** หลุดเฉพาะ X (2/2) — "ไม่บอกฐาน (ราย product ส.ค. 2569 เทียบ ส.ค. 2568)" = ตัวอย่างที่เอาปีออกทำให้ข้อความไม่บอกงวดที่เทียบ → ถอย (`d06d497`) ·
+  R1 หลุดด้วยเหตุอื่น: โมเดลจัดอันดับด้วยยอดเพิ่ม (บาท) แทนอัตรา %
+- **P03 / P04** หลุดที่ข้อความเท่านั้น — SQL และตัวเลขเหมือนรอบที่ผ่าน: P03 เขียน "ปี 2566" หนึ่งประโยคขณะที่ทุกเดือนเขียน 2569 (เกิดบน base ด้วย: B3, B4),
+  P04 เขียน "ประมาณ 6,630 ล้านบาท" แทน 6,630.81
+- **P12 "ค่าใช้จ่ายมีไหม"** (`feed_revenue` ไม่มีค่าใช้จ่าย): ผ่านเมื่อโมเดลเขียน `SELECT NULL AS "ค่าใช้จ่าย"`, หลุดเมื่อรวมรายได้แล้วบอกว่าไม่มีข้อมูลค่าใช้จ่าย
+  ("ปฏิเสธแต่มีตัวเลข") · **code ที่ไม่มีกฎข้อ 5 ใหม่ 3/7 · มี 0/7** (Fisher ด้านเดียว p ≈ 0.10) — กับกฎใหม่ SQL ใช้ `year_month = 202608` แทน
+  `year = 2026 AND CAST(month AS INTEGER) = 8` · 8.0 วัดข้อนี้บนของจริงได้ 0/5 และเป็นข้อค้างของเจ้าของ ("ต้องเป็นกฎของ context") → §13 ข้อ 1
+
+### 11.2 legacy eval (`run_eval --legacy`, in-process บนสำเนาสดแยกรอบ, สลับ base / 8.1)
+
+| รอบ | code | exact | value | รวม / 37 | golden_broken |
+|---|---|---:|---:|---:|---:|
+| lb1 | base | 5 | 2 | 7 | 12 |
+| la1 | `38b69c8` | 5 | 2 | 7 | 12 |
+| lb2 | base | 5 | 2 | 7 | 12 |
+| la2 | `38b69c8` | 6 | 2 | 8 | 12 |
+
+prompt SQL ของ `38b69c8` = ของ `d06d497` (ต่างกันเฉพาะ prompt อธิบายผล ซึ่ง legacy ไม่ให้คะแนน) · ข้อที่เปลี่ยนแบบของความผิด (ผิดทั้งสองฝั่ง):
+#2 `generation_failed` (UNION ที่มี ORDER BY / LIMIT ในแต่ละส่วน — คำถามไม่มีเวลา), #39 `execution_failed` (provider `ReadTimeout`)
+
+---
+
+## 12. ของจริง — สถานะ + คำสั่ง (ซ้อมครบลำดับบนสำเนาของสภาพจริงแล้ว)
+
+### 12.1 สภาพตอนนี้ — server รัน 8.1 ข้อ 8–9 บน config DB ที่ยังไม่ migrate
+
+| เวลา | |
+|---|---|
+| 19:02–19:21 | 8.1 ข้อ 8–9 ลง `main` (`c574cf9` … `0a05000`) — ORM ของ 6 ตารางประกาศ `source` / `status` / `confidence`, ตัวเขียนเขียนคอลัมน์ใหม่ |
+| 19:38 | session 8.0 commit fix หลังขึ้นของจริงต่อท้าย (`3b216ab`, `e05b0f6`, `d273529`, `4eb2bbf`) — คำสั่งขึ้นใน `RESULT_P8_PHASE0` §10 = "ไม่มีการเขียน DB — restart แบบเดิม" |
+| 19:57:32 | เจ้าของ restart port 8000 (PID 74986) → โหลด **`4eb2bbf` = fix 8.0 + 8.1 ข้อ 8–9** บน config DB **ที่ยังไม่ migrate** · ไม่มี app ที่แก้ค้างในไฟล์ขณะนั้น (แก้ตัวอ่านเริ่ม 20:01) |
+| 14:53 → ตอนเขียน | ไม่มีคำถามจริงเข้ามา (`query_audit` ล่าสุด #281) |
+
+**ผลกระทบ — วัดบนสำเนาที่จำลองสภาพนี้:** server `4eb2bbf` + config DB ของจริง (backup แบบ `mode=ro` 21:04) + สลับไฟล์เป็น `d06d497` ใต้ server ที่รันอยู่ (= ไฟล์บนดิสก์ของจริงตอนนี้)
+- **คำถามของ portal ปกติ** — 15/15 ตอบ ไม่มี error, 8/12 · 10/15 (L0) · ทุก module ในเส้นทางคำถามโหลดตอนเริ่ม server (ตรวจ `sys.modules` หลัง startup) = code ของ `4eb2bbf`
+- **เสีย:** ทุกทางที่อ่าน/เขียน 6 ตารางผ่าน ORM → `no such column` — หน้า admin ของ mappings / rules / golden / warnings / vanna docs / schema columns,
+  ปุ่มแก้ SQL ใน chat, review feedback, thumbs-up ของ admin · config GC (log WARNING) · ตัวเรียนรู้ (log, ไม่เขียนอะไร) ·
+  คำเตือนข้อมูล: ตัวโหลดกลืน error แล้วใช้ชุดตายตัว ซึ่งเท่ากับชุดใน DB (`OTHER_REVENUE_NOT_NET` ตัวเดียว) → คำตอบไม่ต่าง
+- **จะเสียเมื่อถูกเรียกครั้งแรก:** onboarding (`context_onboarding` โหลดตอนใช้ = ไฟล์ของ `d06d497`) · MCP metadata server ถ้า process ลูกเริ่มใหม่
+- **ไม่มีข้อมูลเสีย** — ทุกทางที่เสียคือ error ไม่ใช่การเขียนผิด
+- **สาเหตุ:** server รันจาก working tree ของ `main` → restart = ขึ้นทุก commit บน `main` · commit ที่ต้อง migrate ก่อนลง `main` ก่อน migrate ของจริง
+  และคำสั่ง restart ของอีกงานไม่ได้ไล่ `git log <code ที่รันอยู่>..HEAD` (บทเรียน — `FIX_NOTES`)
+
+### 12.2 ขึ้นของจริง — คำสั่งให้เจ้าของรัน
+
+```bash
+cd /Users/seal/Documents/GitHub/AI
+# 1. backup สด (อ่านผ่าน connection mode=ro) + ตรวจ
+D=~/nt-ai-backups/p8-1-golive-$(date +%Y%m%d-%H%M%S) && mkdir -p $D && sqlite3 "file:config.db?mode=ro" ".backup $D/config.db" && sqlite3 "file:app.db?mode=ro" ".backup $D/app.db" && sqlite3 $D/config.db "PRAGMA quick_check" && sqlite3 $D/app.db "PRAGMA quick_check" && echo $D
+# 2. migrate — ขณะ server เดิมยังรัน (หน้า admin ของ code ที่รันอยู่กลับมาใช้ได้ทันที)
+venv/bin/python scripts/migrate_knowledge_provenance.py
+# 3. restart port 8000 แบบเดิม: Ctrl-C ใน terminal ของมัน แล้ว
+venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+# 4. หลัง server ขึ้น (terminal อื่น) — ติดป้ายแถวที่ code เดิมเขียนระหว่างข้อ 2–3 (idempotent)
+venv/bin/python scripts/migrate_knowledge_provenance.py
+```
+- **ที่ควรเห็น** (สำเนาของจริง 21:04): ข้อ 2 = `Added …` + `Labelled 2444 row(s) whose source was unknown` + contexts declared 4 / manual 5 · metadata declared 348 / manual 159 ·
+  rules manual 72 · golden declared 74 / manual 58 · mapping manual 192 · hierarchy manual 22 · values inferred 1,444 / manual 2,246 · warnings manual 1 ·
+  docs declared 71 / manual 5 (ตรงกับ §8.1 ทุกตัว) · ข้อ 4 = `Labelled 0 row(s)` (มากกว่า 0 ได้ถ้ามีคนแก้ config ระหว่างข้อ 2–3)
+- **ตรวจหลัง restart:** log มี `Application startup complete` — ถ้าข้อ 2 ไม่ได้รัน server จะไม่เริ่มและบอก
+  `config DB has no provenance columns on … — run: venv/bin/python scripts/migrate_knowledge_provenance.py` ·
+  คำถามจริงถัดไป `sqlite3 "file:app.db?mode=ro" "SELECT id, created_at, context_name, row_count, error FROM query_audit ORDER BY id DESC LIMIT 3"` → `error` ว่าง · หน้า admin mappings เปิดได้
+- **ผลที่ซ้อมได้ (ลำดับเดียวกันบนสำเนา):** ข้อ 2 ขณะ server `4eb2bbf` รัน → คำถามใหม่ 3 ข้อที่ไม่อยู่ใน cache ตอบ 200 · ข้อ 3 ด่านเริ่ม server ผ่าน ·
+  ข้อ 4 ติดป้าย 0 · portal 8/12 · 10/15 ไม่มี `no such column` และไม่มี WARNING ของ config GC (L1)
+- **ให้ข้อ 3 ตามข้อ 2 ทันที:** code ที่รันอยู่ (`4eb2bbf`) มีตัวเรียนรู้ของ 8.1 (เขียนแถว `learned` / `proposed` ที่ `is_active = 1`) แต่ยังไม่มีตัวอ่านที่กรอง `status` —
+  ตัวเรียนรู้รัน 30 วินาทีหลังเริ่ม server แล้วทุก 6 ชม. (ครั้งถัดไป ~01:58, ~07:58) ถ้าข้อ 2 กับ 3 คร่อมรอบนั้น ข้อเสนอของมันเข้า prompt จนกว่าจะ restart
+
+### 12.3 ถอยกลับ — ซ้อมแล้วทั้งสองระดับ
+
+```bash
+cd /Users/seal/Documents/GitHub/AI
+# ก. ทุกระดับ: ซ่อนข้อเสนอจาก code ก่อน 8.1 (อ่าน is_active ไม่อ่าน status)
+for t in schema_contexts schema_business_rules golden_examples schema_semantic_mapping master_hierarchy master_hierarchy_values data_warnings vanna_documentation; do sqlite3 config.db "UPDATE $t SET is_active = 0 WHERE status != 'active'"; done
+# ข. code — ระดับ 1: ถอยตัวอ่าน + กฎข้อ 5 (= code ที่รันอยู่ตอนนี้)
+git checkout 4eb2bbf -- app mcp_servers scripts
+#    หรือ ระดับ 2: ถอย 8.1 ทั้งหมด (= 8.0 + fix ของมัน — branch ในเครื่อง ไม่ได้ push)
+git checkout p8.0-without-8.1 -- app mcp_servers scripts
+# ค. restart port 8000 แบบเดิม
+```
+- ซ้อมบนสำเนาที่ migrate แล้ว: ระดับ 1 → 6/12 · 8/15 (R1 — P03 ข้อความ, P11 โมเดลเลือกยอดเพิ่มแทนอัตรา) · ระดับ 2 + ก. → 9/12 · 11/15 (R2) ·
+  ก. บนสำเนาวันนี้เปลี่ยน 0 แถว (ยังไม่มีข้อเสนอ) · `schema_metadata` ไม่มี `is_active` — 8.1 ไม่เขียนแถว `proposed` ลงตารางนี้ (ข้อเสนอไปคิว)
+- ระดับ 2 ทิ้งไฟล์ที่ 8.1 เพิ่มไว้ (`app/services/provenance.py`, `scripts/migrate_knowledge_provenance.py`) — code เดิมไม่ import
+- **ไม่ต้องถอย DB** (คอลัมน์เพิ่มอย่างเดียว — code เดิม + DB ที่ migrate แล้ว = prompt เท่าเดิม §8.2) · ถ้าต้องการ DB ก่อน migrate จริง:
+  หยุด server → `cp $D/config.db config.db` (เสียการแก้ config หลัง backup) → start
+- **กลับมาใช้ 8.1:** `git checkout main -- app mcp_servers scripts` + restart (migration ยังอยู่)
+- `git revert d06d497 38b69c8 c75af27` ได้ code เท่ากับระดับ 1 ทุกไบต์ (ตรวจแล้ว) · revert ทั้ง 8.1 ชนที่ไฟล์ผลนี้ → ใช้ `git checkout` แทน
+
+### 12.4 ของจริงที่ยังไม่ได้ทำ
+- migration / restart — รอเจ้าของ (§12.2) · push — ยังไม่ได้สั่ง
+- key ของ portal (id 4) ไม่ได้แตะ · port 8000 ไม่ถูกเรียกเลย — ทุกการวัดบน port 8001 + สำเนา · ของจริงอ่านแบบ `mode=ro` เท่านั้น (backup 21:04, `query_audit`, schema)
+
+---
+
+## 13. ค้าง / เสนอ — ไม่แก้เอง
+
+1. **กฎข้อ 5 กับ P12** (§11.1) — คง `38b69c8` (ความขัดกันของ `feed_ebt` / `feed_expense` / `pl_costtype` หายไป) แล้วทำ P12 เป็นกฎของ context ตามข้อค้างเดิม ·
+   หรือถอย `38b69c8` + `d06d497` = P12 กลับเป็น coin flip แต่ความขัดกันกลับมา · ข้อเสนอ: คง
+2. **ตัวอย่างปีใน prompt อธิบายผล** ("เดือนมกราคม 2568", "Q1/2567") ยังเป็นค่าคงที่ใน prompt path — เอาปีออกตรง ๆ ทำให้ P11 หลุด → ทางเลือก: ตัวอย่างที่ใช้งวดอ้างอิงของคำขอ
+   (ค่าเดียวกับ `hybrid_flow.scope_note`) — ต้องวัดคำถามจริงสองรอบขึ้นไป
+3. ค่าคงที่ที่เหลือจาก §7.4 ไม่ได้แตะใน 8.1: `hybrid_flow.py` "ปี 2569" ใน `scope_note`, `datafeed_knowledge.py` ตัวอย่าง พ.ศ. 2568 → `202501` ใน `instruction_th`
+4. จาก §7.7 + ระหว่างซ้อม: ของทดสอบในของจริง (golden 41–50 + `TEST_001`) · `parent_column = "GROUP"` ของ `revenue_org` (§9) · onboarding NOT NULL (8.2) ·
+   `RunOnboarding.dry_run = False` · `import_master_data.py` ชี้ business DB · admin ลบจริง 7 ตาราง ·
+   **`extract_hierarchy.py` ล้มที่ `revenue_gl`** (`AttributeError: 'int' object has no attribute 'lower'` — `aliases.add(value.lower())` ตั้งแต่ 2026-03-07; รันทุก context แล้วหยุดกลางทาง)
+5. หน้า admin ยังไม่มีคิว `knowledge_proposals` ให้รับ / ปฏิเสธ (8.3) — วันนี้ 0 แถว · ข้อเสนอของตัวเรียนรู้จะรอใน DB
+6. ข้อค้างของเจ้าของจาก prompt: BG8, ย่อหน้า "ข้อเสนอแนะ…" ท้ายคำตอบ, retention ของคำตอบใน chat, oracle ที่คำนวณเอง, `-ER` ของ EXP4, push
+
+---
+
+## commit
+
+| commit | ข้อ |
+|---|---|
+| `80a0ce5` | 7 — สำรวจ 7 ตาราง |
+| `c574cf9` | 8 — คอลัมน์ที่มา / สถานะ / ความมั่นใจ + คิว (migration) |
+| `ae1b1ad` | 9 — ตัวเขียนของคน + กฎเดียว |
+| `fa37c24` | 9 — contract ทับการประกาศของตัวเอง, ของคนเข้าคิว |
+| `c4dcce3` | 9 — เครื่องเปลี่ยนได้เฉพาะของเครื่อง |
+| `0a05000` | 9 — ตัวเขียนที่ไม่เคยทำงานเขียน config.db ตามกฎ |
+| `c75af27` | 10 — ตัวอ่านใช้เฉพาะ `active` + ด่านเริ่ม server |
+| `38b69c8` | 10 — กฎ SQL ไม่ตั้งชื่อคอลัมน์เวลาเอง |
+| `df51e8c` | เอกสาร §9–10 |
+| `d06d497` | 10 — ถอยตัวอย่างปีใน prompt อธิบายผล (วัดแล้ว) |
+| `7e929c0` | 11 — ตัวเติม 3 ตัวรันสองรอบใน test |

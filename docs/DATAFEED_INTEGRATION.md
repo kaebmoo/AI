@@ -132,6 +132,10 @@ logic อยู่ที่ `app/services/datafeed_knowledge.py` (`gen_docs_from
   (compare-and-set บน `data_sources.knowledge_sha`) + `mark_brain_dirty()` + ล้าง query cache — ไม่ต้องรันอะไร
 - instruction + กฎ + metadata มีผลกับ request ถัดไปทันที (อ่านจาก config DB ตรง); docs ใน Vanna รอ admin กด Sync Brain
 - re-sync ล้ม (เช่น yaml เสีย) = คง knowledge เดิม, log error, request ไม่ล้ม
+- **ที่มาของแถว (Plan 8.1):** ทุกแถวที่ contract เขียน = `source='declared'` · re-sync ด้วย contract เดิม = ไม่เขียนอะไรเลย (ไม่เปลี่ยนแม้แต่เวลา) ·
+  contract ฉบับใหม่ทับได้เฉพาะแถว `declared` ของตัวเอง (ที่เลิกประกาศ = ลบเฉพาะแถวของ contract) · แถวที่ admin แก้ (`manual`) ไม่ถูกทับ —
+  ฉบับของ contract เข้าคิว `knowledge_proposals` รอคนตัดสิน (D-C) และแถวของ admin ใช้ต่อ · เปิด/ปิด context เป็นของ admin (re-sync ไม่ตั้ง `is_active=1` กลับแล้ว) ·
+  golden จาก control totals (`gen_golden_from_controls.py`) = `declared` — ตัวอย่างที่คนรับไว้ในหมวดเดียวกันอยู่ต่อ (`plan/archive/RESULT_P8_PHASE1.md` §9)
 - keywords/priority ของ context ตั้งตอนสร้างครั้งแรกเท่านั้น — admin แก้ได้ ไม่ถูกทับ
   (default: คำโดเมน + marker `feed`/`datafeed`/`dashboard`/`แดชบอร์ด`, priority 1 → router เลือก feed เฉพาะเมื่อคำถามมี marker;
   portal ส่ง `context` มาตรง ไม่ผ่าน router)
