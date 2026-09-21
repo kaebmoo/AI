@@ -6,7 +6,10 @@ A score that reads only the numbers in `data` called these 10/12 while the text 
 Buddhist-era year in 7 of them (plan/archive/RESULT_F11.md §9) — so a question passes only when:
 
   numbers  the rows in `data` carry the oracle's values (±0.01 million baht)
-  years    every year the answer text names is a year of the answer (พ.ศ. = ค.ศ. + 543)
+  said     the text states the figure it answers with, to the digits it writes — a text that said
+           "1 ล้านบาท" over rows of 3,434.07 passed on `data` alone
+  years    every year the answer text names is a year of the oracle's answer (พ.ศ. = ค.ศ. + 543) —
+           never widened by the cells of the response (a count of 2025 is not the year 2568)
   base     a question that names no period gets an answer that says which period it used
 
 Ask a server that runs on COPIES of config.db / app.db with a practice key made on that copy — never
@@ -34,9 +37,15 @@ QUESTIONS = Path(__file__).with_name("portal_real_questions.json")
 RESULTS_DIR = PROJECT_ROOT / "eval_results"
 LIVE_PORT = 8000  # the server the portal uses
 TOL = 0.01 + 1e-9  # million baht, and percentage points
-# a year standing alone — not a digit run of an amount ("12,568.3") or a period key ("202608")
-_BE = re.compile(r"(?<![\d,.])(25[67]\d)(?![\d,.])")
-_CE = re.compile(r"(?<![\d,.])(20[23]\d)(?![\d,.])")
+# a year standing alone — not a digit run of an amount ("12,568.3") or a period key ("202608"); it may end
+# a sentence or a list ("ปี 2568, 2569.")
+_BE = re.compile(r"(?<!\d)(?<!\d[.,])(25[67]\d)(?!\d)(?![.,]\d)")
+_CE = re.compile(r"(?<!\d)(?<!\d[.,])(20[23]\d)(?!\d)(?![.,]\d)")
+# a figure as the text writes it: "3,434.07 ล้านบาท", "**6,631** ล้านบาท", "2.7 หมื่นล้านบาท", "82.09%"
+_FIGURE = re.compile(r"(?<![\d.,])(\d[\d,]*(?:\.(\d+))?)[\s*]*(ล้านล้าน|แสนล้าน|หมื่นล้าน|พันล้าน|ล้าน|แสน|หมื่น|พัน)?"
+                     r"[\s*]*(บาท|%)?")
+_SCALE = {"ล้านล้าน": 1e12, "แสนล้าน": 1e11, "หมื่นล้าน": 1e10, "พันล้าน": 1e9, "ล้าน": 1e6, "แสน": 1e5, "หมื่น": 1e4,
+          "พัน": 1e3}
 
 
 # ── what the user sees ─────────────────────────────────────
@@ -61,18 +70,19 @@ def _has(row: dict, target: float, percent: bool = False) -> bool:
     return any(abs(c - target) <= TOL for n in _numbers(row) for c in (n, n * scale))
 
 
-def _data_years(data: list) -> set:
-    """Years the rows themselves carry (a year column or a YYYYMM period)."""
-    years = set()
-    for row in data:
-        for n in _numbers(row):
-            if float(n).is_integer():
-                n = int(n)
-                if 2000 <= n <= 2099:
-                    years.add(n)
-                elif 200001 <= n <= 209912:
-                    years.add(n // 100)
-    return years
+def _states(answer: str, target: float, percent: bool = False) -> bool:
+    """The text writes target — million baht, or a percent — to the digits it shows (the oracle's own ±TOL on
+    top): "6,631 ล้านบาท" states 6,630.81 and "1 ล้านบาท" states nothing near 3,434.07. A sign said in words
+    ("ลดลง 3.81%") has no minus to read, so magnitudes are compared."""
+    unit_size = 1 if percent else 1e6
+    for number, decimals, scale, unit in _FIGURE.findall(answer):
+        if percent != (unit == "%") or not (percent or scale or unit):
+            continue
+        size = _SCALE.get(scale, 1)
+        slack = 0.5 * 10 ** -len(decimals) * size + TOL * unit_size
+        if abs(float(number.replace(",", "")) * size - abs(target) * unit_size) <= slack:
+            return True
+    return False
 
 
 def _key_in(row: dict, key: list) -> bool:
@@ -113,12 +123,25 @@ def check_numbers(alt: dict, data: list) -> tuple:
     return not bad, f"ไม่พบ {bad[:4]}" if bad else ""
 
 
-def check_text(alt: dict, answer: str, data: list, time_in_question: bool) -> tuple:
+def check_said(alt: dict, answer: str) -> tuple:
+    """(ok, note) — the text states the figure it answers with: every value (and the percent) of a
+    single-figure answer, the top of a ranking. A list of months is read from `data` alone."""
+    if "values" in alt:
+        want = [(v, False) for v in alt["values"]] + ([(alt["percent"], True)] if alt.get("percent") is not None else [])
+    elif alt.get("ordered"):
+        want = [(alt["rows"][0]["value"], False)]
+    else:
+        return True, ""
+    missing = [f"{v}%" if percent else v for v, percent in want if not _states(answer, v, percent)]
+    return not missing, f"ข้อความไม่บอกยอด {missing}" if missing else ""
+
+
+def check_text(alt: dict, answer: str, time_in_question: bool) -> tuple:
     """(years_ok, base_ok, note)"""
     if alt.get("refusal"):
         ok = all(word in answer for word in alt["refusal"])
         return True, ok, "" if ok else f"ข้อความไม่บอกว่า{''.join(alt['refusal'])}"
-    allowed_be = set(alt["years_be"]) | {y + 543 for y in _data_years(data)}
+    allowed_be = set(alt["years_be"])
     said_be = {int(y) for y in _BE.findall(answer)}
     said_ce = {int(y) for y in _CE.findall(answer)}
     wrong = sorted((said_be - allowed_be) | {y + 543 for y in said_ce if y + 543 not in allowed_be})
@@ -139,9 +162,11 @@ def score(question: dict, response: dict) -> dict:
     alt, num_ok, num_note = next((r for r in results if r[1]), results[0])
     if response.get("error"):
         num_ok, num_note = False, f"error {response['error']}"
-    years_ok, base_ok, text_note = check_text(alt, answer, data, question["time_in_question"])
-    return {"ok": num_ok and years_ok and base_ok, "numbers": num_ok, "years": years_ok, "base": base_ok,
-            "matched": alt["base"] if num_ok else None, "note": "; ".join(n for n in (num_note, text_note) if n)}
+    said_ok, said_note = check_said(alt, answer)
+    years_ok, base_ok, text_note = check_text(alt, answer, question["time_in_question"])
+    return {"ok": num_ok and said_ok and years_ok and base_ok, "numbers": num_ok, "said": said_ok, "years": years_ok,
+            "base": base_ok, "matched": alt["base"] if num_ok else None,
+            "note": "; ".join(n for n in (num_note, said_note, text_note) if n)}
 
 
 # ── asking ─────────────────────────────────────────────────
@@ -169,17 +194,18 @@ def report(spec: dict, answers: dict) -> str:
             continue
         s = score(q, resp)
         mark = lambda b: "✓" if b else "✗"  # noqa: E731
-        lines.append(f"{q['id']} {mark(s['ok'])} num{mark(s['numbers'])} ปี{mark(s['years'])} ฐาน{mark(s['base'])}"
-                     f"  {q['question'][:40]}{'  — ' + s['note'] if s['note'] else ''}")
+        lines.append(f"{q['id']} {mark(s['ok'])} num{mark(s['numbers'])} ยอด{mark(s['said'])} ปี{mark(s['years'])}"
+                     f" ฐาน{mark(s['base'])}  {q['question'][:40]}{'  — ' + s['note'] if s['note'] else ''}")
         for subset in ("all", "P01-P12") if int(q["id"][1:]) <= 12 else ("all",):
-            t = totals.setdefault(subset, {"n": 0, "ok": 0, "numbers": 0, "years": 0})
+            t = totals.setdefault(subset, {"n": 0, "ok": 0, "numbers": 0, "said": 0, "years": 0})
             t["n"] += 1
             t["ok"] += s["ok"]
             t["numbers"] += s["numbers"]
+            t["said"] += s["said"]
             t["years"] += s["years"] and s["base"]
     for subset, t in totals.items():
         lines.append(f"[{subset}] ถูกครบ {t['ok']}/{t['n']} · ตัวเลข {t['numbers']}/{t['n']}"
-                     f" · ปี+ฐานในข้อความ {t['years']}/{t['n']}")
+                     f" · ยอดในข้อความ {t['said']}/{t['n']} · ปี+ฐานในข้อความ {t['years']}/{t['n']}")
     return "\n".join(lines)
 
 
