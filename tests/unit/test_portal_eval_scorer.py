@@ -32,13 +32,19 @@ def test_amounts_and_period_keys_are_not_years():
     assert s["years"], s
 
 
-def test_bg8_raw_ytd_is_wrong_strict_and_right_only_when_lenient():
-    ranked = SPEC["P10"]["accept"]
-    raw = next(a for a in ranked if a.get("lenient"))
-    data = [{"product_name": r["key"][0][0], "รายได้": r["value"] * 1e6} for r in raw["rows"]]
+def test_bg8_is_net_or_left_out_never_a_sum_of_months():
+    """Owner 2026-09-21: other income's months do not add up to its year to date, and a business view
+    need not count it. A ranking that sums BG8's months fails; one without BG8 passes."""
+    net = next(a for a in SPEC["P10"]["accept"] if "ไม่รวม BG8" not in a["base"])
+    core = next(a for a in SPEC["P10"]["accept"] if "ไม่รวม BG8" in a["base"])
     answer = "10 บริการที่มีรายได้สูงสุดปี 2569"
-    assert not score(SPEC["P10"], {"answer": answer, "data": data})["ok"]
-    assert score(SPEC["P10"], {"answer": answer, "data": data}, lenient=True)["ok"]
+    rows = lambda alt: [{"product_name": r["key"][0][0], "รายได้": r["value"] * 1e6} for r in alt["rows"]]  # noqa: E731
+    raw = rows(net)
+    raw[2] = {"product_name": "รายได้อื่น", "รายได้": 2476.07e6}  # Jan–Aug added up, not the year to date
+    assert raw[2]["product_name"] == net["rows"][2]["key"][0][0]
+    assert not score(SPEC["P10"], {"answer": answer, "data": raw})["ok"]
+    assert score(SPEC["P10"], {"answer": answer, "data": rows(net)})["ok"]
+    assert score(SPEC["P10"], {"answer": answer, "data": rows(core)})["ok"]
 
 
 def test_refusal_passes_only_without_amounts():

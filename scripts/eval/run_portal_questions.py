@@ -133,10 +133,9 @@ def check_text(alt: dict, answer: str, data: list, time_in_question: bool) -> tu
     return not wrong, base_ok, "; ".join(notes)
 
 
-def score(question: dict, response: dict, lenient: bool = False) -> dict:
+def score(question: dict, response: dict) -> dict:
     answer, data = response.get("answer") or "", response.get("data") or []
-    alts = [a for a in question["accept"] if lenient or not a.get("lenient")]
-    results = [(a, *check_numbers(a, data)) for a in alts]
+    results = [(a, *check_numbers(a, data)) for a in question["accept"]]
     alt, num_ok, num_note = next((r for r in results if r[1]), results[0])
     if response.get("error"):
         num_ok, num_note = False, f"error {response['error']}"
@@ -168,20 +167,18 @@ def report(spec: dict, answers: dict) -> str:
         resp = answers.get(q["id"])
         if resp is None:
             continue
-        s, s_len = score(q, resp), score(q, resp, lenient=True)
+        s = score(q, resp)
         mark = lambda b: "✓" if b else "✗"  # noqa: E731
         lines.append(f"{q['id']} {mark(s['ok'])} num{mark(s['numbers'])} ปี{mark(s['years'])} ฐาน{mark(s['base'])}"
-                     f"{' (lenient ✓)' if s_len['ok'] and not s['ok'] else ''}  {q['question'][:40]}"
-                     f"{'  — ' + s['note'] if s['note'] else ''}")
+                     f"  {q['question'][:40]}{'  — ' + s['note'] if s['note'] else ''}")
         for subset in ("all", "P01-P12") if int(q["id"][1:]) <= 12 else ("all",):
-            t = totals.setdefault(subset, {"n": 0, "ok": 0, "lenient": 0, "numbers": 0, "years": 0})
+            t = totals.setdefault(subset, {"n": 0, "ok": 0, "numbers": 0, "years": 0})
             t["n"] += 1
             t["ok"] += s["ok"]
-            t["lenient"] += s_len["ok"]
             t["numbers"] += s["numbers"]
             t["years"] += s["years"] and s["base"]
     for subset, t in totals.items():
-        lines.append(f"[{subset}] ถูกครบ {t['ok']}/{t['n']} (lenient {t['lenient']}) · ตัวเลข {t['numbers']}/{t['n']}"
+        lines.append(f"[{subset}] ถูกครบ {t['ok']}/{t['n']} · ตัวเลข {t['numbers']}/{t['n']}"
                      f" · ปี+ฐานในข้อความ {t['years']}/{t['n']}")
     return "\n".join(lines)
 
