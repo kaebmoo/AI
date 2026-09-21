@@ -232,7 +232,12 @@ def lookup_values_from_question(service: Any, question: str, context_name: str, 
 
 
 def detect_hierarchy_level(question: str, context_name: str) -> Optional[Dict]:
-    hierarchy = get_column_hierarchies().get(context_name)
+    return detect_level(question, get_column_hierarchies().get(context_name))
+
+
+def detect_level(question: str, hierarchy: Optional[List[Dict]], ignore: frozenset = frozenset()) -> Optional[Dict]:
+    """The level whose detection keywords the question contains (the parent when several do).
+    `ignore`: keywords that cannot name a level here — lowercase."""
     if not hierarchy:
         return None
 
@@ -240,6 +245,8 @@ def detect_hierarchy_level(question: str, context_name: str) -> Optional[Dict]:
     matched_levels: Dict[int, tuple] = {}
     for level_info in hierarchy:
         for keyword in level_info["detection_keywords"]:
+            if keyword.lower() in ignore:
+                continue
             if keyword.lower() in question_lower:
                 level = level_info["level"]
                 if level not in matched_levels or len(keyword) > matched_levels[level][0]:
@@ -252,6 +259,21 @@ def detect_hierarchy_level(question: str, context_name: str) -> Optional[Dict]:
 
     parent_level = min(matched_levels.keys())
     return matched_levels[parent_level][1]
+
+
+def format_level_note(hierarchy: Optional[List[Dict]], detected_level: Optional[Dict]) -> str:
+    """The level the question's own words name ("บริการ" → the product level), whether or not value lookup
+    found a value for it. The level used to be worked out only next to found values, so "รายได้ บริการ
+    10 อันดับแรก" — nothing to look up — was ranked per business group or service group (RESULT_F11 §7).
+    Columns and labels come from master_hierarchy; no level named = "" (the prompt as before)."""
+    if not hierarchy or not detected_level:
+        return ""
+    chain = " > ".join(f"{level['label_th']} (`{level['columns'][0]}`)"
+                       for level in sorted(hierarchy, key=lambda level: level["level"]))
+    primary, *others = detected_level["columns"]
+    code = f" (รหัสที่ผู้ใช้พิมพ์มา: {' / '.join(f'`{c}`' for c in others)})" if others else ""
+    return (f"\n**ระดับชั้นที่คำถามพูดถึง: {detected_level['label_th']} → คอลัมน์ `{primary}`**{code} (ลำดับชั้น: {chain}) — "
+            f"จัดอันดับ / แยกราย / กรองในระดับนี้ด้วยคอลัมน์ของระดับนี้ ห้ามตอบด้วยคอลัมน์ของระดับอื่นแทน\n")
 
 
 def format_value_matches(value_matches: List[Dict], hierarchy=None, detected_level=None) -> str:

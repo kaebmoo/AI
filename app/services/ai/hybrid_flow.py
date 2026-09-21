@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, cast
 
 from app.providers.base import ConfidenceResult, QueryResult, RetryStatus
 from app.providers.chart_postprocessor import postprocess_chart_result
-from app.services.ai.hierarchy_context import get_column_hierarchies
+from app.services.ai.hierarchy_context import detect_level, format_level_note, get_column_hierarchies
 from app.services.ai.thai_year import fix_explanation
 from app.services.ai.trace import new_trace, record_usage
 
@@ -194,11 +194,12 @@ def build_initial_user_prompt(
     context_thai: str,
     rag_context: str,
     value_lookup_text: str,
+    level_note: str = "",
 ) -> str:
     return f"""คำถาม: {question}
 
 **บริบท:** ข้อมูล{context_thai} (ใช้ตาราง {context_table})
-{scope_note()}
+{scope_note()}{level_note}
 {rag_context}
 
 {value_lookup_text}
@@ -567,6 +568,7 @@ async def build_first_attempt_prompt(
     conversation_id: Optional[str] = None,
     intent_state_enabled: bool = False,
     required_columns: Optional[List[str]] = None,
+    domain_words: Optional[List[str]] = None,
 ) -> tuple[str, bool]:
     async def _rag_task() -> str:
         try:
@@ -595,13 +597,18 @@ async def build_first_attempt_prompt(
     rag_context = rag_context or ""
 
     value_lookup_text = ""
-    detected_level = None
-    hierarchy = None
+    # The level the question names is worked out whether or not value lookup found anything: it used to
+    # sit behind `if value_matches:`, so a question with nothing to look up ("รายได้ บริการ 10 อันดับแรก")
+    # never got it and was answered at another level (RESULT_F11 §7)
+    hierarchy = get_column_hierarchies().get(context_name)
+    detected_level = detect_hierarchy_level(question, context_name) if hierarchy else None
+    # a word the context is routed by names its measure, not a level: "ค่าใช้จ่ายรายฝ่าย" is not a question
+    # about expense items (legacy eval #29/#32 went to the account level when this was left in)
+    named_level = detect_level(question, hierarchy, frozenset(w.lower() for w in domain_words or []))
+    if named_level:
+        logger.info("Hierarchy: level %s (%s)", named_level["level"], named_level["label_en"])
+    level_note = format_level_note(hierarchy, named_level)
     if value_matches:
-        hierarchy = get_column_hierarchies().get(context_name)
-        detected_level = detect_hierarchy_level(question, context_name)
-        if hierarchy and detected_level:
-            logger.info("Hierarchy: level %s (%s)", detected_level["level"], detected_level["label_en"])
         value_lookup_text = format_value_matches(value_matches, hierarchy=hierarchy, detected_level=detected_level)
 
     current_two_pass_enabled = two_pass_enabled
@@ -631,6 +638,7 @@ async def build_first_attempt_prompt(
             cheap_model=cheap_model,
             trace=trace,
             previous_intent=previous_intent,
+            level_note=level_note,
         )
         if intent_state_enabled and intent_json:
             from app.services.ai import intent_state
@@ -649,6 +657,7 @@ async def build_first_attempt_prompt(
                 value_matches=value_matches if value_lookup_text else None,
                 hierarchy=hierarchy,
                 detected_level=detected_level,
+                level_note=level_note,
             )
             if on_status:
                 on_status(RetryStatus(attempt, max_retries, "generating", "Generating SQL (Pass 2)"))
@@ -663,6 +672,7 @@ async def build_first_attempt_prompt(
             context_thai=context_thai,
             rag_context=rag_context,
             value_lookup_text=value_lookup_text,
+            level_note=level_note,
         )
 
     return user_prompt, current_two_pass_enabled
@@ -1029,6 +1039,7 @@ async def query_hybrid(
                 conversation_id=conversation_id,
                 intent_state_enabled=intent_state_enabled,
                 required_columns=required_columns,
+                domain_words=(temp_schema.get_context_info(context_name) or {}).get("keywords"),
             )
         else:
             user_prompt = build_retry_user_prompt(
@@ -1172,6 +1183,7 @@ async def extract_intent(
     cheap_model: Optional[str] = None,
     trace=None,
     previous_intent: Optional[Dict] = None,
+    level_note: str = "",
 ) -> Optional[Dict]:
     del context_name
 
@@ -1184,7 +1196,7 @@ async def extract_intent(
 คำถามใหม่ (follow-up): {question}
 
 **บริบท:** ข้อมูล{context_thai} (ใช้ตาราง {context_table}){intent_table_hint(context_table)}
-{scope_note()}
+{scope_note()}{level_note}
 
 ---
 **Task:** อัปเดต intent เดิมตามคำถามใหม่ — คงค่า filter/dimension ที่ไม่ถูกกล่าวถึงไว้ตามเดิม (inherit) และเปลี่ยนเฉพาะส่วนที่คำถามใหม่ระบุ
@@ -1194,7 +1206,7 @@ async def extract_intent(
         prompt_header = f"""คำถาม: {question}
 
 **บริบท:** ข้อมูล{context_thai} (ใช้ตาราง {context_table}){intent_table_hint(context_table)}{history_context}
-{scope_note()}
+{scope_note()}{level_note}
 {rag_context}
 
 ---
@@ -1289,6 +1301,7 @@ def build_pass2_prompt(
     value_matches: Optional[List[Dict]] = None,
     hierarchy: Optional[List[Dict]] = None,
     detected_level: Optional[Dict] = None,
+    level_note: str = "",
 ) -> str:
     intent_dimensions = {dimension.lower() for dimension in intent.get("dimensions", [])}
 
@@ -1338,7 +1351,7 @@ def build_pass2_prompt(
     return f"""คำถาม: {question}
 
 **บริบท:** ข้อมูล{context_thai} (ใช้ตาราง {context_table})
-{scope_note()}
+{scope_note()}{level_note}
 ---
 **Structured Intent (วิเคราะห์จากคำถามแล้ว):**
 - Intent Type: {intent.get('intent_type', 'aggregation')}

@@ -120,7 +120,7 @@ def match_status(expected, actual) -> str:
 # ── Golden examples + expected execution ──────────────────
 
 
-def load_golden_examples(limit=None, context_filter=None):
+def load_golden_examples(limit=None, context_filter=None, legacy=False):
     from app.config import settings
     conn = sqlite3.connect(settings.CONFIG_DB_URL.replace("sqlite:///", ""))
     conn.row_factory = sqlite3.Row
@@ -129,6 +129,8 @@ def load_golden_examples(limit=None, context_filter=None):
     if context_filter:
         sql += " AND category = ?"
         params.append(context_filter)
+    if legacy:  # the contexts that were there before the file sources: what a change to a shared path must not lower
+        sql += " AND category NOT LIKE 'feed\\_%' ESCAPE '\\'"
     sql += " ORDER BY id"
     if limit:
         sql += f" LIMIT {int(limit)}"
@@ -177,11 +179,11 @@ def known_contexts():
 # ── Eval loop ──────────────────────────────────────────────
 
 
-async def run_eval(provider=None, context_filter=None, limit=None):
+async def run_eval(provider=None, context_filter=None, limit=None, legacy=False):
     from app.services.mcp_client import MCPClientService
     from app.services.query_engine import QueryEngine, clear_query_cache
 
-    examples = load_golden_examples(limit=limit, context_filter=context_filter)
+    examples = load_golden_examples(limit=limit, context_filter=context_filter, legacy=legacy)
     contexts = known_contexts()
     print(f"Loaded {len(examples)} golden examples (contexts in DB: {sorted(contexts)})")
 
@@ -442,6 +444,7 @@ def main():
     parser.add_argument("--provider", default=None, help="Provider (default: admin default)")
     parser.add_argument("--context", default=None, help="Filter by golden category")
     parser.add_argument("--limit", type=int, default=None, help="Run only N examples")
+    parser.add_argument("--legacy", action="store_true", help="Only golden examples outside feed_* (the legacy contexts)")
     parser.add_argument("--compare", default=None, help="Path to BASELINE.json to diff against")
     parser.add_argument("--cross-domain", default=None, metavar="JSON",
                         help="Questions across contexts (e.g. scripts/eval/cross_domain_golden.json) instead of golden_examples")
@@ -450,7 +453,8 @@ def main():
     if args.cross_domain:
         records = asyncio.run(run_cross_domain(args.cross_domain, provider=args.provider))
     else:
-        records = asyncio.run(run_eval(provider=args.provider, context_filter=args.context, limit=args.limit))
+        records = asyncio.run(run_eval(provider=args.provider, context_filter=args.context, limit=args.limit,
+                                         legacy=args.legacy))
     summary = summarize(records, args.provider)
     latencies = sorted(r["latency_s"] for r in records if r.get("latency_s") is not None)
     if latencies:  # nearest-rank percentiles
