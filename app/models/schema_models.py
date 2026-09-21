@@ -5,14 +5,22 @@ SQLAlchemy models for schema metadata, semantic mappings, and business rules.
 Used by Admin API and SchemaService for AI context management.
 """
 
-from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, Index, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, Float, Index, UniqueConstraint
 from sqlalchemy.dialects.sqlite import JSON
 from datetime import datetime
 from app.db.base_class import ConfigBase
 from app.core.time_utils import utcnow
 
 
-class SchemaMetadata(ConfigBase):
+class ProvenanceMixin:
+    """Plan 8.1 — where a row of knowledge came from and whether it is in use (app/services/provenance.py).
+    Added to the live tables by scripts/migrate_knowledge_provenance.py; prompt and RAG read status 'active' only."""
+    source = Column(String(20), nullable=True)  # declared / manual / inferred / learned; NULL = unknown = a person's
+    status = Column(String(20), nullable=False, default="active", server_default="active")  # active / proposed / rejected
+    confidence = Column(Float, nullable=True)  # 0-1 from the machine that wrote it
+
+
+class SchemaMetadata(ProvenanceMixin, ConfigBase):
     """
     Stores column metadata for AI context.
     Contains information about each column in the revenue database.
@@ -66,7 +74,7 @@ class SchemaMetadata(ConfigBase):
         }
 
 
-class SchemaSemanticMapping(ConfigBase):
+class SchemaSemanticMapping(ProvenanceMixin, ConfigBase):
     """
     Maps keywords (abbreviations, business terms) to SQL conditions.
     Enables AI to understand abbreviations like 'นป.' or terms like 'อสังหาริมทรัพย์'.
@@ -152,7 +160,7 @@ class ViewColumnMapping(ConfigBase):
         }
 
 
-class SchemaBusinessRule(ConfigBase):
+class SchemaBusinessRule(ProvenanceMixin, ConfigBase):
     """
     SQL generation rules for AI.
     Contains rules like 'use || instead of CONCAT in SQLite'.
@@ -194,7 +202,7 @@ class SchemaBusinessRule(ConfigBase):
         }
 
 
-class DataWarningModel(ConfigBase):
+class DataWarningModel(ProvenanceMixin, ConfigBase):
     """
     Data warning definitions for data quality alerts.
     Replaces hardcoded DATA_WARNINGS list in warning_detector.py.
@@ -252,7 +260,7 @@ class QueryComplexityPattern(ConfigBase):
     )
 
 
-class VannaDocumentation(ConfigBase):
+class VannaDocumentation(ProvenanceMixin, ConfigBase):
     """
     Manually authored knowledge documents for Vanna RAG.
     Replaces static file dependency on docs/DATABASE_TABLES_GUIDE.md.

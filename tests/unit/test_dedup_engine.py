@@ -7,6 +7,7 @@ import pytest
 import sqlite3
 
 from app.services.dedup_engine import DedupEngine
+from tests.unit import knowledge_db
 
 
 @pytest.fixture
@@ -52,6 +53,7 @@ def dedup_db(tmp_path):
 
     conn.commit()
     conn.close()
+    knowledge_db.add_provenance(db_path)  # Plan 8.1 columns the models select
     return db_path
 
 

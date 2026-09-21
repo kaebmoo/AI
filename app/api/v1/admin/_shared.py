@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models.schema_models import SchemaMetadata
+from app.services.provenance import ACTIVE, INFERRED
 from app.services.schema_service import SchemaService
 from app.core.time_utils import utcnow
 
@@ -34,6 +35,8 @@ def ensure_metadata_rows(db: Session, table_name: str, column_names: Iterable[st
                     table_name=table_name,
                     column_name=col_name,
                     data_type=col_types.get(col_name, "TEXT"),
+                    source=INFERRED,  # a stub read off the table; a person's edit of it makes it manual
+                    status=ACTIVE,
                 )
             )
     db.flush()

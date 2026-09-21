@@ -8,6 +8,7 @@ import json
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
 from datetime import datetime
+from tests.unit import knowledge_db
 
 
 # ── Fixtures ──────────────────────────────────────────────
@@ -64,6 +65,7 @@ def agent_db(tmp_path):
 
     conn.commit()
     conn.close()
+    knowledge_db.add_provenance(db_path)  # Plan 8.1 columns the models select
     return db_path
 
 

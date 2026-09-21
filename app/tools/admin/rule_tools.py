@@ -6,6 +6,7 @@ from typing import Any, Dict
 
 from app.tools.admin.base import AdminTool
 from app.core.time_utils import utcnow
+from app.services.provenance import ACTIVE, MANUAL
 
 
 class SearchRulesTool(AdminTool):
@@ -163,6 +164,8 @@ class AddRuleTool(AdminTool):
             table_name=params.get("table_name"),
             severity=params.get("severity", "warning"),
             is_active=True,
+            source=MANUAL,  # the admin asked for it and confirmed it
+            status=ACTIVE,
             created_at=utcnow(),
             updated_at=utcnow(),
         )

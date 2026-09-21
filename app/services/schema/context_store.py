@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from app.core.time_utils import utcnow
+from app.services.provenance import ACTIVE, MANUAL, after_human_edit
 
 if TYPE_CHECKING:
     from app.services.schema.service import SchemaService
@@ -88,11 +89,12 @@ def get_all_contexts(service: "SchemaService") -> List[Dict]:
 def create_context(service: "SchemaService", data: Dict) -> Dict:
     config_engine = service.get_config_engine()
     with config_engine.begin() as conn:
-        columns = ["name", "display_name", "description", "main_view", "is_active", "priority", "keywords", "instruction_th", "instruction_en"]
+        columns = ["name", "display_name", "description", "main_view", "is_active", "priority", "keywords", "instruction_th", "instruction_en",
+                   "source", "status"]
         placeholders = ", ".join([f":{column}" for column in columns])
         sql = f"INSERT INTO schema_contexts ({', '.join(columns)}) VALUES ({placeholders})"
 
-        params = data.copy()
+        params = {**data, "source": MANUAL, "status": ACTIVE}  # created by a person
         if params.get("keywords"):
             params["keywords"] = json.dumps(params["keywords"], ensure_ascii=False)
 
@@ -120,6 +122,10 @@ def update_context(service: "SchemaService", context_id: int, data: Dict) -> Opt
 
         params["updated_at"] = utcnow()
         set_parts.append("updated_at = :updated_at")
+        # a person's edit: theirs — or still declared when only fields the contract never writes changed
+        current = conn.execute(text("SELECT source FROM schema_contexts WHERE id = :id"), {"id": context_id}).scalar()
+        params["source"], params["status"] = after_human_edit("schema_contexts", current, data), ACTIVE
+        set_parts += ["source = :source", "status = :status"]
 
         sql = f"UPDATE schema_contexts SET {', '.join(set_parts)} WHERE id = :id"
         cursor = conn.execute(text(sql), params)

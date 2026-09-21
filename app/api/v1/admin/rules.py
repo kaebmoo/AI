@@ -19,6 +19,7 @@ from app.services.query_engine import clear_query_cache
 from app.services.schema_service import SchemaService
 
 from ._shared import mark_brain_dirty
+from app.services.provenance import ACTIVE, MANUAL, mark_human_edit
 from app.core.time_utils import utcnow
 
 router = APIRouter()
@@ -72,7 +73,7 @@ def create_business_rule(
     if existing:
         raise HTTPException(status_code=400, detail=f"Rule code '{data.rule_code}' already exists")
 
-    rule = SchemaBusinessRule(**data.model_dump())
+    rule = SchemaBusinessRule(**data.model_dump(), source=MANUAL, status=ACTIVE)
     db.add(rule)
     db.commit()
     db.refresh(rule)
@@ -99,6 +100,7 @@ def update_business_rule(
     update_data = data.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(rule, key, value)
+    mark_human_edit(rule, "schema_business_rules", update_data)
 
     rule.updated_at = utcnow()
     db.commit()
@@ -144,6 +146,7 @@ def toggle_business_rule(
         raise HTTPException(status_code=404, detail="Business rule not found")
 
     rule.is_active = not rule.is_active
+    mark_human_edit(rule, "schema_business_rules", ["is_active"])
     rule.updated_at = utcnow()
     db.commit()
     db.refresh(rule)

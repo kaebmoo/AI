@@ -15,6 +15,7 @@ from app.schemas.admin_schemas import (
     GoldenExampleUpdate,
 )
 from app.services.ai_service import AIService
+from app.services.provenance import ACTIVE, MANUAL, mark_human_edit
 from app.services.query_engine import clear_query_cache
 from ._shared import mark_brain_dirty
 
@@ -80,7 +81,7 @@ def create_golden_example(
     ai_service: AIService = Depends(deps.get_ai_service),
 ):
     """Create golden example manually. Admin only. Also trains Vanna."""
-    example = GoldenExample(**data.model_dump(), added_by=current_user.id)
+    example = GoldenExample(**data.model_dump(), added_by=current_user.id, source=MANUAL, status=ACTIVE)
     db.add(example)
     db.commit()
     db.refresh(example)
@@ -112,6 +113,7 @@ def update_golden_example(
     update_data = data.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(example, key, value)
+    mark_human_edit(example, "golden_examples", update_data)
 
     db.commit()
     db.refresh(example)

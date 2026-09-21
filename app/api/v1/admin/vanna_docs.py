@@ -16,6 +16,7 @@ from app.schemas.admin_schemas import (
     VannaDocUpdate,
 )
 from ._shared import mark_brain_dirty
+from app.services.provenance import ACTIVE, MANUAL, mark_human_edit
 
 router = APIRouter()
 
@@ -86,7 +87,7 @@ def create_vanna_doc(
         if existing:
             raise HTTPException(status_code=400, detail=f"doc_key '{data.doc_key}' already exists")
 
-        doc = VannaDocumentation(**data.model_dump())
+        doc = VannaDocumentation(**data.model_dump(), source=MANUAL, status=ACTIVE)
         db.add(doc)
         db.commit()
         db.refresh(doc)
@@ -116,6 +117,7 @@ def update_vanna_doc(
         update_data = data.model_dump(exclude_unset=True)
         for key, value in update_data.items():
             setattr(doc, key, value)
+        mark_human_edit(doc, "vanna_documentation", update_data)
 
         db.commit()
         db.refresh(doc)

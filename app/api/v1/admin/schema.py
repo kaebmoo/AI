@@ -31,6 +31,7 @@ from app.schemas.admin_schemas import (
     ViewSummaryListResponse,
 )
 from app.services.ai_service import AIService
+from app.services.provenance import ACTIVE, MANUAL, mark_human_edit
 from app.services.query_engine import clear_query_cache
 from app.services.schema_service import SchemaService
 
@@ -89,7 +90,7 @@ def create_schema_column(
             detail=f"Column {data.column_name} in table {data.table_name} already exists",
         )
 
-    column = SchemaMetadata(**data.model_dump())
+    column = SchemaMetadata(**data.model_dump(), source=MANUAL, status=ACTIVE)
     db.add(column)
     db.commit()
     db.refresh(column)
@@ -116,6 +117,7 @@ def update_schema_column(
     update_data = data.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(column, key, value)
+    mark_human_edit(column, "schema_metadata", update_data)
 
     column.updated_at = utcnow()
     db.commit()
@@ -383,6 +385,7 @@ def batch_update_dimension_families(
         ).first()
         if row:
             row.dimension_group = assignment.dimension_group
+            mark_human_edit(row, "schema_metadata", ["dimension_group"])
             updated += 1
 
     db.commit()

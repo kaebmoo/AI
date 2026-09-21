@@ -4,6 +4,7 @@ import pytest
 from sqlalchemy import create_engine, text
 
 from app.services.schema_service import SchemaService
+from tests.unit import knowledge_db
 
 
 def _create_remaining_service(tmp_path):
@@ -23,6 +24,7 @@ def _create_remaining_service(tmp_path):
         conn.execute(text("INSERT INTO schema_metadata (table_name, column_name, display_name_th, data_type, is_summable, is_groupable, dimension_group) VALUES ('source_data', 'GL_CODE', 'รหัสบัญชี', 'TEXT', 0, 1, 'gl_account')"))
 
         conn.execute(text("INSERT INTO schema_contexts (name, display_name, description, main_view, is_active, priority, keywords, instruction_th, instruction_en) VALUES ('transfer price', 'Transfer Price', 'context', 'source_data', 1, 10, :keywords, 'thai', 'english')"), {"keywords": json.dumps(["tp", "transfer"], ensure_ascii=False)})
+    knowledge_db.add_provenance(engine)  # Plan 8.1 columns
     return SchemaService(db_engine=engine, business_engine=engine)
 
 

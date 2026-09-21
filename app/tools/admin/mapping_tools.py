@@ -6,6 +6,7 @@ from typing import Any, Dict
 
 from app.tools.admin.base import AdminTool
 from app.core.time_utils import utcnow
+from app.services.provenance import ACTIVE, MANUAL
 
 
 class SearchMappingsTool(AdminTool):
@@ -180,6 +181,8 @@ class AddMappingTool(AdminTool):
             keyword_type=params.get("keyword_type", "value_alias"),
             context_name=params.get("context_name"),
             is_active=True,
+            source=MANUAL,  # the admin asked for it and confirmed it
+            status=ACTIVE,
             created_at=utcnow(),
             updated_at=utcnow(),
         )

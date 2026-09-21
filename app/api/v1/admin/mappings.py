@@ -15,6 +15,7 @@ from app.schemas.admin_schemas import (
     SemanticMappingResponse,
     SemanticMappingUpdate,
 )
+from app.services.provenance import ACTIVE, MANUAL, mark_human_edit
 from app.services.query_engine import clear_query_cache
 from app.services.schema_service import SchemaService
 from ._shared import mark_brain_dirty
@@ -74,11 +75,18 @@ def create_semantic_mapping(
     existing = db.query(SchemaSemanticMapping).filter(
         SchemaSemanticMapping.keyword == data.keyword
     ).first()
-    if existing:
+    if existing and existing.status == ACTIVE:
         raise HTTPException(status_code=400, detail=f"Keyword '{data.keyword}' already exists")
 
-    mapping = SchemaSemanticMapping(**data.model_dump())
-    db.add(mapping)
+    if existing:  # a machine's proposal (or a rejected row) holds the keyword: the person decides it now
+        mapping = existing
+        for key, value in data.model_dump().items():
+            setattr(mapping, key, value)
+        mapping.updated_at = utcnow()
+    else:
+        mapping = SchemaSemanticMapping(**data.model_dump())
+        db.add(mapping)
+    mapping.source, mapping.status = MANUAL, ACTIVE
     db.commit()
     db.refresh(mapping)
 
@@ -112,6 +120,7 @@ def update_semantic_mapping(
 
     for key, value in update_data.items():
         setattr(mapping, key, value)
+    mark_human_edit(mapping, "schema_semantic_mapping", update_data)
 
     mapping.updated_at = utcnow()
     db.commit()

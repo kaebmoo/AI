@@ -117,8 +117,8 @@ class HierarchyService:
 
             conn.execute("""
                 INSERT INTO master_hierarchy (context_name, level, level_label_th, level_label_en,
-                    level_columns, detection_keywords, parent_column, source_view, source)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'manual')
+                    level_columns, detection_keywords, parent_column, source_view, source, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'manual', 'active')
                 ON CONFLICT(context_name, level) DO UPDATE SET
                     level_label_th = COALESCE(?, level_label_th),
                     level_label_en = COALESCE(?, level_label_en),
@@ -126,7 +126,7 @@ class HierarchyService:
                     detection_keywords = COALESCE(?, detection_keywords),
                     parent_column = COALESCE(?, parent_column),
                     source_view = COALESCE(?, source_view),
-                    source = 'manual', is_active = 1, updated_at = CURRENT_TIMESTAMP
+                    source = 'manual', status = 'active', is_active = 1, updated_at = CURRENT_TIMESTAMP
             """, (
                 context_name, level,
                 data.get("level_label_th", ""), data.get("level_label_en", ""),
@@ -137,6 +137,10 @@ class HierarchyService:
                 cols_json, kw_json,
                 data.get("parent_column"), data.get("source_view"),
             ))
+            # a person took the level: the values extracted while it waited as a proposal are in use with it
+            conn.execute(
+                "UPDATE master_hierarchy_values SET status = 'active' WHERE context_name = ? AND level = ? "
+                "AND status = 'proposed' AND source IN ('inferred', 'learned')", (context_name, level))
             conn.commit()
             self._invalidate_cache()
             return self.get_levels(context_name)
@@ -217,12 +221,12 @@ class HierarchyService:
         try:
             aliases_json = json.dumps(data.get("aliases", []), ensure_ascii=False)
             conn.execute("""
-                INSERT INTO master_hierarchy_values (context_name, level, value, parent_value, aliases, source)
-                VALUES (?, ?, ?, ?, ?, 'manual')
+                INSERT INTO master_hierarchy_values (context_name, level, value, parent_value, aliases, source, status)
+                VALUES (?, ?, ?, ?, ?, 'manual', 'active')
                 ON CONFLICT(context_name, level, value) DO UPDATE SET
                     parent_value = excluded.parent_value,
                     aliases = excluded.aliases,
-                    source = 'manual', is_active = 1
+                    source = 'manual', status = 'active', is_active = 1
             """, (context_name, data["level"], data["value"], data.get("parent_value"), aliases_json))
             conn.commit()
             return {"success": True}
@@ -245,6 +249,7 @@ class HierarchyService:
                 updates.append("aliases = ?")
                 params.append(json.dumps(data["aliases"], ensure_ascii=False))
             updates.append("source = 'manual'")
+            updates.append("status = 'active'")
             params.append(value_id)
             conn.execute(f"UPDATE master_hierarchy_values SET {', '.join(updates)} WHERE id = ?", params)
             conn.commit()

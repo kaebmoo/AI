@@ -4,8 +4,9 @@ from datetime import datetime
 from app.db.base_class import Base, ConfigBase
 import enum
 from app.core.time_utils import utcnow
+from app.models.schema_models import ProvenanceMixin
 
-class GoldenExample(ConfigBase):  # Config DB table
+class GoldenExample(ProvenanceMixin, ConfigBase):  # Config DB table
     __tablename__ = "golden_examples"
     
     id = Column(Integer, primary_key=True, index=True)

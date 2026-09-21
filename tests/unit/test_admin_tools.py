@@ -11,6 +11,7 @@ from datetime import datetime
 
 from app.tools.admin.base import AdminTool
 from app.tools.admin.registry import AdminToolRegistry
+from tests.unit import knowledge_db
 
 
 # ── Fixtures ──────────────────────────────────────────────
@@ -113,6 +114,7 @@ def admin_tools_db(tmp_path):
 
     conn.commit()
     conn.close()
+    knowledge_db.add_provenance(db_path)  # Plan 8.1 columns the models select
     return db_path
 
 

@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from unittest.mock import patch, AsyncMock
 
 from app.services.auto_analyzer import AutoAnalyzer, SuggestedFix
+from tests.unit import knowledge_db
 
 
 @pytest.fixture
@@ -100,6 +101,7 @@ def analyzer_db(tmp_path):
 
     conn.commit()
     conn.close()
+    knowledge_db.add_provenance(db_path)  # Plan 8.1 columns the models select
     return db_path
 
 

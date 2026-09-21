@@ -15,6 +15,7 @@ from app.schemas.admin_schemas import (
     DataWarningResponse,
     DataWarningUpdate,
 )
+from app.services.provenance import ACTIVE, MANUAL, mark_human_edit
 from app.services.warning_detector import clear_warnings_cache
 from app.core.time_utils import utcnow
 
@@ -69,7 +70,7 @@ def create_data_warning(
     if existing:
         raise HTTPException(status_code=400, detail=f"Warning code '{data.code}' already exists")
 
-    warning = DataWarningModel(**data.model_dump())
+    warning = DataWarningModel(**data.model_dump(), source=MANUAL, status=ACTIVE)
     db.add(warning)
     db.commit()
     db.refresh(warning)
@@ -93,6 +94,7 @@ def update_data_warning(
     update_data = data.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(warning, key, value)
+    mark_human_edit(warning, "data_warnings", update_data)
 
     warning.updated_at = utcnow()
     db.commit()
