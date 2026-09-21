@@ -160,7 +160,8 @@ def test_copying_metadata_to_a_view_fills_a_stub_and_queues_a_persons_row(db, tm
                              "('org', 'dept', 'ฝ่าย', 'จากตารางต้นทาง', 'manual'), "
                              "('v_org', 'stub', NULL, NULL, 'inferred')")
     before = _human_rows(path)
-    view_manager.propagate_metadata_to_view(SchemaService(config_engine=engine, business_engine=engine), "v_org")
+    for _ in range(2):
+        view_manager.propagate_metadata_to_view(SchemaService(config_engine=engine, business_engine=engine), "v_org")
     after = _human_rows(path)
     assert after["schema_metadata"] == before["schema_metadata"]  # v_org.division (a person's, empty name) untouched
     assert knowledge_db.rows(path, "SELECT display_name_th FROM schema_metadata WHERE column_name = 'stub'") == [("ฝ่าย",)]
@@ -189,11 +190,13 @@ def test_analyzer_import_and_detected_families_queue_what_a_person_owns(db, monk
         {"column_name": "fresh", "display_name_th": "ใหม่", "display_name_en": "New", "description": "LLM",
          "data_type": "TEXT", "is_summable": False, "is_groupable": True}], mappings=[], rules=[])
     before = _human_rows(path)
-    assert schema_analyzer.import_schema_suggestions(request, None, session, _Svc())["waiting_for_a_person"] == 1
+    assert [schema_analyzer.import_schema_suggestions(request, None, session, _Svc())["waiting_for_a_person"]
+            for _ in range(2)] == [1, 0]  # the same suggestion again: nothing new waits
     monkeypatch.setattr(admin_schema, "mark_brain_dirty", lambda: None)
     monkeypatch.setattr(admin_schema, "service_for_table", lambda table, svc: _Svc())
     monkeypatch.setattr("app.services.dimension_detector.detect_families", lambda cols: {"org": ["division", "dept"]})
-    admin_schema.auto_populate_dimension_families("v_org", True, None, session, _Svc())
+    for _ in range(2):
+        admin_schema.auto_populate_dimension_families("v_org", True, None, session, _Svc())
     assert _human_rows(path) == before
     assert knowledge_db.rows(path, "SELECT source FROM schema_metadata WHERE column_name = 'fresh'") == [("inferred",)]
     assert sorted(p[1] for p in _proposals(path)) == [  # one waiting proposal per row and proposer…
