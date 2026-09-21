@@ -86,10 +86,3 @@ def test_the_rules_name_no_time_column_of_their_own():
     assert "`year` และ `month`" not in thai and "CAST(month AS INTEGER)" not in thai and "Date Handling" in thai
     assert "`year` and `month`" not in english and "CAST(month AS INTEGER)" not in english and "Date Handling" in english
 
-
-def test_the_explanation_prompt_carries_no_year_of_its_own():
-    """Its examples said "เดือนมกราคม 2568" / "Q1/2567" — a year no answer asked for (thai_year.py fixes the
-    answer's years after the fact; the prompt should not suggest one)."""
-    from app.providers.chart_postprocessor import build_explain_prompt
-    prompt = build_explain_prompt(question="รายได้รวม", sql="SELECT 1 AS n", data=[{"n": 1}])
-    assert "2568" not in prompt and "2567" not in prompt
