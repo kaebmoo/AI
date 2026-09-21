@@ -72,11 +72,11 @@ def propose(conn, table: str, key: Dict[str, Any], values: Dict[str, Any], sourc
     """Queue `values` for the row of `table` at `key`, on the caller's transaction (sqlite3 or SQLAlchemy).
 
     One open proposal per key and proposer: a newer version replaces the one still waiting. A version a person
-    already rejected is not proposed again. True = something waits for a person now.
+    already rejected — or the very version already waiting — is not written again. True = a new version waits now.
     """
     params = {"t": table, "k": as_json(key), "p": as_json(values), "s": source, "c": confidence, "r": reason}
     if _run(conn, "SELECT 1 FROM knowledge_proposals WHERE table_name = :t AND row_key = :k AND source = :s "
-                  "AND status = 'rejected' AND proposed = :p LIMIT 1", params).fetchone():
+                  "AND status IN ('rejected', 'proposed') AND proposed = :p LIMIT 1", params).fetchone():
         return False
     _run(conn, "INSERT INTO knowledge_proposals (table_name, row_key, proposed, source, confidence, reason) "
                "VALUES (:t, :k, :p, :s, :c, :r) ON CONFLICT (table_name, row_key, source) WHERE status = 'proposed' "

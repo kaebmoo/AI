@@ -17,6 +17,7 @@ from sqlalchemy import create_engine, text
 from app.services import datafeed_knowledge as dk
 from app.services.data_sources import SourceResolver
 from scripts.migrate_data_sources import migrate
+from tests.unit import knowledge_db
 
 CONTRACT = {
     "domain": "x", "schema_version": "1.0.0", "title": "X feed", "units": "บาท",
@@ -55,6 +56,7 @@ def config_engine(tmp_path):
             "CREATE TABLE vanna_documentation (id INTEGER PRIMARY KEY, doc_key TEXT UNIQUE, title TEXT, "
             "content TEXT, category TEXT, context_name TEXT, is_active INTEGER)"))
     migrate(engine)
+    knowledge_db.add_provenance(engine)  # Plan 8.1 columns
     return engine
 
 
@@ -290,7 +292,8 @@ def test_point_in_time_measures_are_not_summable(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'c.db'}")
     with engine.begin() as conn:
         conn.execute(text("CREATE TABLE schema_metadata (table_name TEXT, column_name TEXT, description TEXT,"
-                          " data_type TEXT, is_summable INT, is_groupable INT)"))
+                          " data_type TEXT, is_summable INT, is_groupable INT, source TEXT, status TEXT NOT NULL "
+                          "DEFAULT 'active', confidence REAL)"))
         datafeed_knowledge.sync_schema_metadata(conn, "r", contract)
         got = dict(conn.execute(text("SELECT column_name, is_summable FROM schema_metadata")).all())
 

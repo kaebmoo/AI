@@ -13,7 +13,8 @@ fact_ebt_total_monthly) is total-only: one question per measure per period, word
 monthly or YTD per measure (MEASURE_WORDS, else the measure's agg).
 A contract without control_totals gets no golden — there is nothing to check against.
 
-Marker: category = 'feed_<domain>' — delete-and-regen is clean.
+Marker: category = 'feed_<domain>' + source 'declared' (Plan 8.1) — a regen touches only the contract's own
+examples: a person's in the same category stays, and one a person changed waits in knowledge_proposals.
 
 Usage:
     python -m scripts.datafeed.gen_golden_from_controls --domain revenue \
@@ -154,6 +155,38 @@ def build_examples(controls: pd.DataFrame, domain: str, contract: dict) -> list:
     return examples
 
 
+def save_examples(conn, category: str, examples: list) -> tuple:
+    """Write the contract's examples of `category` on the caller's transaction — (written, withdrawn, waiting).
+
+    Plan 8.1: they are declared. A person's example in the same category (the go-live review's) stays, and one a
+    person changed keeps their SQL while the contract's version waits in knowledge_proposals."""
+    from app.services.provenance import DECLARED, may_replace, propose
+
+    existing = {q: (source, status, sql) for q, source, status, sql in conn.execute(
+        "SELECT question_pattern, source, status, expected_sql FROM golden_examples WHERE category = ?", (category,))}
+    written = queued = 0
+    for question, sql in examples:
+        row = existing.get(question)
+        if row is None:
+            conn.execute("INSERT INTO golden_examples (question_pattern, expected_sql, category, is_active, source, "
+                         "status) VALUES (?, ?, ?, 1, 'declared', 'active')", (question, sql, category))
+            written += 1
+        elif row[2] == sql:
+            continue
+        elif may_replace(DECLARED, row[0], row[1]):
+            conn.execute("UPDATE golden_examples SET expected_sql = ?, source = 'declared' "
+                         "WHERE category = ? AND question_pattern = ?", (sql, category, question))
+            written += 1
+        else:
+            queued += propose(conn, "golden_examples", {"category": category, "question_pattern": question},
+                              {"expected_sql": sql}, DECLARED, reason="คนแก้ตัวอย่างนี้ — ฉบับใหม่จาก control totals รอคนตัดสิน")
+    generated = {q for q, _ in examples}
+    gone = [q for q, (source, _, _) in existing.items() if q not in generated and source == DECLARED]
+    conn.executemany("DELETE FROM golden_examples WHERE category = ? AND question_pattern = ? AND source = 'declared'",
+                     [(category, q) for q in gone])
+    return written, len(gone), queued
+
+
 def main():
     parser = argparse.ArgumentParser(description="Generate golden examples from control totals")
     parser.add_argument("--domain", required=True)
@@ -174,15 +207,10 @@ def main():
     conn = sqlite3.connect(settings.CONFIG_DB_URL.replace("sqlite:///", ""), timeout=60)
     category = f"feed_{args.domain}"
     try:
-        deleted = conn.execute("DELETE FROM golden_examples WHERE category = ?", (category,)).rowcount
-        for question, sql in examples:
-            conn.execute(
-                "INSERT INTO golden_examples (question_pattern, expected_sql, category, is_active) "
-                "VALUES (?, ?, ?, 1)",
-                (question, sql, category),
-            )
+        written, withdrawn, queued = save_examples(conn, category, examples)
         conn.commit()
-        print(f"Replaced {deleted} → inserted {len(examples)} golden examples (category={category})")
+        print(f"{len(examples)} golden examples (category={category}): {written} written, {withdrawn} withdrawn, "
+              f"{queued} waiting for a person")
     finally:
         conn.close()
 

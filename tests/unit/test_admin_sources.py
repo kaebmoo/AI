@@ -20,6 +20,7 @@ from scripts.migrate_data_sources import migrate
 from scripts.migrate_workspaces import migrate_config
 from tests.unit.test_datafeed_import import CONTRACT
 from tests.unit.test_datafeed_import import _write_bundle as _write_importer_bundle
+from tests.unit import knowledge_db
 
 ADMIN = SimpleNamespace(id=1)
 
@@ -48,6 +49,7 @@ def _config(path):
         conn.execute(text("CREATE TABLE vanna_documentation (id INTEGER PRIMARY KEY, doc_key TEXT UNIQUE, title TEXT, "
                           "content TEXT, category TEXT, context_name TEXT, is_active INTEGER)"))
     migrate(engine)
+    knowledge_db.add_provenance(engine)  # Plan 8.1 columns
     migrate_config(engine)
     return engine
 

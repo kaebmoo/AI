@@ -8,9 +8,11 @@ knowledge in step with its contract without anyone running a script:
 - the resolver calls ensure_current() per request: one stat of the contract file;
   when the contract or the build's schema_version changed → re-sync + mark_brain_dirty
 
-Writes (idempotent, delete + reinsert, one transaction): schema_contexts row
-feed_<domain>, schema_metadata of feed_<domain>_*, vanna_documentation datafeed_<domain>_*.
-Keywords and priority are set on insert only — an admin's routing edits survive re-syncs.
+Writes (idempotent, one transaction): schema_contexts row feed_<domain>, schema_metadata of feed_<domain>_*,
+vanna_documentation datafeed_<domain>_* — as `declared` (Plan 8.1, app/services/provenance.py): the contract replaces
+its own earlier declaration and what a machine wrote, only where a value changed; a row a person changed keeps their
+version and the contract's waits in knowledge_proposals (D-C). Keywords, priority, display name, workspace and on/off
+are the admin's: set on insert only. What a new contract no longer declares goes — the contract's own rows only.
 """
 
 import hashlib
@@ -22,6 +24,8 @@ from typing import Any, Dict, Mapping, Optional, Tuple
 
 import yaml
 from sqlalchemy import text
+
+from app.services.provenance import DECLARED, may_replace, propose
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +42,26 @@ DOMAIN_KEYWORDS = {
     "ebt": ["ebt", "กำไร", "ขาดทุน", "profit", "ผลดำเนินงาน"],
 }
 FEED_PRIORITY = 1
+WAITS = "คนแก้ส่วนที่ contract ประกาศไว้ — ฉบับใหม่ของ contract รอคนตัดสิน (D-C)"
+
+
+def _declare(conn, table: str, key: Dict[str, Any], values: Dict[str, Any], row: Optional[Mapping],
+             insert: Dict[str, Any], stamp: bool = False) -> None:
+    """Write the contract's `values` for the row at `key` (`row` = what is there, None = nothing) by the one rule."""
+    if row is None:
+        cols = {**key, **values, **insert, "source": DECLARED}
+        conn.execute(text(f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join(':' + c for c in cols)})"), cols)
+        return
+    changed = {c: v for c, v in values.items() if row[c] != v}
+    if may_replace(DECLARED, row["source"], row["status"]):
+        if changed or row["source"] != DECLARED:  # nothing changed = nothing written (no timestamp moves)
+            sets = ", ".join([f"{c} = :{c}" for c in changed] + ["source = :source"]
+                             + (["updated_at = CURRENT_TIMESTAMP"] if stamp and changed else []))
+            where = " AND ".join(f"{c} = :k_{c}" for c in key)
+            conn.execute(text(f"UPDATE {table} SET {sets} WHERE {where}"),
+                         {**changed, "source": DECLARED, **{f"k_{c}": v for c, v in key.items()}})
+    elif changed:  # a person's row that already says what the contract says: nothing waits
+        propose(conn, table, key, values, DECLARED, reason=WAITS)
 
 
 def main_view_dataset(contract: dict) -> str:
@@ -86,27 +110,19 @@ def register_context(conn, domain: str, contract: dict) -> str:
     # The description is what the cross-context splitter and list_contexts read, so prefer it —
     # on one line, because the splitter lists one context per line.
     description = " ".join((contract.get("description") or contract.get("title") or "").split())
-    params = {"name": context_name, "main_view": main_view, "desc": description,
-              "instruction": instruction}
-    updated = conn.execute(text(
-        "UPDATE schema_contexts SET main_view=:main_view, description=:desc, instruction_th=:instruction, "
-        "is_active=1, updated_at=CURRENT_TIMESTAMP WHERE name=:name"
-    ), params).rowcount
-    if not updated:
-        keywords = DOMAIN_KEYWORDS.get(domain, []) + FEED_MARKERS
-        conn.execute(text(
-            "INSERT INTO schema_contexts (name, display_name, description, main_view, is_active, priority, "
-            "keywords, instruction_th) VALUES (:name, :display, :desc, :main_view, 1, :priority, :keywords, :instruction)"
-        ), {**params, "display": f"DataFeed {domain}", "priority": FEED_PRIORITY,
-            "keywords": json.dumps(keywords, ensure_ascii=False)})
+    values = {"main_view": main_view, "description": description, "instruction_th": instruction}
     if contract.get("scope_columns"):  # Phase 3: the owner declares what a caller's scope may filter on
-        conn.execute(text("UPDATE schema_contexts SET scope_columns=:scope WHERE name=:name"),
-                     {"scope": json.dumps(contract["scope_columns"], ensure_ascii=False), "name": context_name})
+        values["scope_columns"] = json.dumps(contract["scope_columns"], ensure_ascii=False)
+    row = conn.execute(text("SELECT source, status, main_view, description, instruction_th, scope_columns "
+                            "FROM schema_contexts WHERE name = :name"), {"name": context_name}).mappings().first()
+    _declare(conn, "schema_contexts", {"name": context_name}, values, row, stamp=True, insert={
+        "display_name": f"DataFeed {domain}", "is_active": 1, "priority": FEED_PRIORITY, "status": "active",
+        "keywords": json.dumps(DOMAIN_KEYWORDS.get(domain, []) + FEED_MARKERS, ensure_ascii=False)})
     return context_name
 
 
 def sync_schema_metadata(conn, domain: str, contract: dict) -> int:
-    """Column metadata for all feed tables (delete + reinsert = idempotent)."""
+    """Column metadata for all feed tables — declared, by the one rule (idempotent: unchanged = not written)."""
     count = 0
     # The contract declares how each measure may be aggregated (control_totals.measures): `agg: sum`
     # adds up, `agg: point_in_time` does not — revenue_ytd is the year to date AT that period, and
@@ -122,7 +138,9 @@ def sync_schema_metadata(conn, domain: str, contract: dict) -> int:
            if m.get("name")}
     for dataset in contract["datasets"]:
         table = f"feed_{domain}_{dataset['name']}"
-        conn.execute(text("DELETE FROM schema_metadata WHERE table_name = :t"), {"t": table})
+        existing = {r["column_name"]: r for r in conn.execute(text(
+            "SELECT column_name, source, status, description, data_type, is_summable, is_groupable "
+            "FROM schema_metadata WHERE table_name = :t"), {"t": table}).mappings()}
         keys = set(dataset.get("keys", []))
         for col in dataset["columns"]:
             summable_agg = (col.get("agg") or agg.get(col["name"], "sum")) == "sum"
@@ -131,18 +149,24 @@ def sync_schema_metadata(conn, domain: str, contract: dict) -> int:
             desc = col.get("description") or ""
             if col.get("unit"):
                 desc = f"{desc} (หน่วย: {col['unit']})".strip()
-            conn.execute(text(
-                "INSERT INTO schema_metadata (table_name, column_name, description, data_type, is_summable, is_groupable) "
-                "VALUES (:t, :c, :d, :dt, :s, :g)"
-            ), {"t": table, "c": col["name"], "d": desc, "dt": col["dtype"], "s": is_summable, "g": is_groupable})
+            _declare(conn, "schema_metadata", {"table_name": table, "column_name": col["name"]},
+                     {"description": desc, "data_type": col["dtype"], "is_summable": is_summable,
+                      "is_groupable": is_groupable}, existing.get(col["name"]), insert={"status": "active"})
             count += 1
+        declared = {c["name"] for c in dataset["columns"]}
+        for name, row in existing.items():  # what the contract no longer declares: its own rows go, a person's stay
+            if name not in declared and row["source"] == DECLARED:
+                conn.execute(text("DELETE FROM schema_metadata WHERE table_name = :t AND column_name = :c"),
+                             {"t": table, "c": name})
     return count
 
 
 def sync_documentation(conn, domain: str, contract: dict, context_name: str) -> int:
-    """vanna_documentation entries — cleared and regenerated per run."""
+    """vanna_documentation entries — declared, by the one rule; a doc the contract no longer yields goes."""
     prefix = f"datafeed_{domain}_"
-    conn.execute(text("DELETE FROM vanna_documentation WHERE doc_key LIKE :p"), {"p": f"{prefix}%"})
+    existing = {r["doc_key"]: r for r in conn.execute(text(
+        "SELECT doc_key, source, status, title, content, category, context_name FROM vanna_documentation "
+        "WHERE doc_key LIKE :p"), {"p": f"{prefix}%"}).mappings()}
     docs = []
 
     def col_line(c: dict) -> str:
@@ -184,10 +208,13 @@ def sync_documentation(conn, domain: str, contract: dict, context_name: str) -> 
     ))
 
     for doc_key, title, content in docs:
-        conn.execute(text(
-            "INSERT INTO vanna_documentation (doc_key, title, content, category, context_name, is_active) "
-            "VALUES (:k, :t, :c, 'datafeed', :ctx, 1)"
-        ), {"k": doc_key, "t": title, "c": content, "ctx": context_name})
+        _declare(conn, "vanna_documentation", {"doc_key": doc_key},
+                 {"title": title, "content": content, "category": "datafeed", "context_name": context_name},
+                 existing.get(doc_key), insert={"is_active": 1, "status": "active"})
+    kept = {d[0] for d in docs}
+    for doc_key, row in existing.items():
+        if doc_key not in kept and row["source"] == DECLARED:
+            conn.execute(text("DELETE FROM vanna_documentation WHERE doc_key = :k"), {"k": doc_key})
     return len(docs)
 
 

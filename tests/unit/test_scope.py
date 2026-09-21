@@ -14,6 +14,7 @@ from sqlalchemy import create_engine, text
 
 from app.services.data_sources import ScopeError, SourceBoundMCPClient, SourceResolver, request_scope
 from scripts.migrate_data_sources import migrate
+from tests.unit import knowledge_db
 
 FACT = [{"name": "year_month", "type": "BIGINT"}, {"name": "cost_center", "type": "VARCHAR"},
         {"name": "revenue", "type": "DOUBLE"}]
@@ -50,6 +51,7 @@ def env(tmp_path, monkeypatch):
         conn.execute(text("INSERT INTO schema_contexts (name, main_view) VALUES "
                           "('revenue', 'revenue_search'), ('feed_x', 'feed_x_fact_org'), ('expense', 'v_other')"))
     migrate(config)
+    knowledge_db.add_provenance(config)  # Plan 8.1 columns
     with config.begin() as conn:
         conn.execute(text("INSERT INTO data_sources (name, source_type, root_path) VALUES ('df_x', 'duckdb_file', :r)"),
                      {"r": str(root)})
@@ -241,6 +243,7 @@ def test_contract_scope_columns_are_synced(tmp_path):
         conn.execute(text("CREATE TABLE vanna_documentation (doc_key TEXT, title TEXT, content TEXT, category TEXT, "
                           "context_name TEXT, is_active INTEGER)"))
     migrate(config)
+    knowledge_db.add_provenance(config)  # Plan 8.1 columns
     contract = {"domain": "x", "schema_version": "1", "primary_dataset": "f", "datasets": [],
                 "scope_columns": {"year_month": "time_key"}}
     with config.begin() as conn:
