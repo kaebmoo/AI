@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, cast
 
 from app.providers.base import ConfidenceResult, QueryResult, RetryStatus
 from app.providers.chart_postprocessor import postprocess_chart_result
-from app.services.ai.hierarchy_context import detect_level, format_level_note, get_column_hierarchies
+from app.services.ai.hierarchy_context import format_level_note, get_column_hierarchies, named_levels
 from app.services.ai.thai_year import fix_explanation
 from app.services.ai.trace import new_trace, record_usage
 
@@ -604,10 +604,10 @@ async def build_first_attempt_prompt(
     detected_level = detect_hierarchy_level(question, context_name) if hierarchy else None
     # a word the context is routed by names its measure, not a level: "ค่าใช้จ่ายรายฝ่าย" is not a question
     # about expense items (legacy eval #29/#32 went to the account level when this was left in)
-    named_level = detect_level(question, hierarchy, frozenset(w.lower() for w in domain_words or []))
-    if named_level:
-        logger.info("Hierarchy: level %s (%s)", named_level["level"], named_level["label_en"])
-    level_note = format_level_note(hierarchy, named_level)
+    levels = named_levels(question, hierarchy, frozenset(w.lower() for w in domain_words or []))
+    if levels:
+        logger.info("Hierarchy: level %s", ", ".join(f"{level['level']} ({level['label_en']})" for level in levels))
+    level_note = format_level_note(hierarchy, levels)
     if value_matches:
         value_lookup_text = format_value_matches(value_matches, hierarchy=hierarchy, detected_level=detected_level)
 

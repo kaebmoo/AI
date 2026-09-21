@@ -104,3 +104,58 @@ async def test_a_word_the_context_is_routed_by_names_no_level(monkeypatch):
     assert "ระดับชั้นที่คำถามพูดถึง" not in prompt
     prompt, _ = await _first_prompt("ค่าใช้จ่ายรายบัญชี", two_pass=False, domain_words=["ค่า", "ค่าใช้จ่าย"])
     assert "ระดับชั้นที่คำถามพูดถึง: รายการค่าใช้จ่าย" in prompt  # its other words still name it
+
+
+async def test_the_level_given_a_name_filters_and_the_level_asked_for_ranks():
+    """"บริการ 10 อันดับแรกในกลุ่มธุรกิจ Digital" names two levels. Naming only the parent told the model to
+    rank business groups by `bu` and use no other level's column — the question ranks products inside one."""
+    prompt, _ = await _first_prompt("บริการ 10 อันดับแรกในกลุ่มธุรกิจ Digital", two_pass=False)
+    assert "ระดับชั้นที่คำถามพูดถึง: กลุ่มธุรกิจ" not in prompt
+    assert ("ระดับชั้นที่คำถามพูดถึง 2 ระดับ:** กลุ่มธุรกิจ → คอลัมน์ `bu` · บริการ/ผลิตภัณฑ์ → คอลัมน์ `product_name`"
+            in prompt)
+    assert "ระดับที่คำถามให้ชื่อหรือรหัสมา = กรอง (WHERE)" in prompt and "จัดอันดับ / แยกราย = GROUP BY" in prompt
+
+
+def test_a_keyword_inside_a_longer_one_names_no_level():
+    # legacy revenue: "กลุ่ม" (service group) sits inside "กลุ่มธุรกิจ", "บริการ" (product) inside "กลุ่มบริการ"
+    levels = [{"level": 0, "detection_keywords": ["กลุ่มธุรกิจ", "ธุรกิจ"]},
+              {"level": 1, "detection_keywords": ["กลุ่มบริการ", "กลุ่ม"]},
+              {"level": 2, "detection_keywords": ["บริการ", "แต่ละบริการ"]}]
+    named = lambda q: [level["level"] for level in hierarchy_context.named_levels(q, levels)]  # noqa: E731
+    assert named("รายได้กลุ่มธุรกิจ") == [0]
+    assert named("รายได้ กลุ่มบริการ 10 อันดับแรก") == [1]
+    assert named("รายได้กลุ่ม Fixed Line แต่ละบริการ") == [1, 2]
+    assert named("บริการ 10 อันดับแรกในกลุ่มธุรกิจ Digital") == [0, 2]
+
+
+def test_a_compound_or_a_name_names_one_level():
+    # legacy eval #23: "หมวดบัญชี" is one word — the account group — not also the account level
+    expense = [{"level": 0, "detection_keywords": ["หมวดค่าใช้จ่าย", "หมวด"]},
+               {"level": 1, "detection_keywords": ["ค่าใช้จ่าย", "บัญชี"]}]
+    assert [level["level"] for level in hierarchy_context.named_levels(
+        "ค่าใช้จ่าย ตบชง. รายหมวดบัญชี", expense, frozenset({"ค่าใช้จ่าย"}))] == [0]
+    # a business group whose name holds the service group's word (golden #53)
+    feed = [dict(level, names=["7.กลุ่มบริการอื่นไม่ใช่โทรคมนาคม"] if level["level"] == 0 else []) for level in LEVELS]
+    question = "รายได้ของกลุ่มธุรกิจ 7.กลุ่มบริการอื่นไม่ใช่โทรคมนาคม เดือนมกราคม 2567 เท่าไร"
+    assert [level["level"] for level in hierarchy_context.named_levels(question, feed)] == [0]
+    assert [level["level"] for level in hierarchy_context.named_levels(question, LEVELS)] == [0, 1]  # without the name
+    # a name no longer than the keyword (an alias "บริการ" of some group) hides nothing
+    aliased = [dict(level, names=["บริการ"] if level["level"] == 1 else []) for level in LEVELS]
+    assert [level["level"] for level in hierarchy_context.named_levels("รายได้ บริการ 10 อันดับแรก", aliased)] == [2]
+
+
+def test_the_levels_load_without_the_values_table(tmp_path, monkeypatch):
+    import sqlite3
+
+    from app.config import settings
+
+    db = tmp_path / "config.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute("CREATE TABLE master_hierarchy (context_name, level, level_label_th, level_label_en, "
+                     "level_columns, detection_keywords, is_active)")
+        conn.execute("INSERT INTO master_hierarchy VALUES ('c', 0, 'ก', 'A', '[\"a\"]', '[\"กลุ่ม\"]', 1)")
+    monkeypatch.setattr(settings, "CONFIG_DB_URL", f"sqlite:///{db}")
+    monkeypatch.setattr(hierarchy_context, "_HIERARCHY_CACHE", {})
+    monkeypatch.setattr(hierarchy_context, "_HIERARCHY_CACHE_TS", 0.0)
+    loaded = hierarchy_context.load_hierarchies_from_db()
+    assert loaded["c"][0]["columns"] == ["a"] and loaded["c"][0]["names"] == []

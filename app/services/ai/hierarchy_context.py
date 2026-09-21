@@ -60,7 +60,23 @@ def load_hierarchies_from_db() -> Dict[str, List[Dict]]:
             "SELECT context_name, level, level_label_th, level_label_en, level_columns, detection_keywords "
             "FROM master_hierarchy WHERE is_active = 1 ORDER BY context_name, level"
         ).fetchall()
+        try:  # the levels must not depend on the values table
+            value_rows = conn.execute(
+                "SELECT context_name, level, value, aliases FROM master_hierarchy_values WHERE is_active = 1"
+            ).fetchall()
+        except sqlite3.Error:
+            value_rows = []
         conn.close()
+
+        # names each level holds (values + aliases) — never sent to a model: they only tell named_levels that
+        # a level word inside a name ("7.กลุ่มบริการอื่นไม่ใช่โทรคมนาคม") is part of that name
+        names: Dict[tuple, List[str]] = {}
+        for ctx, level, value, aliases_json in value_rows:
+            try:
+                aliases = [a for a in json.loads(aliases_json or "[]") if isinstance(a, str)]
+            except (TypeError, ValueError):
+                aliases = []
+            names.setdefault((ctx, level), []).extend([value, *aliases])
 
         result: Dict[str, List[Dict]] = {}
         for ctx, level, label_th, label_en, columns_json, keywords_json in rows:
@@ -70,6 +86,7 @@ def load_hierarchies_from_db() -> Dict[str, List[Dict]]:
                 "label_th": label_th,
                 "label_en": label_en,
                 "detection_keywords": json.loads(keywords_json),
+                "names": names.get((ctx, level), []),
             })
 
         if result:
@@ -261,19 +278,64 @@ def detect_level(question: str, hierarchy: Optional[List[Dict]], ignore: frozens
     return matched_levels[parent_level][1]
 
 
-def format_level_note(hierarchy: Optional[List[Dict]], detected_level: Optional[Dict]) -> str:
-    """The level the question's own words name ("บริการ" → the product level), whether or not value lookup
-    found a value for it. The level used to be worked out only next to found values, so "รายได้ บริการ
+def named_levels(question: str, hierarchy: Optional[List[Dict]], ignore: frozenset = frozenset()) -> List[Dict]:
+    """Every level the question's own words name, parent first. A keyword that is part of something longer
+    names nothing of its own:
+      - a longer keyword: "กลุ่มบริการ" is the service group level, not also "บริการ"
+      - a compound it closes: "รายหมวดบัญชี" is per account group, not also per account (the first word
+        is the head)
+      - a name another level holds (`names`: values + aliases): "กลุ่มธุรกิจ 7.กลุ่มบริการอื่นไม่ใช่โทรคมนาคม"
+        names a business group, not a service group
+    `ignore`: keywords that cannot name a level here — lowercase."""
+    if not hierarchy:
+        return []
+    question_lower = question.lower()
+
+    def spans(words, level_info):
+        for word in words:
+            start = question_lower.find(word) if word else -1
+            while start >= 0:
+                yield start, start + len(word), level_info
+                start = question_lower.find(word, start + 1)
+
+    found = [hit for info in hierarchy
+             for hit in spans((k.lower() for k in info["detection_keywords"] if k.lower() not in ignore), info)]
+    names = [hit for info in hierarchy for hit in spans((n.lower() for n in info.get("names", ())), info)]
+    words = [(start, end, info) for start, end, info in found
+             if not any(s <= start and end <= e and e - s > end - start for s, e, _ in found)]
+    levels = {info["level"]: info for start, end, info in words
+              if not any(e == start for _, e, _ in words)
+              and not any(s <= start and end <= e and e - s > end - start and other["level"] != info["level"]
+                          for s, e, other in names)}
+    return [levels[number] for number in sorted(levels)]
+
+
+def format_level_note(hierarchy: Optional[List[Dict]], levels: List[Dict]) -> str:
+    """The levels the question's own words name ("บริการ" → the product level), whether or not value lookup
+    found a value for them. The level used to be worked out only next to found values, so "รายได้ บริการ
     10 อันดับแรก" — nothing to look up — was ranked per business group or service group (RESULT_F11 §7).
-    Columns and labels come from master_hierarchy; no level named = "" (the prompt as before)."""
-    if not hierarchy or not detected_level:
+    One level: rank / break down / filter in it. Several ("บริการ 10 อันดับแรกในกลุ่มธุรกิจ Digital"): the one
+    given a name is the filter, the one to rank the grouping — naming only the parent there made the model
+    rank business groups. Columns and labels come from master_hierarchy; no level named = "" (the prompt
+    as before)."""
+    if not hierarchy or not levels:
         return ""
     chain = " > ".join(f"{level['label_th']} (`{level['columns'][0]}`)"
                        for level in sorted(hierarchy, key=lambda level: level["level"]))
-    primary, *others = detected_level["columns"]
-    code = f" (รหัสที่ผู้ใช้พิมพ์มา: {' / '.join(f'`{c}`' for c in others)})" if others else ""
-    return (f"\n**ระดับชั้นที่คำถามพูดถึง: {detected_level['label_th']} → คอลัมน์ `{primary}`**{code} (ลำดับชั้น: {chain}) — "
-            f"จัดอันดับ / แยกราย / กรองในระดับนี้ด้วยคอลัมน์ของระดับนี้ ห้ามตอบด้วยคอลัมน์ของระดับอื่นแทน\n")
+
+    def columns(level: Dict) -> tuple:
+        primary, *others = level["columns"]
+        return primary, f" (รหัสที่ผู้ใช้พิมพ์มา: {' / '.join(f'`{c}`' for c in others)})" if others else ""
+
+    if len(levels) == 1:
+        primary, code = columns(levels[0])
+        return (f"\n**ระดับชั้นที่คำถามพูดถึง: {levels[0]['label_th']} → คอลัมน์ `{primary}`**{code} (ลำดับชั้น: {chain}) — "
+                f"จัดอันดับ / แยกราย / กรองในระดับนี้ด้วยคอลัมน์ของระดับนี้ ห้ามตอบด้วยคอลัมน์ของระดับอื่นแทน\n")
+    named = " · ".join(f"{level['label_th']} → คอลัมน์ `{primary}`{code}"
+                       for level, (primary, code) in ((level, columns(level)) for level in levels))
+    return (f"\n**ระดับชั้นที่คำถามพูดถึง {len(levels)} ระดับ:** {named} (ลำดับชั้น: {chain}) — "
+            f"ระดับที่คำถามให้ชื่อหรือรหัสมา = กรอง (WHERE) ด้วยคอลัมน์ของระดับนั้น, ระดับที่ให้จัดอันดับ / แยกราย = "
+            f"GROUP BY ด้วยคอลัมน์ของระดับนั้น — ห้ามตอบด้วยคอลัมน์ของระดับที่ไม่อยู่ในรายการนี้ และห้าม OR ข้ามระดับ\n")
 
 
 def format_value_matches(value_matches: List[Dict], hierarchy=None, detected_level=None) -> str:
