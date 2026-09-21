@@ -166,7 +166,7 @@ request/task · scope ที่เป็นอันตราย (ชนิด�
 
 | กลุ่ม | ข้อ | ต้นเหตุ | ใครแก้ |
 |---|---|---|---|
-| **ฐานเปรียบเทียบไม่ได้ประกาศไว้** | REV8 (YoY ต้องใช้ฐาน ex-divested 27,068.13 ไม่ใช่ raw 45,603), REV10 (เป้าเทียบต้องใช้ฐาน BG 1–7 ทั้งสองข้าง) | contract / knowledge ไม่มีกฎว่า "เทียบปีก่อนใช้ฐานไหน" และ "เป้าอยู่ที่ฐาน BG 1–7" | ข้อเสนอ → NT-Report (contract) หรือ golden example ฝั่ง AI |
+| **ฐานเปรียบเทียบ — โมเดลไม่ทำตามกฎที่มีอยู่** | REV8 (YoY ต้องใช้ฐาน ex-divested 27,068.13 ไม่ใช่ raw 45,603), REV10 (เป้าเทียบต้องใช้ฐาน BG 1–7 ทั้งสองข้าง) | **แก้ข้อสรุปเดิมของเอกสารฉบับนี้ (2026-09-21): contract มีกฎทั้งสองข้ออยู่แล้ว** — `ex_mobile_divest` (`dim_product.is_divested`) และ `revenue_target_basis` (ฐาน bu_seq 1..7 ทั้งสองฝั่ง) จึงไม่ใช่ช่องว่างของ contract แต่เป็นการที่โมเดลไม่ทำตามกฎในข้อความ — เหมือนกรณี `ytd_point_in_time` ใน §7 | **ฝั่ง AI**: golden example ไม่ใช่ข้อเสนอถึง NT-Report |
 | **sales โดยเฉพาะ** | SAL2 (สะสมรวมสองปี), SAL4 (หา Hard Infrastructure ใน `service_group` แทน `business_group` → null), SAL7 / SAL8 (ยังหยิบ 202507 / 202508), SAL10 (เทียบ actual-vs-target แทน sales-vs-revenue) | ความรู้ของ context นี้บางกว่าโดเมนอื่น; คำถามข้ามโดเมน (SAL10) ตอบไม่ได้เพราะ hook ล็อก context เดียว | golden example ต่อ `feed_sales`; SAL10 ต้องใช้ multi-context (ไม่อยู่ใน go-live รอบนี้) |
 | **ถ้อยคำ / การปฏิเสธ** | EBT8 (`expense_month` ของงวดผิด), EBT9 (ตอบพร้อมป้าย "เฉพาะ 2 สายงานขาย" แทนที่จะ**ปฏิเสธ**), EXP7 / EXP10 (จับชื่อกลุ่มค่าใช้จ่ายไม่ตรง) | ถ้อยคำของ `ebt_not_company_wide` ยังไม่แรงพอ; ชื่อกลุ่มค่าใช้จ่ายต้องมี alias | ข้อเสนอ → NT-Report + `schema_semantic_mapping` ฝั่ง AI |
 
