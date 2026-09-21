@@ -203,7 +203,9 @@ python -m scripts.datafeed.gen_golden_from_controls --domain revenue \
 - Upsert context `feed_<domain>` ใน `schema_contexts` (main_view, keywords,
   instruction_th ที่รวม business rules ทุกข้อ)
 - `schema_metadata` ต่อคอลัมน์: description + unit จาก contract,
-  is_summable (double), is_groupable (string/key)
+  is_summable = `agg` ที่ contract ประกาศ (`columns[].agg` ก่อน → `control_totals.measures` → `sum`) **และ** dtype เป็น double
+  — `point_in_time` (เช่น `revenue_ytd`, ebt `ebt`/`expense`) = sum ไม่ได้; key ไม่มี agg จึงยังต้องเช็ก dtype
+  (เดิมดู dtype อย่างเดียว → `revenue_ytd` ถูกติดว่า sum ได้ — `plan/archive/RESULT_F11.md` §8), is_groupable (string/key)
 - `vanna_documentation` (doc_key ขึ้นต้น `datafeed_<domain>_`): ต่อตาราง
   (kind/grain/keys/จำนวนแถว/คอลัมน์), กฎ reserved word ต่อคอลัมน์
   ("ต้อง quote เป็น double quote เสมอ"), business rules ทุกข้อ, กฎ format งวด YYYYMM

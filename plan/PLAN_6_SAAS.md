@@ -1,7 +1,7 @@
 # Plan 6: Multi-tenant / SaaS Architecture
 
 **Priority:** 6 (ระยะยาว)  
-**สถานะ (2026-09-18):** ⏸ เลื่อน — ตัดสินใช้รูปแบบ**แบบผสม** (`PLAN_7_DATA_SOURCE_SERVICE.md` §12, D8): ภายใน NT = deployment เดียวหลาย workspace, ลูกค้าภายนอก = private deployment ต่อราย — โมเดล multi-tenant (API ร่วม + DB ต่อ tenant) ในแผนนี้ = **Tier 3** ทำเมื่อมีลูกค้าภายนอกรายเล็กจำนวนมาก (~10–20 ราย) เท่านั้น  
+**สถานะ (2026-09-18, ทบทวน 2026-09-21):** ⏸ เลื่อน — Plan 8 ทำความสามารถ self-service ทั้งหมดต่อ workspace ก่อน (D-A) จนเหลือแค่ isolation + ปฏิบัติการของ Tier 3 ให้แผนนี้; — ตัดสินใช้รูปแบบ**แบบผสม** (`PLAN_7_DATA_SOURCE_SERVICE.md` §12, D8): ภายใน NT = deployment เดียวหลาย workspace, ลูกค้าภายนอก = private deployment ต่อราย — โมเดล multi-tenant (API ร่วม + DB ต่อ tenant) ในแผนนี้ = **Tier 3** ทำเมื่อมีลูกค้าภายนอกรายเล็กจำนวนมาก (~10–20 ราย) เท่านั้น  
 **ประมาณเวลา:** Design 3 วัน, Implement 2-4 สัปดาห์  
 **Prerequisite:** Plan 5 (DB Separation)  
 **อ้างอิง:** Plan 1 (Admin Agent), Plan 4 (Telegram), Plan 5 (DB Separation)
@@ -32,6 +32,10 @@ AI Assistant API
 4. Tenant เรียก API ด้วย API key
 
 ### 1.2 Model B: Upload & Query (self-service)
+
+> ⚠️ **ปรับโดยหลักของเจ้าของ 2026-09-21** (`PLAN_8_SELF_SERVICE_ONBOARDING.md` §3 ข้อ 5): การ upload แล้วแปลงเป็น SQLite
+> คือ **import** — ในบริการที่ใช้ร่วมกัน**ไม่ทำ**; ใช้ได้เฉพาะ private deployment ที่ลูกค้าเลือกเอง. บริการที่ใช้ร่วม
+> ให้ใช้ Model C (อ่าน ณ ที่อยู่) แทน — ลงมือใน Plan 8 Phase 8.4 (connector) + 8.2 (onboarding ทุก source)
 
 Tenant upload CSV/Excel → ระบบสร้าง SQLite ให้ → onboard อัตโนมัติ
 

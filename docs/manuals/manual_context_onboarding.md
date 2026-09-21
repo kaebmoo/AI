@@ -6,6 +6,11 @@
 
 ## ภาพรวม
 
+> ⚠️ **ข้อจำกัดปัจจุบัน (2026-09-21):** onboarding อ่านข้อมูลด้วย `sqlite3.connect()` ตรง → ใช้ได้กับ **business DB เดิม (SQLite)
+> เท่านั้น** ยังใช้กับ file source (`duckdb_file` เช่น `feed_*`) ไม่ได้ — context แบบนั้นได้ความรู้จาก contract ผ่าน
+> `scripts/datafeed/register_file_source` (4 ใน 7 ตาราง) ส่วน hierarchy รันแยกได้ด้วย `hierarchy_service.bootstrap_from_view`
+> (อ่าน file source ได้แล้ว). การรวมเป็น pipeline เดียวที่รับทุก source = `plan/PLAN_8_SELF_SERVICE_ONBOARDING.md` Phase 8.2
+
 เมื่อมี view/table ใหม่เข้ามาในระบบ (เช่น ข้อมูลสินทรัพย์, segment report, งบดุล) ระบบ Context Onboarding จะ:
 
 1. **วิเคราะห์โครงสร้างข้อมูล** — ตรวจจับว่าเป็น long_table, semi-crosstab, หรือ wide_table
