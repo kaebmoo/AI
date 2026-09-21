@@ -131,7 +131,7 @@ def get_view_column_mappings(service: "SchemaService", view_name: str) -> List[D
 def find_source_metadata(_service: "SchemaService", conn, source_table: str, source_column: str) -> Optional[Dict]:
     result = conn.execute(text("""
         SELECT * FROM schema_metadata
-        WHERE table_name = :st AND column_name = :sc
+        WHERE table_name = :st AND column_name = :sc AND status = 'active'
     """), {"st": source_table, "sc": source_column})
     row = result.mappings().fetchone()
     if row:
@@ -148,7 +148,7 @@ def find_source_metadata(_service: "SchemaService", conn, source_table: str, sou
             chain_col = chain_row["view_column"]
             meta_result = conn.execute(text("""
                 SELECT * FROM schema_metadata
-                WHERE table_name = :tv AND column_name = :tc
+                WHERE table_name = :tv AND column_name = :tc AND status = 'active'
                 AND display_name_th IS NOT NULL AND display_name_th != ''
             """), {"tv": chain_view, "tc": chain_col})
             meta_row = meta_result.mappings().fetchone()
@@ -161,7 +161,7 @@ def find_source_metadata(_service: "SchemaService", conn, source_table: str, sou
     try:
         result = conn.execute(text("""
             SELECT * FROM schema_metadata
-            WHERE column_name = :sc
+            WHERE column_name = :sc AND status = 'active'
             AND display_name_th IS NOT NULL AND display_name_th != ''
             AND table_name != :exclude
             ORDER BY table_name

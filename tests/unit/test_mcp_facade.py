@@ -30,6 +30,7 @@ from app.services.data_sources import ScopeError, request_pinned, request_scope
 from app.services.workspaces import ContextNotAllowed
 from scripts.migrate_data_sources import migrate as migrate_sources
 from scripts.migrate_workspaces import migrate_config
+from tests.unit import knowledge_db
 
 URL = "http://localhost:8000/api/v1/mcp"
 _REAL_ENABLED = mcp_facade._enabled  # the fixture switches the flag on
@@ -48,6 +49,7 @@ def world(tmp_path, monkeypatch):
                           "('hr_payroll', 'เงินเดือน', 'hr'), ('revenue', 'รายได้', 'legacy')"))
     migrate_sources(config)
     migrate_config(config)
+    knowledge_db.add_provenance(config)  # Plan 8.1 columns
     with config.begin() as conn:
         conn.execute(text("INSERT INTO workspaces (name) VALUES ('nt-report'), ('hr')"))
         conn.execute(text("INSERT INTO data_sources (name, source_type, llm_data_policy) VALUES ('secret', 'duckdb_file', 'aggregated_only')"))

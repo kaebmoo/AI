@@ -185,7 +185,7 @@ class ValidationService:
             SELECT rule_code, rule_name, rule_description, severity,
                    example_correct, example_wrong, pattern, check_type
             FROM schema_business_rules
-            WHERE is_active = 1
+            WHERE is_active = 1 AND status = 'active'
         """
         params = {}
 

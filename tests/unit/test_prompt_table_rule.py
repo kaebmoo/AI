@@ -5,6 +5,7 @@ questions to fact_ebt). Legacy contexts keep the pin, byte for byte."""
 from sqlalchemy import create_engine, text
 
 from app.services.ai import hybrid_flow
+from tests.unit import knowledge_db
 
 
 def _config(tmp_path, instruction):
@@ -15,6 +16,7 @@ def _config(tmp_path, instruction):
         conn.execute(text("INSERT INTO schema_contexts VALUES ('feed_e', 'feed_e_total', 1, 7, :i), ('revenue', 'revenue_search', 1, NULL, 'x')"),
                      {"i": instruction})
         conn.execute(text("INSERT INTO source_tables VALUES (7, 'feed_e_total', 1), (7, 'feed_e_fact', 1), (7, 'feed_e_dim', 1)"))
+    knowledge_db.add_provenance(engine)  # Plan 8.1 columns
     return engine
 
 

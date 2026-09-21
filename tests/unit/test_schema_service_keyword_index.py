@@ -7,6 +7,7 @@ from sqlalchemy.exc import OperationalError
 
 from app.services.schema import SchemaService as PackageSchemaService
 from app.services.schema_service import SchemaService
+from tests.unit import knowledge_db
 
 
 def _create_schema_keyword_db(db_path):
@@ -236,6 +237,7 @@ class TestSearchDbSingleProbe:
             conn.execute(text("CREATE TABLE schema_metadata (table_name TEXT, column_name TEXT, is_groupable INTEGER)"))
             for c in cols:
                 conn.execute(text("INSERT INTO schema_metadata VALUES (:t, :c, 1)"), {"t": table, "c": c})
+        knowledge_db.add_provenance(config)  # Plan 8.1 columns
         return config
 
     def test_sqlite_same_results_one_scan_without_match(self, tmp_path):

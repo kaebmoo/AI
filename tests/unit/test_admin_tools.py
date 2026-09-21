@@ -360,6 +360,7 @@ class TestSearchHierarchy:
                          "VALUES (?, 0, ?, '[\"datacom\"]')", (ctx, f"DATACOM-{ctx}"))
         conn.commit()
         conn.close()
+        knowledge_db.add_provenance(path)  # Plan 8.1 columns
 
         def policy(context_name, *args, **kwargs):
             return "full" if context_name == "revenue" else "schema_only"

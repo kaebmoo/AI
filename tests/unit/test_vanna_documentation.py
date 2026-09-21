@@ -192,21 +192,23 @@ class TestSyncDocumentation:
                     doc_key TEXT, title TEXT, content TEXT,
                     category TEXT DEFAULT 'guide', context_name TEXT,
                     is_active INTEGER DEFAULT 1,
-                    created_at DATETIME, updated_at DATETIME
+                    created_at DATETIME, updated_at DATETIME, status TEXT NOT NULL DEFAULT 'active'
                 )
             """))
             sa_conn.execute(text("""
                 CREATE TABLE schema_business_rules (
                     id INTEGER PRIMARY KEY, rule_code TEXT, rule_name TEXT,
                     rule_description TEXT, table_name TEXT, applies_to TEXT,
-                    example_correct TEXT, example_wrong TEXT, severity TEXT, is_active INTEGER
+                    example_correct TEXT, example_wrong TEXT, severity TEXT, is_active INTEGER,
+                    status TEXT NOT NULL DEFAULT 'active'
                 )
             """))
             sa_conn.execute(text("""
                 CREATE TABLE schema_semantic_mapping (
                     id INTEGER PRIMARY KEY, keyword TEXT, keyword_type TEXT,
                     target_column TEXT, target_condition TEXT, full_condition TEXT,
-                    description TEXT, priority INTEGER, is_active INTEGER, context_name TEXT
+                    description TEXT, priority INTEGER, is_active INTEGER, context_name TEXT,
+                    status TEXT NOT NULL DEFAULT 'active'
                 )
             """))
             sa_conn.execute(text(

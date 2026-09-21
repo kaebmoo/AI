@@ -17,7 +17,7 @@ def get_dimension_families(service: "SchemaService", table_name: str) -> Dict[st
             result = conn.execute(text("""
                 SELECT dimension_group, column_name
                 FROM schema_metadata
-                WHERE table_name = :table_name
+                WHERE table_name = :table_name AND status = 'active'
                   AND dimension_group IS NOT NULL
                 ORDER BY dimension_group, column_name
             """), {"table_name": table_name})
@@ -56,7 +56,7 @@ def get_dimension_families_with_source(service: "SchemaService", table_name: str
             result = conn.execute(text("""
                 SELECT dimension_group, column_name
                 FROM schema_metadata
-                WHERE table_name = :table_name
+                WHERE table_name = :table_name AND status = 'active'
                   AND dimension_group IS NOT NULL
             """), {"table_name": table_name})
             for row in result.mappings().fetchall():

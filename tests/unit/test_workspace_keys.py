@@ -16,6 +16,7 @@ from sqlalchemy import create_engine, text
 
 from app.services.workspaces import ContextNotAllowed, allowed_contexts
 from scripts.migrate_workspaces import migrate_config
+from tests.unit import knowledge_db
 
 
 @pytest.fixture
@@ -28,6 +29,7 @@ def config(tmp_path):
                           "('revenue', '[\"รายได้\"]', 10), ('feed_sales', '[\"ยอดขาย\"]', 1), "
                           "('transfer price', '[\"transfer\"]', 0), ('hr_payroll', '[\"เงินเดือน\", \"รายได้\"]', 5)"))
     migrate_config(engine)
+    knowledge_db.add_provenance(engine)  # Plan 8.1 columns
     with engine.begin() as conn:
         conn.execute(text("INSERT INTO workspaces (name) VALUES ('nt-report'), ('hr')"))
         conn.execute(text("UPDATE schema_contexts SET workspace_id = (SELECT id FROM workspaces WHERE name='nt-report') WHERE name IN ('feed_sales', 'transfer price')"))

@@ -28,8 +28,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from sqlalchemy import inspect, text
 
-TABLES = ("schema_contexts", "schema_metadata", "schema_business_rules", "golden_examples", "schema_semantic_mapping",
-          "master_hierarchy", "master_hierarchy_values", "data_warnings", "vanna_documentation")
+from app.services.provenance import KNOWLEDGE_TABLES as TABLES  # noqa: E402 — the one list the app checks at startup
+
 COLUMNS = (("source", "TEXT"), ("status", "TEXT NOT NULL DEFAULT 'active'"), ("confidence", "REAL"))
 
 # What a contract source wrote, read from the registry — never a context name typed here
@@ -69,7 +69,7 @@ PROPOSALS_DDL = (
         status TEXT NOT NULL DEFAULT 'proposed',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )""",
-    # one open proposal per key and proposer: a newer version replaces the one still waiting
+    # one open proposal per key and proposer: a newer version is merged into the one still waiting (provenance.propose)
     "CREATE UNIQUE INDEX IF NOT EXISTS ux_knowledge_proposals_open "
     "ON knowledge_proposals (table_name, row_key, source) WHERE status = 'proposed'",
 )

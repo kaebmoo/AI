@@ -81,28 +81,29 @@ class HierarchyService:
         finally:
             conn.close()
 
-    def get_levels(self, context_name: str) -> List[Dict]:
-        """Get hierarchy levels for a context with value counts."""
+    def get_levels(self, context_name: str, active_only: bool = False) -> List[Dict]:
+        """Get hierarchy levels for a context with value counts. The admin sees every status (a proposed level
+        waits for them); `active_only` = what the prompt and RAG may use (Plan 8.1)."""
         conn = _get_conn()
         try:
             rows = conn.execute("""
                 SELECT h.context_name, h.level, h.level_label_th, h.level_label_en,
                        h.level_columns, h.detection_keywords, h.source, h.is_active,
-                       COALESCE(vc.cnt, 0) as value_count
+                       COALESCE(vc.cnt, 0) as value_count, h.status
                 FROM master_hierarchy h
                 LEFT JOIN (
                     SELECT context_name, level, COUNT(*) as cnt
                     FROM master_hierarchy_values WHERE is_active=1
                     GROUP BY context_name, level
                 ) vc ON h.context_name = vc.context_name AND h.level = vc.level
-                WHERE h.context_name = ? AND h.is_active = 1
+                WHERE h.context_name = ? AND h.is_active = 1 AND (? = 0 OR h.status = 'active')
                 ORDER BY h.level
-            """, (context_name,)).fetchall()
+            """, (context_name, int(active_only))).fetchall()
             return [
                 {"context_name": r[0], "level": r[1], "level_label_th": r[2],
                  "level_label_en": r[3], "level_columns": json.loads(r[4]),
                  "detection_keywords": json.loads(r[5]), "source": r[6],
-                 "is_active": bool(r[7]), "value_count": r[8]}
+                 "is_active": bool(r[7]), "value_count": r[8], "status": r[9]}
                 for r in rows
             ]
         finally:
@@ -192,7 +193,7 @@ class HierarchyService:
             rows = conn.execute(f"""
                 SELECT v.id, v.context_name, v.level, v.value, v.parent_value,
                        v.aliases, v.source, v.is_active,
-                       COALESCE(c.cnt, 0) as children_count
+                       COALESCE(c.cnt, 0) as children_count, v.status
                 FROM master_hierarchy_values v
                 LEFT JOIN (
                     SELECT parent_value, COUNT(*) as cnt
@@ -208,7 +209,7 @@ class HierarchyService:
             items = [
                 {"id": r[0], "context_name": r[1], "level": r[2], "value": r[3],
                  "parent_value": r[4], "aliases": json.loads(r[5]) if r[5] else [],
-                 "source": r[6], "is_active": bool(r[7]), "children_count": r[8]}
+                 "source": r[6], "is_active": bool(r[7]), "children_count": r[8], "status": r[9]}
                 for r in rows
             ]
             return {"items": items, "total": total, "page": page, "page_size": page_size}
@@ -289,6 +290,7 @@ class HierarchyService:
                 FROM master_hierarchy_values v
                 JOIN master_hierarchy h ON v.context_name = h.context_name AND v.level = h.level
                 WHERE v.context_name = ? AND v.is_active = 1 AND h.is_active = 1
+                  AND v.status = 'active' AND h.status = 'active'
                   AND v.aliases LIKE ?
                 ORDER BY v.level
                 LIMIT ?
@@ -323,7 +325,8 @@ class HierarchyService:
         while current and max_depth > 0:
             chain.insert(0, current)
             row = conn.execute(
-                "SELECT parent_value FROM master_hierarchy_values WHERE context_name = ? AND value = ? AND is_active = 1",
+                "SELECT parent_value FROM master_hierarchy_values WHERE context_name = ? AND value = ? AND is_active = 1 "
+                "AND status = 'active'",
                 (context_name, current)
             ).fetchone()
             current = row[0] if row else None

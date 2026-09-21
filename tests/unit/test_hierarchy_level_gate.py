@@ -9,6 +9,7 @@ where the dimension is chosen, so the level has to be there too.
 import pytest
 
 from app.services.ai import hierarchy_context, hybrid_flow
+from tests.unit import knowledge_db
 
 LEVELS = [  # rows as master_hierarchy holds them (loaded by get_column_hierarchies)
     {"level": 0, "columns": ["bu"], "label_th": "กลุ่มธุรกิจ", "label_en": "Business Group",
@@ -154,6 +155,7 @@ def test_the_levels_load_without_the_values_table(tmp_path, monkeypatch):
         conn.execute("CREATE TABLE master_hierarchy (context_name, level, level_label_th, level_label_en, "
                      "level_columns, detection_keywords, is_active)")
         conn.execute("INSERT INTO master_hierarchy VALUES ('c', 0, 'ก', 'A', '[\"a\"]', '[\"กลุ่ม\"]', 1)")
+    knowledge_db.add_provenance(db)  # Plan 8.1 columns
     monkeypatch.setattr(settings, "CONFIG_DB_URL", f"sqlite:///{db}")
     monkeypatch.setattr(hierarchy_context, "_HIERARCHY_CACHE", {})
     monkeypatch.setattr(hierarchy_context, "_HIERARCHY_CACHE_TS", 0.0)

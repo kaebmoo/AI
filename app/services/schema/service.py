@@ -185,7 +185,7 @@ class SchemaService:
             try:
                 result = conn.execute(text("""
                     SELECT * FROM schema_metadata 
-                    WHERE table_name = :table_name
+                    WHERE table_name = :table_name AND status = 'active'
                     ORDER BY 
                         CASE column_name
                             WHEN 'YEAR' THEN 1
@@ -213,7 +213,7 @@ class SchemaService:
             try:
                 query = """
                     SELECT * FROM schema_business_rules
-                    WHERE is_active = 1
+                    WHERE is_active = 1 AND status = 'active'
                     AND (table_name = :table_name OR table_name = 'ALL' OR table_name IS NULL)
                 """
                 params = {"table_name": table_name}
@@ -250,7 +250,7 @@ class SchemaService:
                 result = conn.execute(text("""
                     SELECT level_label_th, level_columns
                     FROM master_hierarchy
-                    WHERE context_name = :ctx AND is_active = 1
+                    WHERE context_name = :ctx AND is_active = 1 AND status = 'active'
                     ORDER BY level
                 """), {"ctx": context_name})
                 rows = result.fetchall()
@@ -340,7 +340,7 @@ class SchemaService:
         """
         with self.engine.connect() as conn:
             try:
-                conditions = ["is_active = 1"]
+                conditions = ["is_active = 1", "status = 'active'"]
                 params: dict = {}
 
                 if keyword_type:

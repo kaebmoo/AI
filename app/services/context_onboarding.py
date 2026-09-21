@@ -696,7 +696,7 @@ class LLMAnalyzer:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 "SELECT name, display_name, main_view FROM schema_contexts "
-                "WHERE is_active = 1 ORDER BY priority"
+                "WHERE is_active = 1 AND status = 'active' ORDER BY priority"
             ).fetchall()
             conn.close()
             if not rows:

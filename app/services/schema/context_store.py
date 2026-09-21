@@ -38,7 +38,7 @@ def get_context_info(service: "SchemaService", context_name: str) -> Optional[Di
     with config_engine.connect() as conn:
         try:
             row = conn.execute(
-                text("SELECT * FROM schema_contexts WHERE name = :name AND is_active = 1"),
+                text("SELECT * FROM schema_contexts WHERE name = :name AND is_active = 1 AND status = 'active'"),
                 {"name": context_name},
             ).mappings().fetchone()
 
@@ -46,7 +46,7 @@ def get_context_info(service: "SchemaService", context_name: str) -> Optional[Di
                 alt_name = context_name.replace("_", " ")
                 if alt_name != context_name:
                     row = conn.execute(
-                        text("SELECT * FROM schema_contexts WHERE name = :name AND is_active = 1"),
+                        text("SELECT * FROM schema_contexts WHERE name = :name AND is_active = 1 AND status = 'active'"),
                         {"name": alt_name},
                     ).mappings().fetchone()
 
@@ -54,7 +54,7 @@ def get_context_info(service: "SchemaService", context_name: str) -> Optional[Di
                 alt_name = context_name.replace(" ", "_")
                 if alt_name != context_name:
                     row = conn.execute(
-                        text("SELECT * FROM schema_contexts WHERE name = :name AND is_active = 1"),
+                        text("SELECT * FROM schema_contexts WHERE name = :name AND is_active = 1 AND status = 'active'"),
                         {"name": alt_name},
                     ).mappings().fetchone()
 
@@ -74,7 +74,7 @@ def get_all_contexts(service: "SchemaService") -> List[Dict]:
     config_engine = service.get_config_engine()
     with config_engine.connect() as conn:
         try:
-            result = conn.execute(text("SELECT * FROM schema_contexts WHERE is_active = 1 ORDER BY priority DESC"))
+            result = conn.execute(text("SELECT * FROM schema_contexts WHERE is_active = 1 AND status = 'active' ORDER BY priority DESC"))
             contexts = []
             for row in result.mappings().fetchall():
                 context = _normalize_context_row(row)

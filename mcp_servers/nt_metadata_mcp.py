@@ -244,7 +244,7 @@ def get_available_contexts() -> List[Dict[str, Any]]:
             priority,
             is_active
         FROM schema_contexts
-        WHERE is_active = 1
+        WHERE is_active = 1 AND status = 'active'
         ORDER BY priority DESC
     """)
 
@@ -363,7 +363,7 @@ def get_context_info(context_name: str) -> Dict[str, Any]:
             keywords,
             priority
         FROM schema_contexts
-        WHERE name = {ph} AND is_active = 1
+        WHERE name = {ph} AND is_active = 1 AND status = 'active'
     """, (context_name,))
 
     if not results:
@@ -419,7 +419,7 @@ def get_schema_for_context(context_name: str) -> Dict[str, Any]:
 
     # Get context info
     ctx_results = db.execute_query(f"""
-        SELECT main_view FROM schema_contexts WHERE name = {ph}
+        SELECT main_view FROM schema_contexts WHERE name = {ph} AND status = 'active'
     """, (context_name,))
 
     if not ctx_results:
@@ -442,7 +442,7 @@ def get_schema_for_context(context_name: str) -> Dict[str, Any]:
             format_hint,
             conversion_sql 
         FROM schema_metadata
-        WHERE table_name = {ph}
+        WHERE table_name = {ph} AND status = 'active'
         ORDER BY id
     """, (main_view,))
 
@@ -497,7 +497,7 @@ def get_column_info(
 
     # Get main_view for context
     ctx_results = db.execute_query(f"""
-        SELECT main_view FROM schema_contexts WHERE name = {ph}
+        SELECT main_view FROM schema_contexts WHERE name = {ph} AND status = 'active'
     """, (context_name,))
 
     if not ctx_results:
@@ -520,7 +520,7 @@ def get_column_info(
             conversion_sql,
             format_hint
         FROM schema_metadata
-        WHERE table_name = {ph} AND column_name = {ph}
+        WHERE table_name = {ph} AND column_name = {ph} AND status = 'active'
     """, (main_view, column_name))
 
     if not results:
@@ -583,7 +583,7 @@ def get_semantic_mappings(
             description,
             priority
         FROM schema_semantic_mapping
-        WHERE is_active = 1
+        WHERE is_active = 1 AND status = 'active'
     """
     params = []
 
@@ -638,7 +638,7 @@ def search_mapping_for_term(term: str) -> Dict[str, Any]:
             full_condition,
             description
         FROM schema_semantic_mapping
-        WHERE is_active = 1 AND keyword = {ph}
+        WHERE is_active = 1 AND status = 'active' AND keyword = {ph}
         ORDER BY priority DESC
         LIMIT 1
     """, (term,))
@@ -666,7 +666,7 @@ def search_mapping_for_term(term: str) -> Dict[str, Any]:
             full_condition,
             description
         FROM schema_semantic_mapping
-        WHERE is_active = 1 AND keyword LIKE {ph}
+        WHERE is_active = 1 AND status = 'active' AND keyword LIKE {ph}
         ORDER BY priority DESC
         LIMIT 3
     """, (f"%{term}%",))
@@ -729,7 +729,7 @@ def get_business_rules(
             example_wrong,
             severity
         FROM schema_business_rules
-        WHERE is_active = 1
+        WHERE is_active = 1 AND status = 'active'
     """
     params = []
 
@@ -878,7 +878,7 @@ def get_golden_examples(
             category,
             usage_count
         FROM golden_examples
-        WHERE is_active = 1
+        WHERE is_active = 1 AND status = 'active'
     """
     params = []
 

@@ -165,7 +165,8 @@ class VannaService(ChromaDB_VectorStore, VannaBase):
 
         # 1. Business Rules
         with service.engine.connect() as conn:
-            rules = conn.execute(text("SELECT * FROM schema_business_rules WHERE is_active=1")).mappings().all()
+            rules = conn.execute(text(
+                "SELECT * FROM schema_business_rules WHERE is_active=1 AND status = 'active'")).mappings().all()
             for rule in rules:
                 if not self._keep.view(rule['table_name']):  # a rule about another workspace's view
                     continue
@@ -174,7 +175,8 @@ class VannaService(ChromaDB_VectorStore, VannaBase):
 
         # 2. Semantic Mappings (Group by type for better context)
         with service.engine.connect() as conn:
-            mappings = conn.execute(text("SELECT * FROM schema_semantic_mapping WHERE is_active=1")).mappings().all()
+            mappings = conn.execute(text(
+                "SELECT * FROM schema_semantic_mapping WHERE is_active=1 AND status = 'active'")).mappings().all()
             for m in mappings:
                 if not self._keep.context(m['context_name']):
                     continue
@@ -188,7 +190,8 @@ class VannaService(ChromaDB_VectorStore, VannaBase):
         try:
             with service.engine.connect() as conn:
                 docs = [d for d in conn.execute(text(
-                    "SELECT title, content, context_name FROM vanna_documentation WHERE is_active = 1 ORDER BY category, doc_key"
+                    "SELECT title, content, context_name FROM vanna_documentation WHERE is_active = 1 AND status = 'active' "
+                    "ORDER BY category, doc_key"
                 )).mappings().all() if self._keep.context(d['context_name'])]
                 for doc in docs:
                     self.train(documentation=f"## {doc['title']}\n{doc['content']}")
@@ -225,7 +228,7 @@ class VannaService(ChromaDB_VectorStore, VannaBase):
 
                 try:
                     from app.services.hierarchy_service import hierarchy_service
-                    levels = hierarchy_service.get_levels(ctx['name'])
+                    levels = hierarchy_service.get_levels(ctx['name'], active_only=True)
                     if levels:
                         chain = ' > '.join(lv['level_label_th'] for lv in levels)
                         summary += f"\nHierarchy: {chain}\n"
@@ -248,7 +251,8 @@ class VannaService(ChromaDB_VectorStore, VannaBase):
         """Train SQL from Golden Examples"""
         with service.engine.connect() as conn:
             # category = the context name for generated golden; free text (legacy) belongs to 'default'
-            examples = [e for e in conn.execute(text("SELECT * FROM golden_examples WHERE is_active=1")).mappings().all()
+            examples = [e for e in conn.execute(text(
+                "SELECT * FROM golden_examples WHERE is_active=1 AND status = 'active'")).mappings().all()
                         if self._keep.context(e['category'])]
             for ex in examples:
                 self.train(question=ex['question_pattern'], sql=ex['expected_sql'])

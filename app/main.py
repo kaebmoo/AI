@@ -17,6 +17,15 @@ setup_logging()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Plan 8.1: every knowledge reader filters status = 'active', and several swallow the error an unmigrated config
+    # DB raises — the prompt would silently lose its schema, rules and mappings. Refuse to start and say what to run.
+    from app.db.session import config_engine
+    from app.services.provenance import missing_status
+    missing = missing_status(config_engine)
+    if missing:
+        raise RuntimeError(f"config DB has no provenance columns on {', '.join(missing)} — "
+                           "run: venv/bin/python scripts/migrate_knowledge_provenance.py")
+
     # Startup: Connect to MCP Servers
     mcp_client = MCPClientService()
     # mcp_external: the facade's task group (Plan 7 Phase 6) — a routed ASGI app gets no lifespan of its own

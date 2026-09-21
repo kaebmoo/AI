@@ -54,14 +54,15 @@ def _context_tables(context_table: str, config_engine=None) -> Dict[str, List[st
         with config_engine.connect() as conn:
             names = [row[0] for row in conn.execute(text(
                 "SELECT st.table_name FROM schema_contexts sc JOIN source_tables st ON st.source_id = sc.source_id "
-                "WHERE sc.main_view = :t AND sc.is_active = 1 AND st.is_active = 1 "
+                "WHERE sc.main_view = :t AND sc.is_active = 1 AND sc.status = 'active' AND st.is_active = 1 "
                 "AND (st.table_name = :t OR instr(sc.instruction_th, st.table_name) > 0) ORDER BY st.table_name"),
                 {"t": context_table})]
             tables: Dict[str, List[str]] = {name: [] for name in names}
             try:  # columns: only the unfilterable rule needs them
                 for name, columns in conn.execute(text(
                         "SELECT st.table_name, st.columns FROM schema_contexts sc JOIN source_tables st "
-                        "ON st.source_id = sc.source_id WHERE sc.main_view = :t AND sc.is_active = 1"), {"t": context_table}):
+                        "ON st.source_id = sc.source_id WHERE sc.main_view = :t AND sc.is_active = 1 AND sc.status = 'active'"),
+                        {"t": context_table}):
                     if name in tables:
                         tables[name] = [c["name"] for c in json.loads(columns or "[]")]
             except Exception:
@@ -337,7 +338,7 @@ def load_execution_metadata(temp_schema, context_table: str, context_name: str) 
         with temp_schema.engine.connect() as conn:
             rows = conn.execute(sa_text(
                 "SELECT level_label_th, level_columns FROM master_hierarchy "
-                "WHERE context_name = :ctx AND is_active = 1 ORDER BY level"
+                "WHERE context_name = :ctx AND is_active = 1 AND status = 'active' ORDER BY level"
             ), {"ctx": context_name}).fetchall()
             if rows:
                 hierarchy_info = [{"level_label_th": row[0], "level_columns": row[1]} for row in rows]

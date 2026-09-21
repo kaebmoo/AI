@@ -19,6 +19,7 @@ from app.core.llm_policy import (AGGREGATED_ONLY, FULL, SCHEMA_ONLY, LLMPolicyEr
 from app.providers.matcha_provider import MatchaProvider
 from app.services.data_sources import SourceResolver, policy_for_table
 from scripts.migrate_data_sources import migrate
+from tests.unit import knowledge_db
 
 S_DIV, S_DIV2, S_NUM, S_LOOKUP, S_ANSWER = "ZQXDIVALPHA", "ZQXDIVBETA", 918273645.55, "ZQXLOOKUP", "ZQXANSWER 777123"
 SENTINELS = (S_DIV, S_DIV2, "918273645", S_LOOKUP, S_ANSWER)
@@ -73,6 +74,7 @@ def env(tmp_path, monkeypatch):
         conn.execute(text("CREATE TABLE master_hierarchy (context_name TEXT, level INT, level_label_th TEXT, "
                           "level_columns TEXT, is_active BOOLEAN)"))
     migrate(config)
+    knowledge_db.add_provenance(config)  # Plan 8.1 columns
     with config.begin() as conn:
         conn.execute(text("INSERT INTO data_sources (name, source_type, root_path) VALUES ('df_x', 'duckdb_file', :r)"),
                      {"r": str(root)})

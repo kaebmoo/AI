@@ -58,11 +58,12 @@ def load_hierarchies_from_db() -> Dict[str, List[Dict]]:
         conn = sqlite3.connect(db_path)
         rows = conn.execute(
             "SELECT context_name, level, level_label_th, level_label_en, level_columns, detection_keywords "
-            "FROM master_hierarchy WHERE is_active = 1 ORDER BY context_name, level"
+            "FROM master_hierarchy WHERE is_active = 1 AND status = 'active' ORDER BY context_name, level"
         ).fetchall()
         try:  # the levels must not depend on the values table
             value_rows = conn.execute(
-                "SELECT context_name, level, value, aliases FROM master_hierarchy_values WHERE is_active = 1"
+                "SELECT context_name, level, value, aliases FROM master_hierarchy_values "
+                "WHERE is_active = 1 AND status = 'active'"
             ).fetchall()
         except sqlite3.Error:
             value_rows = []

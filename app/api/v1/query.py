@@ -221,7 +221,7 @@ def contexts_for(allowed, config_db) -> List[ContextInfo]:
     from sqlalchemy import text
     rows = config_db.execute(text(
         "SELECT name, display_name, description FROM schema_contexts "
-        "WHERE is_active = 1 ORDER BY priority DESC, id")).fetchall()
+        "WHERE is_active = 1 AND status = 'active' ORDER BY priority DESC, id")).fetchall()
     return [ContextInfo(name=name or "", display_name=display_name or "", description=description or "")
             for name, display_name, description in rows if allowed is None or name in allowed]
 

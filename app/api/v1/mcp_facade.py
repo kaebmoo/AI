@@ -67,7 +67,8 @@ def full_policy_contexts(config_engine=None) -> FrozenSet[str]:
                 "ON ds.id = COALESCE(sc.source_id, (SELECT id FROM data_sources WHERE name = :legacy)) "
                 # an allowlist-only key is not tied to a workspace: closing the workspace must still cut it off
                 "JOIN workspaces w ON w.id = COALESCE(sc.workspace_id, (SELECT id FROM workspaces WHERE name = 'default')) "
-                "WHERE sc.is_active = 1 AND ds.is_active = 1 AND w.is_active = 1"), {"legacy": LEGACY}).fetchall()
+                "WHERE sc.is_active = 1 AND sc.status = 'active' AND ds.is_active = 1 AND w.is_active = 1"),
+                {"legacy": LEGACY}).fetchall()
     except Exception as exc:
         logger.error("MCP: source policies unreadable (%s) — every context refused", exc)
         return frozenset()

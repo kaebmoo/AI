@@ -43,7 +43,7 @@ def _load_warnings_from_db() -> Optional[List[Dict]]:
         try:
             from app.models.schema_models import DataWarningModel
             rows = db.query(DataWarningModel).filter(
-                DataWarningModel.is_active == True
+                DataWarningModel.is_active == True, DataWarningModel.status == "active"
             ).all()
             warnings = []
             for row in rows:

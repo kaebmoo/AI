@@ -36,7 +36,7 @@ def get_searchable_columns(service: "SchemaService", context_name: str, table_na
         with service.engine.connect() as conn:
             for table in metadata_tables:
                 rows = conn.execute(
-                    text("SELECT column_name FROM schema_metadata WHERE table_name = :tbl AND is_groupable = 1"),
+                    text("SELECT column_name FROM schema_metadata WHERE table_name = :tbl AND is_groupable = 1 AND status = 'active'"),
                     {"tbl": table},
                 ).fetchall()
                 if rows:
@@ -355,7 +355,7 @@ def get_known_terms(service: "SchemaService", context_name: Optional[str] = None
                 text(
                     f'''
                     SELECT DISTINCT value FROM master_hierarchy_values
-                    WHERE is_active = 1 {context_filter}
+                    WHERE is_active = 1 AND status = 'active' {context_filter}
                     '''
                 ),
                 params,
@@ -369,7 +369,7 @@ def get_known_terms(service: "SchemaService", context_name: Optional[str] = None
                 text(
                     f'''
                     SELECT DISTINCT aliases FROM master_hierarchy_values
-                    WHERE aliases IS NOT NULL AND aliases != '' AND is_active = 1 {context_filter}
+                    WHERE aliases IS NOT NULL AND aliases != '' AND is_active = 1 AND status = 'active' {context_filter}
                     '''
                 ),
                 params,

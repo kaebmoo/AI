@@ -62,11 +62,11 @@ def allowed_contexts(api_key: Any, config_engine=None) -> Optional[FrozenSet[str
     try:
         with (config_engine or _config_engine()).connect() as conn:
             if workspace_id is None:
-                reachable = {row[0] for row in conn.execute(text("SELECT name FROM schema_contexts WHERE is_active = 1"))}
+                reachable = {row[0] for row in conn.execute(text("SELECT name FROM schema_contexts WHERE is_active = 1 AND status = 'active'"))}
             else:
                 reachable = {row[0] for row in conn.execute(text(
                     "SELECT sc.name FROM schema_contexts sc JOIN workspaces w ON w.id = COALESCE(sc.workspace_id, (SELECT id FROM workspaces WHERE name = 'default')) "
-                    "WHERE w.id = :ws AND sc.is_active = 1 AND w.is_active = 1"), {"ws": workspace_id})}
+                    "WHERE w.id = :ws AND sc.is_active = 1 AND sc.status = 'active' AND w.is_active = 1"), {"ws": workspace_id})}
     except Exception as exc:
         logger.error(f"API key contexts unreadable ({exc}) — denying all")
         return frozenset()
@@ -124,7 +124,8 @@ def resolve_key_binding(workspace: Optional[str], contexts: Optional[list], conf
             if workspace_id is None:
                 raise ValueError(f"ไม่พบ workspace '{workspace}'")
         known = {norm(name): ws for name, ws in conn.execute(text(
-            "SELECT sc.name, COALESCE(sc.workspace_id, (SELECT id FROM workspaces WHERE name = 'default')) FROM schema_contexts sc WHERE sc.is_active = 1"))}
+            "SELECT sc.name, COALESCE(sc.workspace_id, (SELECT id FROM workspaces WHERE name = 'default')) FROM schema_contexts sc "
+            "WHERE sc.is_active = 1 AND sc.status = 'active'"))}
     for name in contexts or []:
         if norm(name) not in known:
             raise ValueError(f"ไม่พบ context '{name}'")

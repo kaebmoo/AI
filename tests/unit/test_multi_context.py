@@ -23,6 +23,7 @@ from app.services.data_sources import ScopeError, SourceResolver
 from app.services.query_engine import QueryEngineResult
 from app.services.workspaces import ContextNotAllowed
 from scripts.migrate_data_sources import migrate
+from tests.unit import knowledge_db
 
 WORKSPACES = {1: "default", 2: "nt-report"}
 CONTEXTS = [
@@ -318,6 +319,7 @@ def two_sources(tmp_path, monkeypatch):
         conn.execute(text("CREATE TABLE workspaces (id INTEGER PRIMARY KEY, name TEXT, is_active BOOLEAN DEFAULT 1)"))
         conn.execute(text("INSERT INTO workspaces (id, name) VALUES (1, 'default')"))
     migrate(config)
+    knowledge_db.add_provenance(config)  # Plan 8.1 columns
     columns = json.dumps([{"name": "division", "type": "VARCHAR"}, {"name": "amount", "type": "DOUBLE"}])
     for i, (letter, div, num, keyword, policy) in enumerate((("a", A_DIV, A_NUM, "รายได้", FULL), ("b", B_DIV, B_NUM, "ค่าใช้จ่าย", SCHEMA_ONLY)), start=2):
         root = tmp_path / letter

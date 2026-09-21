@@ -20,6 +20,9 @@ from typing import Any, Dict, Iterable, Optional
 DECLARED, MANUAL, INFERRED, LEARNED = "declared", "manual", "inferred", "learned"
 ACTIVE, PROPOSED, REJECTED = "active", "proposed", "rejected"
 MACHINE = frozenset({INFERRED, LEARNED})
+KNOWLEDGE_TABLES = ("schema_contexts", "schema_metadata", "schema_business_rules", "golden_examples",
+                    "schema_semantic_mapping", "master_hierarchy", "master_hierarchy_values", "data_warnings",
+                    "vanna_documentation")
 
 # What the contract writes, per table (datafeed_knowledge, gen_golden_from_controls). A person who edits one of
 # these makes a declared row theirs; editing anything else — keywords, priority, workspace, on/off, display
@@ -48,6 +51,16 @@ def after_human_edit(table: str, source: Optional[str], changed: Iterable[str]) 
     if source == DECLARED and not DECLARED_FIELDS.get(table, frozenset()) & set(changed):
         return DECLARED
     return MANUAL
+
+
+def missing_status(engine) -> list:
+    """Knowledge tables that exist without the Plan 8.1 `status` column — every prompt / RAG reader filters on it."""
+    from sqlalchemy import inspect
+
+    inspector = inspect(engine)
+    present = set(inspector.get_table_names())
+    return [t for t in KNOWLEDGE_TABLES
+            if t in present and "status" not in {c["name"] for c in inspector.get_columns(t)}]
 
 
 def mark_human_edit(row, table: str, changed: Iterable[str]) -> None:
