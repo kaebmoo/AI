@@ -1,0 +1,2974 @@
+{
+ "about": "คำถามที่ผู้ใช้ portal พิมพ์เองจริง (PocketBase audit_logs action=assistant_ask + AI query_audit channel=portal) — ตัวเลขเป็นล้านบาท (±0.01), years_be = ปี พ.ศ. ที่ข้อความพูดได้, base_words = คำที่บอกฐานเมื่อคำถามไม่ระบุเวลา. ตัวรัน: scripts/eval/run_portal_questions.py",
+ "context": "feed_revenue",
+ "scope": {
+  "year_month": [
+   202501,
+   202502,
+   202503,
+   202504,
+   202505,
+   202506,
+   202507,
+   202508,
+   202509,
+   202510,
+   202511,
+   202512,
+   202601,
+   202602,
+   202603,
+   202604,
+   202605,
+   202606,
+   202607,
+   202608
+  ]
+ },
+ "request": {
+  "include_sql": true,
+  "include_data": true,
+  "max_rows": 20,
+  "source": "portal"
+ },
+ "oracle_build": {
+  "build_id": "20260921T005851Z",
+  "period": 202608,
+  "schema_version": "2.3.2",
+  "reference": "NT-Report/DataFeed/handoff/assistant_reference_202608.md"
+ },
+ "questions": [
+  {
+   "id": "P01",
+   "asked_at": "2026-09-20 22:33",
+   "question": "รายได้รวม",
+   "time_in_question": false,
+   "oracle_status": "RESULT_F11 §7/§9 (ค่าที่ตัดสินแล้ว)",
+   "accept": [
+    {
+     "base": "ส.ค. 2569 (งวดอ้างอิง)",
+     "years_be": [
+      2569
+     ],
+     "values": [
+      3434.07
+     ],
+     "base_words": [
+      "สิงหาคม",
+      "ส.ค."
+     ],
+     "sql": "SELECT value FROM control_totals WHERE bu='__ALL__' AND measure='revenue' AND year_month=202608"
+    },
+    {
+     "base": "สะสม ม.ค.–ส.ค. 2569 รวมรายได้อื่น (⚠3)",
+     "years_be": [
+      2569
+     ],
+     "values": [
+      26036.32
+     ],
+     "base_words": [
+      "สะสม",
+      "ตั้งแต่ต้นปี",
+      "ม.ค."
+     ],
+     "sql": "SELECT value FROM control_totals WHERE bu='__ALL__' AND measure='revenue_ytd' AND year_month=202608"
+    }
+   ]
+  },
+  {
+   "id": "P02",
+   "asked_at": "2026-09-20 22:52",
+   "question": "เอาของปีนี้สิ",
+   "time_in_question": true,
+   "oracle_status": "RESULT_F11 §7/§9 (ค่าที่ตัดสินแล้ว) — 26,644.91 = กับดัก BG8 (⚠3) ผิด",
+   "accept": [
+    {
+     "base": "สะสม ม.ค.–ส.ค. 2569 รวมรายได้อื่น",
+     "years_be": [
+      2569
+     ],
+     "values": [
+      26036.32
+     ],
+     "sql": "SELECT value FROM control_totals WHERE bu='__ALL__' AND measure='revenue_ytd' AND year_month=202608"
+    }
+   ]
+  },
+  {
+   "id": "P03",
+   "asked_at": "2026-09-20 22:53",
+   "question": "รายได้รายเดือนปี 2569",
+   "time_in_question": true,
+   "oracle_status": "RESULT_F11 §7/§9 ✅ (ค่ารายเดือนจาก control_totals)",
+   "accept": [
+    {
+     "base": "รายเดือน ม.ค.–ส.ค. 2569",
+     "years_be": [
+      2569
+     ],
+     "rows": [
+      {
+       "key": [
+        [
+         "202601"
+        ],
+        [
+         "2026",
+         "1"
+        ],
+        [
+         "2569",
+         "1"
+        ],
+        [
+         "1"
+        ]
+       ],
+       "value": 3052.48
+      },
+      {
+       "key": [
+        [
+         "202602"
+        ],
+        [
+         "2026",
+         "2"
+        ],
+        [
+         "2569",
+         "2"
+        ],
+        [
+         "2"
+        ]
+       ],
+       "value": 3426.6
+      },
+      {
+       "key": [
+        [
+         "202603"
+        ],
+        [
+         "2026",
+         "3"
+        ],
+        [
+         "2569",
+         "3"
+        ],
+        [
+         "3"
+        ]
+       ],
+       "value": 3204.13
+      },
+      {
+       "key": [
+        [
+         "202604"
+        ],
+        [
+         "2026",
+         "4"
+        ],
+        [
+         "2569",
+         "4"
+        ],
+        [
+         "4"
+        ]
+       ],
+       "value": 3229.87
+      },
+      {
+       "key": [
+        [
+         "202605"
+        ],
+        [
+         "2026",
+         "5"
+        ],
+        [
+         "2569",
+         "5"
+        ],
+        [
+         "5"
+        ]
+       ],
+       "value": 3258.48
+      },
+      {
+       "key": [
+        [
+         "202606"
+        ],
+        [
+         "2026",
+         "6"
+        ],
+        [
+         "2569",
+         "6"
+        ],
+        [
+         "6"
+        ]
+       ],
+       "value": 3764.62
+      },
+      {
+       "key": [
+        [
+         "202607"
+        ],
+        [
+         "2026",
+         "7"
+        ],
+        [
+         "2569",
+         "7"
+        ],
+        [
+         "7"
+        ]
+       ],
+       "value": 3274.67
+      },
+      {
+       "key": [
+        [
+         "202608"
+        ],
+        [
+         "2026",
+         "8"
+        ],
+        [
+         "2569",
+         "8"
+        ],
+        [
+         "8"
+        ]
+       ],
+       "value": 3434.07
+      }
+     ],
+     "min_rows": 8,
+     "sql": "SELECT year_month, value FROM control_totals WHERE bu='__ALL__' AND measure='revenue' AND year_month BETWEEN 202601 AND 202608 ORDER BY 1"
+    }
+   ]
+  },
+  {
+   "id": "P04",
+   "asked_at": "2026-09-20 22:54",
+   "question": "รายได้ บริการ NT Broadband ปีนี้",
+   "time_in_question": true,
+   "oracle_status": "RESULT_F11 §7/§9 (ค่าที่ตัดสินแล้ว)",
+   "accept": [
+    {
+     "base": "สะสม 2569 ของ product 102020019",
+     "years_be": [
+      2569
+     ],
+     "values": [
+      6630.81
+     ],
+     "sql": "SELECT SUM(revenue_ytd) FROM fact_product_monthly WHERE product_key=102020019 AND year_month=202608"
+    }
+   ]
+  },
+  {
+   "id": "P05",
+   "asked_at": "2026-09-20 22:55",
+   "question": "รายได้ เฉพาะบริการ NT Broadband ปีนี้",
+   "time_in_question": true,
+   "oracle_status": "RESULT_F11 §7/§9 (ค่าที่ตัดสินแล้ว)",
+   "accept": [
+    {
+     "base": "สะสม 2569 ของ product 102020019",
+     "years_be": [
+      2569
+     ],
+     "values": [
+      6630.81
+     ],
+     "sql": "SELECT SUM(revenue_ytd) FROM fact_product_monthly WHERE product_key=102020019 AND year_month=202608"
+    }
+   ]
+  },
+  {
+   "id": "P06",
+   "asked_at": "2026-09-20 22:56",
+   "question": "รายได้ บริการ 102020019",
+   "time_in_question": false,
+   "oracle_status": "RESULT_F11 §7/§9 (ค่าที่ตัดสินแล้ว) (840.05 = งวดอ้างอิง)",
+   "accept": [
+    {
+     "base": "ส.ค. 2569 (งวดอ้างอิง)",
+     "years_be": [
+      2569
+     ],
+     "values": [
+      840.05
+     ],
+     "base_words": [
+      "สิงหาคม",
+      "ส.ค."
+     ],
+     "sql": "SELECT SUM(revenue) FROM fact_product_monthly WHERE product_key=102020019 AND year_month=202608"
+    },
+    {
+     "base": "สะสม ม.ค.–ส.ค. 2569",
+     "years_be": [
+      2569
+     ],
+     "values": [
+      6630.81
+     ],
+     "base_words": [
+      "สะสม",
+      "ตั้งแต่ต้นปี",
+      "ม.ค."
+     ],
+     "sql": "SELECT SUM(revenue_ytd) FROM fact_product_monthly WHERE product_key=102020019 AND year_month=202608"
+    }
+   ]
+  },
+  {
+   "id": "P07",
+   "asked_at": "2026-09-20 22:56",
+   "question": "รายได้ บริการ 102020019 ปี 69",
+   "time_in_question": true,
+   "oracle_status": "RESULT_F11 §7/§9 (ค่าที่ตัดสินแล้ว)",
+   "accept": [
+    {
+     "base": "สะสม 2569",
+     "years_be": [
+      2569
+     ],
+     "values": [
+      6630.81
+     ],
+     "sql": "SELECT SUM(revenue_ytd) FROM fact_product_monthly WHERE product_key=102020019 AND year_month=202608"
+    }
+   ]
+  },
+  {
+   "id": "P08",
+   "asked_at": "2026-09-20 22:56",
+   "question": "รายได้ ปี 69 10 อันดับแรก",
+   "time_in_question": true,
+   "oracle_status": "RESULT_F11 §7/§9 ✅ นับแถว BG8 แบบ raw — ที่นี่เข้มตาม ⚠3: BG8 สะสม = net 1,873.45 (รอเจ้าของยืนยัน)",
+   "accept": [
+    {
+     "base": "ราย BU สะสม 2569",
+     "years_be": [
+      2569
+     ],
+     "rows": [
+      {
+       "key": [
+        [
+         "4.Fixed Line & Broadband"
+        ]
+       ],
+       "value": 11584.64
+      },
+      {
+       "key": [
+        [
+         "1.Hard Infrastructure"
+        ]
+       ],
+       "value": 5555.51
+      },
+      {
+       "key": [
+        [
+         "5.Digital"
+        ]
+       ],
+       "value": 3096.35
+      },
+      {
+       "key": [
+        [
+         "8.รายได้อื่น"
+        ]
+       ],
+       "value": 1873.45
+      },
+      {
+       "key": [
+        [
+         "6.ICT Solution"
+        ]
+       ],
+       "value": 1378.44
+      },
+      {
+       "key": [
+        [
+         "3.Mobile"
+        ]
+       ],
+       "value": 1358.86
+      },
+      {
+       "key": [
+        [
+         "2.International"
+        ]
+       ],
+       "value": 1186.2
+      },
+      {
+       "key": [
+        [
+         "7.กลุ่มบริการอื่นไม่ใช่โทรคมนาคม"
+        ]
+       ],
+       "value": 2.88
+      }
+     ],
+     "min_rows": 8,
+     "ordered": true,
+     "sql": "SELECT bu, revenue_ytd FROM fact_bu_monthly WHERE year_month=202608 ORDER BY 2 DESC"
+    },
+    {
+     "base": "ราย product สะสม 2569",
+     "years_be": [
+      2569
+     ],
+     "rows": [
+      {
+       "key": [
+        [
+         "บริการ NT Broadband"
+        ]
+       ],
+       "value": 6630.81
+      },
+      {
+       "key": [
+        [
+         "บริการเสาโทรคมนาคม AWN"
+        ]
+       ],
+       "value": 3368.74
+      },
+      {
+       "key": [
+        [
+         "รายได้อื่น"
+        ]
+       ],
+       "value": 1867.47
+      },
+      {
+       "key": [
+        [
+         "บริการ GDCC"
+        ]
+       ],
+       "value": 1378.07
+      },
+      {
+       "key": [
+        [
+         "NT Home Phone"
+        ]
+       ],
+       "value": 1299.46
+      },
+      {
+       "key": [
+        [
+         "บริการเสาโทรคมนาคม DTN"
+        ]
+       ],
+       "value": 893.02
+      },
+      {
+       "key": [
+        [
+         "บริการ NT CLOUD"
+        ]
+       ],
+       "value": 835.99
+      },
+      {
+       "key": [
+        [
+         "NT Business Trunk Line"
+        ]
+       ],
+       "value": 600.92
+      },
+      {
+       "key": [
+        [
+         "NT Corporate Internet"
+        ]
+       ],
+       "value": 598.67
+      },
+      {
+       "key": [
+        [
+         "บริการ my 5G 700 MHz"
+        ]
+       ],
+       "value": 595.66
+      }
+     ],
+     "min_rows": 10,
+     "ordered": true,
+     "sql": "SELECT product_name, SUM(revenue_ytd) s FROM fact_product_monthly WHERE year_month=202608 GROUP BY 1 ORDER BY s DESC"
+    },
+    {
+     "base": "ราย BU 2569 (BG8 raw)",
+     "years_be": [
+      2569
+     ],
+     "rows": [
+      {
+       "key": [
+        [
+         "4.Fixed Line & Broadband"
+        ]
+       ],
+       "value": 11584.64
+      },
+      {
+       "key": [
+        [
+         "1.Hard Infrastructure"
+        ]
+       ],
+       "value": 5555.51
+      },
+      {
+       "key": [
+        [
+         "5.Digital"
+        ]
+       ],
+       "value": 3096.35
+      },
+      {
+       "key": [
+        [
+         "8.รายได้อื่น"
+        ]
+       ],
+       "value": 2482.04
+      },
+      {
+       "key": [
+        [
+         "6.ICT Solution"
+        ]
+       ],
+       "value": 1378.44
+      },
+      {
+       "key": [
+        [
+         "3.Mobile"
+        ]
+       ],
+       "value": 1358.86
+      },
+      {
+       "key": [
+        [
+         "2.International"
+        ]
+       ],
+       "value": 1186.2
+      },
+      {
+       "key": [
+        [
+         "7.กลุ่มบริการอื่นไม่ใช่โทรคมนาคม"
+        ]
+       ],
+       "value": 2.88
+      }
+     ],
+     "min_rows": 8,
+     "ordered": true,
+     "sql": "SELECT bu, SUM(revenue) s FROM fact_bu_monthly WHERE year=2026 GROUP BY 1 ORDER BY s DESC",
+     "lenient": "BG8 แบบผลรวมรายเดือน raw — RESULT_F11 §9 นับ ✅ แต่ ⚠3 ว่าสะสมของ BG8 ต้องเป็น net (รอเจ้าของตัดสิน)"
+    },
+    {
+     "base": "ราย product 2569 (BG8 raw)",
+     "years_be": [
+      2569
+     ],
+     "rows": [
+      {
+       "key": [
+        [
+         "บริการ NT Broadband"
+        ]
+       ],
+       "value": 6630.81
+      },
+      {
+       "key": [
+        [
+         "บริการเสาโทรคมนาคม AWN"
+        ]
+       ],
+       "value": 3368.74
+      },
+      {
+       "key": [
+        [
+         "รายได้อื่น"
+        ]
+       ],
+       "value": 2476.07
+      },
+      {
+       "key": [
+        [
+         "บริการ GDCC"
+        ]
+       ],
+       "value": 1378.07
+      },
+      {
+       "key": [
+        [
+         "NT Home Phone"
+        ]
+       ],
+       "value": 1299.46
+      },
+      {
+       "key": [
+        [
+         "บริการเสาโทรคมนาคม DTN"
+        ]
+       ],
+       "value": 893.02
+      },
+      {
+       "key": [
+        [
+         "บริการ NT CLOUD"
+        ]
+       ],
+       "value": 835.99
+      },
+      {
+       "key": [
+        [
+         "NT Business Trunk Line"
+        ]
+       ],
+       "value": 600.92
+      },
+      {
+       "key": [
+        [
+         "NT Corporate Internet"
+        ]
+       ],
+       "value": 598.67
+      },
+      {
+       "key": [
+        [
+         "บริการ my 5G 700 MHz"
+        ]
+       ],
+       "value": 595.66
+      }
+     ],
+     "min_rows": 10,
+     "ordered": true,
+     "sql": "SELECT product_name, SUM(revenue) s FROM fact_product_monthly WHERE year=2026 GROUP BY 1 ORDER BY s DESC",
+     "lenient": "BG8 แบบผลรวมรายเดือน raw — RESULT_F11 §9 นับ ✅ แต่ ⚠3 ว่าสะสมของ BG8 ต้องเป็น net (รอเจ้าของตัดสิน)"
+    }
+   ]
+  },
+  {
+   "id": "P09",
+   "asked_at": "2026-09-20 22:57",
+   "question": "รายได้ บริการ 10 อันดับแรก",
+   "time_in_question": false,
+   "oracle_status": "RESULT_F11 §9 ✅ ราย product เดือน ส.ค. (ค่าคำนวณจาก bundle)",
+   "accept": [
+    {
+     "base": "ราย product ส.ค. 2569",
+     "years_be": [
+      2569
+     ],
+     "rows": [
+      {
+       "key": [
+        [
+         "บริการ NT Broadband"
+        ]
+       ],
+       "value": 840.05
+      },
+      {
+       "key": [
+        [
+         "บริการเสาโทรคมนาคม AWN"
+        ]
+       ],
+       "value": 420.62
+      },
+      {
+       "key": [
+        [
+         "รายได้อื่น"
+        ]
+       ],
+       "value": 310.31
+      },
+      {
+       "key": [
+        [
+         "บริการเสาโทรคมนาคม NT"
+        ]
+       ],
+       "value": 177.46
+      },
+      {
+       "key": [
+        [
+         "บริการ GDCC"
+        ]
+       ],
+       "value": 161.32
+      },
+      {
+       "key": [
+        [
+         "NT Home Phone"
+        ]
+       ],
+       "value": 147.1
+      },
+      {
+       "key": [
+        [
+         "บริการ NT CLOUD"
+        ]
+       ],
+       "value": 115.8
+      },
+      {
+       "key": [
+        [
+         "บริการเสาโทรคมนาคม DTN"
+        ]
+       ],
+       "value": 111.21
+      },
+      {
+       "key": [
+        [
+         "บริการ my 5G 700 MHz"
+        ]
+       ],
+       "value": 77.03
+      },
+      {
+       "key": [
+        [
+         "NT Business Trunk Line"
+        ]
+       ],
+       "value": 72.93
+      }
+     ],
+     "base_words": [
+      "สิงหาคม",
+      "ส.ค."
+     ],
+     "min_rows": 10,
+     "ordered": true,
+     "sql": "SELECT product_name, SUM(revenue) s FROM fact_product_monthly WHERE year_month=202608 GROUP BY 1 ORDER BY s DESC"
+    },
+    {
+     "base": "ราย product สะสม ม.ค.–ส.ค. 2569",
+     "years_be": [
+      2569
+     ],
+     "rows": [
+      {
+       "key": [
+        [
+         "บริการ NT Broadband"
+        ]
+       ],
+       "value": 6630.81
+      },
+      {
+       "key": [
+        [
+         "บริการเสาโทรคมนาคม AWN"
+        ]
+       ],
+       "value": 3368.74
+      },
+      {
+       "key": [
+        [
+         "รายได้อื่น"
+        ]
+       ],
+       "value": 1867.47
+      },
+      {
+       "key": [
+        [
+         "บริการ GDCC"
+        ]
+       ],
+       "value": 1378.07
+      },
+      {
+       "key": [
+        [
+         "NT Home Phone"
+        ]
+       ],
+       "value": 1299.46
+      },
+      {
+       "key": [
+        [
+         "บริการเสาโทรคมนาคม DTN"
+        ]
+       ],
+       "value": 893.02
+      },
+      {
+       "key": [
+        [
+         "บริการ NT CLOUD"
+        ]
+       ],
+       "value": 835.99
+      },
+      {
+       "key": [
+        [
+         "NT Business Trunk Line"
+        ]
+       ],
+       "value": 600.92
+      },
+      {
+       "key": [
+        [
+         "NT Corporate Internet"
+        ]
+       ],
+       "value": 598.67
+      },
+      {
+       "key": [
+        [
+         "บริการ my 5G 700 MHz"
+        ]
+       ],
+       "value": 595.66
+      }
+     ],
+     "base_words": [
+      "สะสม",
+      "ตั้งแต่ต้นปี",
+      "ม.ค."
+     ],
+     "min_rows": 10,
+     "ordered": true,
+     "sql": "SELECT product_name, SUM(revenue_ytd) s FROM fact_product_monthly WHERE year_month=202608 GROUP BY 1 ORDER BY s DESC"
+    },
+    {
+     "base": "ราย product ม.ค.–ส.ค. 2569 (BG8 raw)",
+     "years_be": [
+      2569
+     ],
+     "rows": [
+      {
+       "key": [
+        [
+         "บริการ NT Broadband"
+        ]
+       ],
+       "value": 6630.81
+      },
+      {
+       "key": [
+        [
+         "บริการเสาโทรคมนาคม AWN"
+        ]
+       ],
+       "value": 3368.74
+      },
+      {
+       "key": [
+        [
+         "รายได้อื่น"
+        ]
+       ],
+       "value": 2476.07
+      },
+      {
+       "key": [
+        [
+         "บริการ GDCC"
+        ]
+       ],
+       "value": 1378.07
+      },
+      {
+       "key": [
+        [
+         "NT Home Phone"
+        ]
+       ],
+       "value": 1299.46
+      },
+      {
+       "key": [
+        [
+         "บริการเสาโทรคมนาคม DTN"
+        ]
+       ],
+       "value": 893.02
+      },
+      {
+       "key": [
+        [
+         "บริการ NT CLOUD"
+        ]
+       ],
+       "value": 835.99
+      },
+      {
+       "key": [
+        [
+         "NT Business Trunk Line"
+        ]
+       ],
+       "value": 600.92
+      },
+      {
+       "key": [
+        [
+         "NT Corporate Internet"
+        ]
+       ],
+       "value": 598.67
+      },
+      {
+       "key": [
+        [
+         "บริการ my 5G 700 MHz"
+        ]
+       ],
+       "value": 595.66
+      }
+     ],
+     "base_words": [
+      "สะสม",
+      "ตั้งแต่ต้นปี",
+      "ม.ค."
+     ],
+     "min_rows": 10,
+     "ordered": true,
+     "sql": "SELECT product_name, SUM(revenue) s FROM fact_product_monthly WHERE year=2026 GROUP BY 1 ORDER BY s DESC",
+     "lenient": "BG8 แบบผลรวมรายเดือน raw — RESULT_F11 §9 นับ ✅ แต่ ⚠3 ว่าสะสมของ BG8 ต้องเป็น net (รอเจ้าของตัดสิน)"
+    }
+   ]
+  },
+  {
+   "id": "P10",
+   "asked_at": "2026-09-20 22:58",
+   "question": "รายได้บริการ 10 อันดับแรก รายบริการ ปี 69",
+   "time_in_question": true,
+   "oracle_status": "RESULT_F11 §7/§9 ✅ (ค่าคำนวณจาก bundle)",
+   "accept": [
+    {
+     "base": "ราย product สะสม 2569",
+     "years_be": [
+      2569
+     ],
+     "rows": [
+      {
+       "key": [
+        [
+         "บริการ NT Broadband"
+        ]
+       ],
+       "value": 6630.81
+      },
+      {
+       "key": [
+        [
+         "บริการเสาโทรคมนาคม AWN"
+        ]
+       ],
+       "value": 3368.74
+      },
+      {
+       "key": [
+        [
+         "รายได้อื่น"
+        ]
+       ],
+       "value": 1867.47
+      },
+      {
+       "key": [
+        [
+         "บริการ GDCC"
+        ]
+       ],
+       "value": 1378.07
+      },
+      {
+       "key": [
+        [
+         "NT Home Phone"
+        ]
+       ],
+       "value": 1299.46
+      },
+      {
+       "key": [
+        [
+         "บริการเสาโทรคมนาคม DTN"
+        ]
+       ],
+       "value": 893.02
+      },
+      {
+       "key": [
+        [
+         "บริการ NT CLOUD"
+        ]
+       ],
+       "value": 835.99
+      },
+      {
+       "key": [
+        [
+         "NT Business Trunk Line"
+        ]
+       ],
+       "value": 600.92
+      },
+      {
+       "key": [
+        [
+         "NT Corporate Internet"
+        ]
+       ],
+       "value": 598.67
+      },
+      {
+       "key": [
+        [
+         "บริการ my 5G 700 MHz"
+        ]
+       ],
+       "value": 595.66
+      }
+     ],
+     "min_rows": 10,
+     "ordered": true,
+     "sql": "SELECT product_name, SUM(revenue_ytd) s FROM fact_product_monthly WHERE year_month=202608 GROUP BY 1 ORDER BY s DESC"
+    },
+    {
+     "base": "ราย product 2569 (BG8 raw)",
+     "years_be": [
+      2569
+     ],
+     "rows": [
+      {
+       "key": [
+        [
+         "บริการ NT Broadband"
+        ]
+       ],
+       "value": 6630.81
+      },
+      {
+       "key": [
+        [
+         "บริการเสาโทรคมนาคม AWN"
+        ]
+       ],
+       "value": 3368.74
+      },
+      {
+       "key": [
+        [
+         "รายได้อื่น"
+        ]
+       ],
+       "value": 2476.07
+      },
+      {
+       "key": [
+        [
+         "บริการ GDCC"
+        ]
+       ],
+       "value": 1378.07
+      },
+      {
+       "key": [
+        [
+         "NT Home Phone"
+        ]
+       ],
+       "value": 1299.46
+      },
+      {
+       "key": [
+        [
+         "บริการเสาโทรคมนาคม DTN"
+        ]
+       ],
+       "value": 893.02
+      },
+      {
+       "key": [
+        [
+         "บริการ NT CLOUD"
+        ]
+       ],
+       "value": 835.99
+      },
+      {
+       "key": [
+        [
+         "NT Business Trunk Line"
+        ]
+       ],
+       "value": 600.92
+      },
+      {
+       "key": [
+        [
+         "NT Corporate Internet"
+        ]
+       ],
+       "value": 598.67
+      },
+      {
+       "key": [
+        [
+         "บริการ my 5G 700 MHz"
+        ]
+       ],
+       "value": 595.66
+      }
+     ],
+     "min_rows": 10,
+     "ordered": true,
+     "sql": "SELECT product_name, SUM(revenue) s FROM fact_product_monthly WHERE year=2026 GROUP BY 1 ORDER BY s DESC",
+     "lenient": "BG8 แบบผลรวมรายเดือน raw — RESULT_F11 §9 นับ ✅ แต่ ⚠3 ว่าสะสมของ BG8 ต้องเป็น net (รอเจ้าของตัดสิน)"
+    }
+   ]
+  },
+  {
+   "id": "P11",
+   "asked_at": "2026-09-20 22:59",
+   "question": "บริการใดมีการเติบโตมากสุด 10 อันดับแรก",
+   "time_in_question": false,
+   "oracle_status": "เกณฑ์การจัดอันดับ (ฐานเล็ก / divested) รอเจ้าของตัดสิน — ตรวจเฉพาะชั้น product + ตัวเลขของแต่ละแถวตรงกับงวดที่ใช้ + ปี",
+   "accept": [
+    {
+     "base": "ราย product ส.ค. 2569 เทียบ ส.ค. 2568",
+     "years_be": [
+      2569,
+      2568
+     ],
+     "base_words": [
+      "สิงหาคม",
+      "ส.ค."
+     ],
+     "pairs": {
+      "พัฒนาสินทรัพย์อื่น": [
+       -1.47,
+       1.49
+      ],
+      "พัฒนาสินทรัพย์-งามวงค์วาน": [
+       0.54,
+       1.01
+      ],
+      "บริการข้ามเครือข่ายระหว่างประเทศ (IR)-HSPA": [
+       0.08,
+       0.79
+      ],
+      "NT Business Cloud PBX": [
+       5.68,
+       4.98
+      ],
+      "บริการ CCTV Solution": [
+       6.19,
+       5.09
+      ],
+      "บริการ Security System Integration (SSI)": [
+       16.35,
+       9.34
+      ],
+      "บริการ NT Ultimate Connect": [
+       1.11,
+       0.74
+      ],
+      "บริการศูนย์บริการข้อมูล (Contact Center)": [
+       16.15,
+       14.05
+      ],
+      "บริการเสาโทรคมนาคม DTN": [
+       111.21,
+       116.18
+      ],
+      "อาคารที่พักผู้ปฏิบัติงานและหอพัก - หลักสี่": [
+       1.8,
+       1.86
+      ],
+      "สินค้าโทรคมนาคม (NT mobile)": [
+       0.0,
+       0.01
+      ],
+      "บริการ Security Standard Consulting": [
+       0.19,
+       2.61
+      ],
+      "บริการ Single Last Mile": [
+       0.6,
+       0.71
+      ],
+      "พัฒนาสินทรัพย์-สิรินธร": [
+       0.0,
+       0.0
+      ],
+      "บริการ Consortium เคเบิลใต้น้ำ": [
+       0.6,
+       0.36
+      ],
+      "บริการCPE": [
+       0.82,
+       1.07
+      ],
+      "บริการเสริม Fixed Line": [
+       3.69,
+       4.07
+      ],
+      "บริการ NT GlobeSat": [
+       0.46,
+       0.46
+      ],
+      "Thaicom 6 Satellite Ratail Transponder": [
+       21.06,
+       18.13
+      ],
+      "บริการ NT Conference": [
+       0.07,
+       0.69
+      ],
+      "รายได้อื่น": [
+       310.31,
+       389.56
+      ],
+      "บริการเสาโทรคมนาคม AWN": [
+       420.62,
+       413.66
+      ],
+      "พัฒนาสินทรัพย์-สำนักงานใหญ่": [
+       1.21,
+       2.24
+      ],
+      "บริการ IC - my MMS": [
+       0.02,
+       0.06
+      ],
+      "บริการวิทยุคมนาคม": [
+       0.74,
+       0.66
+      ],
+      "NT Home Phone": [
+       147.1,
+       175.5
+      ],
+      "NT Interconnect": [
+       3.9,
+       4.36
+      ],
+      "บริการ IoT by CAT": [
+       0.0,
+       0.0
+      ],
+      "บริการ e-Office": [
+       2.67,
+       0.0
+      ],
+      "บ.Priv.Line.In.(AAE1": [
+       11.76,
+       12.19
+      ],
+      "บริการ mobile siptrunk": [
+       0.02,
+       0.54
+      ],
+      "บริการเสริม Broadband": [
+       2.43,
+       2.51
+      ],
+      "บริการ NT SD-WAN": [
+       0.54,
+       0.55
+      ],
+      "NT Corporate Internet": [
+       72.92,
+       69.33
+      ],
+      "NT Business Trunk Line": [
+       72.93,
+       75.63
+      ],
+      "บริการ NT CLOUD:Cloud Service(Prepaid)": [
+       0.01,
+       0.0
+      ],
+      "บริการโครงข่าย-Dark Fiber": [
+       1.03,
+       0.74
+      ],
+      "บริการโทรศัพท์เคลื่อนที่ NT Mobile": [
+       1.68,
+       4.88
+      ],
+      "บริการอื่น-Mobile": [
+       -1.63,
+       0.85
+      ],
+      "บริการ NT Private Line": [
+       13.98,
+       11.84
+      ],
+      "บริการ NT iP Star": [
+       0.22,
+       0.06
+      ],
+      "บริการอื่น-นอกจากพัฒนาสินทรัพย์": [
+       0.0,
+       0.0
+      ],
+      "บริการ - ใช้เส้นใยแก้วนำแสง": [
+       3.35,
+       3.02
+      ],
+      "บริการ - เสา-FL&BB": [
+       1.45,
+       0.7
+      ],
+      "พัฒนาสินทรัพย์-สำนักงานแจ้งวัฒนะ": [
+       3.7,
+       3.52
+      ],
+      "พัฒนาสินทรัพย์-หน่วยงานพื้นที่": [
+       12.52,
+       7.84
+      ],
+      "บริการ ค่าดำเนินงานโครงการและบริการอื่น ๆ": [
+       0.04,
+       0.05
+      ],
+      "บริการ NT Wireless Net": [
+       0.06,
+       0.68
+      ],
+      "บริการ NSI": [
+       38.69,
+       34.41
+      ],
+      "Wholesale-Fixed Line": [
+       1.07,
+       1.01
+      ],
+      "บริการ INMARSAT": [
+       1.27,
+       1.21
+      ],
+      "บริการ Internet Security": [
+       12.19,
+       1.01
+      ],
+      "บริการ All@Secure": [
+       2.44,
+       2.19
+      ],
+      "บริการ DSI": [
+       11.85,
+       6.43
+      ],
+      "ICT Solution": [
+       70.63,
+       52.02
+      ],
+      "บริการ NT NetLog (Log Management System)": [
+       0.27,
+       0.36
+      ],
+      "บริการเสาโทรคมนาคม NT": [
+       177.46,
+       50.21
+      ],
+      "สินค้าโทรคมนาคม": [
+       0.43,
+       0.49
+      ],
+      "บริการคู่สายเช่า วงจรเช่า": [
+       1.08,
+       1.03
+      ],
+      "บริการ DDN (Digital Data Network)": [
+       1.96,
+       4.35
+      ],
+      "บริการ NT Satellite Platform": [
+       3.51,
+       3.62
+      ],
+      "Thaicom 4 Satellite Wholesale Transponder": [
+       7.75,
+       7.75
+      ],
+      "บริการระบบจดหมายอิเล็กทรอนิกส์ (e-Mail)": [
+       0.17,
+       0.12
+      ],
+      "บริการ ICT Solution Platform": [
+       0.02,
+       0.02
+      ],
+      "สินค้าและอุปกรณ์": [
+       0.26,
+       0.12
+      ],
+      "บริการเช่าใช้ระบบไฟฟ้า": [
+       6.37,
+       9.12
+      ],
+      "บริการเช่าใช้ระบบปรับอากาศ": [
+       0.04,
+       0.08
+      ],
+      "บริการอื่น Fixed Line": [
+       1.18,
+       1.53
+      ],
+      "Manage Service": [
+       12.54,
+       10.42
+      ],
+      "Cyber Security": [
+       0.98,
+       0.32
+      ],
+      "บริการรับจ้างทำงานให้ Vendor": [
+       0.01,
+       0.0
+      ],
+      "บริการอื่นที่ไม่ใช่โทรคมนาคม": [
+       0.42,
+       0.1
+      ],
+      "บริการ GDCC": [
+       161.32,
+       212.58
+      ],
+      "บริการวิทยุคมฯ-ส.โทรฯ": [
+       0.0,
+       0.0
+      ],
+      "สินค้าNonโทรคมนาคม": [
+       0.0,
+       0.0
+      ],
+      "พัฒนาสินทรัพย์-บางรัก": [
+       23.06,
+       29.09
+      ],
+      "บริการ NT MPLS International": [
+       3.38,
+       3.23
+      ],
+      "บริการโครงการยกระดับโครงสร้างพื้นฐาน NT-DE": [
+       0.0,
+       0.7
+      ],
+      "รายได้โทรฯอื่นที่เกี่ยวเนื่อง-โทรศัพท์เคลื่อนที่": [
+       0.01,
+       0.11
+      ],
+      "บริการ my 5G 700 MHz": [
+       77.03,
+       53.54
+      ],
+      "บริการ Inhouse connect": [
+       4.87,
+       4.2
+      ],
+      "บริการ iP Star": [
+       1.59,
+       1.78
+      ],
+      "บริการ NT Messaging": [
+       0.1,
+       0.2
+      ],
+      "บริการ Cloud WAN": [
+       1.95,
+       5.69
+      ],
+      "บริการท่อร้อยสาย": [
+       33.21,
+       31.26
+      ],
+      "บริการ IIG": [
+       25.52,
+       14.4
+      ],
+      "บริการ Ethernet International": [
+       2.03,
+       2.21
+      ],
+      "บริการติดตั้งซ่อมบำรุงเคเบิลใต้น้ำ (Submarine Cable)": [
+       10.1,
+       9.98
+      ],
+      "International Transit and Termination": [
+       22.9,
+       21.9
+      ],
+      "บริการ IC - my- Termination": [
+       0.56,
+       0.92
+      ],
+      "บริการวิทยุเฉพาะกิจ Trunked Mobile": [
+       52.88,
+       73.23
+      ],
+      "บริการเครื่องและอุปกรณ์ 2G,3G,4G": [
+       0.0,
+       0.3
+      ],
+      "บริการอื่น Broadband": [
+       17.04,
+       5.28
+      ],
+      "บริการสื่อสัญญาณถ่ายทอดภาพและเสียง (TV Encoder Decoder)": [
+       1.49,
+       1.37
+      ],
+      "สิทธิในการใช้ระบบ": [
+       0.0,
+       0.0
+      ],
+      "บริการ NT DATA CENTER": [
+       31.32,
+       29.65
+      ],
+      "บริการ NT IDC": [
+       4.26,
+       4.42
+      ],
+      "ออกใบรับรองอิเล็กทรอนิกส์ (NT CA)": [
+       1.07,
+       1.68
+      ],
+      "พัฒนาสินทรัพย์-นนทบุรี": [
+       0.29,
+       0.05
+      ],
+      "การเช่าพื้นที่สถานีดาวเทียมไทยคม นนทบุรี": [
+       0.03,
+       0.03
+      ],
+      "พัฒนาสินทรัพย์-ศรีราชา": [
+       0.01,
+       0.01
+      ],
+      "บริการ NT Broadband": [
+       840.05,
+       805.43
+      ],
+      "บริการ NT Carrier Ethernet": [
+       64.35,
+       64.63
+      ],
+      "บริการ NT TV Transmission": [
+       3.79,
+       11.52
+      ],
+      "Thaicom 6 Satellite Wholesale Transponder": [
+       12.26,
+       13.33
+      ],
+      "บริการ DTH Platform": [
+       1.95,
+       2.44
+      ],
+      "บริการ NT CLOUD": [
+       115.8,
+       27.67
+      ],
+      "บริการ Supervise & MA": [
+       4.53,
+       4.6
+      ],
+      "Retail IDD - Premium": [
+       2.04,
+       2.52
+      ],
+      "SCCP": [
+       0.84,
+       0.83
+      ],
+      "บริการ IC-my-Transit": [
+       0.0,
+       0.0
+      ],
+      "บริการ DSL-VPN": [
+       1.41,
+       1.67
+      ],
+      "บริการโทรศัพท์เคลื่อนที่ในพื่นที่ชายขอบ": [
+       0.0,
+       24.16
+      ],
+      "บริการ Thailand IX": [
+       7.0,
+       6.02
+      ],
+      "บริการ NSW": [
+       16.81,
+       17.0
+      ],
+      "บริการ CCTV on Cloud": [
+       0.9,
+       0.9
+      ],
+      "บริการการศึกษาทางอิเล็กทรอนิกส์ (e-Education)": [
+       0.06,
+       0.05
+      ],
+      "บริการความบันเทิงทางอิเล็กทรอนิกส์ (e-Entertainment)": [
+       0.0,
+       0.0
+      ],
+      "บริการสถานีเคเบิลใต้น้ำ": [
+       6.44,
+       3.9
+      ],
+      "Retail IDD - ECO": [
+       1.31,
+       1.78
+      ],
+      "บริการ NT CA (Subordinate NRCA)": [
+       0.12,
+       0.13
+      ],
+      "บริการ NT SafeLog": [
+       0.83,
+       0.86
+      ],
+      "บริการ ICT SaaS": [
+       0.46,
+       0.41
+      ],
+      "Toll Free - International": [
+       0.37,
+       0.35
+      ],
+      "Wholesale IDD": [
+       0.16,
+       0.22
+      ],
+      "บริการ IC - my- SMS": [
+       1.59,
+       1.73
+      ],
+      "บริการ my": [
+       28.8,
+       49.53
+      ],
+      "บริการ NT WiFi": [
+       4.21,
+       3.47
+      ],
+      "Foreign Satellite Transponder": [
+       0.9,
+       6.91
+      ],
+      "บริการทดสอบ/ซ่อม/ผลิต/ปรับเทียบ-อุปกรณ์": [
+       0.46,
+       0.29
+      ],
+      "ICT Solution - รายย่อย": [
+       41.44,
+       39.1
+      ],
+      "บริการ ICT Business Solution": [
+       8.2,
+       7.88
+      ],
+      "บริการข้อมูลทางอิเล็กทรอนิกส์ (e-Information)": [
+       0.01,
+       0.02
+      ],
+      "บริการ IPTV": [
+       5.34,
+       5.76
+      ],
+      "บริการเสาโทรคมนาคม TUC": [
+       0.13,
+       0.18
+      ],
+      "บริการ Private Line International": [
+       70.44,
+       59.66
+      ],
+      "Calling Card - International": [
+       0.05,
+       0.05
+      ],
+      "บริการวงจร Mobile": [
+       0.0,
+       0.22
+      ],
+      "บริการโทรคมนาคมอื่นที่เกี่ยวเนื่อง-สื่อสารข้อมูลอื่น": [
+       0.59,
+       0.41
+      ],
+      "บริการ NT MPLS": [
+       66.02,
+       63.55
+      ],
+      "บริการ Ground Segment as a Service (GSaaS)": [
+       3.0,
+       2.76
+      ],
+      "บริการ NT BIG DATA": [
+       10.52,
+       9.04
+      ],
+      "บริการ Managed Security Service": [
+       10.02,
+       12.42
+      ],
+      "บริการประชุมทางไกลทางอิเล็กทรอนิกส์ (e-Conference)": [
+       0.35,
+       0.53
+      ]
+     },
+     "min_rows": 10,
+     "sql": "SELECT product_name, SUM(CASE WHEN year_month=202608 THEN revenue END), SUM(CASE WHEN year_month=202508 THEN revenue END), SUM(CASE WHEN year_month=202608 THEN revenue_ytd END), SUM(CASE WHEN year_month=202508 THEN revenue_ytd END) FROM fact_product_monthly GROUP BY 1"
+    },
+    {
+     "base": "ราย product สะสม ม.ค.–ส.ค. 2569 เทียบ 2568",
+     "years_be": [
+      2569,
+      2568
+     ],
+     "base_words": [
+      "สะสม",
+      "ตั้งแต่ต้นปี",
+      "ม.ค."
+     ],
+     "pairs": {
+      "พัฒนาสินทรัพย์อื่น": [
+       16.72,
+       11.99
+      ],
+      "พัฒนาสินทรัพย์-งามวงค์วาน": [
+       3.84,
+       5.24
+      ],
+      "บริการข้ามเครือข่ายระหว่างประเทศ (IR)-HSPA": [
+       2.61,
+       20.5
+      ],
+      "NT Business Cloud PBX": [
+       42.56,
+       41.03
+      ],
+      "บริการ CCTV Solution": [
+       62.65,
+       30.24
+      ],
+      "บริการ Security System Integration (SSI)": [
+       69.59,
+       73.6
+      ],
+      "บริการ NT Ultimate Connect": [
+       8.08,
+       4.94
+      ],
+      "บริการศูนย์บริการข้อมูล (Contact Center)": [
+       129.09,
+       111.54
+      ],
+      "บริการเสาโทรคมนาคม DTN": [
+       893.02,
+       1016.24
+      ],
+      "อาคารที่พักผู้ปฏิบัติงานและหอพัก - หลักสี่": [
+       13.79,
+       13.96
+      ],
+      "สินค้าโทรคมนาคม (NT mobile)": [
+       0.04,
+       0.09
+      ],
+      "บริการ Security Standard Consulting": [
+       7.74,
+       70.65
+      ],
+      "บริการ Single Last Mile": [
+       4.1,
+       3.81
+      ],
+      "พัฒนาสินทรัพย์-สิรินธร": [
+       0.04,
+       0.61
+      ],
+      "บริการ Consortium เคเบิลใต้น้ำ": [
+       3.56,
+       4.94
+      ],
+      "บริการCPE": [
+       7.09,
+       8.87
+      ],
+      "บริการเสริม Fixed Line": [
+       29.96,
+       34.09
+      ],
+      "บริการ NT GlobeSat": [
+       3.64,
+       3.64
+      ],
+      "Thaicom 6 Satellite Ratail Transponder": [
+       171.87,
+       150.21
+      ],
+      "บริการ NT Conference": [
+       0.42,
+       3.28
+      ],
+      "รายได้อื่น": [
+       1867.47,
+       2833.91
+      ],
+      "บริการเสาโทรคมนาคม AWN": [
+       3368.74,
+       3300.51
+      ],
+      "พัฒนาสินทรัพย์-สำนักงานใหญ่": [
+       9.52,
+       19.8
+      ],
+      "บริการ IC - my MMS": [
+       0.13,
+       0.17
+      ],
+      "บริการวิทยุคมนาคม": [
+       5.02,
+       5.74
+      ],
+      "NT Home Phone": [
+       1299.46,
+       1444.75
+      ],
+      "NT Interconnect": [
+       31.21,
+       31.51
+      ],
+      "บริการ IoT by CAT": [
+       0.01,
+       0.03
+      ],
+      "บริการ e-Office": [
+       46.49,
+       20.14
+      ],
+      "บ.Priv.Line.In.(AAE1": [
+       110.52,
+       18.77
+      ],
+      "บริการ mobile siptrunk": [
+       0.16,
+       3.42
+      ],
+      "บริการเสริม Broadband": [
+       19.44,
+       19.92
+      ],
+      "บริการ NT SD-WAN": [
+       4.91,
+       5.04
+      ],
+      "NT Corporate Internet": [
+       598.67,
+       581.2
+      ],
+      "NT Business Trunk Line": [
+       600.92,
+       614.67
+      ],
+      "บริการ NT CLOUD:Cloud Service(Prepaid)": [
+       0.06,
+       0.05
+      ],
+      "บริการโครงข่าย-Dark Fiber": [
+       8.56,
+       56.75
+      ],
+      "บริการโทรศัพท์เคลื่อนที่ NT Mobile": [
+       14.26,
+       106.98
+      ],
+      "บริการอื่น-Mobile": [
+       0.94,
+       15.43
+      ],
+      "บริการ NT Private Line": [
+       85.88,
+       95.18
+      ],
+      "บริการ NT iP Star": [
+       2.54,
+       0.57
+      ],
+      "บริการอื่น-นอกจากพัฒนาสินทรัพย์": [
+       0.02,
+       0.03
+      ],
+      "บริการ - ใช้เส้นใยแก้วนำแสง": [
+       23.75,
+       26.39
+      ],
+      "บริการ - เสา-FL&BB": [
+       11.22,
+       18.63
+      ],
+      "พัฒนาสินทรัพย์-สำนักงานแจ้งวัฒนะ": [
+       29.06,
+       29.24
+      ],
+      "พัฒนาสินทรัพย์-หน่วยงานพื้นที่": [
+       94.39,
+       60.85
+      ],
+      "บริการ ค่าดำเนินงานโครงการและบริการอื่น ๆ": [
+       0.34,
+       0.8
+      ],
+      "บริการ NT Wireless Net": [
+       0.53,
+       17.48
+      ],
+      "บริการ NSI": [
+       289.86,
+       266.0
+      ],
+      "Wholesale-Fixed Line": [
+       8.38,
+       8.1
+      ],
+      "บริการ INMARSAT": [
+       12.21,
+       7.77
+      ],
+      "บริการ Internet Security": [
+       75.89,
+       9.68
+      ],
+      "บริการ All@Secure": [
+       17.92,
+       17.36
+      ],
+      "บริการ DSI": [
+       47.19,
+       43.91
+      ],
+      "ICT Solution": [
+       557.43,
+       439.29
+      ],
+      "บริการ NT NetLog (Log Management System)": [
+       2.35,
+       3.02
+      ],
+      "บริการเสาโทรคมนาคม NT": [
+       520.04,
+       470.55
+      ],
+      "สินค้าโทรคมนาคม": [
+       3.87,
+       4.92
+      ],
+      "บริการคู่สายเช่า วงจรเช่า": [
+       8.38,
+       10.61
+      ],
+      "บริการ DDN (Digital Data Network)": [
+       16.46,
+       18.46
+      ],
+      "บริการ NT Satellite Platform": [
+       28.08,
+       29.82
+      ],
+      "Thaicom 4 Satellite Wholesale Transponder": [
+       62.0,
+       62.0
+      ],
+      "บริการระบบจดหมายอิเล็กทรอนิกส์ (e-Mail)": [
+       1.39,
+       1.25
+      ],
+      "บริการ ICT Solution Platform": [
+       -0.34,
+       0.74
+      ],
+      "สินค้าและอุปกรณ์": [
+       0.91,
+       1.13
+      ],
+      "บริการเช่าใช้ระบบไฟฟ้า": [
+       52.44,
+       56.98
+      ],
+      "บริการเช่าใช้ระบบปรับอากาศ": [
+       0.42,
+       0.56
+      ],
+      "บริการอื่น Fixed Line": [
+       11.39,
+       6.41
+      ],
+      "Manage Service": [
+       96.45,
+       81.54
+      ],
+      "Cyber Security": [
+       6.4,
+       25.15
+      ],
+      "บริการรับจ้างทำงานให้ Vendor": [
+       0.01,
+       0.09
+      ],
+      "บริการอื่นที่ไม่ใช่โทรคมนาคม": [
+       1.94,
+       1.52
+      ],
+      "บริการ GDCC": [
+       1378.07,
+       1449.74
+      ],
+      "บริการวิทยุคมฯ-ส.โทรฯ": [
+       34.68,
+       1.97
+      ],
+      "สินค้าNonโทรคมนาคม": [
+       0.0,
+       0.0
+      ],
+      "พัฒนาสินทรัพย์-บางรัก": [
+       214.78,
+       235.68
+      ],
+      "บริการ NT MPLS International": [
+       22.74,
+       28.43
+      ],
+      "บริการโครงการยกระดับโครงสร้างพื้นฐาน NT-DE": [
+       -0.72,
+       282.43
+      ],
+      "รายได้โทรฯอื่นที่เกี่ยวเนื่อง-โทรศัพท์เคลื่อนที่": [
+       0.25,
+       0.52
+      ],
+      "บริการ my 5G 700 MHz": [
+       595.66,
+       418.26
+      ],
+      "บริการ Inhouse connect": [
+       37.73,
+       32.34
+      ],
+      "บริการ iP Star": [
+       11.9,
+       14.5
+      ],
+      "บริการ NT Messaging": [
+       0.78,
+       1.25
+      ],
+      "บริการ Cloud WAN": [
+       16.59,
+       37.79
+      ],
+      "บริการท่อร้อยสาย": [
+       270.88,
+       261.55
+      ],
+      "บริการ IIG": [
+       115.31,
+       120.23
+      ],
+      "บริการ Ethernet International": [
+       16.29,
+       13.12
+      ],
+      "บริการติดตั้งซ่อมบำรุงเคเบิลใต้น้ำ (Submarine Cable)": [
+       82.56,
+       84.15
+      ],
+      "International Transit and Termination": [
+       193.94,
+       205.93
+      ],
+      "บริการ IC - my- Termination": [
+       4.79,
+       5.8
+      ],
+      "บริการวิทยุเฉพาะกิจ Trunked Mobile": [
+       454.59,
+       582.47
+      ],
+      "บริการเครื่องและอุปกรณ์ 2G,3G,4G": [
+       0.27,
+       0.3
+      ],
+      "บริการอื่น Broadband": [
+       57.16,
+       31.56
+      ],
+      "บริการสื่อสัญญาณถ่ายทอดภาพและเสียง (TV Encoder Decoder)": [
+       15.45,
+       12.03
+      ],
+      "สิทธิในการใช้ระบบ": [
+       0.02,
+       0.02
+      ],
+      "บริการ NT DATA CENTER": [
+       222.58,
+       195.93
+      ],
+      "บริการ NT IDC": [
+       39.28,
+       37.3
+      ],
+      "ออกใบรับรองอิเล็กทรอนิกส์ (NT CA)": [
+       8.4,
+       11.6
+      ],
+      "พัฒนาสินทรัพย์-นนทบุรี": [
+       1.47,
+       0.91
+      ],
+      "การเช่าพื้นที่สถานีดาวเทียมไทยคม นนทบุรี": [
+       0.24,
+       0.2
+      ],
+      "พัฒนาสินทรัพย์-ศรีราชา": [
+       0.05,
+       0.07
+      ],
+      "บริการ NT Broadband": [
+       6630.81,
+       6379.18
+      ],
+      "บริการ NT Carrier Ethernet": [
+       507.52,
+       502.64
+      ],
+      "บริการ NT TV Transmission": [
+       37.55,
+       45.16
+      ],
+      "Thaicom 6 Satellite Wholesale Transponder": [
+       100.05,
+       106.62
+      ],
+      "บริการ DTH Platform": [
+       15.59,
+       19.51
+      ],
+      "บริการ NT CLOUD": [
+       835.99,
+       539.21
+      ],
+      "บริการ Supervise & MA": [
+       35.48,
+       38.29
+      ],
+      "Retail IDD - Premium": [
+       18.37,
+       26.3
+      ],
+      "SCCP": [
+       7.3,
+       7.75
+      ],
+      "บริการ IC-my-Transit": [
+       0.05,
+       0.03
+      ],
+      "บริการ DSL-VPN": [
+       11.95,
+       14.36
+      ],
+      "บริการโทรศัพท์เคลื่อนที่ในพื่นที่ชายขอบ": [
+       224.7,
+       193.29
+      ],
+      "บริการ Thailand IX": [
+       46.64,
+       48.05
+      ],
+      "บริการ NSW": [
+       151.24,
+       113.58
+      ],
+      "บริการ CCTV on Cloud": [
+       7.07,
+       8.04
+      ],
+      "บริการการศึกษาทางอิเล็กทรอนิกส์ (e-Education)": [
+       0.34,
+       0.4
+      ],
+      "บริการความบันเทิงทางอิเล็กทรอนิกส์ (e-Entertainment)": [
+       0.0,
+       0.01
+      ],
+      "บริการสถานีเคเบิลใต้น้ำ": [
+       60.47,
+       32.7
+      ],
+      "Retail IDD - ECO": [
+       11.45,
+       16.47
+      ],
+      "บริการ NT CA (Subordinate NRCA)": [
+       0.75,
+       1.41
+      ],
+      "บริการ NT SafeLog": [
+       6.79,
+       6.96
+      ],
+      "บริการ ICT SaaS": [
+       4.23,
+       3.39
+      ],
+      "Toll Free - International": [
+       3.31,
+       3.02
+      ],
+      "Wholesale IDD": [
+       1.35,
+       1.19
+      ],
+      "บริการ IC - my- SMS": [
+       13.02,
+       4.91
+      ],
+      "บริการ my": [
+       227.56,
+       455.25
+      ],
+      "บริการ NT WiFi": [
+       35.84,
+       27.02
+      ],
+      "Foreign Satellite Transponder": [
+       18.74,
+       46.44
+      ],
+      "บริการทดสอบ/ซ่อม/ผลิต/ปรับเทียบ-อุปกรณ์": [
+       2.32,
+       2.12
+      ],
+      "ICT Solution - รายย่อย": [
+       318.36,
+       304.05
+      ],
+      "บริการ ICT Business Solution": [
+       94.17,
+       53.9
+      ],
+      "บริการข้อมูลทางอิเล็กทรอนิกส์ (e-Information)": [
+       0.12,
+       0.13
+      ],
+      "บริการ IPTV": [
+       43.83,
+       47.22
+      ],
+      "บริการเสาโทรคมนาคม TUC": [
+       1.06,
+       251.36
+      ],
+      "บริการ Private Line International": [
+       539.35,
+       504.77
+      ],
+      "Calling Card - International": [
+       0.42,
+       0.5
+      ],
+      "บริการวงจร Mobile": [
+       0.02,
+       0.91
+      ],
+      "บริการโทรคมนาคมอื่นที่เกี่ยวเนื่อง-สื่อสารข้อมูลอื่น": [
+       0.69,
+       3.77
+      ],
+      "บริการ NT MPLS": [
+       521.24,
+       528.05
+      ],
+      "บริการ Ground Segment as a Service (GSaaS)": [
+       23.6,
+       21.86
+      ],
+      "บริการ NT BIG DATA": [
+       60.89,
+       59.58
+      ],
+      "บริการ Managed Security Service": [
+       71.47,
+       74.75
+      ],
+      "บริการประชุมทางไกลทางอิเล็กทรอนิกส์ (e-Conference)": [
+       2.92,
+       3.45
+      ]
+     },
+     "min_rows": 10,
+     "sql": "SELECT product_name, SUM(CASE WHEN year_month=202608 THEN revenue END), SUM(CASE WHEN year_month=202508 THEN revenue END), SUM(CASE WHEN year_month=202608 THEN revenue_ytd END), SUM(CASE WHEN year_month=202508 THEN revenue_ytd END) FROM fact_product_monthly GROUP BY 1"
+    }
+   ]
+  },
+  {
+   "id": "P12",
+   "asked_at": "2026-09-20 23:00",
+   "question": "ค่าใช้จ่ายมีไหม",
+   "time_in_question": false,
+   "oracle_status": "RESULT_F11 §9 ✅ = บอกว่าชุดนี้ไม่มีข้อมูลค่าใช้จ่าย",
+   "accept": [
+    {
+     "base": "ปฏิเสธ: รายงานรายได้ไม่มีค่าใช้จ่าย",
+     "years_be": [],
+     "refusal": [
+      "ไม่มี",
+      "ค่าใช้จ่าย"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "P13",
+   "asked_at": "2026-09-21 07:50",
+   "question": "รายได้ cctv รายเดือน",
+   "time_in_question": false,
+   "oracle_status": "คำนวณเองจาก bundle — รอเจ้าของข้อมูลยืนยัน — CCTV = 2 product (CCTV Solution + CCTV on Cloud) รวมกัน",
+   "accept": [
+    {
+     "base": "รายเดือนทั้งขอบเขต ม.ค. 2568–ส.ค. 2569",
+     "years_be": [
+      2568,
+      2569
+     ],
+     "rows": [
+      {
+       "key": [
+        [
+         "202501"
+        ],
+        [
+         "2025",
+         "1"
+        ],
+        [
+         "2568",
+         "1"
+        ]
+       ],
+       "value": 4.18
+      },
+      {
+       "key": [
+        [
+         "202502"
+        ],
+        [
+         "2025",
+         "2"
+        ],
+        [
+         "2568",
+         "2"
+        ]
+       ],
+       "value": 4.67
+      },
+      {
+       "key": [
+        [
+         "202503"
+        ],
+        [
+         "2025",
+         "3"
+        ],
+        [
+         "2568",
+         "3"
+        ]
+       ],
+       "value": 4.82
+      },
+      {
+       "key": [
+        [
+         "202504"
+        ],
+        [
+         "2025",
+         "4"
+        ],
+        [
+         "2568",
+         "4"
+        ]
+       ],
+       "value": 4.58
+      },
+      {
+       "key": [
+        [
+         "202505"
+        ],
+        [
+         "2025",
+         "5"
+        ],
+        [
+         "2568",
+         "5"
+        ]
+       ],
+       "value": 4.35
+      },
+      {
+       "key": [
+        [
+         "202506"
+        ],
+        [
+         "2025",
+         "6"
+        ],
+        [
+         "2568",
+         "6"
+        ]
+       ],
+       "value": 5.19
+      },
+      {
+       "key": [
+        [
+         "202507"
+        ],
+        [
+         "2025",
+         "7"
+        ],
+        [
+         "2568",
+         "7"
+        ]
+       ],
+       "value": 4.5
+      },
+      {
+       "key": [
+        [
+         "202508"
+        ],
+        [
+         "2025",
+         "8"
+        ],
+        [
+         "2568",
+         "8"
+        ]
+       ],
+       "value": 6.0
+      },
+      {
+       "key": [
+        [
+         "202509"
+        ],
+        [
+         "2025",
+         "9"
+        ],
+        [
+         "2568",
+         "9"
+        ]
+       ],
+       "value": 5.58
+      },
+      {
+       "key": [
+        [
+         "202510"
+        ],
+        [
+         "2025",
+         "10"
+        ],
+        [
+         "2568",
+         "10"
+        ]
+       ],
+       "value": 3.45
+      },
+      {
+       "key": [
+        [
+         "202511"
+        ],
+        [
+         "2025",
+         "11"
+        ],
+        [
+         "2568",
+         "11"
+        ]
+       ],
+       "value": 3.91
+      },
+      {
+       "key": [
+        [
+         "202512"
+        ],
+        [
+         "2025",
+         "12"
+        ],
+        [
+         "2568",
+         "12"
+        ]
+       ],
+       "value": 5.21
+      },
+      {
+       "key": [
+        [
+         "202601"
+        ],
+        [
+         "2026",
+         "1"
+        ],
+        [
+         "2569",
+         "1"
+        ]
+       ],
+       "value": 4.84
+      },
+      {
+       "key": [
+        [
+         "202602"
+        ],
+        [
+         "2026",
+         "2"
+        ],
+        [
+         "2569",
+         "2"
+        ]
+       ],
+       "value": 6.34
+      },
+      {
+       "key": [
+        [
+         "202603"
+        ],
+        [
+         "2026",
+         "3"
+        ],
+        [
+         "2569",
+         "3"
+        ]
+       ],
+       "value": 10.98
+      },
+      {
+       "key": [
+        [
+         "202604"
+        ],
+        [
+         "2026",
+         "4"
+        ],
+        [
+         "2569",
+         "4"
+        ]
+       ],
+       "value": 27.54
+      },
+      {
+       "key": [
+        [
+         "202605"
+        ],
+        [
+         "2026",
+         "5"
+        ],
+        [
+         "2569",
+         "5"
+        ]
+       ],
+       "value": 4.71
+      },
+      {
+       "key": [
+        [
+         "202606"
+        ],
+        [
+         "2026",
+         "6"
+        ],
+        [
+         "2569",
+         "6"
+        ]
+       ],
+       "value": 4.52
+      },
+      {
+       "key": [
+        [
+         "202607"
+        ],
+        [
+         "2026",
+         "7"
+        ],
+        [
+         "2569",
+         "7"
+        ]
+       ],
+       "value": 3.7
+      },
+      {
+       "key": [
+        [
+         "202608"
+        ],
+        [
+         "2026",
+         "8"
+        ],
+        [
+         "2569",
+         "8"
+        ]
+       ],
+       "value": 7.09
+      }
+     ],
+     "min_rows": 20,
+     "sql": "SELECT year_month, SUM(revenue) FROM fact_product_monthly WHERE product_name ILIKE '%cctv%' AND year_month BETWEEN 202501 AND 202608 GROUP BY 1 ORDER BY 1"
+    },
+    {
+     "base": "รายเดือน ม.ค.–ส.ค. 2569",
+     "years_be": [
+      2569
+     ],
+     "rows": [
+      {
+       "key": [
+        [
+         "202601"
+        ],
+        [
+         "2026",
+         "1"
+        ],
+        [
+         "2569",
+         "1"
+        ],
+        [
+         "1"
+        ]
+       ],
+       "value": 4.84
+      },
+      {
+       "key": [
+        [
+         "202602"
+        ],
+        [
+         "2026",
+         "2"
+        ],
+        [
+         "2569",
+         "2"
+        ],
+        [
+         "2"
+        ]
+       ],
+       "value": 6.34
+      },
+      {
+       "key": [
+        [
+         "202603"
+        ],
+        [
+         "2026",
+         "3"
+        ],
+        [
+         "2569",
+         "3"
+        ],
+        [
+         "3"
+        ]
+       ],
+       "value": 10.98
+      },
+      {
+       "key": [
+        [
+         "202604"
+        ],
+        [
+         "2026",
+         "4"
+        ],
+        [
+         "2569",
+         "4"
+        ],
+        [
+         "4"
+        ]
+       ],
+       "value": 27.54
+      },
+      {
+       "key": [
+        [
+         "202605"
+        ],
+        [
+         "2026",
+         "5"
+        ],
+        [
+         "2569",
+         "5"
+        ],
+        [
+         "5"
+        ]
+       ],
+       "value": 4.71
+      },
+      {
+       "key": [
+        [
+         "202606"
+        ],
+        [
+         "2026",
+         "6"
+        ],
+        [
+         "2569",
+         "6"
+        ],
+        [
+         "6"
+        ]
+       ],
+       "value": 4.52
+      },
+      {
+       "key": [
+        [
+         "202607"
+        ],
+        [
+         "2026",
+         "7"
+        ],
+        [
+         "2569",
+         "7"
+        ],
+        [
+         "7"
+        ]
+       ],
+       "value": 3.7
+      },
+      {
+       "key": [
+        [
+         "202608"
+        ],
+        [
+         "2026",
+         "8"
+        ],
+        [
+         "2569",
+         "8"
+        ],
+        [
+         "8"
+        ]
+       ],
+       "value": 7.09
+      }
+     ],
+     "min_rows": 8,
+     "sql": "SELECT year_month, SUM(revenue) FROM fact_product_monthly WHERE product_name ILIKE '%cctv%' AND year = 2026 GROUP BY 1 ORDER BY 1"
+    }
+   ]
+  },
+  {
+   "id": "P14",
+   "asked_at": "2026-09-21 07:51",
+   "question": "ถ้าเทียบงวดเดียวกันกับปีก่อนหน้า เพิ่มขึ้นหรือลดลงเท่าไหร่ เป็นกี่ %",
+   "time_in_question": false,
+   "oracle_status": "คำนวณเองจาก bundle — รอเจ้าของข้อมูลยืนยัน — ผู้ใช้ถามต่อจาก P13 (หมายถึง CCTV) แต่ /api/v1/query ไม่มีประวัติ จึงให้คะแนนตามความหมายเมื่อถามลอย ๆ: รายได้รวม ฐานเทียบได้ตาม ⚠4 (−305.97% ของฐานดิบ = ผิด)",
+   "accept": [
+    {
+     "base": "ส.ค. 2569 เทียบ ส.ค. 2568 ex-divested (⚠4)",
+     "years_be": [
+      2569,
+      2568
+     ],
+     "values": [
+      3434.07,
+      3314.22
+     ],
+     "base_words": [
+      "สิงหาคม",
+      "ส.ค."
+     ],
+     "percent": 3.62,
+     "sql": "SELECT SUM(CASE WHEN year_month=202608 THEN revenue END), SUM(CASE WHEN year_month=202508 THEN revenue END) FROM fact_product_monthly WHERE product_key NOT IN (SELECT product_key FROM dim_product WHERE is_divested)"
+    },
+    {
+     "base": "สะสม ม.ค.–ส.ค. 2569 เทียบ 2568 ex-divested (reference §1 #8)",
+     "years_be": [
+      2569,
+      2568
+     ],
+     "values": [
+      26036.32,
+      27068.13
+     ],
+     "base_words": [
+      "สะสม",
+      "ตั้งแต่ต้นปี",
+      "ม.ค."
+     ],
+     "percent": -3.81,
+     "sql": "SELECT SUM(CASE WHEN year_month=202608 THEN revenue_ytd END), SUM(CASE WHEN year_month=202508 THEN revenue_ytd END) FROM fact_product_monthly WHERE product_key NOT IN (SELECT product_key FROM dim_product WHERE is_divested)"
+    }
+   ]
+  },
+  {
+   "id": "P15",
+   "asked_at": "2026-09-21 07:52",
+   "question": "ถ้าเทียบงวดเดียวกันกับปีก่อนหน้า เพิ่มขึ้นหรือลดลงเท่าไหร่ เป็นกี่ % ของบริการ CCTV แบบสะสม",
+   "time_in_question": true,
+   "oracle_status": "คำนวณเองจาก bundle — รอเจ้าของข้อมูลยืนยัน",
+   "accept": [
+    {
+     "base": "CCTV สะสม ม.ค.–ส.ค. 2569 เทียบ 2568",
+     "years_be": [
+      2569,
+      2568
+     ],
+     "values": [
+      69.71,
+      38.28
+     ],
+     "percent": 82.09,
+     "sql": "SELECT SUM(CASE WHEN year_month=202608 THEN revenue_ytd END), SUM(CASE WHEN year_month=202508 THEN revenue_ytd END) FROM fact_product_monthly WHERE product_name ILIKE '%cctv%'"
+    }
+   ]
+  }
+ ]
+}
