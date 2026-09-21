@@ -110,3 +110,26 @@ def test_retry_and_pass2_prompts_carry_it_too(scoped):
     pass2 = hybrid_flow.build_pass2_prompt(service=_Service(), question="q", intent={},
                                            context_table="t", context_thai="รายได้")
     assert "งวดอ้างอิง = 202608" in pass2
+
+
+def test_the_column_is_named_when_it_differs_from_the_key(scoped, monkeypatch):
+    """expense and ebt map the caller's `year_month` onto `time_key`. Naming only the key pinned the
+    reference period to a column those tables do not have, and ebt kept answering from the wrong
+    year (RESULT_F11 §8)."""
+    from app.services.data_sources import request_scope_columns
+
+    scoped({"year_month": [202606, 202607]})
+    token = request_scope_columns.set({"year_month": "time_key"})
+    try:
+        note = hybrid_flow.scope_note()
+    finally:
+        request_scope_columns.reset(token)
+    assert "year_month (คอลัมน์ `time_key`)" in note
+
+    # a context whose key already is the column says it once, not twice
+    scoped({"year_month": [202607, 202608]})
+    token = request_scope_columns.set({"year_month": "year_month"})
+    try:
+        assert "(คอลัมน์" not in hybrid_flow.scope_note()
+    finally:
+        request_scope_columns.reset(token)

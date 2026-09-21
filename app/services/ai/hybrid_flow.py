@@ -148,20 +148,25 @@ def scope_note() -> str:
     then sums both or picks the wrong one (RESULT_F11 §2). The filter still does the enforcing — this
     only says which period the question is being asked about.
     """
-    from app.services.data_sources import request_scope
+    from app.services.data_sources import request_scope, request_scope_columns
 
     scope = request_scope.get()
     if not scope:
         return ""
+    # the caller's key and the column it filters are not the same name for every context
+    # (expense / ebt: year_month → time_key) — naming only the key pinned the reference period to a
+    # column those tables do not have, and ebt kept answering from the wrong year (RESULT_F11 §8)
+    columns = request_scope_columns.get() or {}
     lines, anchored = [], None
     for key, value in scope.items():
+        label = f"{key} (คอลัมน์ `{columns[key]}`)" if columns.get(key) and columns[key] != key else key
         values = value if isinstance(value, (list, tuple)) else [value]
         if len(values) > 6 and all(isinstance(v, int) for v in values):
             newest = max(values)
-            lines.append(f"- {key}: {min(values)}–{newest} ({len(values)} ค่า) — ค่าล่าสุด/งวดอ้างอิง = {newest}")
+            lines.append(f"- {label}: {min(values)}–{newest} ({len(values)} ค่า) — ค่าล่าสุด/งวดอ้างอิง = {newest}")
             anchored = anchored or newest
         else:
-            lines.append(f"- {key}: {', '.join(str(v) for v in values)}"
+            lines.append(f"- {label}: {', '.join(str(v) for v in values)}"
                          + (f" — ค่าล่าสุด/งวดอ้างอิง = {max(values)}" if len(values) > 1
                             and all(isinstance(v, int) for v in values) else ""))
             if len(values) > 1 and all(isinstance(v, int) for v in values):

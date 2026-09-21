@@ -114,6 +114,10 @@ def sync_schema_metadata(conn, domain: str, contract: dict) -> int:
     # Summability was derived from the dtype alone, which said the opposite of the column's own
     # description, and a portal question came back with SUM(revenue_ytd) = 115,090 MB against a real
     # 26,036 MB even though the prompt already carried the rule in words (RESULT_F11 §7).
+    # Contracts 2.3.2 / 1.2.2 / 1.3.2 / 1.4.2 carry `agg` on the column itself, which is where it
+    # belongs — control_totals only lists the measures it reconciles, so fact_ebt.amount_ytd was
+    # point-in-time in its description and nowhere a reader could see it. Column first, then the
+    # reconciled measures (older contracts), then "sum".
     agg = {m["name"]: m.get("agg") for m in (contract.get("control_totals") or {}).get("measures", [])
            if m.get("name")}
     for dataset in contract["datasets"]:
@@ -121,7 +125,7 @@ def sync_schema_metadata(conn, domain: str, contract: dict) -> int:
         conn.execute(text("DELETE FROM schema_metadata WHERE table_name = :t"), {"t": table})
         keys = set(dataset.get("keys", []))
         for col in dataset["columns"]:
-            summable_agg = agg.get(col["name"], "sum") == "sum"
+            summable_agg = (col.get("agg") or agg.get(col["name"], "sum")) == "sum"
             is_summable = 1 if (col["dtype"] == "double" and summable_agg) else 0
             is_groupable = 1 if (col["dtype"] == "string" or col["name"] in keys) else 0
             desc = col.get("description") or ""

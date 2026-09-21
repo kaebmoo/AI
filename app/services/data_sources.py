@@ -82,6 +82,10 @@ request_scope: ContextVar[Optional[Dict[str, Any]]] = ContextVar("request_scope"
 # Phase 4a: the request comes from an API key bound to a workspace/allowlist — a legacy context is
 # then its main view and nothing else, and a context that doesn't resolve is refused (never the legacy DB)
 request_pinned: ContextVar[bool] = ContextVar("request_pinned", default=False)
+# {scope key: column} of the context being answered — the key the caller sends and the column
+# it lands on are not the same name (expense/ebt map `year_month` to `time_key`), and a prompt
+# that names the key alone pins the period to a column the tables do not have (RESULT_F11 §8).
+request_scope_columns: ContextVar[Optional[Dict[str, str]]] = ContextVar("request_scope_columns", default=None)
 
 
 class ScopeError(ValueError):
@@ -307,6 +311,7 @@ class SourceResolver:
             raise ScopeError(f"scope_columns ของ context '{context_name}' ไม่ใช่ JSON") from exc
         if not isinstance(mapping, dict) or not all(isinstance(v, str) for v in mapping.values()):
             raise ScopeError(f"scope_columns ของ context '{context_name}' ต้องเป็น {{key: column}}")
+        request_scope_columns.set({k: v for k, v in mapping.items() if k in scope})
         if source.adapter is None:  # legacy business DB: the context's main view is the only table
             from app.db.session import business_engine
             filters = scope_filters(scope, mapping, {row["main_view"]: None})

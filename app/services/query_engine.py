@@ -27,7 +27,8 @@ from app.services.ai_service import AIService
 from app.services.mcp_client import MCPClientService
 from app.services.admin_config_service import AdminConfigService
 from app.core.llm_policy import FULL, LLMPolicyError, PolicyMCPClient, RequestPolicy, history_without_answers, normalize, request_llm_policy
-from app.services.data_sources import SourceBoundMCPClient, request_pinned, request_scope, source_resolver
+from app.services.data_sources import (SourceBoundMCPClient, request_pinned, request_scope,
+                                       request_scope_columns, source_resolver)
 from app.services import query_audit
 from app.services.retention import stores_results
 from app.services.workspaces import canonical_context, check_context, workspace_of_context
@@ -418,6 +419,7 @@ class QueryEngine:
         token = request_scope.set(scope or None)
         pin = request_pinned.set(allowed_contexts is not None)  # restricted key: see data_sources.request_pinned
         llm = request_llm_policy.set(None)  # Phase 4.5: set once the context's source is known (_execute_query)
+        cols = request_scope_columns.set(None)  # filled by the resolver, which reads the context's mapping
         audit = {"user_id": user_id, "api_key_id": api_key_id, "channel": channel, "question": question,
                  "request_group": request_group}
         try:
@@ -439,6 +441,7 @@ class QueryEngine:
             raise
         finally:
             request_llm_policy.reset(llm)
+            request_scope_columns.reset(cols)
             request_pinned.reset(pin)
             request_scope.reset(token)
 

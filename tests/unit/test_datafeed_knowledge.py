@@ -282,7 +282,10 @@ def test_point_in_time_measures_are_not_summable(tmp_path):
         "columns": [{"name": "year_month", "dtype": "bigint"},
                     {"name": "revenue", "dtype": "double"},
                     {"name": "revenue_ytd", "dtype": "double"},
-                    {"name": "other_amount", "dtype": "double"}],  # no measure entry: unchanged
+                    # declared on the column, and named by no reconciled measure — where contracts
+                    # 2.3.2+ put it, and the only place fact_ebt.amount_ytd ever said it
+                    {"name": "amount_ytd", "dtype": "double", "agg": "point_in_time"},
+                    {"name": "other_amount", "dtype": "double"}],  # nothing declared: unchanged
     }]}
     engine = create_engine(f"sqlite:///{tmp_path / 'c.db'}")
     with engine.begin() as conn:
@@ -293,4 +296,5 @@ def test_point_in_time_measures_are_not_summable(tmp_path):
 
     assert got["revenue"] == 1
     assert got["revenue_ytd"] == 0, "a point-in-time total must not be marked summable"
+    assert got["amount_ytd"] == 0, "the column's own agg counts even with no measure entry"
     assert got["other_amount"] == 1, "a double with no declared agg keeps the old behaviour"
