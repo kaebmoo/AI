@@ -5,6 +5,8 @@ replaces its own earlier declaration and what a machine wrote; only a person tou
 who edits only fields the contract never writes (keywords, priority, dimension family…) leaves a row declared.
 """
 
+import json
+
 import pytest
 from fastapi import HTTPException
 from sqlalchemy.orm import sessionmaker
@@ -56,8 +58,8 @@ def test_one_waiting_version_per_key_and_a_rejected_one_is_not_proposed_again(db
     with engine.begin() as conn:
         assert p.propose(conn, "schema_contexts", key, values, "declared", reason="a person changed it")
         assert p.propose(conn, "schema_contexts", key, {"instruction_th": "v3"}, "declared")  # replaces the waiting one
-    assert knowledge_db.rows(path, "SELECT proposed, status FROM knowledge_proposals") == [
-        ('{"instruction_th": "v3"}', "proposed")]
+    assert [(json.loads(p), s) for p, s in knowledge_db.rows(path, "SELECT proposed, status FROM knowledge_proposals")] == [
+        ({"instruction_th": "v3"}, "proposed")]
     with engine.begin() as conn:
         conn.exec_driver_sql("UPDATE knowledge_proposals SET status = 'rejected'")
         assert not p.propose(conn, "schema_contexts", key, {"instruction_th": "v3"}, "declared")  # said no already

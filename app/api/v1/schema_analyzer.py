@@ -263,12 +263,19 @@ async def get_ai_suggestions(
 def import_schema_suggestions(
     request: ImportRequest,
     current_user: User = Depends(deps.require_admin),
-    db: Session = Depends(deps.get_db),
+    db: Session = Depends(deps.get_config_db),  # the knowledge tables live in config.db (was get_db: failed since the 3-DB split)
     schema_service: SchemaService = Depends(deps.get_schema_service)
 ):
     """
     Import the approved suggestions into the database.
+
+    Plan 8.1: the suggestions are an LLM's (`inferred`): they fill new rows and machine rows; a row a person or
+    the contract owns keeps its content and the suggestion waits in knowledge_proposals.
     """
+    from app.services.provenance import ACTIVE, INFERRED, may_replace, propose
+
+    reason = "ข้อเสนอจาก schema analyzer — แถวที่ใช้อยู่เป็นของคน"
+    queued = 0
     try:
         # 1. Import Metadata
         for meta in request.metadata:
@@ -277,12 +284,16 @@ def import_schema_suggestions(
                 SchemaMetadata.column_name == meta.column_name
             ).first()
             
-            if existing:
-                existing.display_name_th = meta.display_name_th
-                existing.display_name_en = meta.display_name_en
-                existing.is_summable = meta.is_summable
-                existing.is_groupable = meta.is_groupable
-                existing.description = meta.description
+            suggested = {"display_name_th": meta.display_name_th, "display_name_en": meta.display_name_en,
+                         "is_summable": meta.is_summable, "is_groupable": meta.is_groupable, "description": meta.description}
+            if existing and may_replace(INFERRED, existing.source, existing.status):
+                for key, value in suggested.items():
+                    setattr(existing, key, value)
+            elif existing:
+                if any(getattr(existing, key) != value for key, value in suggested.items()):
+                    queued += propose(db.connection(), "schema_metadata",
+                                      {"table_name": request.table_name, "column_name": meta.column_name},
+                                      suggested, INFERRED, reason=reason)
             else:
                 new_meta = SchemaMetadata(
                     table_name=request.table_name,
@@ -293,7 +304,8 @@ def import_schema_suggestions(
                     data_type=meta.data_type,
                     is_summable=meta.is_summable,
                     is_groupable=meta.is_groupable,
-                    special_notes=meta.special_notes
+                    special_notes=meta.special_notes,
+                    source=INFERRED, status=ACTIVE,
                 )
                 db.add(new_meta)
         
@@ -303,13 +315,23 @@ def import_schema_suggestions(
                 SchemaSemanticMapping.keyword == mapping.keyword
             ).first()
             
-            if not existing_map:
+            suggested = {"keyword_type": mapping.keyword_type, "target_column": mapping.target_column,
+                         "target_condition": mapping.target_condition, "description": mapping.description}
+            if existing_map and may_replace(INFERRED, existing_map.source, existing_map.status):
+                for key, value in suggested.items():
+                    setattr(existing_map, key, value)
+            elif existing_map:
+                if any(getattr(existing_map, key) != value for key, value in suggested.items()):
+                    queued += propose(db.connection(), "schema_semantic_mapping", {"keyword": mapping.keyword},
+                                      suggested, INFERRED, reason=reason)
+            else:
                 new_map = SchemaSemanticMapping(
                     keyword=mapping.keyword,
                     keyword_type=mapping.keyword_type,
                     target_column=mapping.target_column,
                     target_condition=mapping.target_condition,
-                    description=mapping.description
+                    description=mapping.description,
+                    source=INFERRED, status=ACTIVE,
                 )
                 db.add(new_map)
                 
@@ -319,21 +341,33 @@ def import_schema_suggestions(
                 SchemaBusinessRule.rule_code == rule.rule_code
             ).first()
             
-            if not existing_rule:
+            suggested = {"rule_name": rule.rule_name, "rule_description": rule.rule_description,
+                         "example_correct": rule.example_correct, "example_wrong": rule.example_wrong,
+                         "severity": rule.severity}
+            if existing_rule and may_replace(INFERRED, existing_rule.source, existing_rule.status):
+                for key, value in suggested.items():
+                    setattr(existing_rule, key, value)
+            elif existing_rule:
+                if any(getattr(existing_rule, key) != value for key, value in suggested.items()):
+                    queued += propose(db.connection(), "schema_business_rules", {"rule_code": rule.rule_code},
+                                      suggested, INFERRED, reason=reason)
+            else:
                 new_rule = SchemaBusinessRule(
                     rule_code=rule.rule_code,
                     rule_name=rule.rule_name,
                     rule_description=rule.rule_description,
                     example_correct=rule.example_correct,
                     example_wrong=rule.example_wrong,
-                    severity=rule.severity
+                    severity=rule.severity,
+                    source=INFERRED, status=ACTIVE,
                 )
                 db.add(new_rule)
 
         db.commit()
         schema_service.refresh_cache()
         
-        return {"status": "success", "message": f"Successfully imported schema for {request.table_name}"}
+        return {"status": "success", "message": f"Successfully imported schema for {request.table_name}",
+                "waiting_for_a_person": queued}
 
     except Exception as e:
         db.rollback()

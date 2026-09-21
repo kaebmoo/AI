@@ -11,7 +11,11 @@ This script:
 1. Reads hierarchy config from schema_contexts + view columns
 2. Extracts DISTINCT parent-child relationships from actual data
 3. Populates master_hierarchy (levels) and master_hierarchy_values (values)
-4. Preserves 'manual' entries (from admin/master data files)
+4. Plan 8.1 (app/services/provenance.py): writes only what a machine owns — a level is written when missing
+   (never changed after), a value is 'inferred' and in use when its level is, and a value a person owns is left
+   as it is. No proposal either: the parent read off the data is not a person's kind of fact — a value can sit
+   under several parents, and a parent_column the view lacks reads as a string ("GROUP"); on the live copy 122
+   of the 123 would-be proposals were that (RESULT_P8_PHASE1 §9)
 """
 
 import sqlite3
@@ -169,7 +173,8 @@ def run_migration(conn: sqlite3.Connection):
 
 
 def extract_hierarchy_levels(conn: sqlite3.Connection, context_name: str, definition: dict, dry_run: bool = False):
-    """Extract and save hierarchy level definitions."""
+    """Write the level definitions that are missing. They come from master_hierarchy itself (DB mode) or from
+    HIERARCHY_DEFS, which people wrote — so an existing level, whoever owns it, is left exactly as it is."""
     for level_def in definition["levels"]:
         level = level_def["level"]
         columns_json = json.dumps(level_def["columns"], ensure_ascii=False)
@@ -180,14 +185,10 @@ def extract_hierarchy_levels(conn: sqlite3.Connection, context_name: str, defini
             continue
 
         conn.execute("""
-            INSERT INTO master_hierarchy (context_name, level, level_label_th, level_label_en, level_columns, detection_keywords, source)
-            VALUES (?, ?, ?, ?, ?, ?, 'auto')
-            ON CONFLICT(context_name, level) DO UPDATE SET
-                level_label_th = excluded.level_label_th,
-                level_label_en = excluded.level_label_en,
-                level_columns = CASE WHEN source = 'manual' THEN level_columns ELSE excluded.level_columns END,
-                detection_keywords = CASE WHEN source = 'manual' THEN detection_keywords ELSE excluded.detection_keywords END,
-                updated_at = CURRENT_TIMESTAMP
+            INSERT INTO master_hierarchy (context_name, level, level_label_th, level_label_en, level_columns, detection_keywords,
+                                          source, status)
+            VALUES (?, ?, ?, ?, ?, ?, 'manual', 'active')
+            ON CONFLICT(context_name, level) DO NOTHING
         """, (context_name, level, level_def["label_th"], level_def["label_en"], columns_json, keywords_json))
 
 
@@ -195,6 +196,7 @@ def extract_hierarchy_values(conn: sqlite3.Connection, data_engine, context_name
                              dry_run: bool = False):
     """Extract actual parent-child values from data (read on data_engine, written on conn = config DB)."""
     from sqlalchemy import text
+    from app.services.provenance import INFERRED, may_replace
 
     view = definition["view"]
     try:  # the view must exist in the context's own source
@@ -208,6 +210,10 @@ def extract_hierarchy_values(conn: sqlite3.Connection, data_engine, context_name
         level = level_def["level"]
         col = level_def["columns"][0]  # primary column
         parent_col = level_def.get("parent_column")
+        status = level_def.get("status") or "active"  # a value is in use when its level is
+        existing = {v: (source, st) for v, source, st in conn.execute(
+            "SELECT value, source, status FROM master_hierarchy_values WHERE context_name = ? AND level = ?",
+            (context_name, level))}
 
         if parent_col:
             query = f'SELECT DISTINCT "{parent_col}", "{col}" FROM "{view}" WHERE "{col}" IS NOT NULL AND "{col}" != \'\' ORDER BY "{parent_col}", "{col}"'
@@ -251,13 +257,21 @@ def extract_hierarchy_values(conn: sqlite3.Connection, data_engine, context_name
 
             aliases_json = json.dumps(sorted(aliases), ensure_ascii=False)
 
+            known = existing.get(value)
+            if known and not may_replace(INFERRED, known[0], known[1]):
+                count += 1  # a person's value (or a rejected one): theirs
+                continue
             conn.execute("""
-                INSERT INTO master_hierarchy_values (context_name, level, value, parent_value, aliases, source)
-                VALUES (?, ?, ?, ?, ?, 'auto')
+                INSERT INTO master_hierarchy_values (context_name, level, value, parent_value, aliases, source, status)
+                VALUES (?, ?, ?, ?, ?, 'inferred', ?)
                 ON CONFLICT(context_name, level, value) DO UPDATE SET
-                    parent_value = CASE WHEN source = 'manual' THEN parent_value ELSE excluded.parent_value END,
-                    aliases = CASE WHEN source = 'manual' THEN aliases ELSE excluded.aliases END
-            """, (context_name, level, value, parent_value, aliases_json))
+                    parent_value = excluded.parent_value, aliases = excluded.aliases, status = excluded.status
+                WHERE master_hierarchy_values.source IN ('inferred', 'learned')
+                  AND master_hierarchy_values.status != 'rejected'
+                  AND (master_hierarchy_values.parent_value IS NOT excluded.parent_value
+                       OR master_hierarchy_values.aliases IS NOT excluded.aliases
+                       OR master_hierarchy_values.status IS NOT excluded.status)
+            """, (context_name, level, value, parent_value, aliases_json, status))
             count += 1
 
         if not dry_run:
@@ -279,9 +293,9 @@ def load_defs_from_db(conn: sqlite3.Connection, context_filter: str = None) -> d
     try:
         rows = conn.execute("""
             SELECT context_name, level, level_label_th, level_label_en,
-                   level_columns, detection_keywords, parent_column, source_view
+                   level_columns, detection_keywords, parent_column, source_view, status
             FROM master_hierarchy
-            WHERE is_active = 1 AND source_view IS NOT NULL
+            WHERE is_active = 1 AND source_view IS NOT NULL AND status != 'rejected'
             ORDER BY context_name, level
         """).fetchall()
     except Exception:
@@ -295,7 +309,7 @@ def load_defs_from_db(conn: sqlite3.Connection, context_filter: str = None) -> d
         return HIERARCHY_DEFS
 
     db_defs = {}
-    for ctx, level, label_th, label_en, cols_json, kw_json, parent_col, view in rows:
+    for ctx, level, label_th, label_en, cols_json, kw_json, parent_col, view, status in rows:
         if context_filter and ctx != context_filter:
             continue
         if ctx not in db_defs:
@@ -307,6 +321,7 @@ def load_defs_from_db(conn: sqlite3.Connection, context_filter: str = None) -> d
             "label_en": label_en,
             "keywords": json.loads(kw_json),
             "parent_column": parent_col,
+            "status": status,
         })
 
     if db_defs:

@@ -407,8 +407,14 @@ class HierarchyService:
         This function detects columns, creates levels, then extracts values — all in one step.
 
         Heuristic: looks for columns with low-to-medium cardinality that form parent-child patterns.
+
+        Plan 8.1: a guess is not put in use by itself — a new level is `inferred` / `proposed` until a person takes
+        it (upsert_level), and a level a person or the contract owns keeps theirs while the guess waits in
+        knowledge_proposals (8.0 §3.1: the heuristic was wrong for 3 of the 4 feed contexts).
         """
         from sqlalchemy import inspect as sa_inspect
+
+        from app.services.provenance import INFERRED, may_replace, propose
 
         conn = _get_conn()  # config DB: master_hierarchy is written here
         data = _data_engine(context_name)
@@ -503,25 +509,31 @@ class HierarchyService:
                     if key in col.lower():
                         keywords.extend(thai_kws)
 
-                conn.execute("""
-                    INSERT INTO master_hierarchy
-                        (context_name, level, level_label_th, level_label_en, level_columns,
-                         detection_keywords, parent_column, source_view, source)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'auto')
-                    ON CONFLICT(context_name, level) DO UPDATE SET
-                        level_columns = excluded.level_columns,
-                        detection_keywords = excluded.detection_keywords,
-                        parent_column = excluded.parent_column,
-                        source_view = excluded.source_view,
-                        updated_at = CURRENT_TIMESTAMP
-                """, (
-                    context_name, level_num, label, label,
-                    json.dumps([col], ensure_ascii=False),
-                    json.dumps(keywords, ensure_ascii=False),
-                    parent_col, view_name,
-                ))
+                guess = {"level_columns": json.dumps([col], ensure_ascii=False),
+                         "detection_keywords": json.dumps(keywords, ensure_ascii=False),
+                         "parent_column": parent_col, "source_view": view_name}
+                held = conn.execute("SELECT source, status FROM master_hierarchy WHERE context_name = ? AND level = ?",
+                                    (context_name, level_num)).fetchone()
+                if held and not may_replace(INFERRED, *held):
+                    propose(conn, "master_hierarchy", {"context_name": context_name, "level": level_num}, guess,
+                            INFERRED, reason="bootstrap เดาระดับนี้จากข้อมูล — ระดับที่ใช้อยู่เป็นของคน")
+                else:
+                    conn.execute("""
+                        INSERT INTO master_hierarchy
+                            (context_name, level, level_label_th, level_label_en, level_columns,
+                             detection_keywords, parent_column, source_view, source, status)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'inferred', 'proposed')
+                        ON CONFLICT(context_name, level) DO UPDATE SET
+                            level_columns = excluded.level_columns,
+                            detection_keywords = excluded.detection_keywords,
+                            parent_column = excluded.parent_column,
+                            source_view = excluded.source_view,
+                            updated_at = CURRENT_TIMESTAMP
+                    """, (context_name, level_num, label, label, guess["level_columns"], guess["detection_keywords"],
+                          parent_col, view_name))
 
-                levels_created.append({"level": level_num, "col": col, "distinct": col_info["distinct"], "parent": parent_col})
+                levels_created.append({"level": level_num, "col": col, "distinct": col_info["distinct"], "parent": parent_col,
+                                       "proposed": True})  # waits for a person either way
                 used_cols.add(col)
                 level_num += 1
 

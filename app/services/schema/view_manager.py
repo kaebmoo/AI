@@ -178,6 +178,10 @@ def find_source_metadata(_service: "SchemaService", conn, source_table: str, sou
 
 
 def propagate_metadata_to_view(service: "SchemaService", view_name: str) -> Dict:
+    """Copy the source tables' metadata onto the view's columns. Plan 8.1: a copy is `inferred` — it fills a
+    machine's row; a row a person owns keeps what it has and the copy waits in knowledge_proposals."""
+    from app.services.provenance import INFERRED, may_replace, propose
+
     mappings = get_view_column_mappings(service, view_name)
     if not mappings:
         logger.warning("No column mappings found for view '%s'", view_name)
@@ -196,13 +200,20 @@ def propagate_metadata_to_view(service: "SchemaService", view_name: str) -> Dict
             source_meta = find_source_metadata(service, conn, source_table, source_column)
 
             result = conn.execute(text("""
-                SELECT id, display_name_th FROM schema_metadata
+                SELECT id, display_name_th, source, status FROM schema_metadata
                 WHERE table_name = :vn AND column_name = :vc
             """), {"vn": view_name, "vc": view_column})
             existing = result.mappings().fetchone()
 
             if source_meta:
-                if existing:
+                if existing and not existing["display_name_th"] and not may_replace(INFERRED, existing["source"], existing["status"]):
+                    fill = {k: source_meta.get(k) for k in ("display_name_th", "display_name_en", "description", "data_type",
+                                                            "hierarchy_level", "special_notes", "conversion_sql",
+                                                            "dimension_group") if source_meta.get(k) is not None}
+                    propose(conn, "schema_metadata", {"table_name": view_name, "column_name": view_column}, fill, INFERRED,
+                            reason=f"คัดลอกจาก {source_table}.{source_column} — แถวนี้เป็นของคน")
+                    skipped += 1
+                elif existing:
                     if not existing["display_name_th"]:
                         conn.execute(text("""
                             UPDATE schema_metadata SET
@@ -242,12 +253,12 @@ def propagate_metadata_to_view(service: "SchemaService", view_name: str) -> Dict
                             table_name, column_name, display_name_th, display_name_en,
                             description, data_type, format_hint, example_value,
                             is_summable, is_groupable, hierarchy_level,
-                            special_notes, conversion_sql, dimension_group
+                            special_notes, conversion_sql, dimension_group, source, status
                         ) VALUES (
                             :table_name, :column_name, :display_name_th, :display_name_en,
                             :description, :data_type, :format_hint, :example_value,
                             :is_summable, :is_groupable, :hierarchy_level,
-                            :special_notes, :conversion_sql, :dimension_group
+                            :special_notes, :conversion_sql, :dimension_group, 'inferred', 'active'
                         )
                     """), {
                         "table_name": view_name,
@@ -274,8 +285,8 @@ def propagate_metadata_to_view(service: "SchemaService", view_name: str) -> Dict
                 })
                 if not existing:
                     conn.execute(text("""
-                        INSERT INTO schema_metadata (table_name, column_name, data_type)
-                        VALUES (:table_name, :column_name, :data_type)
+                        INSERT INTO schema_metadata (table_name, column_name, data_type, source, status)
+                        VALUES (:table_name, :column_name, :data_type, 'inferred', 'active')
                     """), {
                         "table_name": view_name,
                         "column_name": view_column,

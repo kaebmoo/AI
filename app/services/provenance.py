@@ -71,15 +71,19 @@ def propose(conn, table: str, key: Dict[str, Any], values: Dict[str, Any], sourc
             confidence: Optional[float] = None, reason: Optional[str] = None) -> bool:
     """Queue `values` for the row of `table` at `key`, on the caller's transaction (sqlite3 or SQLAlchemy).
 
-    One open proposal per key and proposer: a newer version replaces the one still waiting. A version a person
-    already rejected — or the very version already waiting — is not written again. True = a new version waits now.
+    One open proposal per key and proposer: a newer version is merged into the one still waiting, field by field
+    (two machine writers may propose different fields of one row). A version a person already rejected, or one
+    the waiting proposal already says, is not written again. True = something new waits now.
     """
     params = {"t": table, "k": as_json(key), "p": as_json(values), "s": source, "c": confidence, "r": reason}
-    if _run(conn, "SELECT 1 FROM knowledge_proposals WHERE table_name = :t AND row_key = :k AND source = :s "
-                  "AND status IN ('rejected', 'proposed') AND proposed = :p LIMIT 1", params).fetchone():
-        return False
+    wanted = json.loads(params["p"])
+    for status, proposed in _run(conn, "SELECT status, proposed FROM knowledge_proposals WHERE table_name = :t "
+                                       "AND row_key = :k AND source = :s AND status IN ('rejected', 'proposed')", params):
+        held = json.loads(proposed)
+        if (status == REJECTED and held == wanted) or (status == PROPOSED and {**held, **wanted} == held):
+            return False
     _run(conn, "INSERT INTO knowledge_proposals (table_name, row_key, proposed, source, confidence, reason) "
                "VALUES (:t, :k, :p, :s, :c, :r) ON CONFLICT (table_name, row_key, source) WHERE status = 'proposed' "
-               "DO UPDATE SET proposed = excluded.proposed, confidence = excluded.confidence, "
-               "reason = excluded.reason, created_at = CURRENT_TIMESTAMP", params)
+               "DO UPDATE SET proposed = json_patch(knowledge_proposals.proposed, excluded.proposed), "
+               "confidence = excluded.confidence, reason = excluded.reason, created_at = CURRENT_TIMESTAMP", params)
     return True

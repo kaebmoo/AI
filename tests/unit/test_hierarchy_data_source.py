@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import create_engine, text
 
 from app.services import hierarchy_service as hs
+from tests.unit import knowledge_db
 
 MIGRATION = Path(__file__).resolve().parents[2] / "database" / "migrations" / "009_master_hierarchy.sql"
 
@@ -26,6 +27,7 @@ def dbs(tmp_path, monkeypatch):
                      [("A",), ("B",)])
     conn.commit()
     conn.close()
+    knowledge_db.add_provenance(config)  # Plan 8.1 columns
     business = create_engine(f"sqlite:///{tmp_path / 'biz.db'}")
     with business.begin() as c:
         c.execute(text("CREATE TABLE org (division TEXT, department TEXT, v REAL)"))

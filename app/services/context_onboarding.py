@@ -16,6 +16,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
+from app.services.provenance import as_json
+
 logger = logging.getLogger(__name__)
 
 
@@ -850,28 +852,28 @@ class ConfigGenerator:
         if ctx:
             bundle.context = ctx
             keywords_json = json.dumps(ctx.get("keywords", []), ensure_ascii=False)
-            sql.append(self._gen_context_sql(ctx, keywords_json))
+            sql.extend(self._gen_context_sql(ctx, keywords_json))
 
         # 2. Schema metadata
         for meta in analysis.get("schema_metadata", []):
             bundle.metadata.append(meta)
-            sql.append(self._gen_metadata_sql(meta))
+            sql.extend(self._gen_metadata_sql(meta))
 
         # 3. Business rules
         for rule in analysis.get("business_rules", []):
             bundle.business_rules.append(rule)
-            sql.append(self._gen_rule_sql(rule))
+            sql.extend(self._gen_rule_sql(rule))
 
         # 4. Golden examples
         for ex in analysis.get("golden_examples", []):
             bundle.golden_examples.append(ex)
-            sql.append(self._gen_example_sql(ex))
+            sql.extend(self._gen_example_sql(ex))
 
         # 5. Semantic mappings
         ctx_name = ctx.get("name", "") if ctx else ""
         for mapping in analysis.get("semantic_mappings", []):
             bundle.semantic_mappings.append(mapping)
-            sql.append(self._gen_mapping_sql(mapping, ctx_name))
+            sql.extend(self._gen_mapping_sql(mapping, ctx_name))
 
         # 6. Hierarchy
         for level in analysis.get("hierarchy", []):
@@ -893,69 +895,86 @@ class ConfigGenerator:
             return ''
         return str(s).replace("'", "''")
 
-    def _gen_context_sql(self, ctx: Dict, keywords_json: str) -> str:
-        return (
-            f"INSERT OR REPLACE INTO schema_contexts "
-            f"(name, display_name, main_view, keywords, instruction_th, instruction_en, is_active) "
-            f"VALUES ("
-            f"'{self._esc(ctx.get('name', ''))}', "
-            f"'{self._esc(ctx.get('display_name_th', ''))}', "
-            f"'{self._esc(self.view_name)}', "
-            f"'{self._esc(keywords_json)}', "
-            f"'{self._esc(ctx.get('instruction_th', ''))}', "
-            f"'{self._esc(ctx.get('instruction_en', ''))}', "
-            f"1);"
-        )
+    # Plan 8.1 (app/services/provenance.py): what onboarding writes is `inferred`, in use once the admin applies
+    # it — a new row, or over a machine row. A row a person or the contract owns keeps its content and the inference
+    # waits in knowledge_proposals. Still SQL text: the admin UI previews it and sends it back (apply-sql).
+    # (_gen_hierarchy_sql / _gen_warning_sql leave out NOT NULL columns and fail as they always did — 8.2 rewrites them.)
+    _REASON = "onboarding อนุมานจาก view — แถวที่ใช้อยู่เป็นของคน"
 
-    def _gen_metadata_sql(self, meta: Dict) -> str:
+    def _lit(self, value) -> str:
+        if value is None:
+            return "NULL"
+        if isinstance(value, bool):
+            return "1" if value else "0"
+        if isinstance(value, (int, float)):
+            return repr(value)
+        return f"'{self._esc(value)}'"
+
+    @staticmethod
+    def _machine(table: str) -> str:
+        return (f"COALESCE({table}.source, '') IN ('inferred', 'learned') "
+                f"AND COALESCE({table}.status, 'active') != 'rejected'")
+
+    def _proposal_sql(self, table: str, key: Dict, values: Dict) -> str:
+        """Queue the inference when the row at `key` is not a machine's and says something else."""
+        where_key = " AND ".join(f"{c} = {self._lit(v)}" for c, v in key.items())
+        same = " AND ".join(f"{c} IS {self._lit(v)}" for c, v in values.items())
+        row_key, proposed = self._lit(as_json(key)), self._lit(as_json(values))
+        return (f"INSERT INTO knowledge_proposals (table_name, row_key, proposed, source, reason) "
+                f"SELECT '{table}', {row_key}, {proposed}, 'inferred', {self._lit(self._REASON)} "
+                f"WHERE EXISTS (SELECT 1 FROM {table} WHERE {where_key} AND NOT ({self._machine(table)}) AND NOT ({same})) "
+                f"AND NOT EXISTS (SELECT 1 FROM knowledge_proposals WHERE table_name = '{table}' AND row_key = {row_key} "
+                f"AND source = 'inferred' AND status IN ('rejected', 'proposed') AND proposed = {proposed}) "
+                f"ON CONFLICT (table_name, row_key, source) WHERE status = 'proposed' DO UPDATE SET "
+                f"proposed = excluded.proposed, reason = excluded.reason, created_at = CURRENT_TIMESTAMP;")
+
+    def _guarded(self, table: str, key: Dict, values: Dict, insert: Optional[Dict] = None) -> List[str]:
+        """[proposal, upsert] — the upsert changes only a machine's row; a person's gets the proposal instead."""
+        cols = {**key, **values, **(insert or {}), "source": "inferred", "status": "active"}
+        sets = ", ".join(f"{c} = excluded.{c}" for c in values)
+        return [self._proposal_sql(table, key, values),
+                f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join(self._lit(v) for v in cols.values())}) "
+                f"ON CONFLICT({', '.join(key)}) DO UPDATE SET {sets} WHERE {self._machine(table)};"]
+
+    def _gen_context_sql(self, ctx: Dict, keywords_json: str) -> List[str]:
+        return self._guarded("schema_contexts", {"name": ctx.get("name", "")}, {
+            "display_name": ctx.get("display_name_th", ""), "main_view": self.view_name, "keywords": keywords_json,
+            "instruction_th": ctx.get("instruction_th", ""), "instruction_en": ctx.get("instruction_en", ""),
+        }, insert={"is_active": 1})
+
+    def _gen_metadata_sql(self, meta: Dict) -> List[str]:
         # schema_metadata in config.db has NO is_active column
-        return (
-            f"INSERT OR REPLACE INTO schema_metadata "
-            f"(table_name, column_name, display_name_th, description, "
-            f"is_summable, is_groupable, special_notes) VALUES ("
-            f"'{self._esc(self.view_name)}', "
-            f"'{self._esc(meta.get('column_name', ''))}', "
-            f"'{self._esc(meta.get('display_name_th', ''))}', "
-            f"'{self._esc(meta.get('description', ''))}', "
-            f"{1 if meta.get('is_summable') else 0}, "
-            f"{1 if meta.get('is_groupable') else 0}, "
-            f"'{self._esc(meta.get('special_notes', ''))}');"
-        )
+        return self._guarded("schema_metadata", {"table_name": self.view_name, "column_name": meta.get("column_name", "")}, {
+            "display_name_th": meta.get("display_name_th", ""), "description": meta.get("description", ""),
+            "is_summable": 1 if meta.get("is_summable") else 0, "is_groupable": 1 if meta.get("is_groupable") else 0,
+            "special_notes": meta.get("special_notes", ""),
+        })
 
-    def _gen_rule_sql(self, rule: Dict) -> str:
-        return (
-            f"INSERT INTO schema_business_rules "
-            f"(rule_code, rule_name, rule_description, table_name, "
-            f"example_correct, example_wrong, severity, inject_mode, is_active) VALUES ("
-            f"'{self._esc(rule.get('rule_code', ''))}', "
-            f"'{self._esc(rule.get('rule_name', ''))}', "
-            f"'{self._esc(rule.get('rule_description', ''))}', "
-            f"'{self._esc(self.view_name)}', "
-            f"'{self._esc(rule.get('example_correct', ''))}', "
-            f"'{self._esc(rule.get('example_wrong', ''))}', "
-            f"'{self._esc(rule.get('severity', 'warning'))}', "
-            f"'{self._esc(rule.get('inject_mode', 'schema_context'))}', 1);"
-        )
+    def _gen_rule_sql(self, rule: Dict) -> List[str]:
+        return self._guarded("schema_business_rules", {"rule_code": rule.get("rule_code", "")}, {
+            "rule_name": rule.get("rule_name", ""), "rule_description": rule.get("rule_description", ""),
+            "table_name": self.view_name, "example_correct": rule.get("example_correct", ""),
+            "example_wrong": rule.get("example_wrong", ""), "severity": rule.get("severity", "warning"),
+            "inject_mode": rule.get("inject_mode", "schema_context"),
+        }, insert={"is_active": 1})
 
-    def _gen_example_sql(self, ex: Dict) -> str:
-        return (
-            f"INSERT INTO golden_examples "
-            f"(question_pattern, expected_sql, category, is_active, usage_count) VALUES ("
-            f"'{self._esc(ex.get('question', ''))}', "
-            f"'{self._esc(ex.get('sql', ''))}', "
-            f"'{self._esc(ex.get('category', ''))}', 1, 0);"
-        )
+    def _gen_example_sql(self, ex: Dict) -> List[str]:
+        # golden_examples has no key of its own: the question is the key — a re-run no longer adds a duplicate
+        key = {"question_pattern": ex.get("question", "")}
+        values = {"expected_sql": ex.get("sql", ""), "category": ex.get("category", "")}
+        q, sql, category = self._lit(key["question_pattern"]), self._lit(values["expected_sql"]), self._lit(values["category"])
+        return [self._proposal_sql("golden_examples", key, values),
+                f"UPDATE golden_examples SET expected_sql = {sql}, category = {category} "
+                f"WHERE question_pattern = {q} AND {self._machine('golden_examples')};",
+                f"INSERT INTO golden_examples (question_pattern, expected_sql, category, is_active, usage_count, source, status) "
+                f"SELECT {q}, {sql}, {category}, 1, 0, 'inferred', 'active' "
+                f"WHERE NOT EXISTS (SELECT 1 FROM golden_examples WHERE question_pattern = {q});"]
 
-    def _gen_mapping_sql(self, mapping: Dict, context_name: str) -> str:
-        return (
-            f"INSERT OR IGNORE INTO schema_semantic_mapping "
-            f"(keyword, keyword_type, target_column, target_condition, context_name, is_active) VALUES ("
-            f"'{self._esc(mapping.get('keyword', ''))}', "
-            f"'{self._esc(mapping.get('keyword_type', 'term'))}', "
-            f"'{self._esc(mapping.get('target_column', ''))}', "
-            f"'{self._esc(mapping.get('target_condition', ''))}', "
-            f"'{self._esc(context_name)}', 1);"
-        )
+    def _gen_mapping_sql(self, mapping: Dict, context_name: str) -> List[str]:
+        return self._guarded("schema_semantic_mapping", {"keyword": mapping.get("keyword", "")}, {
+            "keyword_type": mapping.get("keyword_type", "term"), "target_column": mapping.get("target_column", ""),
+            "target_condition": mapping.get("target_condition", ""), "context_name": context_name,
+        }, insert={"is_active": 1})
 
     def _gen_hierarchy_sql(self, level: Dict, context_name: str) -> str:
         keywords_json = json.dumps(level.get("detection_keywords", []), ensure_ascii=False)

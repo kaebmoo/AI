@@ -78,8 +78,9 @@ def rows(path, sql: str, params=()) -> list:
 
 def add_provenance(target) -> None:
     """Give the knowledge tables a fixture created with its own DDL the Plan 8.1 columns — the ORM models select
-    them and the readers filter on status. `target`: a path to a SQLite file or a SQLAlchemy engine."""
-    from scripts.migrate_knowledge_provenance import COLUMNS, TABLES
+    them and the readers filter on status — and the proposal queue the writers file into.
+    `target`: a path to a SQLite file or a SQLAlchemy engine."""
+    from scripts.migrate_knowledge_provenance import COLUMNS, PROPOSALS_DDL, TABLES
 
     engine = target if hasattr(target, "begin") else create_engine(f"sqlite:///{target}")
     with engine.begin() as conn:
@@ -88,3 +89,5 @@ def add_provenance(target) -> None:
             for column, ddl in COLUMNS:
                 if present and column not in present:
                     conn.exec_driver_sql(f'ALTER TABLE "{table}" ADD COLUMN {column} {ddl}')
+        for ddl in PROPOSALS_DDL:
+            conn.exec_driver_sql(ddl)

@@ -1,5 +1,6 @@
 """Schema metadata, view builder, and dimension family admin endpoints."""
 
+import logging
 from datetime import datetime
 from typing import List, Optional
 
@@ -31,12 +32,14 @@ from app.schemas.admin_schemas import (
     ViewSummaryListResponse,
 )
 from app.services.ai_service import AIService
-from app.services.provenance import ACTIVE, MANUAL, mark_human_edit
+from app.services.provenance import ACTIVE, INFERRED, MANUAL, mark_human_edit, may_replace, propose
 from app.services.query_engine import clear_query_cache
 from app.services.schema_service import SchemaService
 
 from ._shared import ensure_metadata_rows, mark_brain_dirty
 from app.core.time_utils import utcnow
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -421,16 +424,26 @@ def auto_populate_dimension_families(
     all_family_cols = [column for cols in auto_families.values() for column in cols]
     ensure_metadata_rows(db, table_name, all_family_cols, service)
 
-    updated = 0
+    # Plan 8.1: a detected family is `inferred` — it goes on a machine's row (a stub from ensure_metadata_rows);
+    # a row a person or the contract owns keeps its family and the detection waits in knowledge_proposals
+    updated = queued = 0
     for family_name, cols in auto_families.items():
         for col_name in cols:
             row = db.query(SchemaMetadata).filter(
                 SchemaMetadata.table_name == table_name,
                 SchemaMetadata.column_name == col_name,
             ).first()
-            if row and (overwrite or not row.dimension_group):
+            if not row or not (overwrite or not row.dimension_group) or row.dimension_group == family_name:
+                continue
+            if may_replace(INFERRED, row.source, row.status):
                 row.dimension_group = family_name
                 updated += 1
+            else:
+                queued += propose(db.connection(), "schema_metadata", {"table_name": table_name, "column_name": col_name},
+                                  {"dimension_group": family_name}, INFERRED,
+                                  reason="ตรวจพบกลุ่มคอลัมน์อัตโนมัติ — แถวนี้เป็นของคน")
+    if queued:
+        logger.info("Dimension families of %s: %d detection(s) wait for a person", table_name, queued)
 
     db.commit()
     mark_brain_dirty()

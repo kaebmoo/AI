@@ -10,6 +10,7 @@ import sqlite3
 import tempfile
 
 import pytest
+from tests.unit import knowledge_db
 
 from app.services.context_onboarding import (
     ConfigApplicator,
@@ -70,7 +71,7 @@ def business_db():
     conn.execute("""
         CREATE TABLE schema_semantic_mapping (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            keyword TEXT, keyword_type TEXT DEFAULT 'term',
+            keyword TEXT UNIQUE, keyword_type TEXT DEFAULT 'term',
             target_column TEXT, target_condition TEXT,
             context_name TEXT, is_active INTEGER DEFAULT 1, priority INTEGER DEFAULT 0
         )
@@ -140,6 +141,7 @@ def business_db():
 
     conn.commit()
     conn.close()
+    knowledge_db.add_provenance(path)  # Plan 8.1 columns + proposal queue
     yield path
     os.close(fd)
     os.unlink(path)
