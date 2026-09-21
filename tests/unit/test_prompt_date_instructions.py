@@ -64,3 +64,32 @@ def test_nothing_time_like_claims_nothing():
     note = prompt_builder.build_date_instructions(_Service(_meta(("a", 0), ("b", 1))), "t")
     assert "คอลัมน์เวลาของตาราง" not in note
     assert "พ.ศ." in note  # the language-level hint still applies
+
+
+class _PromptService(_Service):
+    """What _build_thai_prompt / _build_english_prompt read besides the date block."""
+    engine = business_engine = None
+
+    def build_hierarchy_rule_text(self, context_name):
+        return ""
+
+    def build_instruction_rules_text(self, main_view):
+        return ""
+
+
+def test_the_rules_name_no_time_column_of_their_own():
+    """Plan 8.1 (RESULT_P8_PHASE0 §9.4): the SQL rules still said "ใช้ `year` และ `month`" in the same prompt whose
+    Date Handling block names each table's own columns — two orders for feed_ebt / feed_expense / pl_costtype."""
+    service, context = _PromptService(), {"instruction_th": ""}
+    thai = prompt_builder._build_thai_prompt(service, "matcha", "feed_ebt_fact", "feed_ebt", context)
+    english = prompt_builder._build_english_prompt(service, "matcha", "feed_ebt_fact", "feed_ebt", context)
+    assert "`year` และ `month`" not in thai and "CAST(month AS INTEGER)" not in thai and "Date Handling" in thai
+    assert "`year` and `month`" not in english and "CAST(month AS INTEGER)" not in english and "Date Handling" in english
+
+
+def test_the_explanation_prompt_carries_no_year_of_its_own():
+    """Its examples said "เดือนมกราคม 2568" / "Q1/2567" — a year no answer asked for (thai_year.py fixes the
+    answer's years after the fact; the prompt should not suggest one)."""
+    from app.providers.chart_postprocessor import build_explain_prompt
+    prompt = build_explain_prompt(question="รายได้รวม", sql="SELECT 1 AS n", data=[{"n": 1}])
+    assert "2568" not in prompt and "2567" not in prompt

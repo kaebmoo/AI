@@ -362,8 +362,8 @@ STEP 3: FALLBACK
    - **กฎการค้นหา:** ห้ามใช้ `=` กับชื่อไทย (เช่น account_name, department) ยกเว้นมั่นใจ 100%
    - **ให้ใช้ `LIKE '%keyword%'` เสมอ** สำหรับคำค้นทั่วไป
    - ตัวอย่าง: User หา "ค่าล่วงเวลา" -> `WHERE account_name LIKE '%ค่าล่วงเวลา%'`
-5. ใช้ `year` และ `month` สำหรับ filter เวลา
-   - **กฎเหล็ก:** ใช้ `CAST(month AS INTEGER)` เสมอ
+5. กรองเวลาด้วยคอลัมน์เวลาของตารางนี้ตามหัวข้อ "Date Handling" ข้างล่างเท่านั้น
+   - **กฎเหล็ก:** CAST คอลัมน์เวลาเป็น INTEGER ก่อนเทียบกับตัวเลขเสมอ
 5. SELECT query เท่านั้น
    - ถ้ามี ORDER BY + LIMIT + UNION ต้องครอบด้วย Subquery
 6. ห้ามใช้ table จริง ให้ใช้ view ที่กำหนดเท่านั้น
@@ -412,8 +412,8 @@ Current Context: **{context_name.upper()}** (Table: `{main_view}`)
 1. Use {sql_dialect} syntax
 2. Query from: **{main_view}**
 3. Use English column names (see Schema)
-4. Filter time using `year` and `month`
-   - Always `CAST(month AS INTEGER)`
+4. Filter time only with this table's time columns, listed under "Date Handling" below
+   - Always CAST a time column to INTEGER before comparing it with a number
 5. Wrap UNION + ORDER BY/LIMIT in subqueries
 6. Do NOT query raw tables directly
 

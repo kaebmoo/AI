@@ -345,7 +345,7 @@ Results ({len(data)} rows):
 Explain in Thai.
 CRITICAL RULES:
 1. **SQL is the ground truth** — describe ONLY what the SQL actually queries. If the SQL has no WHERE filter for a province/department, do NOT mention any specific province/department. Look at the SQL's WHERE clause and GROUP BY to understand the scope.
-2. **Dimension columns** (Year/ปี, Month/เดือน, Quarter/ไตรมาส) — NEVER SUM or aggregate them. Report as-is (e.g., "เดือนมกราคม 2568" NOT "เดือนที่ 78").
+2. **Dimension columns** (Year/ปี, Month/เดือน, Quarter/ไตรมาส) — NEVER SUM or aggregate them. Report as-is (e.g., "เดือนมกราคม" NOT "เดือนที่ 78").
 3. Only SUM/aggregate **MEASURE columns** (revenue, amount, cost, etc.).
 4. If data has multiple months, summarize each month individually or say "เดือน 1-12" — do NOT add month numbers together.
 
@@ -362,7 +362,7 @@ CRITICAL: You must analyze the data and recommend the best visualization type.
 Return the result as a JSON object with these keys:
 1. "explanation": The beautifully formatted Thai markdown explanation.
 2. "visualization": One of ['bar_chart', 'horizontal_bar', 'line_chart', 'pie_chart', 'donut_chart', 'table', 'single_value', 'grouped_bar', 'stacked_bar', 'waterfall', 'heatmap']
-2b. "chart_title": (optional) Short Thai title for the chart, e.g. "รายได้ตามกลุ่มธุรกิจ Q1/2567"
+2b. "chart_title": (optional) Short Thai title for the chart, e.g. "รายได้ตามกลุ่มธุรกิจ รายไตรมาส"
 3. "chart_config": Object with column mappings for the chart:
    - "category_column": The column name for X-axis labels (the PRIMARY grouping)
    - "measure_column": The column name for Y-axis values (e.g., total, sum, amount)
