@@ -1,6 +1,6 @@
 # Plan 8: Self-service — ต่อแหล่งข้อมูลเอง พร้อมตอบอัตโนมัติ คนตัดสินเฉพาะที่ระบบไม่แน่ใจ
 
-**สถานะ:** 🟡 **8.0 ทำบนสำเนาแล้ว 2026-09-21** — exit ผ่านบนสำเนา (คำถามจริง 4/12 → 8/12, legacy eval ไม่ลด); ของจริงยังไม่เปลี่ยน รอเจ้าของตัดสิน (`plan/archive/RESULT_P8_PHASE0.md` §8) · 8.1 ยังไม่เริ่ม · ข้อตัดสิน D-A / D-B / D-C ตัดสินแล้ว 2026-09-21 (§6) · prompt: `plan/PROMPT_P8_PHASE0_1.md` (8.0 + 8.1)
+**สถานะ:** ✅ **8.0 เสร็จ + ขึ้นของจริง 2026-09-21** — คำถามจริง 4/12 → 8/12 (วัดบนสำเนา), legacy eval ไม่ลด, hierarchy `feed_revenue` + code ใหม่อยู่บนของจริง (`plan/archive/RESULT_P8_PHASE0.md`) · 8.1 ยังไม่เริ่ม · ข้อตัดสิน D-A / D-B / D-C ตัดสินแล้ว 2026-09-21 (§6) · prompt: `plan/PROMPT_P8_PHASE0_1.md` (8.0 + 8.1)
 **ต่อจาก:** Plan 7 — ครึ่งหลังของเส้นทางผู้ใช้ (ถามตอบผ่าน REST / MCP / Claude Desktop พร้อม scope, policy, audit, quota) **ทำเสร็จแล้ว**
 **เป็นฐานให้:** Plan 6 (Tier 3 multi-tenant / สมัครใช้เอง) — ยังเลื่อนตาม D8 (`PLAN_7` §12); แผนนี้ออกแบบให้ "tenant = workspace" จึงใช้ได้ทั้ง Tier 1 (ภายใน NT), Tier 2 (private deployment ต่อราย) และเป็นฐานของ Tier 3 เมื่อถึง trigger
 **หลักฐาน:** ทุกตัวเลขใน §2 วัดจาก `config.db` / code / server จริง 2026-09-21

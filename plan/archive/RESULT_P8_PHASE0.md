@@ -1,7 +1,7 @@
 # RESULT Plan 8 Phase 8.0 — เครื่องมือที่มีอยู่กับ `feed_*` + คำถามจริงของ portal
 
-**สถานะ (2026-09-21):** 🟡 **ทำครบบนสำเนา — ของจริงยังไม่เปลี่ยนอะไร** · exit ผ่านบนสำเนา (คำถามจริง 4/12 → **8/12** แบบเข้ม,
-legacy eval 8/37 → **8/37** ไม่มีข้อใดเปลี่ยนผล) · เจ้าของตัดสินเกณฑ์แล้ว 2026-09-21 (§8) · **เจ้าของ restart server + ใส่ hierarchy เอง** · ยังไม่เริ่ม 8.1
+**สถานะ (2026-09-21):** ✅ **ขึ้นของจริงแล้ว 14:51** (เจ้าของใส่ hierarchy + restart เอง — §7) · exit ผ่านบนสำเนา (คำถามจริง 4/12 → **8/12**,
+legacy eval 8/37 → **8/37** ไม่มีข้อใดเปลี่ยนผล) · เจ้าของตัดสินเกณฑ์แล้ว 2026-09-21 (§8) · ยังไม่เริ่ม 8.1
 **prompt:** `plan/PROMPT_P8_PHASE0_1.md` · **แผน:** `plan/PLAN_8_SELF_SERVICE_ONBOARDING.md` §5 8.0
 
 | | ก่อน (`ca935fa`) | หลัง (`db799cc` + hierarchy ข้อเสนอบนสำเนา) |
@@ -247,20 +247,18 @@ DELETE FROM master_hierarchy WHERE context_name='feed_revenue';` + restart (ห�
 
 ---
 
-## 7. สถานะของจริง
+## 7. สถานะของจริง — ขึ้นแล้ว 2026-09-21 (เจ้าของทำเอง ตามคำสั่งที่ทดสอบกับสำเนาก่อน)
 
-| | สถานะ |
-|---|---|
-| `config.db` / `app.db` | **ไม่เปลี่ยน** — SHA-256 เท่ากับตอน backup (§0) |
-| server (port 8000) | process เดิม — **ยังรัน code ก่อน phase นี้** (ต้อง restart เพื่อให้ข้อ 2 / 4 มีผล) |
-| key ของ portal (id 4) | ไม่ได้ใช้ ไม่ได้แตะ |
-| commit | ทุก commit ของ phase นี้ (ตาราง commit ท้ายไฟล์) + `ca935fa` ที่ค้างจาก session ก่อน อยู่บน `main` **ยังไม่ push** |
+| เวลา | ขั้น | หลักฐาน |
+|---|---|---|
+| 14:50 | backup สด `~/nt-ai-backups/p8-deploy-20260921-145039/` (backup API จาก `mode=ro` + `quick_check`) | ไดเรกทอรีมีอยู่ |
+| 14:50–14:51 | ใส่ hierarchy `feed_revenue` ตาม §3.3 | `master_hierarchy` 3 ระดับ `auto` · ค่า 8 / 32 / 175 |
+| 14:51:33 | restart server port 8000 ด้วย code `8e1393f` | PID ใหม่ start 14:51:33 |
+| 14:53 | คำถามจริงผ่าน portal "รายได้ บริการ 10 อันดับแรก" (`query_audit` #281) | ชั้น product · ข้อความ "สิงหาคม 2569" · ตัวเลขตรง oracle ทั้ง 10 แถว → **ผ่านทั้ง 3 เกณฑ์** (ก่อนหน้านี้ข้อนี้ได้ "สิงหาคม 2568" หรือตอบราย BU / กลุ่มบริการ) |
 
-**ลำดับที่เสนอเมื่อได้คำสั่ง:** backup สด → ใส่ hierarchy `feed_revenue` (§3.3) → restart server (`venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000`)
-→ smoke บนของจริงต้องผ่าน portal โดยผู้ใช้/เจ้าของ (key ของ portal ห้ามใช้ทดสอบ; ของจริงไม่มี key ซ้อม) — การวัดทำกับ server ซ้อมที่ชี้สำเนาสดของของจริงแทน
-· **ถอยกลับ:** `git revert` 4 commit (หรือ checkout `ca935fa`) + restart · ลบ hierarchy ตาม §3.3
-
----
+ยังไม่ทำ: push commit · key ของ portal (id 4) ไม่ได้แตะ ·
+**ถอยกลับ:** hierarchy = `DELETE … WHERE context_name='feed_revenue'` ทั้งสองตาราง (§3.3) + restart ·
+code = `git checkout ca935fa -- app/services/ai/hybrid_flow.py app/services/ai/hierarchy_context.py` + restart (ถอย code ให้ถอย hierarchy ด้วย — R2: hierarchy โดยไม่มีประตู 4/12)
 
 ## 8. ข้อตัดสินของเจ้าของ (2026-09-21) และที่ยังค้าง
 
