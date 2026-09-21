@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, cast
 from app.providers.base import ConfidenceResult, QueryResult, RetryStatus
 from app.providers.chart_postprocessor import postprocess_chart_result
 from app.services.ai.hierarchy_context import get_column_hierarchies
+from app.services.ai.thai_year import fix_explanation
 from app.services.ai.trace import new_trace, record_usage
 
 if TYPE_CHECKING:
@@ -422,6 +423,9 @@ async def build_explanation(
             hierarchy_info=hierarchy_info,
             schema_metadata=schema_metadata,
         )
+        # the model converts ค.ศ. → พ.ศ. by itself and slips (2026 → "2566") — the years in the text are
+        # checked against the years of this answer in code, not asked for (RESULT_F11 §9)
+        explanation = fix_explanation(explanation, question, sql_query, data)
 
         t_explain = time.perf_counter() - t0
         logger.debug("Hybrid Mode: Explanation Generation took %.4fs", t_explain)
