@@ -71,7 +71,8 @@ def review_feedback(
     feedback_id: int,
     request: ReviewFeedbackRequest,
     current_user: User = Depends(deps.get_current_user),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_db),
+    config_db: Session = Depends(deps.get_config_db),  # a golden example is written to config.db
 ):
     """
     Review feedback and verify action.
@@ -85,7 +86,8 @@ def review_feedback(
             feedback_id=feedback_id,
             reviewer_id=current_user.id,
             notes=request.notes,
-            is_golden_example=request.is_golden_example
+            is_golden_example=request.is_golden_example,
+            config_db=config_db,
         )
         
         return {
@@ -173,11 +175,13 @@ def submit_feedback(
     feedback_text: Optional[str] = None,
     current_user: User = Depends(deps.get_current_user),
     db: Session = Depends(deps.get_db),
-    ai_service: AIService = Depends(deps.get_ai_service)
+    ai_service: AIService = Depends(deps.get_ai_service),
+    config_db: Session = Depends(deps.get_config_db),
 ):
     """
     Submit feedback for a specific chat message.
-    If Admin submits THUMBS_UP, auto-train the AI.
+    If Admin submits THUMBS_UP, the answer becomes the admin's golden example (manual, active — Plan 8.1) and
+    trains the AI: it used to train Vanna with no row behind it, so the next Sync Brain dropped it.
     """
     service = FeedbackService(db)
     
@@ -198,6 +202,13 @@ def submit_feedback(
             
             if chat and chat.generated_sql:
                 try:
+                    from app.models.feedback_models import GoldenExample
+                    from app.services.provenance import ACTIVE, MANUAL
+                    if not config_db.query(GoldenExample).filter(GoldenExample.question_pattern == chat.question).first():
+                        config_db.add(GoldenExample(chat_id=chat.id, question_pattern=chat.question,
+                                                    expected_sql=chat.generated_sql, added_by=current_user.id,
+                                                    is_active=True, source=MANUAL, status=ACTIVE))
+                        config_db.commit()
                     # Train Vanna
                     ai_service.train(question=chat.question, sql_query=chat.generated_sql)
                     response_msg += " (Auto-trained)"

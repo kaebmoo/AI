@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import asyncio
 import uuid
 import json
@@ -849,18 +849,43 @@ def get_history(
 
 from app.models.feedback_models import GoldenExample
 
+def save_training(db: Session, question: str, sql: str, context: Optional[str], user_id: int, is_admin: bool) -> None:
+    """A corrected SQL from the chat, as a golden example (Plan 8.1): an admin's is theirs and in use; a user's is
+    `learned` / `proposed` and never changes an example someone else decided — the newer correction of a
+    question still waiting replaces it, and a question a person owns gets a proposal."""
+    from app.services.provenance import ACTIVE, LEARNED, MANUAL, PROPOSED, mark_human_edit, may_replace, propose
+
+    existing = db.query(GoldenExample).filter(GoldenExample.question_pattern == question).first()
+    if is_admin and existing:
+        existing.expected_sql = sql
+        existing.is_active = True
+        existing.added_by = user_id
+        mark_human_edit(existing, "golden_examples", ["expected_sql"])
+    elif existing and may_replace(LEARNED, existing.source, existing.status):
+        existing.expected_sql = sql
+    elif existing:
+        propose(db.connection(), "golden_examples", {"question_pattern": question},
+                {"expected_sql": sql, "category": context}, LEARNED, reason=f"ผู้ใช้ {user_id} แก้ SQL ในแชท")
+    else:
+        db.add(GoldenExample(question_pattern=question, expected_sql=sql, category=context, is_active=is_admin,
+                             added_by=user_id, source=MANUAL if is_admin else LEARNED,
+                             status=ACTIVE if is_admin else PROPOSED))
+    db.commit()
+
+
 @router.post("/train")
 async def train_model(
     request: TrainingRequest,
     current_request: Request,
     current_user: User = Depends(deps.get_current_user),
     default_ai_service: AIService = Depends(deps.get_ai_service),
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_config_db),  # golden_examples live in config.db (was get_db: failed since the 3-DB split)
 ):
     """
     Train RAG with Correct SQL
-    - Admins: Validates & Trains immediately (Active).
-    - Users: Submits for review (Inactive).
+    - Admins: Validates & Trains immediately (Active) — the example is theirs (manual).
+    - Users: Submits for review — a `learned` / `proposed` example (Plan 8.1), kept out of prompt and RAG until a
+      person takes it; a user never changes an example someone else decided (it used to switch an admin's off).
     """
     try:
         mcp_client = deps.get_mcp_client(current_request)
@@ -879,27 +904,7 @@ async def train_model(
 
         is_admin = getattr(current_user, 'is_superuser', False) or getattr(current_user, 'role', '') == 'admin'
 
-        existing = db.query(GoldenExample).filter(GoldenExample.question_pattern == request.question).first()
-
-        if existing:
-            existing.expected_sql = request.sql
-            existing.is_active = is_admin
-            existing.updated_at = utcnow()
-            if is_admin:
-                existing.added_by = current_user.id
-            db_item = existing
-        else:
-            db_item = GoldenExample(
-                question_pattern=request.question,
-                expected_sql=request.sql,
-                category=request.context,
-                is_active=is_admin,
-                added_by=current_user.id
-            )
-            db.add(db_item)
-
-        db.commit()
-        db.refresh(db_item)
+        save_training(db, request.question, request.sql, request.context, current_user.id, is_admin)
 
         if is_admin:
             success = default_ai_service.train(request.question, request.sql)

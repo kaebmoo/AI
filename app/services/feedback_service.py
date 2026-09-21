@@ -5,6 +5,7 @@ from datetime import datetime
 from app.models.feedback_models import UserFeedback, FeedbackRating, FeedbackCategory, GoldenExample
 from app.models.chat import ChatHistory
 from app.core.time_utils import utcnow
+from app.services.provenance import ACTIVE, MANUAL
 
 class FeedbackService:
     def __init__(self, db: Session):
@@ -97,9 +98,13 @@ class FeedbackService:
         feedback_id: int,
         reviewer_id: int,
         notes: Optional[str] = None,
-        is_golden_example: bool = False
+        is_golden_example: bool = False,
+        config_db: Optional[Session] = None,
     ) -> UserFeedback:
-        """Review feedback and optionally create golden example"""
+        """Review feedback and optionally create golden example.
+
+        The example goes to config.db (`config_db`; it used to go through the app.db session, which has no
+        golden_examples table) and is the reviewer's own — manual, active (Plan 8.1)."""
         feedback = self.db.query(UserFeedback).filter(UserFeedback.id == feedback_id).first()
         if not feedback:
             raise ValueError("Feedback not found")
@@ -111,10 +116,11 @@ class FeedbackService:
         
         # Create Golden Example if requested
         if is_golden_example:
+            config = config_db or self.db
             chat = self.db.query(ChatHistory).filter(ChatHistory.id == feedback.chat_id).first()
             if chat:
                 # Check if already exists to avoid duplicates
-                existing = self.db.query(GoldenExample).filter(
+                existing = config.query(GoldenExample).filter(
                     GoldenExample.question_pattern == chat.question
                 ).first()
                 
@@ -122,15 +128,19 @@ class FeedbackService:
                     golden = GoldenExample(
                         chat_id=chat.id,
                         question_pattern=chat.question,
-                        expected_sql=chat.sql_query, # Assuming SQL was correct or corrected in notes? 
+                        expected_sql=chat.generated_sql,  # (was chat.sql_query — no such column) 
                         # Ideally admin should provide correct SQL if the original was wrong.
                         # For now, using generated SQL. In future, allow admin to override.
                         category=feedback.feedback_category,
                         added_by=reviewer_id,
-                        is_active=True
+                        is_active=True,
+                        source=MANUAL,
+                        status=ACTIVE,
                     )
-                    self.db.add(golden)
-        
+                    config.add(golden)
+                    if config is not self.db:
+                        config.commit()
+
         self.db.commit()
         self.db.refresh(feedback)
         return feedback

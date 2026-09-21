@@ -80,9 +80,10 @@ class BackgroundScheduler:
     async def _job_auto_analyze(self):
         """Analyze recent query failures, suggest fixes, auto-apply high-confidence ones."""
         db = self._db_factory()
+        config_db = self._config_db_factory()
         try:
             from app.services.auto_analyzer import AutoAnalyzer
-            analyzer = AutoAnalyzer(db)
+            analyzer = AutoAnalyzer(db, config_db=config_db)
             result = await analyzer.analyze_recent_failures(period_hours=24)
             if result and result.total_failures > 0:
                 logger.info(
@@ -91,46 +92,52 @@ class BackgroundScheduler:
                     len(result.groups),
                     len(result.suggested_fixes),
                 )
-                # Auto-apply high-confidence fixes
-                self._apply_high_confidence_fixes(result, db)
+                self._propose_fixes(result, db, config_db)
         finally:
+            config_db.close()
             db.close()
 
-    def _apply_high_confidence_fixes(self, result, db):
-        """Apply suggested fixes with confidence >= 0.8 automatically."""
+    def _propose_fixes(self, result, db, config_db):
+        """What the learner found waits for a person — it is never put in use by itself (Plan 8.1, owner 2026-09-21).
+
+        A mapping for a keyword nobody has is a `learned` row with status `proposed` (the prompt reads `active`
+        only); a keyword a person owns keeps its mapping and the learner's waits in knowledge_proposals. It used
+        to auto-apply at confidence >= 0.8 — which its heuristics never reach (0.4 / 0.5), and the keyword check
+        ran on the app.db session, so nothing was ever written. Other fix types have no content to propose yet.
+        """
+        from app.models.schema_models import SchemaSemanticMapping
         from app.services.audit_service import AuditService
+        from app.services.provenance import LEARNED, PROPOSED, may_replace, propose
         audit = AuditService(db)
 
         for fix in result.suggested_fixes:
-            if fix.confidence < 0.8:
+            if fix.fix_type != "add_mapping" or not fix.params.get("keyword"):
                 continue
-            if not fix.auto_applicable:
-                continue
-
             try:
-                if fix.fix_type == "add_mapping":
-                    from app.models.schema_models import SchemaSemanticMapping
-                    from app.db.session import ConfigSessionLocal
-                    config_db = ConfigSessionLocal()
-                    mapping = SchemaSemanticMapping(
-                        keyword=fix.params.get("keyword", ""),
-                        target_column=fix.params.get("target_column", ""),
-                        target_condition=fix.params.get("target_condition", ""),
-                        keyword_type="value_alias",
-                        is_active=True,
-                    )
-                    config_db.add(mapping)
+                keyword = fix.params["keyword"]
+                values = {"target_column": fix.params.get("target_column", ""),
+                          "target_condition": fix.params.get("target_condition", ""), "keyword_type": "value_alias"}
+                row = config_db.query(SchemaSemanticMapping).filter(SchemaSemanticMapping.keyword == keyword).first()
+                if row is None:
+                    row = SchemaSemanticMapping(keyword=keyword, is_active=True, source=LEARNED, status=PROPOSED,
+                                                confidence=fix.confidence, **values)
+                    config_db.add(row)
                     config_db.commit()
-                    audit.log_change(
-                        action="INSERT", table_name="schema_semantic_mapping",
-                        record_id=mapping.id,
-                        new_value=fix.params,
-                        source="auto_analyzer",
-                    )
-                    config_db.close()
-                    logger.info("[AutoApply] Applied %s: %s", fix.fix_type, fix.params)
+                    audit.log_change(action="INSERT", table_name="schema_semantic_mapping", record_id=row.id,
+                                     new_value={**fix.params, "status": PROPOSED, "confidence": fix.confidence},
+                                     source="auto_analyzer")
+                elif may_replace(LEARNED, row.source, row.status):
+                    for key, value in values.items():
+                        setattr(row, key, value)
+                    row.confidence = fix.confidence
+                    config_db.commit()
+                elif propose(config_db.connection(), "schema_semantic_mapping", {"keyword": keyword}, values, LEARNED,
+                             confidence=fix.confidence, reason=fix.reason):
+                    config_db.commit()
+                logger.info("[AutoAnalyze] Proposed %s: %s", fix.fix_type, fix.params)
             except Exception as e:
-                logger.warning("[AutoApply] Failed to apply %s: %s", fix.fix_type, e)
+                config_db.rollback()
+                logger.warning("[AutoAnalyze] Failed to propose %s: %s", fix.fix_type, e)
 
     async def _job_export_cleanup(self):
         """Delete expired report exports (records + files + orphan files)."""

@@ -46,8 +46,9 @@ class AnalysisResult:
 class AutoAnalyzer:
     """Analyzes query failures and suggests configuration fixes."""
 
-    def __init__(self, db: Session):
-        self.db = db
+    def __init__(self, db: Session, config_db: Optional[Session] = None):
+        self.db = db  # app.db: chat history, feedback
+        self.config_db = config_db or db  # config.db: the knowledge tables (was the app session: no such table)
 
     async def analyze_recent_failures(self, period_hours: int = 24) -> AnalysisResult:
         """Analyze failed/thumbs-down queries from the last N hours."""
@@ -199,7 +200,7 @@ class AutoAnalyzer:
     def _keyword_not_mapped(self, keyword: str) -> bool:
         """Check if a keyword has no existing mapping."""
         from app.models.schema_models import SchemaSemanticMapping
-        exists = self.db.query(SchemaSemanticMapping).filter(
+        exists = self.config_db.query(SchemaSemanticMapping).filter(
             SchemaSemanticMapping.keyword.ilike(f"%{keyword}%"),
             SchemaSemanticMapping.is_active == True,
         ).first()
