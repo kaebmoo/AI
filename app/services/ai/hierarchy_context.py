@@ -72,7 +72,10 @@ def load_hierarchies_from_db() -> Dict[str, List[Dict]]:
         # names each level holds (values + aliases) — never sent to a model: they only tell named_levels that
         # a level word inside a name ("7.กลุ่มบริการอื่นไม่ใช่โทรคมนาคม") is part of that name
         names: Dict[tuple, List[str]] = {}
+        in_use = {(r[0], r[1]) for r in rows}  # names under a level still waiting for a person are not its names yet
         for ctx, level, value, aliases_json in value_rows:
+            if (ctx, level) not in in_use:
+                continue
             try:
                 aliases = [a for a in json.loads(aliases_json or "[]") if isinstance(a, str)]
             except (TypeError, ValueError):

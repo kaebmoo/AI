@@ -351,28 +351,20 @@ def get_known_terms(service: "SchemaService", context_name: Optional[str] = None
                 if len(value) >= 2:
                     terms_set.add(value)
 
-            hierarchy_rows = conn.execute(
-                text(
-                    f'''
-                    SELECT DISTINCT value FROM master_hierarchy_values
-                    WHERE is_active = 1 AND status = 'active' {context_filter}
-                    '''
-                ),
-                params,
-            ).fetchall()
+            # a value is a term only while its level is in use too — a level a machine proposed keeps its
+            # extracted values out of the dictionary until a person takes the level (Codex review 2026-09-22)
+            in_use = ("FROM master_hierarchy_values v JOIN master_hierarchy h "
+                      "ON h.context_name = v.context_name AND h.level = v.level "
+                      "WHERE v.is_active = 1 AND v.status = 'active' AND h.is_active = 1 AND h.status = 'active' "
+                      + ("AND v.context_name = :ctx" if context_name else ""))
+            hierarchy_rows = conn.execute(text(f"SELECT DISTINCT v.value {in_use}"), params).fetchall()
             for row in hierarchy_rows:
                 value = (row[0] or "").strip()
                 if len(value) >= 2:
                     terms_set.add(value)
 
             alias_rows = conn.execute(
-                text(
-                    f'''
-                    SELECT DISTINCT aliases FROM master_hierarchy_values
-                    WHERE aliases IS NOT NULL AND aliases != '' AND is_active = 1 AND status = 'active' {context_filter}
-                    '''
-                ),
-                params,
+                text(f"SELECT DISTINCT v.aliases {in_use} AND v.aliases IS NOT NULL AND v.aliases != ''"), params,
             ).fetchall()
             for row in alias_rows:
                 raw = (row[0] or "").strip()

@@ -767,8 +767,10 @@ def test_sync_ddl_trains_context_main_views_from_the_business_db(tmp_path):
     config = create_engine(f"sqlite:///{tmp_path / 'config.db'}")
     business = create_engine(f"sqlite:///{tmp_path / 'biz.db'}")
     with config.begin() as conn:
-        conn.execute(text("CREATE TABLE schema_contexts (name TEXT, main_view TEXT, is_active INTEGER)"))
-        conn.execute(text("INSERT INTO schema_contexts VALUES ('revenue', 'revenue_search', 1), ('old', 'v_old', 0)"))
+        conn.execute(text("CREATE TABLE schema_contexts (name TEXT, main_view TEXT, is_active INTEGER, "
+                          "status TEXT NOT NULL DEFAULT 'active')"))  # Plan 8.1: DDL is trained for contexts in use
+        conn.execute(text("INSERT INTO schema_contexts (name, main_view, is_active) "
+                          "VALUES ('revenue', 'revenue_search', 1), ('old', 'v_old', 0)"))
     with business.begin() as conn:
         conn.execute(text("CREATE TABLE revenue (YEAR INT, V REAL)"))
         conn.execute(text("CREATE VIEW revenue_search AS SELECT YEAR AS year, V AS revenue FROM revenue"))

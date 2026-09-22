@@ -98,6 +98,7 @@ def test_level_detection_values_and_known_terms_read_active_rows_only(db, monkey
     keyword_index._known_terms_cache.clear()
     terms = set(keyword_index.get_known_terms(_service(engine), "ctx_on"))
     assert "ค่าใช้" in terms and not {"ค่ารอ", "ค่าไม่", "alias_wait", "alias_no"} & terms
+    assert not {"ค่าในระดับรอ", "alias_level_wait"} & terms  # an active value under a level still waiting
     keyword_index._known_terms_cache.clear()
 
 
@@ -125,3 +126,17 @@ def test_the_brain_is_trained_on_active_rows_only(db):
     assert "kw_on" in trained and "q_on" in trained and "R_ON" in trained and "## ใช้" in trained
     for waiting_or_rejected in ("kw_wait", "kw_no", "q_wait", "q_no", "R_WAIT", "R_NO", "## รอ", "## ไม่"):
         assert waiting_or_rejected not in trained, waiting_or_rejected
+
+
+def test_the_brain_trains_the_ddl_of_contexts_in_use_only(db):
+    """_sync_ddl read is_active alone — a proposed context's main view was trained (Codex review 2026-09-22)."""
+    from app.services.vanna_service import VannaService
+    _, engine = db
+    with engine.begin() as conn:
+        for view in ("v", "v_wait", "v_no"):
+            conn.exec_driver_sql(f"CREATE TABLE {view} (x INTEGER)")
+    trainer = MagicMock()
+    trainer._keep = SimpleNamespace(context=lambda name: True, view=lambda name: True)
+    VannaService._sync_ddl(trainer, _service(engine))
+    trained = [call.kwargs["ddl"] for call in trainer.train.call_args_list]
+    assert trained == ["CREATE TABLE v (x INTEGER)"]

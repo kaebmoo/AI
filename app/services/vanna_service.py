@@ -135,7 +135,8 @@ class VannaService(ChromaDB_VectorStore, VannaBase):
         """
         with service.engine.connect() as conn:
             views = sorted({row[0] for row in conn.execute(text(
-                "SELECT main_view FROM schema_contexts WHERE is_active = 1 AND main_view IS NOT NULL"))
+                "SELECT main_view FROM schema_contexts WHERE is_active = 1 AND status = 'active' "
+                "AND main_view IS NOT NULL"))
                 if self._keep.view(row[0])})
         # Phase 4d: a file-source view has no DDL in the business DB — what is there under the same
         # name is F10's stale imported copy. Its DDL is the registry's column list.
