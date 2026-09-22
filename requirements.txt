@@ -23,7 +23,10 @@ requests
 google-genai
 anthropic
 tenacity
-mcp>=1.26.0
+# mcp 2.x renamed FastMCP (mcp_servers/*, app/api/v1/mcp_facade.py) and changed streamablehttp_client: an open
+# upper bound gave CI 2.2.0 and every run on main failed at collection 2026-09-18..22. Pinned to the version the
+# code and the full suite run on; lift it only together with a migration to 2.x.
+mcp==1.26.0
 
 # Plan 7: file sources read in place (allowed_paths/lock_configuration verified on 1.5.5)
 duckdb>=1.5
