@@ -100,6 +100,8 @@ export const PivotDataView: React.FC<PivotDataViewProps> = ({ data, title }) => 
     const containerRef = useRef<HTMLDivElement>(null);
     const pivotRef = useRef<any>(null);
     const [ready, setReady] = useState(false);
+    // The library is fetched on first open (a lazy chunk in dev) — when that fails, say so instead of loading forever
+    const [failed, setFailed] = useState(false);
 
     // Detect dark mode
     const isDark = typeof window !== 'undefined' &&
@@ -138,6 +140,7 @@ export const PivotDataView: React.FC<PivotDataViewProps> = ({ data, title }) => 
                 if (destroyed || !containerRef.current) return;
                 if (!WebDataRocks) {
                     console.error('WebDataRocks not found on window after import');
+                    setFailed(true);
                     return;
                 }
 
@@ -159,6 +162,7 @@ export const PivotDataView: React.FC<PivotDataViewProps> = ({ data, title }) => 
                 pivotRef.current = pivot;
             } catch (err) {
                 console.error('Failed to load WebDataRocks:', err);
+                if (!destroyed) setFailed(true);
             }
         };
 
@@ -213,7 +217,7 @@ export const PivotDataView: React.FC<PivotDataViewProps> = ({ data, title }) => 
                     textAlign: 'center',
                     color: isDark ? '#9CA3AF' : '#6B7280',
                 }}>
-                    Loading Pivot Table...
+                    {failed ? 'โหลด Pivot ไม่สำเร็จ — รีเฟรชหน้าแล้วลองใหม่' : 'Loading Pivot Table...'}
                 </div>
             )}
             {/*
