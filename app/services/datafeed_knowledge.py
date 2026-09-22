@@ -25,7 +25,7 @@ from typing import Any, Dict, Mapping, Optional, Tuple
 import yaml
 from sqlalchemy import text
 
-from app.services.provenance import DECLARED, may_replace, propose
+from app.services.provenance import DECLARED, REJECTED, may_replace, propose, replaceable
 
 logger = logging.getLogger(__name__)
 
@@ -43,24 +43,37 @@ DOMAIN_KEYWORDS = {
 }
 FEED_PRIORITY = 1
 WAITS = "คนแก้ส่วนที่ contract ประกาศไว้ — ฉบับใหม่ของ contract รอคนตัดสิน (D-C)"
+# What the contract may withdraw: its own declaration — never a person's row, never one a person rejected
+OWN = "source = 'declared' AND COALESCE(status, 'active') != 'rejected'"
 
 
 def _declare(conn, table: str, key: Dict[str, Any], values: Dict[str, Any], row: Optional[Mapping],
              insert: Dict[str, Any], stamp: bool = False) -> None:
-    """Write the contract's `values` for the row at `key` (`row` = what is there, None = nothing) by the one rule."""
+    """Write the contract's `values` for the row at `key` (`row` = what is there, None = nothing) by the one rule.
+
+    The write re-checks what was read: a row inserted, or taken by a person, between the read and the write is
+    decided on what it is now — a person's edit wins and the contract's version waits (Codex review 2026-09-22)."""
+    where = " AND ".join(f"{c} = :k_{c}" for c in key)
+    keys = {f"k_{c}": v for c, v in key.items()}
     if row is None:
         cols = {**key, **values, **insert, "source": DECLARED}
-        conn.execute(text(f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join(':' + c for c in cols)})"), cols)
-        return
+        if conn.execute(text(f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join(':' + c for c in cols)}) "
+                             "ON CONFLICT DO NOTHING"), cols).rowcount:
+            return
+        row = conn.execute(text(f"SELECT source, status, {', '.join(values)} FROM {table} WHERE {where}"),
+                           keys).mappings().first()
+        if row is None:
+            return
     changed = {c: v for c, v in values.items() if row[c] != v}
     if may_replace(DECLARED, row["source"], row["status"]):
-        if changed or row["source"] != DECLARED:  # nothing changed = nothing written (no timestamp moves)
-            sets = ", ".join([f"{c} = :{c}" for c in changed] + ["source = :source"]
-                             + (["updated_at = CURRENT_TIMESTAMP"] if stamp and changed else []))
-            where = " AND ".join(f"{c} = :k_{c}" for c in key)
-            conn.execute(text(f"UPDATE {table} SET {sets} WHERE {where}"),
-                         {**changed, "source": DECLARED, **{f"k_{c}": v for c, v in key.items()}})
-    elif changed:  # a person's row that already says what the contract says: nothing waits
+        if not changed and row["source"] == DECLARED:  # nothing changed = nothing written (no timestamp moves)
+            return
+        sets = ", ".join([f"{c} = :{c}" for c in changed] + ["source = :source"]
+                         + (["updated_at = CURRENT_TIMESTAMP"] if stamp and changed else []))
+        if conn.execute(text(f"UPDATE {table} SET {sets} WHERE {where} AND {replaceable(DECLARED)}"),
+                        {**changed, "source": DECLARED, **keys}).rowcount:
+            return
+    if changed:  # a person's row (or a rejected one) that already says what the contract says: nothing waits
         propose(conn, table, key, values, DECLARED, reason=WAITS)
 
 
@@ -154,9 +167,9 @@ def sync_schema_metadata(conn, domain: str, contract: dict) -> int:
                       "is_groupable": is_groupable}, existing.get(col["name"]), insert={"status": "active"})
             count += 1
         declared = {c["name"] for c in dataset["columns"]}
-        for name, row in existing.items():  # what the contract no longer declares: its own rows go, a person's stay
-            if name not in declared and row["source"] == DECLARED:
-                conn.execute(text("DELETE FROM schema_metadata WHERE table_name = :t AND column_name = :c"),
+        for name, row in existing.items():  # what the contract no longer declares: its own rows go; a person's and
+            if name not in declared and row["source"] == DECLARED and row["status"] != REJECTED:  # a rejection stay
+                conn.execute(text(f"DELETE FROM schema_metadata WHERE table_name = :t AND column_name = :c AND {OWN}"),
                              {"t": table, "c": name})
     return count
 
@@ -213,8 +226,8 @@ def sync_documentation(conn, domain: str, contract: dict, context_name: str) -> 
                  existing.get(doc_key), insert={"is_active": 1, "status": "active"})
     kept = {d[0] for d in docs}
     for doc_key, row in existing.items():
-        if doc_key not in kept and row["source"] == DECLARED:
-            conn.execute(text("DELETE FROM vanna_documentation WHERE doc_key = :k"), {"k": doc_key})
+        if doc_key not in kept and row["source"] == DECLARED and row["status"] != REJECTED:
+            conn.execute(text(f"DELETE FROM vanna_documentation WHERE doc_key = :k AND {OWN}"), {"k": doc_key})
     return len(docs)
 
 

@@ -16,7 +16,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-from app.services.provenance import as_json
+from app.services.provenance import as_json, merged_proposal
 
 logger = logging.getLogger(__name__)
 
@@ -916,17 +916,21 @@ class ConfigGenerator:
                 f"AND COALESCE({table}.status, 'active') != 'rejected'")
 
     def _proposal_sql(self, table: str, key: Dict, values: Dict) -> str:
-        """Queue the inference when the row at `key` is not a machine's and says something else."""
+        """Queue the inference when the row at `key` is not a machine's and says something else — merged field by field
+        into a proposal already waiting, like provenance.propose (another machine may have proposed other fields of
+        the row: the column-family detector's dimension_group); a rejected or already-waiting version is not repeated."""
         where_key = " AND ".join(f"{c} = {self._lit(v)}" for c, v in key.items())
         same = " AND ".join(f"{c} IS {self._lit(v)}" for c, v in values.items())
         row_key, proposed = self._lit(as_json(key)), self._lit(as_json(values))
+        merged = merged_proposal(values, lambda _, v: f"json({self._lit(json.dumps(v, ensure_ascii=False, default=str))})")
         return (f"INSERT INTO knowledge_proposals (table_name, row_key, proposed, source, reason) "
                 f"SELECT '{table}', {row_key}, {proposed}, 'inferred', {self._lit(self._REASON)} "
                 f"WHERE EXISTS (SELECT 1 FROM {table} WHERE {where_key} AND NOT ({self._machine(table)}) AND NOT ({same})) "
                 f"AND NOT EXISTS (SELECT 1 FROM knowledge_proposals WHERE table_name = '{table}' AND row_key = {row_key} "
-                f"AND source = 'inferred' AND status IN ('rejected', 'proposed') AND proposed = {proposed}) "
+                f"AND source = 'inferred' AND ((status = 'rejected' AND json(proposed) = json({proposed})) "
+                f"OR (status = 'proposed' AND {merged} = json(proposed)))) "
                 f"ON CONFLICT (table_name, row_key, source) WHERE status = 'proposed' DO UPDATE SET "
-                f"proposed = excluded.proposed, reason = excluded.reason, created_at = CURRENT_TIMESTAMP;")
+                f"proposed = {merged}, reason = excluded.reason, created_at = CURRENT_TIMESTAMP;")
 
     def _guarded(self, table: str, key: Dict, values: Dict, insert: Optional[Dict] = None) -> List[str]:
         """[proposal, upsert] — the upsert changes only a machine's row; a person's gets the proposal instead."""

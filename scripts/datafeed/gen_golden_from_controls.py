@@ -159,32 +159,45 @@ def save_examples(conn, category: str, examples: list) -> tuple:
     """Write the contract's examples of `category` on the caller's transaction — (written, withdrawn, waiting).
 
     Plan 8.1: they are declared. A person's example in the same category (the go-live review's) stays, and one a
-    person changed keeps their SQL while the contract's version waits in knowledge_proposals."""
-    from app.services.provenance import DECLARED, may_replace, propose
+    person changed keeps their SQL while the contract's version waits in knowledge_proposals. golden_examples has no
+    key, so a question can be there twice — a person's row beside the contract's: every write goes by row id and
+    re-checks provenance in the statement itself, a rejected row included (only a person changes it)."""
+    from collections import defaultdict
 
-    existing = {q: (source, status, sql) for q, source, status, sql in conn.execute(
-        "SELECT question_pattern, source, status, expected_sql FROM golden_examples WHERE category = ?", (category,))}
+    from app.services.provenance import DECLARED, REJECTED, may_replace, propose, replaceable
+
+    held = defaultdict(list)  # question -> [(id, source, status, sql)]
+    for row_id, question, source, status, sql in conn.execute(
+            "SELECT id, question_pattern, source, status, expected_sql FROM golden_examples WHERE category = ? "
+            "ORDER BY id", (category,)):
+        held[question].append((row_id, source, status, sql))
     written = queued = 0
     for question, sql in examples:
-        row = existing.get(question)
-        if row is None:
+        rows = held.get(question)
+        if not rows:
             conn.execute("INSERT INTO golden_examples (question_pattern, expected_sql, category, is_active, source, "
                          "status) VALUES (?, ?, ?, 1, 'declared', 'active')", (question, sql, category))
             written += 1
-        elif row[2] == sql:
             continue
-        elif may_replace(DECLARED, row[0], row[1]):
-            conn.execute("UPDATE golden_examples SET expected_sql = ?, source = 'declared' "
-                         "WHERE category = ? AND question_pattern = ?", (sql, category, question))
+        mine = [r for r in rows if may_replace(DECLARED, r[1], r[2])]
+        stale = [r[0] for r in mine if r[3] != sql]
+        if mine and not stale:
+            continue
+        if stale and conn.execute(
+                f"UPDATE golden_examples SET expected_sql = ?, source = 'declared' WHERE id IN "
+                f"({', '.join('?' * len(stale))}) AND {replaceable(DECLARED)}", (sql, *stale)).rowcount == len(stale):
             written += 1
-        else:
-            queued += propose(conn, "golden_examples", {"category": category, "question_pattern": question},
-                              {"expected_sql": sql}, DECLARED, reason="คนแก้ตัวอย่างนี้ — ฉบับใหม่จาก control totals รอคนตัดสิน")
+            continue
+        if any(r[3] == sql for r in rows):  # a person's row, or one a person rejected, already says it
+            continue
+        queued += propose(conn, "golden_examples", {"category": category, "question_pattern": question},
+                          {"expected_sql": sql}, DECLARED, reason="คนแก้ตัวอย่างนี้ — ฉบับใหม่จาก control totals รอคนตัดสิน")
     generated = {q for q, _ in examples}
-    gone = [q for q, (source, _, _) in existing.items() if q not in generated and source == DECLARED]
-    conn.executemany("DELETE FROM golden_examples WHERE category = ? AND question_pattern = ? AND source = 'declared'",
-                     [(category, q) for q in gone])
-    return written, len(gone), queued
+    gone = [r[0] for q, rows in held.items() if q not in generated for r in rows if r[1] == DECLARED and r[2] != REJECTED]
+    withdrawn = conn.execute(
+        f"DELETE FROM golden_examples WHERE id IN ({', '.join('?' * len(gone))}) AND source = 'declared' "
+        "AND COALESCE(status, 'active') != 'rejected'", gone).rowcount if gone else 0
+    return written, withdrawn, queued
 
 
 def main():

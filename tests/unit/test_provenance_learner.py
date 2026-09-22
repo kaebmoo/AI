@@ -60,6 +60,7 @@ def test_what_the_learner_finds_waits_for_a_person_however_sure(config):
     assert knowledge_db.rows(path, "SELECT row_key, source, confidence FROM knowledge_proposals") == [
         ('{"keyword": "นป."}', "learned", 0.5)]               # …and the learner's waits, once
     assert knowledge_db.rows(path, "SELECT count(*) FROM schema_business_rules") == [(0,)]
+    assert knowledge_db.rows(path, "SELECT is_active FROM schema_semantic_mapping WHERE keyword = 'ftth'") == [(0,)]
 
 
 def test_the_learners_keyword_check_reads_the_config_db(config, app_db):
@@ -119,3 +120,19 @@ def test_an_admins_thumbs_up_is_kept_as_their_example(config, app_db):
                                    "WHERE question_pattern = 'รายได้รวมปี 2568'") == [
         ("SELECT SUM(revenue) FROM revenue_search", "manual", "active")]  # survives the next Sync Brain
     ai_service.train.assert_called_once()
+
+
+def test_a_users_correction_never_changes_an_example_in_use(config):
+    """may_replace let `learned` rewrite a machine's example that was already in use (Codex review 2026-09-22)."""
+    from sqlalchemy import text
+
+    from app.api.v1.chat import save_training
+    path, session = config
+    session.execute(text("INSERT INTO golden_examples (question_pattern, expected_sql, category, is_active, source, "
+                         "status) VALUES ('คำถามของเครื่อง', 'SELECT 1', 'revenue', 1, 'inferred', 'active')"))
+    session.commit()
+    save_training(session, "คำถามของเครื่อง", "SELECT 99", "revenue", user_id=7, is_admin=False)
+    assert knowledge_db.rows(path, "SELECT expected_sql, is_active, source, status FROM golden_examples "
+                                   "WHERE question_pattern = 'คำถามของเครื่อง'") == [("SELECT 1", 1, "inferred", "active")]
+    assert knowledge_db.rows(path, "SELECT row_key, source FROM knowledge_proposals") == [
+        ('{"question_pattern": "คำถามของเครื่อง"}', "learned")]

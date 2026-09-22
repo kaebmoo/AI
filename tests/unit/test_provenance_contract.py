@@ -9,6 +9,7 @@ import copy
 import sqlite3
 
 import pytest
+from sqlalchemy import text
 
 from app.services import datafeed_knowledge as dk
 from scripts.datafeed.gen_golden_from_controls import save_examples
@@ -109,3 +110,60 @@ def test_golden_regeneration_keeps_the_examples_a_person_accepted(db):
     assert knowledge_db.rows(path, "SELECT question_pattern, source FROM golden_examples WHERE id = 127") == [
         ("รายได้เดือนมีนาคม 2568", "declared")]
     assert len(knowledge_db.rows(path, "SELECT 1 FROM knowledge_proposals WHERE status = 'proposed'")) == 1
+
+
+def test_golden_regeneration_changes_only_the_contracts_row_when_a_person_asked_the_same_question(db):
+    """golden_examples has no key: a person's row beside the contract's, same question, used to be rewritten too."""
+    path, _ = db
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        INSERT INTO golden_examples (id, question_pattern, expected_sql, category, is_active, source, status) VALUES
+            (60, 'รายได้รวมปีนี้', 'SELECT admin', 'feed_x', 1, 'manual', 'active'),
+            (61, 'รายได้รวมปีนี้', 'SELECT old', 'feed_x', 1, 'declared', 'active');""")
+    assert save_examples(conn, "feed_x", [("รายได้รวมปีนี้", "SELECT new")]) == (1, 0, 0)
+    conn.commit()
+    assert knowledge_db.rows(path, "SELECT id, expected_sql, source FROM golden_examples ORDER BY id") == [
+        (60, "SELECT admin", "manual"), (61, "SELECT new", "declared")]
+
+
+def test_golden_regeneration_leaves_a_rejected_example_alone(db):
+    path, _ = db
+    conn = sqlite3.connect(path)
+    conn.execute("INSERT INTO golden_examples (id, question_pattern, expected_sql, category, is_active, source, status) "
+                 "VALUES (70, 'ถาม', 'SELECT 1', 'feed_x', 1, 'declared', 'rejected')")
+    assert save_examples(conn, "feed_x", []) == (0, 0, 0)                     # not withdrawn
+    assert save_examples(conn, "feed_x", [("ถาม", "SELECT 1")]) == (0, 0, 0)  # not declared again
+    assert save_examples(conn, "feed_x", [("ถาม", "SELECT 2")]) == (0, 0, 1)  # a new version waits for a person
+    conn.commit()
+    assert knowledge_db.rows(path, "SELECT id, expected_sql, status FROM golden_examples") == [(70, "SELECT 1", "rejected")]
+
+
+def test_a_person_editing_between_the_contracts_read_and_write_wins(db):
+    path, engine = db
+    _sync(engine, CONTRACT)
+    key = {"table_name": "feed_x_fact_bu_monthly", "column_name": "bu"}
+    values = {"description": "contract ฉบับใหม่", "data_type": "string", "is_summable": 0, "is_groupable": 1}
+    with engine.begin() as conn:
+        stale = conn.execute(text("SELECT source, status, description, data_type, is_summable, is_groupable "
+                                  "FROM schema_metadata WHERE column_name = 'bu'")).mappings().first()
+        conn.exec_driver_sql("UPDATE schema_metadata SET description = 'คนแก้ระหว่างทาง', source = 'manual' "
+                             "WHERE column_name = 'bu'")                      # a person, between the read and the write
+        dk._declare(conn, "schema_metadata", key, values, stale, insert={})
+        dk._declare(conn, "schema_metadata", key, values, None, insert={})    # read found nothing, the row is there now
+    assert knowledge_db.rows(path, "SELECT description, source FROM schema_metadata WHERE column_name = 'bu'") == [
+        ("คนแก้ระหว่างทาง", "manual")]
+    assert knowledge_db.rows(path, "SELECT table_name, source FROM knowledge_proposals") == [("schema_metadata", "declared")]
+
+
+def test_a_rejection_outlives_the_contract_withdrawing_and_declaring_the_row_again(db):
+    path, engine = db
+    _sync(engine, CONTRACT)
+    with engine.begin() as conn:
+        conn.exec_driver_sql("UPDATE schema_metadata SET status = 'rejected' WHERE column_name = 'revenue'")
+        conn.exec_driver_sql("UPDATE vanna_documentation SET status = 'rejected' WHERE doc_key = 'datafeed_x_rule_r1'")
+    _sync(engine, V2)        # withdraws the revenue column and rule r1
+    _sync(engine, CONTRACT)  # declares them again
+    assert knowledge_db.rows(path, "SELECT source, status FROM schema_metadata WHERE column_name = 'revenue'") == [
+        ("declared", "rejected")]
+    assert knowledge_db.rows(path, "SELECT source, status FROM vanna_documentation "
+                                   "WHERE doc_key = 'datafeed_x_rule_r1'") == [("declared", "rejected")]

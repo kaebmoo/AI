@@ -4,6 +4,7 @@ A machine's guess is `inferred`; bootstrap's levels wait for a person (8.0 §3.1
 the 4 feed contexts). A row a person owns keeps its content and the machine's version waits in knowledge_proposals.
 """
 
+import json
 import sqlite3
 
 import pytest
@@ -203,3 +204,17 @@ def test_analyzer_import_and_detected_families_queue_what_a_person_owns(db, monk
         '{"column_name": "dept", "table_name": "v_org"}', '{"column_name": "division", "table_name": "v_org"}']
     merged = knowledge_db.rows(path, "SELECT proposed FROM knowledge_proposals WHERE row_key LIKE '%dept%'")[0][0]
     assert '"display_name_th":"LLM"' in merged and '"dimension_group":"org"' in merged  # …carrying both writers' fields
+
+
+def test_onboarding_adds_its_fields_to_a_proposal_another_machine_left(db):
+    """_proposal_sql replaced the waiting proposal whole: the column-family detector's dimension_group was lost."""
+    path, _, _ = db
+    with sqlite3.connect(path) as conn:
+        conn.execute("INSERT INTO knowledge_proposals (table_name, row_key, proposed, source) VALUES ('schema_metadata', "
+                     "'{\"column_name\": \"dept\", \"table_name\": \"v_org\"}', '{\"dimension_group\": \"org\"}', "
+                     "'inferred')")
+    for _ in range(2):
+        assert ConfigApplicator(str(path)).apply(ConfigGenerator("v_org").generate(ANALYSIS), dry_run=False)["errors"] == []
+    (proposed,), = knowledge_db.rows(path, "SELECT proposed FROM knowledge_proposals WHERE table_name = 'schema_metadata' "
+                                           "AND row_key LIKE '%\"dept\"%'")
+    assert json.loads(proposed)["dimension_group"] == "org" and json.loads(proposed)["description"] == "LLM"

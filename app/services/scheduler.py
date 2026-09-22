@@ -105,9 +105,11 @@ class BackgroundScheduler:
         to auto-apply at confidence >= 0.8 — which its heuristics never reach (0.4 / 0.5), and the keyword check
         ran on the app.db session, so nothing was ever written. Other fix types have no content to propose yet.
         """
+        from sqlalchemy import text
+
         from app.models.schema_models import SchemaSemanticMapping
         from app.services.audit_service import AuditService
-        from app.services.provenance import LEARNED, PROPOSED, may_replace, propose
+        from app.services.provenance import LEARNED, PROPOSED, may_replace, propose, replaceable
         audit = AuditService(db)
 
         for fix in result.suggested_fixes:
@@ -119,18 +121,19 @@ class BackgroundScheduler:
                           "target_condition": fix.params.get("target_condition", ""), "keyword_type": "value_alias"}
                 row = config_db.query(SchemaSemanticMapping).filter(SchemaSemanticMapping.keyword == keyword).first()
                 if row is None:
-                    row = SchemaSemanticMapping(keyword=keyword, is_active=True, source=LEARNED, status=PROPOSED,
+                    # switched off as well: code that ever reads is_active alone (a reader that forgets status, or
+                    # a rollback to before Plan 8.1) still leaves it out; a person taking it switches it on
+                    row = SchemaSemanticMapping(keyword=keyword, is_active=False, source=LEARNED, status=PROPOSED,
                                                 confidence=fix.confidence, **values)
                     config_db.add(row)
                     config_db.commit()
                     audit.log_change(action="INSERT", table_name="schema_semantic_mapping", record_id=row.id,
                                      new_value={**fix.params, "status": PROPOSED, "confidence": fix.confidence},
                                      source="auto_analyzer")
-                elif may_replace(LEARNED, row.source, row.status):
-                    for key, value in values.items():
-                        setattr(row, key, value)
-                    row.confidence = fix.confidence
-                    config_db.commit()
+                elif may_replace(LEARNED, row.source, row.status) and config_db.query(SchemaSemanticMapping).filter(
+                        SchemaSemanticMapping.id == row.id, text(replaceable(LEARNED))).update(
+                        {**values, "confidence": fix.confidence}, synchronize_session=False):
+                    config_db.commit()  # its own proposal, still waiting: the newer finding replaces it
                 elif propose(config_db.connection(), "schema_semantic_mapping", {"keyword": keyword}, values, LEARNED,
                              confidence=fix.confidence, reason=fix.reason):
                     config_db.commit()

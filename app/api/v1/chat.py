@@ -851,9 +851,12 @@ from app.models.feedback_models import GoldenExample
 
 def save_training(db: Session, question: str, sql: str, context: Optional[str], user_id: int, is_admin: bool) -> None:
     """A corrected SQL from the chat, as a golden example (Plan 8.1): an admin's is theirs and in use; a user's is
-    `learned` / `proposed` and never changes an example someone else decided — the newer correction of a
-    question still waiting replaces it, and a question a person owns gets a proposal."""
-    from app.services.provenance import ACTIVE, LEARNED, MANUAL, PROPOSED, mark_human_edit, may_replace, propose
+    `learned` / `proposed` and changes nothing in use — the newer correction of a question still waiting replaces
+    it, and any other example (in use, a person's, a rejected one) gets a proposal."""
+    from sqlalchemy import text
+
+    from app.services.provenance import (ACTIVE, LEARNED, MANUAL, PROPOSED, mark_human_edit, may_replace, propose,
+                                         replaceable)
 
     existing = db.query(GoldenExample).filter(GoldenExample.question_pattern == question).first()
     if is_admin and existing:
@@ -861,11 +864,13 @@ def save_training(db: Session, question: str, sql: str, context: Optional[str], 
         existing.is_active = True
         existing.added_by = user_id
         mark_human_edit(existing, "golden_examples", ["expected_sql"])
-    elif existing and may_replace(LEARNED, existing.source, existing.status):
-        existing.expected_sql = sql
-    elif existing:
-        propose(db.connection(), "golden_examples", {"question_pattern": question},
-                {"expected_sql": sql, "category": context}, LEARNED, reason=f"ผู้ใช้ {user_id} แก้ SQL ในแชท")
+    elif existing:  # the UPDATE re-checks: a person may have taken the waiting correction in the meantime
+        waiting = may_replace(LEARNED, existing.source, existing.status) and db.query(GoldenExample).filter(
+            GoldenExample.id == existing.id, text(replaceable(LEARNED))).update(
+            {GoldenExample.expected_sql: sql}, synchronize_session=False)
+        if not waiting:
+            propose(db.connection(), "golden_examples", {"question_pattern": question},
+                    {"expected_sql": sql, "category": context}, LEARNED, reason=f"ผู้ใช้ {user_id} แก้ SQL ในแชท")
     else:
         db.add(GoldenExample(question_pattern=question, expected_sql=sql, category=context, is_active=is_admin,
                              added_by=user_id, source=MANUAL if is_admin else LEARNED,
