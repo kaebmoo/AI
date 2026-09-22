@@ -1,7 +1,8 @@
 # RESULT Plan 8 Phase 8.1 — โมเดลความรู้: ที่มา + ความมั่นใจ + สถานะ
 
 **สถานะ (2026-09-21 ดึก):** ข้อ 7–11 ✅ บนสำเนา (Exit §11 — legacy 7–8/37 เท่ากับ base วันเดียวกัน) · ยังไม่ push ·
-**✅ ขึ้นของจริงแล้ว 22:06** (เจ้าของทำเองตาม §12.2 — §12.5) · ช่วง 19:57–22:06 server รัน 8.1 ครึ่งหนึ่งบน DB ที่ยังไม่ migrate (§12.1)
+**✅ ขึ้นของจริงแล้ว 22:06** (เจ้าของทำเองตาม §12.2 — §12.5) · ช่วง 19:57–22:06 server รัน 8.1 ครึ่งหนึ่งบน DB ที่ยังไม่ migrate (§12.1) ·
+**ตรวจโดย Codex 2026-09-22: 9 ข้อ แก้ครบ (§14)** — ถึงของจริงเมื่อ start server ครั้งถัดไป (ไม่ต้อง migrate)
 **prompt:** `plan/PROMPT_P8_PHASE1.md` · **แผน:** `plan/PLAN_8_SELF_SERVICE_ONBOARDING.md` §3, §5 8.1
 
 ---
@@ -432,6 +433,40 @@ config GC ~22:07 วันถัดไป (ไม่มี `no such column`), Da
 
 ---
 
+## 14. ตรวจโดย Codex (2026-09-22) — 9 ข้อ แก้ครบ
+
+ผู้ตรวจไล่ 17 commit `0078dcf..0868447` และทำซ้ำทุกข้อบน DB จำลอง · ทุกข้อมี test ที่**ล้มบน code ก่อนแก้** (18 test ล้มบน `8906cd5` —
+worktree ที่ใส่ test ใหม่) และผ่านหลังแก้ · pytest **1180 passed, 3 skipped** · lint ของ CI ผ่าน · unused import ไม่เพิ่ม
+
+| # | ที่ผู้ตรวจพบ | แก้ | commit |
+|---|---|---|---|
+| 1 P1 | `save_examples` เก็บแถวใน dict ตามคำถาม (ตารางไม่มี key) แล้ว UPDATE ทุกแถวที่คำถามตรง — golden ของคนที่คำถามซ้ำกับ contract ถูกเปลี่ยน SQL + ป้ายเป็น `declared` | ทีละ row id + ตรวจ provenance ใน UPDATE เอง | `ddd58bf` |
+| 2 P1 | `/chat/train` ของ user แก้ golden ของเครื่องที่ **active** อยู่ได้ตรง ๆ (`may_replace` ให้ `learned` ทับแถวเครื่องทุกสถานะ) | `learned` เปลี่ยนได้เฉพาะข้อเสนอที่ยังรอ — ที่ใช้อยู่ = เข้าคิว (ตัวเรียนรู้ด้วย) | `39c2003`, `ddd58bf` |
+| 3 P1 | `_declare` ตรวจ provenance จากแถวที่อ่านไว้ แต่ UPDATE ตรวจแค่ key — คนแก้ระหว่างอ่านกับเขียน contract ทับได้ | UPDATE มีเงื่อนไข `replaceable()` + rowcount 0 = เข้าคิว · INSERT ที่ชนแถวที่เพิ่งเกิด = อ่านใหม่แล้วตัดสินตามกฎ | `39c2003`, `ddd58bf` |
+| 4 P2 | backfill ล้มหลัง DROP TRIGGER: ข้อมูล rollback แต่ trigger หาย (pysqlite เริ่ม transaction เฉพาะก่อน DML) | label + trigger + คิว ใน transaction เดียวที่เริ่มเอง (`isolation_level None`, `BEGIN IMMEDIATE`) | `e7a732a` |
+| 5 P2 | contract ถอนแถวที่คน **rejected** ได้ แล้วประกาศใหม่ = `declared/active` — การปฏิเสธหาย | ถอนเฉพาะแถวของ contract ที่ไม่ใช่ rejected (metadata, doc, golden) | `ddd58bf` |
+| 6 P2 | `_sync_ddl` กรองแค่ `is_active` (context ที่ proposed ถูก train DDL) · `get_known_terms` ไม่ดูระดับแม่ | กรอง `status` ของ context · ค่าเป็นคำในพจนานุกรมเมื่อระดับของมันใช้อยู่ด้วย (+ ชื่อที่ `hierarchy_context` ใช้ตรวจคำระดับ) | `487d21e` |
+| 7 P2 | `propose()` ใช้ `json_patch` — JSON null = ลบ key → ข้อเสนอให้ล้างค่าหาย | รวมด้วย `json_set` (เก็บ null) | `39c2003` |
+| 8 P2 | onboarding `proposed = excluded.proposed` — ทับข้อเสนอของเครื่องอื่นทั้งก้อน (`dimension_group` หาย) | รวมทีละช่องด้วย `json_set` เหมือนกฎกลาง | `ddd58bf` |
+| 9 P2 | ด่านเริ่ม server ตรวจแค่ `status` — ลบ `knowledge_proposals` แล้วยังเริ่มได้ | `missing_provenance()`: ทุกคอลัมน์ source / status / confidence + คิว + index ของคิว | `39c2003` |
+| + | ข้อเสนอเรื่อง `is_active=0` | ตัวเรียนรู้เขียนข้อเสนอแบบปิดไว้ · `mark_human_edit` เปิดให้ด้วยเมื่อคนรับ (ยกเว้นคนตั้ง `is_active` เอง) | `39c2003`, `ddd58bf` |
+
+**prompt ไม่เปลี่ยน:** ตัวอ่านที่แก้ (พจนานุกรม, ระดับชั้น + ชื่อ, DDL) บนสำเนาของ config DB จริงให้ผล**เท่ากันทุกไบต์** ระหว่าง code ก่อน/หลังแก้ —
+พจนานุกรม 9 context (11,924 คำ), ระดับชั้น 8 context, DDL 8 ตัว · ของจริงไม่มีค่าใต้ระดับที่ไม่ได้ใช้ (0 แถว) และไม่มี context ที่รอ
+
+**ที่ผู้ตรวจยืนยันว่าไม่พบปัญหา:** `_lit()` escape ถูก, `_guarded()` ไม่มีช่อง injection, ตัวอ่านหลักกรอง active แล้ว, ไม่มีการผ่อน scope / allowlist /
+`request_pinned` / `llm_data_policy` / `check_select` / audit
+
+### 14.1 ถึงของจริง
+- **ตอนตรวจ (2026-09-22 ค่ำ) ไม่มี service ใดรัน** — เครื่อง boot ใหม่ ~4.5 ชม. ก่อนหน้า: AI server (8000), PocketBase ของ portal (8090), frontend (8081) ไม่ได้ start กลับ ·
+  คำถามจริงล่าสุด #287 (chat, 15:03)
+- start ครั้งถัดไป = ขึ้น `git log 1857dbe..HEAD` (4 commit ของข้อนี้ + `8906cd5` frontend + เอกสาร) — **ไม่ต้อง migrate**: ด่านใหม่ผ่านบนสำเนา schema ของจริง ·
+  คำสั่งเดิม `venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000`
+- ถ้า server เดิมยังรันอยู่ขณะ commit: `context_onboarding` (import ตอนใช้) จะโหลดไฟล์ใหม่ที่ต้องการ `merged_proposal` จาก `provenance` เวอร์ชันใหม่ → onboarding ล้มจนกว่าจะ restart
+- **ถอยกลับ:** `git checkout 1857dbe -- app mcp_servers scripts` + restart — DB ไม่ต้องถอย (ไม่มีการเปลี่ยน schema; ข้อเสนอที่ปิดไว้ code เดิมก็ไม่อ่าน)
+
+---
+
 ## commit
 
 | commit | ข้อ |
@@ -447,3 +482,8 @@ config GC ~22:07 วันถัดไป (ไม่มี `no such column`), Da
 | `df51e8c` | เอกสาร §9–10 |
 | `d06d497` | 10 — ถอยตัวอย่างปีใน prompt อธิบายผล (วัดแล้ว) |
 | `7e929c0` | 11 — ตัวเติม 3 ตัวรันสองรอบใน test |
+| `1857dbe`, `0868447` | เอกสาร §11–13, ขึ้นของจริง §12.5 |
+| `39c2003` | 14 — กฎหลังตรวจ: `learned` แก้ได้เฉพาะข้อเสนอ, `replaceable()`, `json_set`, ด่านครบ, รับข้อเสนอ = เปิด |
+| `ddd58bf` | 14 — ตัวเขียนตรวจ provenance ในคำสั่งเขียน ทีละแถว และเก็บการปฏิเสธ |
+| `e7a732a` | 14 — migration ล้มแล้ว trigger กลับมา |
+| `487d21e` | 14 — DDL + พจนานุกรมอ่านเฉพาะ context / ระดับที่ใช้อยู่ |
