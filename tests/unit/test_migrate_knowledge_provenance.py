@@ -122,3 +122,20 @@ def test_one_open_proposal_per_key_and_proposer(db):
         conn.execute(insert, {**row, "s": "inferred", "st": "proposed"})  # another proposer may wait too
     with pytest.raises(Exception), engine.begin() as conn:
         conn.execute(insert, {**row, "s": "declared", "st": "proposed"})
+
+
+def test_a_failed_backfill_leaves_the_trigger_and_the_labels_as_they_were(db, monkeypatch):
+    """pysqlite began the transaction only at the first UPDATE: the DROP TRIGGER before it committed on its own, and
+    a backfill that failed rolled back without the trigger (Codex review 2026-09-22)."""
+    import scripts.migrate_knowledge_provenance as mig
+    monkeypatch.setattr(mig, "BACKFILL", mig.BACKFILL + ("UPDATE no_such_table SET x = 1",))
+    with pytest.raises(sqlite3.OperationalError):
+        migrate(create_engine(f"sqlite:///{db}"))
+    conn = sqlite3.connect(db)
+    assert conn.execute("SELECT count(*) FROM sqlite_master WHERE type = 'trigger'").fetchone() == (1,)
+    assert conn.execute("SELECT count(*) FROM vanna_documentation WHERE source IS NOT NULL").fetchone() == (0,)
+    assert conn.execute("SELECT count(*) FROM sqlite_master WHERE name = 'knowledge_proposals'").fetchone() == (0,)
+    monkeypatch.undo()
+    migrate(create_engine(f"sqlite:///{db}"))  # the next run completes what the failed one left
+    assert conn.execute("SELECT count(*) FROM sqlite_master WHERE type = 'trigger'").fetchone() == (1,)
+    assert conn.execute("SELECT count(*) FROM vanna_documentation WHERE source IS NULL").fetchone() == (0,)

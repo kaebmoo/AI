@@ -75,6 +75,42 @@ PROPOSALS_DDL = (
 )
 
 
+def _label_and_queue(engine) -> int:
+    """Label unknown provenance and create the queue in ONE SQLite transaction, begun by hand. pysqlite issues BEGIN
+    only before DML, so a DROP TRIGGER ahead of the backfill committed on its own, and a backfill that failed rolled
+    back without the trigger (Codex review 2026-09-22). With isolation_level None the BEGIN below covers DDL too."""
+    raw = engine.raw_connection()
+    dbapi = raw.driver_connection
+    saved, dbapi.isolation_level = dbapi.isolation_level, None
+    cur = dbapi.cursor()
+    try:
+        cur.execute("BEGIN IMMEDIATE")
+        try:
+            labelled = 0
+            if any(cur.execute(f'SELECT 1 FROM "{t}" WHERE {UNKNOWN} LIMIT 1').fetchone() for t in TABLES):
+                # Labelling provenance is not an edit of the content: a trigger that stamps updated_at on every
+                # UPDATE (vanna_documentation has one) is lifted for the backfill and put back as it was
+                names = ", ".join(f"'{t}'" for t in TABLES)
+                triggers = cur.execute(
+                    f"SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name IN ({names})").fetchall()
+                for name, _ in triggers:
+                    cur.execute(f'DROP TRIGGER "{name}"')
+                for sql in BACKFILL:
+                    labelled += cur.execute(sql).rowcount
+                for _, sql in triggers:
+                    cur.execute(sql)
+            for ddl in PROPOSALS_DDL:
+                cur.execute(ddl)
+            cur.execute("COMMIT")
+            return labelled
+        except BaseException:
+            cur.execute("ROLLBACK")
+            raise
+    finally:
+        dbapi.isolation_level = saved
+        raw.close()
+
+
 def migrate(config_engine=None) -> dict:
     if config_engine is None:
         from app.db.session import config_engine
@@ -85,21 +121,8 @@ def migrate(config_engine=None) -> dict:
                 with config_engine.begin() as conn:
                     conn.execute(text(f'ALTER TABLE "{table}" ADD COLUMN {column} {ddl}'))
                 print(f"Added {table}.{column}")
-    with config_engine.begin() as conn:
-        labelled = 0
-        if any(conn.execute(text(f'SELECT 1 FROM "{t}" WHERE {UNKNOWN} LIMIT 1')).first() for t in TABLES):
-            # Labelling provenance is not an edit of the content: a trigger that stamps updated_at on every
-            # UPDATE (vanna_documentation has one) is lifted for the backfill and put back as it was, same transaction
-            names = ", ".join(f"'{t}'" for t in TABLES)
-            triggers = conn.execute(text(
-                f"SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name IN ({names})")).all()
-            for name, _ in triggers:
-                conn.exec_driver_sql(f'DROP TRIGGER "{name}"')
-            labelled = sum(conn.execute(text(sql)).rowcount for sql in BACKFILL)
-            for _, sql in triggers:
-                conn.exec_driver_sql(sql)
-        for ddl in PROPOSALS_DDL:
-            conn.execute(text(ddl))
+    labelled = _label_and_queue(config_engine)
+    with config_engine.connect() as conn:
         summary = {t: conn.execute(text(f'SELECT source, status, COUNT(*) FROM "{t}" GROUP BY 1, 2 ORDER BY 1, 2')).all()
                    for t in TABLES}
     print(f"Labelled {labelled} row(s) whose source was unknown")
