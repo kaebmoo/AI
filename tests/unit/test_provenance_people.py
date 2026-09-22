@@ -38,6 +38,8 @@ def db(tmp_path):
     ("inferred", "inferred", "active", True), ("inferred", "learned", "proposed", True),
     ("inferred", "declared", "active", False), ("inferred", "manual", "active", False),
     ("learned", "inferred", "rejected", False),
+    ("learned", "learned", "proposed", True), ("learned", "inferred", "proposed", True),  # a proposal still waiting
+    ("learned", "inferred", "active", False), ("learned", "learned", "active", False),   # real use changes nothing in use
     ("inferred", None, "active", False), ("inferred", "auto", "active", False),  # unknown = a person's
 ])
 def test_who_may_replace_a_row(writer, source, status, allowed):
@@ -117,3 +119,58 @@ def test_a_person_accepting_a_proposed_level_takes_its_values_in_use(db, monkeyp
     hs.HierarchyService().create_value("ctx", {"level": 0, "value": "A", "aliases": ["a"]})
     assert knowledge_db.rows(path, "SELECT source, status FROM master_hierarchy_values WHERE value = 'A'") == [
         ("manual", "active")]
+
+
+@pytest.mark.parametrize("writer", ["manual", "declared", "inferred", "learned"])
+def test_the_write_re_checks_exactly_what_may_replace_says(tmp_path, writer):
+    """replaceable() is may_replace() as SQL — the condition an UPDATE carries so that a row which changed hands
+    between the read and the write is not overwritten (Codex review 2026-09-22)."""
+    import sqlite3
+    conn = sqlite3.connect(tmp_path / "t.db")
+    conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, source TEXT, status TEXT)")
+    combos = [(s, st) for s in ("declared", "manual", "inferred", "learned", None, "auto")
+              for st in ("active", "proposed", "rejected", None)]
+    conn.executemany("INSERT INTO t (source, status) VALUES (?, ?)", combos)
+    allowed = {r[0] for r in conn.execute(f"SELECT id FROM t WHERE {p.replaceable(writer)}")}
+    assert allowed == {i + 1 for i, (s, st) in enumerate(combos) if p.may_replace(writer, s, st)}
+
+
+def test_a_proposed_null_survives_the_merge(db):
+    """json_patch read JSON null as "delete the key": a proposal to clear a field vanished when merged."""
+    path, engine = db
+    key = {"table_name": "t", "column_name": "c"}
+    with engine.begin() as conn:
+        assert p.propose(conn, "schema_metadata", key, {"description": "x"}, "inferred")
+        assert p.propose(conn, "schema_metadata", key, {"special_notes": None}, "inferred")  # merged into the waiting one
+        assert not p.propose(conn, "schema_metadata", key, {"special_notes": None}, "inferred")  # already waiting
+    assert [json.loads(r[0]) for r in knowledge_db.rows(path, "SELECT proposed FROM knowledge_proposals")] == [
+        {"description": "x", "special_notes": None}]
+
+
+def test_the_startup_gate_names_every_missing_column_and_the_queue(db):
+    path, engine = db
+    assert p.missing_provenance(engine) == []
+    with engine.begin() as conn:
+        conn.exec_driver_sql("DROP INDEX ux_knowledge_proposals_open")
+    assert p.missing_provenance(engine) == ["knowledge_proposals.ux_knowledge_proposals_open"]
+    with engine.begin() as conn:
+        conn.exec_driver_sql("DROP TABLE knowledge_proposals")
+        conn.exec_driver_sql("ALTER TABLE data_warnings DROP COLUMN confidence")
+    assert p.missing_provenance(engine) == ["data_warnings.confidence", "knowledge_proposals"]
+
+
+def test_a_person_taking_a_proposal_switches_it_on(db):
+    from app.models.schema_models import SchemaSemanticMapping
+    _, engine = db
+    taken = SchemaSemanticMapping(keyword="ftth", target_column="c", target_condition="= 1", is_active=False,
+                                  source="learned", status="proposed")
+    p.mark_human_edit(taken, "schema_semantic_mapping", {"target_column": "service"})
+    assert (taken.source, taken.status, taken.is_active) == ("manual", "active", True)
+    kept_off = SchemaSemanticMapping(keyword="adsl", target_column="c", target_condition="= 1", is_active=False,
+                                     source="learned", status="proposed")
+    p.mark_human_edit(kept_off, "schema_semantic_mapping", {"is_active": False})  # taken, and switched off by them
+    assert (kept_off.status, kept_off.is_active) == ("active", False)
+    in_use = SchemaSemanticMapping(keyword="vdsl", target_column="c", target_condition="= 1", is_active=False,
+                                   source="manual", status="active")
+    p.mark_human_edit(in_use, "schema_semantic_mapping", {"description": "x"})  # a row a person switched off earlier
+    assert in_use.is_active is False
