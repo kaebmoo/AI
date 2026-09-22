@@ -1,5 +1,7 @@
 # PLAN F7 — Token Accounting จริง + Request Trace แบบ log เดียว
 
+> **ตรวจ source ซ้ำ 2026-09-21:** แผนนี้มี implementation แล้ว ไม่ต้อง execute ซ้ำ; สถานะรายข้อ หลักฐาน และ acceptance ที่ยังค้างดู [รายงาน F1–F8](../REVIEW_F1_F8_2026-09-21.md) ข้อความและ checklist ด้านล่างคงไว้เป็นแผนในอดีต
+
 **Prerequisite:** PLAN_F2 เสร็จ (แนะนำหลัง F3 Phase B เพื่อใช้ eval เช็คว่าไม่กระทบคุณภาพ)
 **ประมาณเวลา:** 1-2 วัน
 **ขอบเขตชัดเจน:** log-based เท่านั้น — Langfuse/OpenTelemetry เป็น deferred decision (ดู PLAN_FIX_MASTER) ห้ามเพิ่ม dependency ใหม่ในแผนนี้

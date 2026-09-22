@@ -11,7 +11,8 @@
 | [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) | สถานะ implementation ราย area (source-verified) |
 | [IMPLEMENTATION_TASKS.md](IMPLEMENTATION_TASKS.md) | Backlog งาน hardening รอบถัดไป |
 | [PLAN_REMAINING_ITEMS.md](PLAN_REMAINING_ITEMS.md) | รายการงานคงเหลือหลัง Plans 0-5 (REMAIN-1..8) |
-| [PLAN_FIX_MASTER.md](PLAN_FIX_MASTER.md) | Master ของรอบ code-review remediation F1-F11 (executed 2026-07-11) |
+| [PLAN_FIX_MASTER.md](PLAN_FIX_MASTER.md) | Master ของรอบ remediation — implementation แล้ว; acceptance บางข้อยังค้าง |
+| [REVIEW_F1_F8_2026-09-21.md](REVIEW_F1_F8_2026-09-21.md) | ตรวจแผนเดิม F1–F8 + BGE-M3 กับโค้ดจริง แยก implementation / tests / operational gaps |
 | [PLAN_F12_HISTORY_RENDER_PERSISTENCE.md](PLAN_F12_HISTORY_RENDER_PERSISTENCE.md) | F12 — persist chart/table/pivot ในประวัติการสนทนา (executed 2026-07-13, Phase A+B+C ครบ) |
 | [FIX_NOTES.md](FIX_NOTES.md) | บันทึกปัญหา/ข้อค้างที่พบระหว่างทำ F-plans (มี open items) |
 

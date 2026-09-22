@@ -1,5 +1,7 @@
 # PLAN F8 — Structured Output สำหรับ Intent Extraction (Pass 1) และ JSON tasks
 
+> **ตรวจ source ซ้ำ 2026-09-21:** แผนนี้มี implementation แล้ว ไม่ต้อง execute ซ้ำ; สถานะรายข้อ หลักฐาน และ acceptance ที่ยังค้างดู [รายงาน F1–F8](../REVIEW_F1_F8_2026-09-21.md) ข้อความและ checklist ด้านล่างคงไว้เป็นแผนในอดีต
+
 **Prerequisite:** PLAN_F2 เสร็จ (แนะนำหลัง F7 เพื่อให้ usage tracking ครอบ method ใหม่ด้วย)
 **ประมาณเวลา:** 1-2 วัน
 **ขอบเขต:** ใช้ความสามารถ native ของ provider ที่มีอยู่ — **ไม่เพิ่ม dependency ใหม่**

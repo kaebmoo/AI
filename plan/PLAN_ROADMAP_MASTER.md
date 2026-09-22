@@ -255,11 +255,13 @@ ConfigSessionLocal = sessionmaker(bind=config_engine)
 
 ---
 
-## PLAN_FIX_MASTER (Code Review Remediation) — ✅ Executed 2026-07-11
+## PLAN_FIX_MASTER (Code Review Remediation) — implementation แล้ว, acceptance บางข้อยังค้าง
+
+ตรวจ source F1–F8 ซ้ำ 2026-09-21: [REVIEW_F1_F8_2026-09-21.md](REVIEW_F1_F8_2026-09-21.md) — F5 manual E2E, F6 deployment และ F7 trace/usage coverage ยังไม่ปิด; รอบนั้นรัน pytest ไม่ได้ (interpreter ที่ลองไม่มี pytest — suite รันด้วย `venv/bin/python3.14`: HEAD `7cdc7af` ผ่าน 1180) · **CI บน main แดง 2026-09-18..22 เพราะ mcp 2.x** — pin `mcp==1.26.0` แล้ว (`36d1867`), รอผลหลัง push
 
 F3-A CI, F1 Correctness, F2 Hygiene/Leaks, F4 SQL Hardening, F5 Telegram, F3-B Eval Harness,
 F7 Token/Observability, F6 Reports/Export, F8 Structured Output, F9 A-D (flags OFF),
 F10 DataFeed pilot (values correct 14/14 value-based; strict 0/14 alias-mismatch), F11 Dashboard Embed (AI + NT-Report)
 
 รายละเอียด: `docs/CODE_REVIEW_REPORT_2026-07-11.md` | ค้าง/decision: `plan/FIX_NOTES.md`
-PENDING_BGE_M3: มี baseline แล้ว — พร้อมให้เจ้าของตัดสินใจ (ห้าม execute จนกว่าอนุมัติ)
+PENDING_BGE_M3: มี baseline เก่าแล้ว แต่ยังต้องมี A/B บน corpus/golden/config เดียวกันก่อน Go/No-Go; คง PENDING และอยู่นอก execution order (ห้าม execute จนกว่าอนุมัติ)

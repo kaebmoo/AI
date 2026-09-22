@@ -1,5 +1,7 @@
 # PLAN F6 — Reports / Export (ช่องว่างหลักตาม IMPLEMENTATION_STATUS: 10%)
 
+> **ตรวจ source ซ้ำ 2026-09-21:** แผนนี้มี implementation แล้ว ไม่ต้อง execute ซ้ำ; สถานะรายข้อ หลักฐาน และ acceptance ที่ยังค้างดู [รายงาน F1–F8](../REVIEW_F1_F8_2026-09-21.md) ข้อความและ checklist ด้านล่างคงไว้เป็นแผนในอดีต
+
 **Prerequisite:** PLAN_F1 (ห้ามใช้ query cache/ข้อมูล truncate เป็นแหล่ง export) และ PLAN_F4 (read-only connection)
 **ประมาณเวลา:** 2-3 วัน
 **ขอบเขต:** Backend เท่านั้น — ส่งมอบ API contract ให้ frontend/admin ทำปุ่มภายหลัง

@@ -1,5 +1,7 @@
 # PLAN F5 — Telegram: Webhook Lifecycle + Admin Routing + Runtime Cleanup
 
+> **ตรวจ source ซ้ำ 2026-09-21:** แผนนี้มี implementation แล้ว ไม่ต้อง execute ซ้ำ; สถานะรายข้อ หลักฐาน และ acceptance ที่ยังค้างดู [รายงาน F1–F8](../REVIEW_F1_F8_2026-09-21.md) ข้อความและ checklist ด้านล่างคงไว้เป็นแผนในอดีต
+
 **Prerequisite:** PLAN_F2 เสร็จ
 **ประมาณเวลา:** 1 วัน
 **หมายเหตุ:** แผนนี้รวมทุกจุดที่แตะ `app/main.py` ส่วน Telegram — ห้ามทำขนานกับแผนอื่นที่แก้ main.py

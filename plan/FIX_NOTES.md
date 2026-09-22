@@ -1,5 +1,7 @@
 # FIX NOTES — สิ่งที่พบระหว่าง execute แผน (ไม่แก้ทันที ตามกฎ)
 
+> **ตรวจ F1–F8 ซ้ำ 2026-09-21:** [รายงานพร้อมหลักฐาน](REVIEW_F1_F8_2026-09-21.md) — บันทึกด้านล่างเป็นประวัติ; F8 two-pass เปิดบน config จริงแล้วตาม RESULT_F11 แม้ code default ยัง OFF, F6 create/download ย้าย audit ไป `query_audit.record` แล้ว ส่วนตาราง `report_exports` บน deployment (2026-09-22: DB จริงยังไม่มี) และ F5 manual E2E ยังต้องยืนยัน · CI บน main แดง 2026-09-18..22 เพราะ mcp 2.x — pin แล้ว (ด้านล่าง)
+
 ## จาก F1 (2026-07-11)
 
 - **F1.3 frontend QA:** `frontend/components/Chat/ModelSelector.tsx` auto-select default provider จาก `/admin/config/ai/providers` (`is_default`) แล้ว `frontend/app/(app)/index.tsx` ส่ง `provider` ชัดเจนทุก request — ไม่มี hardcode "gemini" ฝั่ง frontend ถ้า API ล่มจะ fallback (ดู adminService.ts) — พฤติกรรมยอมรับได้ ไม่ต้องแก้
@@ -31,7 +33,7 @@
 
 ## จาก F8 (2026-07-11)
 
-- **`TWO_PASS_ENABLED` ยังคง default OFF** — F8 ทำให้ Pass 1 พร้อมใช้ (structured output + fallback) แต่การเปิด flag ถาวรรอเทียบ eval (F3-B baseline) ก่อน — decision ของเจ้าของโปรเจกต์
+- **`TWO_PASS_ENABLED` ยังคง code default OFF** — แต่ config จริงเปิด `two_pass_enabled = true` แล้วตาม `archive/RESULT_F11.md` §4.1 (2026-09-20); ข้อความ “รอเปิด” เดิมเป็นสถานะ ณ ก.ค. รอบตรวจ 2026-09-21 ไม่ได้เปลี่ยน flag
 - **Gemini structured output ใช้ mime json + schema ใน prompt** (ไม่ใช่ `response_schema`) — การแปลง JSON Schema → google-genai Schema type เปราะต่อเวอร์ชัน SDK; วิธีที่เลือกเสถียรกว่าและยอมรับตามแผน
 - **งานอนาคต:** เปลี่ยน main SQL generation path เป็น structured output — ยังไม่ทำเพราะ CoT + ```sql fence ทำงานอยู่และต้องมี eval คุมก่อน
 - Manual smoke ที่ต้องเปิด two_pass + ยิงคำถาม follow-up 3 แบบกับ key จริง — ค้างให้เจ้าของโปรเจกต์ (env นี้เรียก LLM ผ่าน default provider ได้ แต่การเปิด two-pass ใน admin_config เป็น state change ที่ควรทำใน dev ของทีม)
@@ -485,3 +487,9 @@
 13. **`json_patch` ตีความ JSON null ว่าลบ key** (RFC 7396) — ข้อเสนอให้ล้างค่าหายเมื่อรวม → `json_set`
 14. **test ของเราผ่านหมด แต่ผู้ตรวจอีกคนเจอ 9 ข้อ** — race, แถวซ้ำ, แถว rejected ถูกถอนแล้วกลับมา, ทางที่ migration ล้ม, ตัวอ่านที่ลืมระดับแม่: ทุกข้อคือกรณีที่ไม่มี test ·
     ให้ไล่ทั้งช่วง commit ก่อนถือว่า Exit ผ่าน
+
+## จาก CI ที่แดงโดยไม่มีใครเห็น (2026-09-22)
+
+1. **dependency ที่ไม่มีเพดาน major version** — `mcp>=1.26.0` ให้ CI ได้ mcp 2.2.0 (API เปลี่ยน) → ทุก push บน main ล้มตั้งแต่ 2026-09-18
+   ขณะที่ในเครื่องยังเป็น 1.26.0 และ suite ผ่าน → pin เวอร์ชันที่ code และ test ใช้จริง (`mcp==1.26.0`); ยกเพดานพร้อมงาน migrate เท่านั้น
+2. **ไม่มีใครดูผล CI หลัง push** — แดง 8 รอบติด 4 วัน ขณะที่งานขึ้นของจริงไปหลายรอบ → ดู `gh run list --branch main` หลังทุก push

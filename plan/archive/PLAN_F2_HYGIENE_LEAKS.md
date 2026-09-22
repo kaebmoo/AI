@@ -1,5 +1,7 @@
 # PLAN F2 — Resource Leaks, SSE Robustness, Latent Bugs
 
+> **ตรวจ source ซ้ำ 2026-09-21:** แผนนี้มี implementation แล้ว ไม่ต้อง execute ซ้ำ; สถานะรายข้อ หลักฐาน และ acceptance ที่ยังค้างดู [รายงาน F1–F8](../REVIEW_F1_F8_2026-09-21.md) ข้อความและ checklist ด้านล่างคงไว้เป็นแผนในอดีต
+
 **Prerequisite:** PLAN_F1 เสร็จ (แตะ `query_engine.py` ต่อจากกัน ห้ามทำขนาน)
 **ประมาณเวลา:** 1 วัน
 

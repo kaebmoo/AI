@@ -1,7 +1,7 @@
 # AI Assistant - Implementation Status
 
 > ประเภทเอกสาร: สถานะความคืบหน้าเทียบกับ source code จริง
-> Snapshot date: 2026-03-23
+> Snapshot date เดิม: 2026-03-23; ตรวจเฉพาะ F1–F8 ซ้ำ 2026-09-21 — [หลักฐานและข้อค้าง](REVIEW_F1_F8_2026-09-21.md) (ไม่ได้ re-audit ทุก area/เปอร์เซ็นต์ในเอกสารนี้)
 > วิธีอ่าน: เอกสารนี้สรุปเฉพาะสิ่งที่ยืนยันได้จาก repository ปัจจุบัน ไม่อิง roadmap เก่าเพียงอย่างเดียว
 
 ---
@@ -124,7 +124,7 @@
 ### ยังเป็นช่องว่าง
 
 - ยังไม่เห็นงาน infra ระดับ reverse proxy / NGINX config ใน repo
-- ยังไม่เห็น CI/CD file ทำงานจริงใน root
+- มี CI workflow แล้ว (`.github/workflows/ci.yml`, F3-A); ยังไม่ได้ยืนยันผลรันล่าสุดหรือ CD deployment ในรอบตรวจนี้ · 2026-09-22: แดงทุกรอบตั้งแต่ 09-18 เพราะ mcp 2.x — pin `mcp==1.26.0` แล้ว (`36d1867`)
 
 ## Phase 2: Authentication & Security
 
@@ -245,9 +245,9 @@ Phase นี้อยู่ในสภาพใช้งานจริงแ�
 
 ## Phase 6: Reports & Export
 
-### ยังไม่เห็น implementation หลัก
+### มี implementation หลักแล้ว
 
-- ไม่พบ `report_service.py`
+- มี `app/services/report_service.py`; ข้อค้าง operational: go-live 2026-09-20 พบ `report_exports` หายบน DB จริง ยังไม่ได้ตรวจซ้ำบน deployment ในรอบนี้ (2026-09-22: DB จริงยังไม่มีตาราง)
 ### สถานะ (อัปเดต 2026-07-11 — F6)
 
 - `app/api/v1/reports.py` — POST (สร้าง export, rate limit 10/hr), GET status/list, GET download (ownership + expiry)
@@ -285,8 +285,8 @@ Phase นี้อยู่ในสภาพใช้งานจริงแ�
 - **Admin routing ผ่าน `/admin` explicit** — เลิก regex hijack ที่จับ "เพิ่มขึ้น/ติดลบ" ผิด (B6, F5.3)
 - **Telegram chart type เคารพ visualization จาก AI** — อ่านจาก explanation dict (F5.4)
 - **Token accounting เป็นค่าจริงจาก provider usage** — `TokenUsage`/`last_usage` ทุก provider, `QueryResult.usage_breakdown` per-stage, เลิก hardcode 500 (B9, F7.1-2)
-- **Request trace หนึ่งบรรทัด JSON ต่อ query** — `query_trace {...}` จาก QueryEngine (รวม cache hit), stage timings ย่อยลด noise เป็น debug (F7.3)
-- **Structured output สำหรับ intent extraction** — `generate_structured` ทั้ง 3 providers (Claude forced tool, Matcha json_schema→json_object, Gemini json mime), extract_intent structured-first + text fallback, suggest_mappings ด้วย (F8) — two_pass flag ยัง default OFF
+- **Request trace JSON ในเส้นทางหลัก** — `query_trace {...}` จาก QueryEngine (รวม cache hit), stage timings ย่อยลด noise เป็น debug (F7.3); ยังไม่ครอบคลุม dedup early return / exception ก่อน emit — ดูรายงานตรวจ 2026-09-21
+- **Structured output สำหรับ intent extraction** — `generate_structured` ทั้ง 3 providers (Claude forced tool, Matcha json_schema→json_object, Gemini json mime), extract_intent structured-first + text fallback, suggest_mappings ด้วย (F8) — code default OFF แต่ config จริงเปิดแล้วตาม `archive/RESULT_F11.md` §4.1
 - **Eval harness (F3-B)** — `scripts/eval/run_eval.py` execution-match accuracy จาก golden examples, `--compare` แสดง regression; feed_revenue: ค่าถูก 14/14 (value-based) แต่ strict exact-match 0/14 เพราะ alias ไม่ตรง golden (`plan/archive/RESULT_F10.md`)
 - **DataFeed integration (F10 pilot revenue)** — ตาราง `feed_revenue_*` 255k แถว + integrity gates 4 ชั้น, context/docs/golden จาก contract อัตโนมัติ (3 scripts domain-agnostic ใน `scripts/datafeed/`)
 - **Agentic latency (F9 A-D)** — template answers, parallel metadata prep, intent state, escalation ladder — flags ทั้งหมด default OFF รอวัด (`plan/archive/RESULT_F9.md`); Phase E รออนุมัติ
@@ -327,7 +327,7 @@ Phase นี้อยู่ในสภาพใช้งานจริงแ�
 
 ## ช่องว่างหลักที่ยังต้องทำต่อ
 
-1. Reports / export / scheduled reporting
+1. Reports: ยืนยัน deployment ของ `report_exports` + export/cleanup จริง และงาน frontend/scheduled reporting ที่เหลือ (backend export มีแล้ว)
 2. CI/CD และ infra deployment story ที่ชัดเจน
 3. แยกไฟล์ monolith ขนาดใหญ่
 4. ลด broad exception และ hardening เรื่อง reliability

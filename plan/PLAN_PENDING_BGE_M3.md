@@ -1,7 +1,9 @@
 # PLAN PENDING — เปลี่ยน Vanna Embedding เป็น BGE-M3
 
 **สถานะ: PENDING DECISION — ห้าม execute จนกว่าเจ้าของโปรเจกต์อนุมัติ**
-**Prerequisite (บังคับก่อนตัดสินใจ):** PLAN_F3 Phase B เสร็จ + มี `BASELINE.json`
+**Prerequisite (บังคับก่อนตัดสินใจ):** F3-B มี harness + `eval_results/BASELINE.json` แล้ว แต่ baseline เดิมมี golden_broken 12 ข้อ; ก่อน Go/No-Go ต้องวัด A/B บน corpus/golden/config เดียวกัน
+
+> **ตรวจ source 2026-09-21:** ยังไม่มี BGE-M3 implementation (`VannaService` ส่งเฉพาะ path ให้ Chroma) คง PENDING และไม่ผูก execution order; ดู [รายงานตรวจ](REVIEW_F1_F8_2026-09-21.md) การมี baseline ไม่ใช่การอนุมัติ execute
 **ประมาณเวลา (ถ้าอนุมัติ):** 1-2 วัน + เวลา re-sync + เวลา eval เปรียบเทียบ
 
 ---

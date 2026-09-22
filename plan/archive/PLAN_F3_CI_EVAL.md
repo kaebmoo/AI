@@ -1,5 +1,7 @@
 # PLAN F3 — CI (Phase A) + NL→SQL Eval Harness (Phase B)
 
+> **ตรวจ source ซ้ำ 2026-09-21:** แผนนี้มี implementation แล้ว ไม่ต้อง execute ซ้ำ; สถานะรายข้อ หลักฐาน และ acceptance ที่ยังค้างดู [รายงาน F1–F8](../REVIEW_F1_F8_2026-09-21.md) ข้อความและ checklist ด้านล่างคงไว้เป็นแผนในอดีต
+
 **Phase A Prerequisite:** ไม่มี — ทำเป็นอย่างแรกของทั้งชุด (safety net)
 **Phase B Prerequisite:** PLAN_F1 เสร็จ
 **ประมาณเวลา:** A = 0.5 วัน, B = 1-2 วัน

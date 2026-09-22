@@ -2,7 +2,9 @@
 
 **ที่มา:** Code review เต็มรูปแบบ (อ่าน source จริง 21 ไฟล์) วันที่ 2026-07-04
 **Project Root:** `/Users/seal/Documents/GitHub/AI/`
-**สถานะ:** ✅ Executed ครบทุกแผน (2026-07-11) — ดูสถานะรวมใน `PLAN_ROADMAP_MASTER.md`
+**สถานะ:** implementation ของ F1–F8 มีแล้ว; acceptance/operational checks ยังมีข้อค้าง — ตรวจ source ซ้ำ 2026-09-21 ที่ [REVIEW_F1_F8_2026-09-21.md](REVIEW_F1_F8_2026-09-21.md) ส่วน F9–F11 ดู `PLAN_ROADMAP_MASTER.md`
+
+> Waves ด้านล่างเป็นลำดับทำงานในอดีต ไม่ใช่ backlog ให้ execute ซ้ำ; BGE-M3 ยัง PENDING และอยู่นอก waves
 
 > **หมายเหตุ (2026-07-12):** ไฟล์แผน `PLAN_F1`–`PLAN_F11` และ `RESULT_F9`/`RESULT_F10` ที่อ้างถึงในเอกสารนี้ ถูกย้ายไป `plan/archive/` แล้วหลังงานเสร็จ
 
@@ -110,16 +112,22 @@ Wave 6 (integration ข้ามระบบ)
 
 - **Langfuse / OpenTelemetry GenAI** — observability platform เต็มรูปแบบ (self-host ได้, ตรง on-prem) — F7 ทำแบบ log-based ไปก่อน พอเพียงระยะนี้
 - **sqlglot AST validation** — บังคับกฎ "ห้าม OR ข้าม hierarchy" เชิงโครงสร้างแทน prompt — dependency ใหม่ (pure Python) รอประเมินหลัง F3-B มีตัววัด
-- **MCP streamable HTTP transport** — แก้คอขวด stdio ตอน scale / Celery ต้องใช้ tool — ยังไม่จำเป็นที่ load ปัจจุบัน
+- **MCP transport ภายใน** — การแทน stdio เพื่อ scale / Celery ยังเป็น decision แยก; facade **ภายนอก** ใช้ Streamable HTTP แล้วใน Plan 7 Phase 6 (`app/api/v1/mcp_facade.py`, default OFF) ห้ามตีความว่า HTTP ยังไม่มีทั้งระบบ
 
 ---
 
-## Definition of Done ของทั้งชุด
+## Definition of Done — ตรวจสถานะ 2026-09-21
 
-- [ ] F3-A: CI เขียวบน main
-- [ ] F1, F2, F4, F5 เสร็จ + tests ใหม่ผ่าน + ไม่มี regression
-- [ ] F3-B: eval baseline report ถูกสร้างและ commit
-- [ ] F7: `tokens_used` ใน chat_history เป็นค่าจริงจาก provider usage
-- [ ] F6: export xlsx ใช้งานได้จริงผ่าน API พร้อม cleanup job
-- [ ] F8: intent extraction ใช้ structured output พร้อม fallback
-- [ ] อัปเดต `plan/IMPLEMENTATION_STATUS.md` sections ที่เกี่ยวข้อง
+- [x] F1/F2/F4 มี implementation และ regression tests ใน repo (รอบนี้ยังไม่ได้ผล pytest ใหม่)
+- [x] F3-A มี CI workflow; F3-B มี harness + baseline ที่ commit แล้ว
+- [x] F5 มี lifecycle และ explicit `/admin` ใน code
+- [x] F6 มี export API/service/worker/cleanup ใน code
+- [x] F7 ใช้ provider usage และ JSON trace ในเส้นทางหลัก
+- [x] F8 ใช้ structured intent + fallback
+- [x] อัปเดตสถานะเอกสารและเชื่อมหลักฐาน source
+- [ ] ยืนยัน CI ล่าสุดบน main และ regression suite ของ revision ที่จะ deploy — 2026-09-22: CI แดงตั้งแต่ 09-18 เพราะ mcp 2.x (pin `36d1867`, รอผลหลัง push); suite ในเครื่องที่ HEAD `7cdc7af` ผ่าน 1180
+- [ ] F5 manual webhook E2E ผ่าน tunnel
+- [ ] F6 ยืนยันตาราง `report_exports` และ export/cleanup บน deployment (go-live เดิมพบตารางหาย) — 2026-09-22: DB จริงยังไม่มีตาราง
+- [ ] F7 ยืนยัน/ปิดช่องว่าง trace early exits และ usage ของ fallback ตามรายงานตรวจ
+
+รายละเอียดและขอบเขตหลักฐาน: [REVIEW_F1_F8_2026-09-21.md](REVIEW_F1_F8_2026-09-21.md)
