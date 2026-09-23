@@ -492,8 +492,11 @@ R2-7, R2-8 **ล้มบน code ก่อนแก้** (ตรวจแล้
 ในชุดของผู้ตรวจ**ไม่ได้ทดสอบอะไรแล้ว** — จุดที่มันเกี่ยว (`before_flush`, `may_replace` ใน bootstrap) ไม่อยู่บนทางเขียนแล้ว คนในจำลองจึงไม่ได้แก้ ·
 test ของเราเกี่ยวที่ `may_replace` ก่อนคำสั่งเขียน (ล้มบน code เดิม) · `_declare` แถวหาย / UNIQUE ชุดอื่น = ข้อจำกัดที่ผู้ตรวจแยกไว้ ไม่ได้แก้
 
-**ยังไม่ได้ทำ / ไม่ได้ตรวจ:** ไม่ได้ commit / push (CI จริงรู้หลัง push) · ไม่ได้ restart — **server รันจาก working tree**: start ครั้งถัดไป = ขึ้นไฟล์ที่แก้นี้
-ด้วย (ไม่ต้อง migrate) · script เก่าที่เขียนตรง (`populate_schema_metadata.py`, `import_master_data.py`, `add_mapping.py`, `insert_golden_example.py`) ยังไม่ผ่าน helper ·
+**CI (2026-09-23):** commit `3b8f692`, `f3b280b`, `4f7eaf3`, `9e912aa` — run 35814933388 **ผ่าน: lint + 1194 passed, 3 skipped** (Python 3.12) —
+เขียวครั้งแรกบน main ตั้งแต่ 2026-07-13
+
+**ยังไม่ได้ทำ / ไม่ได้ตรวจ:** ไม่ได้ restart — **server รันจาก working tree**: start ครั้งถัดไป = ขึ้น `git log 528be11..HEAD`
+(ไม่ต้อง migrate) · script เก่าที่เขียนตรง (`populate_schema_metadata.py`, `import_master_data.py`, `add_mapping.py`, `insert_golden_example.py`) ยังไม่ผ่าน helper ·
 duplicate check ของ AddMapping / AddRule ยังบอกว่ามีแถว (รวมแถว rejected) ให้โมเดลได้ · pivot / live eval / Telegram / Celery E2E ไม่ได้ตรวจ
 
 ---
