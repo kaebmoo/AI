@@ -122,6 +122,33 @@ def test_an_admins_thumbs_up_is_kept_as_their_example(config, app_db):
     ai_service.train.assert_called_once()
 
 
+@pytest.mark.parametrize("via", ["thumbs_up", "review"])
+def test_an_admin_taking_a_waiting_example_puts_it_in_use_before_training(config, app_db, via):
+    """The example of the chat's question already waited (a user's correction): feedback left it learned /
+    proposed / off, and thumbs-up still trained Vanna on it (Codex review round 2, R2-3)."""
+    from app.api.v1.feedback import submit_feedback
+    from app.models.feedback_models import FeedbackRating, GoldenExample
+    from app.services.feedback_service import FeedbackService
+    path, session = config
+    chat, feedback = _chat_with_feedback(app_db)
+    session.add(GoldenExample(question_pattern=chat.question, expected_sql="SELECT user", is_active=False,
+                              source="learned", status="proposed"))
+    session.commit()
+    ai_service = MagicMock()
+    ai_service.train.side_effect = lambda **kw: calls.append(knowledge_db.rows(
+        path, "SELECT source, status, is_active FROM golden_examples WHERE question_pattern = ?", (chat.question,)))
+    calls = []
+    if via == "thumbs_up":
+        submit_feedback(chat.id, FeedbackRating.THUMBS_UP, None, None, SimpleNamespace(id=1, role="admin"), app_db,
+                        ai_service, session)
+        assert calls == [[("manual", "active", 1)]]  # what Vanna trains on is already saved as taken
+    else:
+        FeedbackService(app_db).review_feedback(feedback.id, reviewer_id=1, is_golden_example=True, config_db=session)
+    assert knowledge_db.rows(path, "SELECT expected_sql, source, status, is_active FROM golden_examples "
+                                   "WHERE question_pattern = ?", (chat.question,)) == [
+        ("SELECT SUM(revenue) FROM revenue_search", "manual", "active", 1)]
+
+
 def test_a_users_correction_never_changes_an_example_in_use(config):
     """may_replace let `learned` rewrite a machine's example that was already in use (Codex review 2026-09-22)."""
     from sqlalchemy import text

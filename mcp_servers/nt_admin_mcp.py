@@ -81,11 +81,11 @@ async def add_mapping(keyword: str, target_column: str, target_value: str, keywo
 
 
 @mcp.tool()
-async def search_rules(search_text: str = "", severity: str = "", is_active: bool = True) -> str:
+async def search_rules(search_text: str = "", severity: str = "") -> str:
     """ค้นหา business rules ตาม code, คำอธิบาย, หรือ severity"""
     from app.tools.admin.rule_tools import SearchRulesTool
     tool = SearchRulesTool()
-    params = {k: v for k, v in {"search_text": search_text, "severity": severity, "is_active": is_active}.items() if v != ""}
+    params = {k: v for k, v in {"search_text": search_text, "severity": severity}.items() if v != ""}
     result = await tool.execute(params, _get_db())
     return json.dumps(result, ensure_ascii=False, default=str)
 

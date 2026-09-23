@@ -45,8 +45,8 @@ class SearchMappingsTool(AdminTool):
     async def execute(self, params: Dict[str, Any], db) -> Dict[str, Any]:
         from app.models.schema_models import SchemaSemanticMapping
 
-        query = db.query(SchemaSemanticMapping).filter(
-            SchemaSemanticMapping.is_active == True
+        query = db.query(SchemaSemanticMapping).filter(  # knowledge in use only (Plan 8.1)
+            SchemaSemanticMapping.is_active == True, SchemaSemanticMapping.status == "active"
         )
 
         keyword = params.get("keyword")

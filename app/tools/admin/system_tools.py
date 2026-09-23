@@ -77,7 +77,7 @@ class ListContextsTool(AdminTool):
         # schema_contexts is in config DB, not app DB
         config_db = ConfigSessionLocal()
         try:
-            result = config_db.execute(text("SELECT * FROM schema_contexts WHERE is_active = 1 ORDER BY id"))
+            result = config_db.execute(text("SELECT * FROM schema_contexts WHERE is_active = 1 AND status = 'active' ORDER BY id"))
             rows = result.fetchall()
             columns = result.keys()
         except Exception as e:

@@ -180,7 +180,7 @@ def find_source_metadata(_service: "SchemaService", conn, source_table: str, sou
 def propagate_metadata_to_view(service: "SchemaService", view_name: str) -> Dict:
     """Copy the source tables' metadata onto the view's columns. Plan 8.1: a copy is `inferred` — it fills a
     machine's row; a row a person owns keeps what it has and the copy waits in knowledge_proposals."""
-    from app.services.provenance import INFERRED, may_replace, propose
+    from app.services.provenance import INFERRED, may_replace, propose, replaceable
 
     mappings = get_view_column_mappings(service, view_name)
     if not mappings:
@@ -206,16 +206,17 @@ def propagate_metadata_to_view(service: "SchemaService", view_name: str) -> Dict
             existing = result.mappings().fetchone()
 
             if source_meta:
+                fill = {k: source_meta.get(k) for k in ("display_name_th", "display_name_en", "description", "data_type",
+                                                        "hierarchy_level", "special_notes", "conversion_sql",
+                                                        "dimension_group") if source_meta.get(k) is not None}
                 if existing and not existing["display_name_th"] and not may_replace(INFERRED, existing["source"], existing["status"]):
-                    fill = {k: source_meta.get(k) for k in ("display_name_th", "display_name_en", "description", "data_type",
-                                                            "hierarchy_level", "special_notes", "conversion_sql",
-                                                            "dimension_group") if source_meta.get(k) is not None}
                     propose(conn, "schema_metadata", {"table_name": view_name, "column_name": view_column}, fill, INFERRED,
                             reason=f"คัดลอกจาก {source_table}.{source_column} — แถวนี้เป็นของคน")
                     skipped += 1
                 elif existing:
                     if not existing["display_name_th"]:
-                        conn.execute(text("""
+                        # re-checks what was read: a person who took the row in the meantime keeps it, the copy waits
+                        written = conn.execute(text(f"""
                             UPDATE schema_metadata SET
                                 display_name_th = :display_name_th,
                                 display_name_en = COALESCE(display_name_en, :display_name_en),
@@ -228,7 +229,7 @@ def propagate_metadata_to_view(service: "SchemaService", view_name: str) -> Dict
                                 conversion_sql = COALESCE(conversion_sql, :conversion_sql),
                                 dimension_group = COALESCE(dimension_group, :dimension_group),
                                 updated_at = :updated_at
-                            WHERE table_name = :vn AND column_name = :vc
+                            WHERE table_name = :vn AND column_name = :vc AND {replaceable(INFERRED)}
                         """), {
                             "display_name_th": source_meta.get("display_name_th"),
                             "display_name_en": source_meta.get("display_name_en"),
@@ -243,8 +244,13 @@ def propagate_metadata_to_view(service: "SchemaService", view_name: str) -> Dict
                             "updated_at": utcnow(),
                             "vn": view_name,
                             "vc": view_column,
-                        })
-                        updated += 1
+                        }).rowcount
+                        if written:
+                            updated += 1
+                        else:
+                            propose(conn, "schema_metadata", {"table_name": view_name, "column_name": view_column}, fill,
+                                    INFERRED, reason=f"คัดลอกจาก {source_table}.{source_column} — แถวนี้เป็นของคน")
+                            skipped += 1
                     else:
                         skipped += 1
                 else:

@@ -6,6 +6,7 @@ the 4 feed contexts). A row a person owns keeps its content and the machine's ve
 
 import json
 import sqlite3
+from unittest.mock import Mock
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -218,3 +219,87 @@ def test_onboarding_adds_its_fields_to_a_proposal_another_machine_left(db):
     (proposed,), = knowledge_db.rows(path, "SELECT proposed FROM knowledge_proposals WHERE table_name = 'schema_metadata' "
                                            "AND row_key LIKE '%\"dept\"%'")
     assert json.loads(proposed)["dimension_group"] == "org" and json.loads(proposed)["description"] == "LLM"
+
+
+def _person_takes_it_after_the_check(monkeypatch, target, path, sql):
+    """A person's edit committed on another connection right after the writer checked the row (Codex review round 2,
+    R2-1): the check said "a machine's row", the write must still find a person's and leave it."""
+    real = target.may_replace
+    fired = []
+
+    def check(*args):
+        ok = real(*args)
+        if not fired:
+            fired.append(1)
+            with sqlite3.connect(path) as other:
+                other.execute(sql)
+        return ok
+    monkeypatch.setattr(target, "may_replace", check)
+
+
+def test_a_persons_edit_between_the_check_and_the_write_wins(db, monkeypatch):
+    from app.api.v1 import schema_analyzer
+    from app.api.v1.admin import schema as admin_schema
+    from app.services import provenance
+    from app.services.schema import view_manager
+    from app.services.schema_service import SchemaService
+    path, engine, _ = db
+    with sqlite3.connect(path) as conn:
+        conn.execute("INSERT INTO schema_metadata (table_name, column_name, source) VALUES "
+                     "('v_race', 'a', 'inferred'), ('v_race', 'b', 'inferred'), ('v_race', 'c', 'inferred')")
+    person = "UPDATE schema_metadata SET {col} = 'คน', source = 'manual' WHERE table_name = 'v_race' AND column_name = '{c}'"
+
+    # the LLM's suggestions (schema analyzer)
+    _person_takes_it_after_the_check(monkeypatch, provenance, path, person.format(col="description", c="a"))
+    request = schema_analyzer.ImportRequest(table_name="v_race", metadata=[
+        {"column_name": "a", "display_name_th": "LLM", "display_name_en": "LLM", "description": "LLM",
+         "data_type": "TEXT", "is_summable": False, "is_groupable": True}], mappings=[], rules=[])
+    schema_analyzer.import_schema_suggestions(request, None, sessionmaker(bind=engine)(), Mock())
+
+    # the detected column families
+    _person_takes_it_after_the_check(monkeypatch, admin_schema, path, person.format(col="dimension_group", c="b"))
+    svc = Mock(get_table_info=Mock(return_value=[{"name": "b"}]), get_dimension_families_with_source=Mock(return_value=[]))
+    monkeypatch.setattr(admin_schema, "service_for_table", lambda *_: svc)
+    monkeypatch.setattr(admin_schema, "mark_brain_dirty", lambda: None)
+    monkeypatch.setattr("app.services.dimension_detector.detect_families", lambda cols: {"machine": ["b"]})
+    admin_schema.auto_populate_dimension_families("v_race", True, None, sessionmaker(bind=engine)(), svc)
+
+    # a view's metadata copied from its source table
+    _person_takes_it_after_the_check(monkeypatch, provenance, path, person.format(col="display_name_th", c="c"))
+    monkeypatch.setattr(view_manager, "get_view_column_mappings",
+                        lambda *_: [{"source_table": "t", "source_column": "c", "view_column": "c"}])
+    monkeypatch.setattr(view_manager, "find_source_metadata", lambda *_: {"display_name_th": "เครื่อง"})
+    view_manager.propagate_metadata_to_view(SchemaService(config_engine=engine, business_engine=engine), "v_race")
+
+    assert knowledge_db.rows(path, "SELECT column_name, description, dimension_group, display_name_th, source "
+                                   "FROM schema_metadata WHERE table_name = 'v_race' ORDER BY column_name") == [
+        ("a", "คน", None, None, "manual"), ("b", None, "คน", None, "manual"), ("c", None, None, "คน", "manual")]
+    assert len(knowledge_db.rows(path, "SELECT 1 FROM knowledge_proposals WHERE row_key LIKE '%v_race%'")) == 3
+
+
+def test_bootstrap_leaves_a_level_a_person_took_just_before_the_write(db, monkeypatch):
+    """A person takes bootstrap's own waiting level between bootstrap's check and its UPSERT: the unconditioned
+    DO UPDATE wrote the guess over it (R2-1). The UPSERT's WHERE decides now — the person's level stays, the guess
+    waits."""
+    path, _, _ = db
+    monkeypatch.setattr(hs.HierarchyService, "auto_extract", lambda self, ctx=None: [])
+    with sqlite3.connect(path) as conn:
+        conn.execute("INSERT INTO master_hierarchy (context_name, level, level_label_th, level_label_en, level_columns, "
+                     "detection_keywords, source, status) VALUES ('ctx_race', 0, 'x', 'x', ?, '[]', 'inferred', "
+                     "'proposed')", ('["old"]',))
+
+    class PersonBeforeTheWrite(sqlite3.Connection):
+        fired = False
+
+        def execute(self, sql, params=()):
+            if "INSERT INTO master_hierarchy" in sql and not self.fired:
+                self.fired = True
+                with sqlite3.connect(path) as other:
+                    other.execute("UPDATE master_hierarchy SET level_columns = ?, source = 'manual', status = 'active' "
+                                  "WHERE context_name = 'ctx_race' AND level = 0", ('["human"]',))
+            return super().execute(sql, params)
+    monkeypatch.setattr(hs, "_get_conn", lambda: sqlite3.connect(path, factory=PersonBeforeTheWrite))
+    hs.HierarchyService().bootstrap_from_view("ctx_race", "v_org")
+    assert knowledge_db.rows(path, "SELECT level_columns, source, status FROM master_hierarchy "
+                                   "WHERE context_name = 'ctx_race' AND level = 0") == [('["human"]', "manual", "active")]
+    assert [p[1] for p in _proposals(path)] == ['{"context_name": "ctx_race", "level": 0}']

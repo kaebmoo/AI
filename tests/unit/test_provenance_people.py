@@ -174,3 +174,19 @@ def test_a_person_taking_a_proposal_switches_it_on(db):
                                    source="manual", status="active")
     p.mark_human_edit(in_use, "schema_semantic_mapping", {"description": "x"})  # a row a person switched off earlier
     assert in_use.is_active is False
+
+
+def test_a_person_editing_a_proposed_hierarchy_value_switches_it_on(db, monkeypatch):
+    """update_value took a switched-off proposal as manual / active but left it off: no reader saw it (R2-4)."""
+    from app.services import hierarchy_service as hs
+    path, engine = db
+    with engine.begin() as conn:
+        conn.exec_driver_sql("UPDATE master_hierarchy_values SET source = 'inferred', status = 'proposed', is_active = 0 "
+                             "WHERE value = 'A'")
+        conn.exec_driver_sql("UPDATE master_hierarchy_values SET is_active = 0 WHERE value = 'B'")  # a person's, off
+    monkeypatch.setattr(hs.settings, "CONFIG_DB_URL", f"sqlite:///{path}")
+    for value in ("A", "B"):
+        (value_id,), = knowledge_db.rows(path, "SELECT id FROM master_hierarchy_values WHERE value = ?", (value,))
+        hs.HierarchyService().update_value(value_id, {"aliases": ["x"]})
+    assert knowledge_db.rows(path, "SELECT value, source, status, is_active FROM master_hierarchy_values ORDER BY value") == [
+        ("A", "manual", "active", 1), ("B", "manual", "active", 0)]

@@ -272,10 +272,22 @@ def import_schema_suggestions(
     Plan 8.1: the suggestions are an LLM's (`inferred`): they fill new rows and machine rows; a row a person or
     the contract owns keeps its content and the suggestion waits in knowledge_proposals.
     """
-    from app.services.provenance import ACTIVE, INFERRED, may_replace, propose
+    from sqlalchemy import text
+
+    from app.services.provenance import ACTIVE, INFERRED, may_replace, propose, replaceable
 
     reason = "ข้อเสนอจาก schema analyzer — แถวที่ใช้อยู่เป็นของคน"
     queued = 0
+
+    def take(model, row, table, key, suggested) -> int:
+        """A machine's row takes the suggestion — the UPDATE re-checks, so a person's edit between the read and the
+        write wins; any other row keeps its content and a suggestion that differs waits. Returns 1 = queued."""
+        if may_replace(INFERRED, row.source, row.status) and db.query(model).filter(
+                model.id == row.id, text(replaceable(INFERRED))).update(suggested, synchronize_session=False):
+            return 0
+        if any(getattr(row, k) != v for k, v in suggested.items()):
+            return int(propose(db.connection(), table, key, suggested, INFERRED, reason=reason))
+        return 0
     try:
         # 1. Import Metadata
         for meta in request.metadata:
@@ -286,14 +298,9 @@ def import_schema_suggestions(
             
             suggested = {"display_name_th": meta.display_name_th, "display_name_en": meta.display_name_en,
                          "is_summable": meta.is_summable, "is_groupable": meta.is_groupable, "description": meta.description}
-            if existing and may_replace(INFERRED, existing.source, existing.status):
-                for key, value in suggested.items():
-                    setattr(existing, key, value)
-            elif existing:
-                if any(getattr(existing, key) != value for key, value in suggested.items()):
-                    queued += propose(db.connection(), "schema_metadata",
-                                      {"table_name": request.table_name, "column_name": meta.column_name},
-                                      suggested, INFERRED, reason=reason)
+            if existing:
+                queued += take(SchemaMetadata, existing, "schema_metadata",
+                               {"table_name": request.table_name, "column_name": meta.column_name}, suggested)
             else:
                 new_meta = SchemaMetadata(
                     table_name=request.table_name,
@@ -317,13 +324,9 @@ def import_schema_suggestions(
             
             suggested = {"keyword_type": mapping.keyword_type, "target_column": mapping.target_column,
                          "target_condition": mapping.target_condition, "description": mapping.description}
-            if existing_map and may_replace(INFERRED, existing_map.source, existing_map.status):
-                for key, value in suggested.items():
-                    setattr(existing_map, key, value)
-            elif existing_map:
-                if any(getattr(existing_map, key) != value for key, value in suggested.items()):
-                    queued += propose(db.connection(), "schema_semantic_mapping", {"keyword": mapping.keyword},
-                                      suggested, INFERRED, reason=reason)
+            if existing_map:
+                queued += take(SchemaSemanticMapping, existing_map, "schema_semantic_mapping",
+                               {"keyword": mapping.keyword}, suggested)
             else:
                 new_map = SchemaSemanticMapping(
                     keyword=mapping.keyword,
@@ -344,13 +347,9 @@ def import_schema_suggestions(
             suggested = {"rule_name": rule.rule_name, "rule_description": rule.rule_description,
                          "example_correct": rule.example_correct, "example_wrong": rule.example_wrong,
                          "severity": rule.severity}
-            if existing_rule and may_replace(INFERRED, existing_rule.source, existing_rule.status):
-                for key, value in suggested.items():
-                    setattr(existing_rule, key, value)
-            elif existing_rule:
-                if any(getattr(existing_rule, key) != value for key, value in suggested.items()):
-                    queued += propose(db.connection(), "schema_business_rules", {"rule_code": rule.rule_code},
-                                      suggested, INFERRED, reason=reason)
+            if existing_rule:
+                queued += take(SchemaBusinessRule, existing_rule, "schema_business_rules",
+                               {"rule_code": rule.rule_code}, suggested)
             else:
                 new_rule = SchemaBusinessRule(
                     rule_code=rule.rule_code,

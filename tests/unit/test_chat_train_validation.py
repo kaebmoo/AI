@@ -16,7 +16,7 @@ def _train(payload, context="revenue", source=LEGACY_SOURCE):
     mcp = MagicMock()
     mcp.call_tool = AsyncMock(return_value=json.dumps(payload))  # MCP returns JSON text
     db = MagicMock()
-    db.query.return_value.filter.return_value.first.return_value = None
+    db.query.return_value.filter.return_value.order_by.return_value.first.return_value = None  # no example yet
     with patch.object(chat.deps, "get_mcp_client", return_value=mcp), \
          patch.object(chat.source_resolver, "for_context", return_value=source):
         result = asyncio.run(chat.train_model(

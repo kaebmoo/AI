@@ -318,7 +318,7 @@ class TestListContexts:
         conn = sqlite3.connect(db_path)
         conn.execute(
             "CREATE TABLE schema_contexts (id INTEGER PRIMARY KEY, name TEXT, display_name TEXT, "
-            "description TEXT, main_view TEXT, is_active INTEGER)"
+            "description TEXT, main_view TEXT, is_active INTEGER, status TEXT DEFAULT 'active')"
         )
         conn.executemany(
             "INSERT INTO schema_contexts (name, display_name, description, main_view, is_active) VALUES (?, ?, ?, ?, 1)",

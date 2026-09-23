@@ -33,10 +33,6 @@ class SearchRulesTool(AdminTool):
                     "type": "string",
                     "description": "Filter by severity: error, warning, info",
                     "enum": ["error", "warning", "info"]
-                },
-                "is_active": {
-                    "type": "boolean",
-                    "description": "Filter by active status"
                 }
             },
             "required": []
@@ -45,7 +41,10 @@ class SearchRulesTool(AdminTool):
     async def execute(self, params: Dict[str, Any], db) -> Dict[str, Any]:
         from app.models.schema_models import SchemaBusinessRule
 
-        query = db.query(SchemaBusinessRule)
+        # knowledge in use only (Plan 8.1): the result goes to the agent's model — a switched-off rule or a proposal
+        # is not knowledge (R2-2); there is no parameter to ask for them
+        query = db.query(SchemaBusinessRule).filter(SchemaBusinessRule.is_active == True,
+                                                    SchemaBusinessRule.status == "active")
 
         search_text = params.get("search_text")
         if search_text:
@@ -59,9 +58,6 @@ class SearchRulesTool(AdminTool):
 
         if params.get("severity"):
             query = query.filter(SchemaBusinessRule.severity == params["severity"])
-
-        if params.get("is_active") is not None:
-            query = query.filter(SchemaBusinessRule.is_active == params["is_active"])
 
         results = query.order_by(SchemaBusinessRule.rule_code).limit(50).all()
 

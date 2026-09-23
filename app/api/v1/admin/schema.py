@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.api import deps
@@ -32,7 +33,7 @@ from app.schemas.admin_schemas import (
     ViewSummaryListResponse,
 )
 from app.services.ai_service import AIService
-from app.services.provenance import ACTIVE, INFERRED, MANUAL, mark_human_edit, may_replace, propose
+from app.services.provenance import ACTIVE, INFERRED, MANUAL, mark_human_edit, may_replace, propose, replaceable
 from app.services.query_engine import clear_query_cache
 from app.services.schema_service import SchemaService
 
@@ -435,8 +436,10 @@ def auto_populate_dimension_families(
             ).first()
             if not row or not (overwrite or not row.dimension_group) or row.dimension_group == family_name:
                 continue
-            if may_replace(INFERRED, row.source, row.status):
-                row.dimension_group = family_name
+            # the UPDATE re-checks: a person's edit between the read and the write wins
+            if may_replace(INFERRED, row.source, row.status) and db.query(SchemaMetadata).filter(
+                    SchemaMetadata.id == row.id, text(replaceable(INFERRED))).update(
+                    {SchemaMetadata.dimension_group: family_name}, synchronize_session=False):
                 updated += 1
             else:
                 queued += propose(db.connection(), "schema_metadata", {"table_name": table_name, "column_name": col_name},

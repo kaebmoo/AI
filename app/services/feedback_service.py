@@ -5,7 +5,6 @@ from datetime import datetime
 from app.models.feedback_models import UserFeedback, FeedbackRating, FeedbackCategory, GoldenExample
 from app.models.chat import ChatHistory
 from app.core.time_utils import utcnow
-from app.services.provenance import ACTIVE, MANUAL
 
 class FeedbackService:
     def __init__(self, db: Session):
@@ -114,32 +113,12 @@ class FeedbackService:
         feedback.review_notes = notes
         feedback.is_golden_example = is_golden_example
         
-        # Create Golden Example if requested
+        # Create Golden Example if requested — the reviewer takes it (a waiting example too): save_training
         if is_golden_example:
-            config = config_db or self.db
             chat = self.db.query(ChatHistory).filter(ChatHistory.id == feedback.chat_id).first()
-            if chat:
-                # Check if already exists to avoid duplicates
-                existing = config.query(GoldenExample).filter(
-                    GoldenExample.question_pattern == chat.question
-                ).first()
-                
-                if not existing:
-                    golden = GoldenExample(
-                        chat_id=chat.id,
-                        question_pattern=chat.question,
-                        expected_sql=chat.generated_sql,  # (was chat.sql_query — no such column) 
-                        # Ideally admin should provide correct SQL if the original was wrong.
-                        # For now, using generated SQL. In future, allow admin to override.
-                        category=feedback.feedback_category,
-                        added_by=reviewer_id,
-                        is_active=True,
-                        source=MANUAL,
-                        status=ACTIVE,
-                    )
-                    config.add(golden)
-                    if config is not self.db:
-                        config.commit()
+            if chat and chat.generated_sql:
+                save_training(config_db or self.db, chat.question, chat.generated_sql, chat.context_name, reviewer_id,
+                              is_admin=True, chat_id=chat.id)
 
         self.db.commit()
         self.db.refresh(feedback)
@@ -169,3 +148,37 @@ class FeedbackService:
             {"question": r.question, "count": r.count}
             for r in results
         ]
+
+
+def save_training(db: Session, question: str, sql: str, context: Optional[str], user_id: int, is_admin: bool,
+                  chat_id: Optional[int] = None) -> None:
+    """A corrected SQL from the chat, as a golden example (Plan 8.1): an admin's is theirs and in use; a user's is
+    `learned` / `proposed` and changes nothing in use — the newer correction of a question still waiting replaces
+    it, and any other example (in use, a person's, a rejected one) gets a proposal.
+
+    Also the admin's path of feedback (thumbs-up, review as golden): an admin taking an example that waits (or one
+    a person rejected) makes it theirs and in use — before anything trains on it (Codex review round 2, R2-3).
+    One example per question: the first one found (by id) is the one changed."""
+    from sqlalchemy import text
+
+    from app.services.provenance import (ACTIVE, LEARNED, MANUAL, PROPOSED, mark_human_edit, may_replace, propose,
+                                         replaceable)
+
+    existing = db.query(GoldenExample).filter(GoldenExample.question_pattern == question).order_by(GoldenExample.id).first()
+    if is_admin and existing:
+        existing.expected_sql = sql
+        existing.is_active = True
+        existing.added_by = user_id
+        mark_human_edit(existing, "golden_examples", ["expected_sql"])
+    elif existing:  # the UPDATE re-checks: a person may have taken the waiting correction in the meantime
+        waiting = may_replace(LEARNED, existing.source, existing.status) and db.query(GoldenExample).filter(
+            GoldenExample.id == existing.id, text(replaceable(LEARNED))).update(
+            {GoldenExample.expected_sql: sql}, synchronize_session=False)
+        if not waiting:
+            propose(db.connection(), "golden_examples", {"question_pattern": question},
+                    {"expected_sql": sql, "category": context}, LEARNED, reason=f"ผู้ใช้ {user_id} แก้ SQL ในแชท")
+    else:
+        db.add(GoldenExample(chat_id=chat_id, question_pattern=question, expected_sql=sql, category=context,
+                             is_active=is_admin, added_by=user_id, source=MANUAL if is_admin else LEARNED,
+                             status=ACTIVE if is_admin else PROPOSED))
+    db.commit()

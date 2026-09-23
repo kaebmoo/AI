@@ -36,7 +36,8 @@ class SearchExamplesTool(AdminTool):
     async def execute(self, params: Dict[str, Any], db) -> Dict[str, Any]:
         from app.models.feedback_models import GoldenExample
 
-        query = db.query(GoldenExample).filter(GoldenExample.is_active == True)
+        # Plan 8.1: what goes back to the agent's model is knowledge in use — never a proposal or a rejected row
+        query = db.query(GoldenExample).filter(GoldenExample.is_active == True, GoldenExample.status == "active")
 
         search_text = params.get("search_text")
         if search_text:

@@ -138,7 +138,8 @@ class HierarchyService:
                 cols_json, kw_json,
                 data.get("parent_column"), data.get("source_view"),
             ))
-            # a person took the level: the values extracted while it waited as a proposal are in use with it
+            # a person took the level: the values extracted while it waited as a proposal are in use with it.
+            # status only: extraction writes values switched on, so one switched off is one a person deleted
             conn.execute(
                 "UPDATE master_hierarchy_values SET status = 'active' WHERE context_name = ? AND level = ? "
                 "AND status = 'proposed' AND source IN ('inferred', 'learned')", (context_name, level))
@@ -249,6 +250,9 @@ class HierarchyService:
             if "aliases" in data:
                 updates.append("aliases = ?")
                 params.append(json.dumps(data["aliases"], ensure_ascii=False))
+            # a person taking a proposal (or a rejected value) switches it on too — mark_human_edit's rule;
+            # a value already in use keeps its on/off (SET reads the row as it was: status is the old one)
+            updates.append("is_active = CASE WHEN COALESCE(status, 'active') != 'active' THEN 1 ELSE is_active END")
             updates.append("source = 'manual'")
             updates.append("status = 'active'")
             params.append(value_id)
@@ -417,7 +421,7 @@ class HierarchyService:
         """
         from sqlalchemy import inspect as sa_inspect
 
-        from app.services.provenance import INFERRED, may_replace, propose
+        from app.services.provenance import INFERRED, propose, replaceable
 
         conn = _get_conn()  # config DB: master_hierarchy is written here
         data = _data_engine(context_name)
@@ -515,25 +519,24 @@ class HierarchyService:
                 guess = {"level_columns": json.dumps([col], ensure_ascii=False),
                          "detection_keywords": json.dumps(keywords, ensure_ascii=False),
                          "parent_column": parent_col, "source_view": view_name}
-                held = conn.execute("SELECT source, status FROM master_hierarchy WHERE context_name = ? AND level = ?",
-                                    (context_name, level_num)).fetchone()
-                if held and not may_replace(INFERRED, *held):
+                # the write itself decides (a person's level, even one taken a moment ago, keeps what it has)
+                written = conn.execute(f"""
+                    INSERT INTO master_hierarchy
+                        (context_name, level, level_label_th, level_label_en, level_columns,
+                         detection_keywords, parent_column, source_view, source, status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'inferred', 'proposed')
+                    ON CONFLICT(context_name, level) DO UPDATE SET
+                        level_columns = excluded.level_columns,
+                        detection_keywords = excluded.detection_keywords,
+                        parent_column = excluded.parent_column,
+                        source_view = excluded.source_view,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE {replaceable(INFERRED)}
+                """, (context_name, level_num, label, label, guess["level_columns"], guess["detection_keywords"],
+                      parent_col, view_name)).rowcount
+                if not written:
                     propose(conn, "master_hierarchy", {"context_name": context_name, "level": level_num}, guess,
                             INFERRED, reason="bootstrap เดาระดับนี้จากข้อมูล — ระดับที่ใช้อยู่เป็นของคน")
-                else:
-                    conn.execute("""
-                        INSERT INTO master_hierarchy
-                            (context_name, level, level_label_th, level_label_en, level_columns,
-                             detection_keywords, parent_column, source_view, source, status)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'inferred', 'proposed')
-                        ON CONFLICT(context_name, level) DO UPDATE SET
-                            level_columns = excluded.level_columns,
-                            detection_keywords = excluded.detection_keywords,
-                            parent_column = excluded.parent_column,
-                            source_view = excluded.source_view,
-                            updated_at = CURRENT_TIMESTAMP
-                    """, (context_name, level_num, label, label, guess["level_columns"], guess["detection_keywords"],
-                          parent_col, view_name))
 
                 levels_created.append({"level": level_num, "col": col, "distinct": col_info["distinct"], "parent": parent_col,
                                        "proposed": True})  # waits for a person either way

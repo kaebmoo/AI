@@ -140,3 +140,27 @@ def test_the_brain_trains_the_ddl_of_contexts_in_use_only(db):
     VannaService._sync_ddl(trainer, _service(engine))
     trained = [call.kwargs["ddl"] for call in trainer.train.call_args_list]
     assert trained == ["CREATE TABLE v (x INTEGER)"]
+
+
+def test_the_admin_agents_tools_hand_its_model_active_rows_only(db):
+    """The Admin Agent (and nt_admin_mcp, which runs the same tools) sends a tool's result to its model: a search
+    returned proposals and rejected rows as if in use (Codex review round 2, R2-2)."""
+    import asyncio
+    import json
+
+    from app.tools.admin.example_tools import SearchExamplesTool
+    from app.tools.admin.mapping_tools import SearchMappingsTool
+    from app.tools.admin.rule_tools import SearchRulesTool
+    from app.tools.admin.system_tools import ListContextsTool
+    _, engine = db
+    with engine.begin() as conn:  # in use by status, switched off by a person: not knowledge either
+        conn.exec_driver_sql("INSERT INTO schema_business_rules (rule_code, rule_name, rule_description, is_active, "
+                             "status) VALUES ('R_OFF', 'ปิด', 'ปิด', 0, 'active')")
+    session = sessionmaker(bind=engine)()
+    sent = json.dumps([asyncio.run(tool().execute({}, session))["data"]
+                       for tool in (SearchExamplesTool, SearchMappingsTool, SearchRulesTool, ListContextsTool)],
+                      ensure_ascii=False, default=str)
+    for mark in ("q_on", "kw_on", "R_ON", "ctx_on"):
+        assert mark in sent
+    for mark in ("q_wait", "q_no", "kw_wait", "kw_no", "R_WAIT", "R_NO", "R_OFF", "ctx_wait", "ctx_no"):
+        assert mark not in sent

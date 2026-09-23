@@ -202,13 +202,10 @@ def submit_feedback(
             
             if chat and chat.generated_sql:
                 try:
-                    from app.models.feedback_models import GoldenExample
-                    from app.services.provenance import ACTIVE, MANUAL
-                    if not config_db.query(GoldenExample).filter(GoldenExample.question_pattern == chat.question).first():
-                        config_db.add(GoldenExample(chat_id=chat.id, question_pattern=chat.question,
-                                                    expected_sql=chat.generated_sql, added_by=current_user.id,
-                                                    is_active=True, source=MANUAL, status=ACTIVE))
-                        config_db.commit()
+                    from app.services.feedback_service import save_training
+                    # the admin takes the example (a waiting one too) — saved before Vanna trains on it
+                    save_training(config_db, chat.question, chat.generated_sql, chat.context_name, current_user.id,
+                                  is_admin=True, chat_id=chat.id)
                     # Train Vanna
                     ai_service.train(question=chat.question, sql_query=chat.generated_sql)
                     response_msg += " (Auto-trained)"
