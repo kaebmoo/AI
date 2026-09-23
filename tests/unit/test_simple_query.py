@@ -220,12 +220,17 @@ class TestQueryContextsEndpoint:
         resp = query_client.get("/api/v1/query/contexts")
         assert resp.status_code == 200 and isinstance(resp.json(), list)
 
-    def test_a_key_sees_its_own_workspace_and_spends_no_quota(self, client, test_user, db_session):
+    def test_a_key_sees_its_own_workspace_and_spends_no_quota(self, client, test_user, db_session, tmp_path):
         from app.services.api_key_service import APIKeyService
+        from tests.unit import knowledge_db
 
+        # the contexts a key may reach are read from a config DB of the test's own (not the dev's config.db)
+        config = knowledge_db.make(tmp_path / "config.db", "INSERT INTO schema_contexts (name, main_view) VALUES "
+                                                           "('feed_sales', 'v'), ('feed_ebt', 'v');")
         service = APIKeyService(db_session)
         raw, key = service.create_key(user_id=test_user.id, name="portal", allowed_contexts='["feed_sales"]')
-        with patch("app.api.v1.query.contexts_for", return_value=[]) as listed:
+        with patch("app.api.v1.query.contexts_for", return_value=[]) as listed, \
+                patch("app.services.workspaces._config_engine", return_value=config):
             assert client.get("/api/v1/query/contexts", headers={"X-API-Key": raw}).status_code == 200
         assert listed.call_args.args[0] == frozenset({"feed_sales"})
         assert service.usage_today(key.id) == 0  # listing is not a question

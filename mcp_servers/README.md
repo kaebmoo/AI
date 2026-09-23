@@ -299,8 +299,7 @@ mcp_servers/
 ## Dependencies
 
 ```
-mcp>=1.0.0
-fastmcp>=0.1.0
+mcp==1.26.0            # same pin as ../requirements.txt — 2.x renamed FastMCP
 psycopg2-binary>=2.9.0  # PostgreSQL
 pyodbc>=4.0.0           # MSSQL
 python-dotenv>=1.0.0

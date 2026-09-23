@@ -506,8 +506,9 @@ class TestLLMAnalyzer:
 class TestOnboardingWritesConfigDb:
     """REMAIN-9.1: the facade inspects the business DB but applies/validates on the config DB."""
 
-    def test_default_targets_config_db_not_business_db(self, business_db):
+    def test_default_targets_config_db_not_business_db(self, business_db, tmp_path, monkeypatch):
         from app.config import settings
+        monkeypatch.setattr(settings, "CONFIG_DB_URL", f"sqlite:///{tmp_path / 'config.db'}")  # not the dev's .env
         service = ContextOnboardingService(business_db)
         config_path = settings.CONFIG_DB_URL.replace("sqlite:///", "")
         assert service.applicator.db_path == config_path != business_db

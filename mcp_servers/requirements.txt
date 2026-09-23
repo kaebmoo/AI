@@ -1,6 +1,7 @@
 # MCP Server Dependencies
-mcp>=1.0.0
-fastmcp>=0.1.0
+# the same pin as ../requirements.txt: mcp 2.x renamed FastMCP (from mcp.server.fastmcp import FastMCP).
+# No standalone `fastmcp` package — nothing imports it
+mcp==1.26.0
 
 # Database drivers (install based on your needs)
 # SQLite is built-in

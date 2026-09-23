@@ -152,6 +152,7 @@ class TestMultiContext:
         engine.query = AsyncMock(side_effect=part_exc) if part_exc else AsyncMock(return_value=_result())
         engine.schema_service.get_all_contexts.return_value = []
         with patch.object(mc, "enabled_workspaces", return_value=frozenset({"nt-report"})), \
+                patch.object(mc, "_workspaces", return_value={}), \
                 patch.object(mc, "candidates", return_value=[{"name": "feed_revenue", "display_name": "r"},
                                                              {"name": "feed_expense", "display_name": "e"}]), \
                 patch.object(mc, "_split", AsyncMock(return_value={

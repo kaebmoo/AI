@@ -16,5 +16,6 @@ def test_client_passes_an_absolute_config_db_url(monkeypatch):
     from app.config import settings
     from app.services.mcp_client import MCPClientService
     monkeypatch.delenv("CONFIG_DB_URL", raising=False)
+    monkeypatch.setattr(settings, "CONFIG_DB_URL", "sqlite:///./config.db")  # relative, as in a .env — not the dev's
     env = {c.name: c.env for c in MCPClientService()._load_server_configs()}["nt-metadata"]
     assert env["CONFIG_DB_URL"] == f"sqlite:///{os.path.abspath(settings.CONFIG_DB_URL[len('sqlite:///'):])}"
