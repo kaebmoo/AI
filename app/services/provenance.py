@@ -120,22 +120,37 @@ def propose(conn, table: str, key: Dict[str, Any], values: Dict[str, Any], sourc
     wanted = json.loads(params["p"])
     if not wanted:
         return False
+    for column in wanted:  # a field name no merge could carry fails here, before anything is filed
+        _label(column)
     for status, proposed in _run(conn, "SELECT status, proposed FROM knowledge_proposals WHERE table_name = :t "
                                        "AND row_key = :k AND source = :s AND status IN ('rejected', 'proposed')", params):
         held = json.loads(proposed)
         if (status == REJECTED and held == wanted) or (status == PROPOSED and {**held, **wanted} == held):
             return False
     params.update({f"v{i}": json.dumps(v, ensure_ascii=False) for i, v in enumerate(wanted.values())})
-    _run(conn, "INSERT INTO knowledge_proposals (table_name, row_key, proposed, source, confidence, reason) "
-               "VALUES (:t, :k, :p, :s, :c, :r) ON CONFLICT (table_name, row_key, source) WHERE status = 'proposed' "
-               f"DO UPDATE SET proposed = {merged_proposal(wanted, lambda i, _: f'json(:v{i})')}, "
-               "confidence = excluded.confidence, reason = excluded.reason, created_at = CURRENT_TIMESTAMP", params)
-    return True
+    merged = merged_proposal(wanted, lambda i, _: f'json(:v{i})')
+    # the WHERE decides again at the write: a proposal saying the same, filed by another connection after the
+    # SELECT above, leaves nothing to write (R2-7) — rowcount 0, and its time / reason / confidence stay
+    return bool(_run(conn, "INSERT INTO knowledge_proposals (table_name, row_key, proposed, source, confidence, reason) "
+                           "VALUES (:t, :k, :p, :s, :c, :r) ON CONFLICT (table_name, row_key, source) "
+                           f"WHERE status = 'proposed' DO UPDATE SET proposed = {merged}, "
+                           "confidence = excluded.confidence, reason = excluded.reason, created_at = CURRENT_TIMESTAMP "
+                           f"WHERE json({merged}) != json(knowledge_proposals.proposed)", params).rowcount)
 
 
 def merged_proposal(values: Dict[str, Any], value_sql) -> str:
     """The waiting proposal with `values` set field by field. json_set, not json_patch: a proposed NULL (clear this
     field) is a value to keep, and json_patch reads JSON null as "delete the key". `value_sql(i, value)` renders the
-    JSON of each value — a bind parameter here, a literal in onboarding's generated SQL."""
-    paths = ", ".join(f"'$.\"{column}\"', {value_sql(i, value)}" for i, (column, value) in enumerate(values.items()))
+    JSON of each value — a bind parameter here, a literal in onboarding's generated SQL.
+
+    A field name goes in a quoted path label — _label."""
+    paths = ", ".join(f"{_label(column)}, {value_sql(i, value)}" for i, (column, value) in enumerate(values.items()))
     return f"json_set(knowledge_proposals.proposed, {paths})"
+
+
+def _label(column: str) -> str:
+    """The JSON path of field `column` as an SQL literal: ' doubled; " and \\ refused — the SQLite of the server's
+    Python (3.40) reads no escape inside a quoted label, so no spelling keeps them (Codex review round 2, R2-6)."""
+    if '"' in column or "\\" in column:
+        raise ValueError(f"field name {column!r}: a JSON path label cannot carry \" or \\")
+    return "'$.\"{}\"'".format(column.replace("'", "''"))

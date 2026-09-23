@@ -183,9 +183,11 @@ def save_examples(conn, category: str, examples: list) -> tuple:
         stale = [r[0] for r in mine if r[3] != sql]
         if mine and not stale:
             continue
+        # a row a person took after the read keeps theirs; one the contract still holds says it now — like
+        # `mine and not stale`, nothing waits then. Counted per question, whatever part of it was written (R2-8)
         if stale and conn.execute(
                 f"UPDATE golden_examples SET expected_sql = ?, source = 'declared' WHERE id IN "
-                f"({', '.join('?' * len(stale))}) AND {replaceable(DECLARED)}", (sql, *stale)).rowcount == len(stale):
+                f"({', '.join('?' * len(stale))}) AND {replaceable(DECLARED)}", (sql, *stale)).rowcount:
             written += 1
             continue
         if any(r[3] == sql for r in rows):  # a person's row, or one a person rejected, already says it

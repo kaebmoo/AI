@@ -190,3 +190,50 @@ def test_a_person_editing_a_proposed_hierarchy_value_switches_it_on(db, monkeypa
         hs.HierarchyService().update_value(value_id, {"aliases": ["x"]})
     assert knowledge_db.rows(path, "SELECT value, source, status, is_active FROM master_hierarchy_values ORDER BY value") == [
         ("A", "manual", "active", 1), ("B", "manual", "active", 0)]
+
+
+@pytest.mark.parametrize("field", ["a.b", "$money", "a'b", "ก.ข"])
+def test_a_merged_field_keeps_its_name(db, field):
+    """The field name sits in a JSON path inside an SQL literal: ' broke the SQL (R2-6)."""
+    path, engine = db
+    with engine.begin() as conn:
+        assert p.propose(conn, "t", {"id": 1}, {"seed": 0}, "inferred")
+        assert p.propose(conn, "t", {"id": 1}, {field: None}, "inferred")
+    assert [json.loads(r[0]) for r in knowledge_db.rows(path, "SELECT proposed FROM knowledge_proposals")] == [
+        {"seed": 0, field: None}]
+
+
+@pytest.mark.parametrize("field", ['a"b', "a\\b"])
+def test_a_field_name_no_path_can_carry_is_refused_before_anything_is_filed(db, field):
+    """SQLite 3.40 (the server's Python) reads no escape in a path label: `a\\b` became a backspace (R2-6)."""
+    path, engine = db
+    with engine.begin() as conn:
+        with pytest.raises(ValueError):
+            p.propose(conn, "t", {"id": 1}, {field: 1}, "inferred")
+    assert knowledge_db.rows(path, "SELECT count(*) FROM knowledge_proposals") == [(0,)]
+
+
+def test_the_same_proposal_filed_meanwhile_by_another_connection_is_not_written_again(db, monkeypatch):
+    """Another connection filed the same version after propose() read the queue: it wrote again, moved the
+    proposal's time and returned True (R2-7)."""
+    import sqlite3
+    path, _ = db
+    real, fired = p._run, []
+
+    def run(conn, sql, params):
+        result = real(conn, sql, params)
+        if sql.startswith("SELECT status") and not fired:
+            rows = list(result)
+            fired.append(1)
+            with sqlite3.connect(path) as other:
+                p.propose(other, "t", {"id": 1}, {"a": 1}, "inferred")
+            return rows
+        return result
+    monkeypatch.setattr(p, "_run", run)
+    conn = sqlite3.connect(path)
+    assert p.propose(conn, "t", {"id": 1}, {"a": 1}, "inferred") is False
+    assert conn.total_changes == 0
+    assert p.propose(conn, "t", {"id": 1}, {"b": 2}, "inferred") is True  # something new still merges
+    conn.commit()
+    assert [json.loads(r[0]) for r in knowledge_db.rows(path, "SELECT proposed FROM knowledge_proposals")] == [
+        {"a": 1, "b": 2}]

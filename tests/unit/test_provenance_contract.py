@@ -155,6 +155,30 @@ def test_a_person_editing_between_the_contracts_read_and_write_wins(db):
     assert knowledge_db.rows(path, "SELECT table_name, source FROM knowledge_proposals") == [("schema_metadata", "declared")]
 
 
+def test_golden_regeneration_counts_a_question_written_even_when_a_person_took_one_of_its_rows_meanwhile(db):
+    """Two contract rows of one question, one taken by a person between the read and the UPDATE: the other row was
+    written, but the count said nothing was (R2-8)."""
+    path, _ = db
+
+    class PersonMeanwhile(sqlite3.Connection):
+        fired = False
+
+        def execute(self, sql, params=()):
+            if sql.startswith("UPDATE golden_examples SET expected_sql") and not self.fired:
+                self.fired = True
+                super().execute("UPDATE golden_examples SET source = 'manual', expected_sql = 'คน' WHERE id = 81")
+            return super().execute(sql, params)
+
+    conn = sqlite3.connect(path, factory=PersonMeanwhile)
+    conn.execute("INSERT INTO golden_examples (id, question_pattern, expected_sql, category, source, status) VALUES "
+                 "(80, 'ถาม', 'SELECT old', 'feed_x', 'declared', 'active'), "
+                 "(81, 'ถาม', 'SELECT old', 'feed_x', 'declared', 'active')")
+    assert save_examples(conn, "feed_x", [("ถาม", "SELECT new")]) == (1, 0, 0)  # the contract's row says it now
+    conn.commit()
+    assert knowledge_db.rows(path, "SELECT id, expected_sql, source FROM golden_examples ORDER BY id") == [
+        (80, "SELECT new", "declared"), (81, "คน", "manual")]
+
+
 def test_a_rejection_outlives_the_contract_withdrawing_and_declaring_the_row_again(db):
     path, engine = db
     _sync(engine, CONTRACT)
