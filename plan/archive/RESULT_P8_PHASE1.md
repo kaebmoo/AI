@@ -465,6 +465,37 @@ worktree ที่ใส่ test ใหม่) และผ่านหลัง
 - ถ้า server เดิมยังรันอยู่ขณะ commit: `context_onboarding` (import ตอนใช้) จะโหลดไฟล์ใหม่ที่ต้องการ `merged_proposal` จาก `provenance` เวอร์ชันใหม่ → onboarding ล้มจนกว่าจะ restart
 - **ถอยกลับ:** `git checkout 1857dbe -- app mcp_servers scripts` + restart — DB ไม่ต้องถอย (ไม่มีการเปลี่ยน schema; ข้อเสนอที่ปิดไว้ code เดิมก็ไม่อ่าน)
 
+
+## 15. ตรวจรอบ 2 โดย Codex (2026-09-23) — 8 ข้อ + manifest
+
+ขอบเขต `0868447..369390c` (8 commit) · รายงานของผู้ตรวจอยู่นอก repo (ไฟล์ชั่วคราว ไม่ได้เก็บ) — สิ่งที่ต้องรู้จากรายงานสรุปไว้ในตารางนี้ · **แยกสองคำรับรอง:** 9 repro ของ §14 ปิดจริง
+(regression 60 test ผ่าน) **แต่ไม่เท่ากับ** "ทุกตัวเขียน / ตัวอ่านของระบบครบกติกา" — R2-1..R2-4 คือเส้นทางที่ §14 ไม่ได้ครอบ · test ของ R2-1..R2-4, R2-6 (`'`, `"`, `\`),
+R2-7, R2-8 **ล้มบน code ก่อนแก้** (ตรวจแล้ว: stash `app scripts mcp_servers` เก็บ test ไว้ — 12 ล้ม) และผ่านหลังแก้ · ชื่อ field `a.b` / `$money` / ไทย
+ผ่านทั้งก่อนและหลัง (เป็นตัวกันถอย ไม่ใช่ repro) · R2-5 ยืนยันด้วยการรันแบบ CI ไม่ใช่ test ที่ล้ม · pytest **1194 passed, 3 skipped** ทั้งบนสำเนา DB และแบบ CI (checkout สะอาด ไม่มี `.env` / DB) · lint ของ CI ผ่าน
+
+| # | ที่ผู้ตรวจพบ | แก้ | test |
+|---|---|---|---|
+| R2-1 P1 | schema analyzer, dimension detector, view copy, hierarchy bootstrap: ตรวจ `may_replace` ก่อน แล้วเขียนด้วย key อย่างเดียว — คนแก้ระหว่างอ่านกับเขียนถูกทับเนื้อหา | ORM: `query.update` + `replaceable(INFERRED)` ใน WHERE (แบบ `save_training`) · view copy: เงื่อนไขใน UPDATE + rowcount 0 = เข้าคิว · bootstrap: ไม่อ่านก่อนแล้ว — `ON CONFLICT DO UPDATE ... WHERE replaceable` + rowcount 0 = เข้าคิว | `test_provenance_machines`: `test_a_persons_edit_between_the_check_and_the_write_wins` (คนแก้ใน hook ของ `may_replace`), `test_bootstrap_leaves_a_level_a_person_took_just_before_the_write` (คนแก้ก่อน UPSERT — code เดิมได้ `["division"]` ทับ `["human"]` ตามที่ผู้ตรวจพบ) |
+| R2-2 P2 | Admin Agent / `nt_admin_mcp`: search examples / mappings / rules และ list contexts คืนแถว proposed / rejected → ส่งให้โมเดลสรุป | 4 tool กรอง `status = 'active'` + `is_active` (search rules เดิมไม่กรอง `is_active` และมี parameter ขอกฎที่ปิด — ตัดทั้งใน tool และ `nt_admin_mcp.search_rules`; search hierarchy กรองอยู่แล้ว) — ข้อเสนอดูที่คิว ไม่ใช่ผ่านเครื่องมือของ agent | `test_provenance_readers`: `test_the_admin_agents_tools_hand_its_model_active_rows_only` (+ กฎ `is_active = 0, status = active`) |
+| R2-3 P2 | thumbs-up / review ของ admin: มีตัวอย่างของคำถามนั้นรออยู่ = ไม่แตะ (`if not existing`) แต่ thumbs-up ยัง train Vanna | ทั้งสองทางใช้ `save_training(is_admin=True)` ตัวเดียวกับ `/chat/train` (ย้ายไป `feedback_service`) — ตัวอย่างแรกของคำถาม (ตาม id) เป็นของ admin + active + เปิด **ก่อน** train · category = `chat.context_name` (เดิม review ใส่ feedback category) | `test_provenance_learner`: `test_an_admin_taking_a_waiting_example_puts_it_in_use_before_training` |
+| R2-4 P2 | `update_value` ของ hierarchy รับข้อเสนอเป็น `manual/active` แต่ `is_active` ยัง 0 | เปิดเมื่อสถานะเดิมไม่ใช่ `active` (กฎ `mark_human_edit`) · การรับค่าลูกใน `upsert_level` คงเป็นแบบสถานะอย่างเดียว: extract เขียนค่าแบบเปิด ค่าที่ปิด = คนลบ | `test_provenance_people`: `test_a_person_editing_a_proposed_hierarchy_value_switches_it_on` |
+| R2-5 P2 | CI หลัง pin ผ่าน collection แต่ล้ม 5 (`--maxfail=5` — รันแบบไม่หยุดได้ 7 เมื่อรวมสอง test ที่ R2-2/R2-3 กระทบ) — test อ่าน `.env` / config DB ของเครื่อง dev | fixture ตั้ง `CONFIG_DB_URL` / config engine ของตัวเอง, mock `_workspaces` ใน test ที่ไม่ได้ทดสอบ registry | รันแบบ CI ในเครื่อง: 1194 passed |
+| R2-6 P3 | ชื่อ field ใน JSON path: `'` = SQL syntax error, `"` / `\` = path เสีย | `'` ซ้อน · `"` / `\` = `ValueError` ก่อนเขียนอะไร — SQLite 3.40 (Python 3.10 ของ venv) ไม่อ่าน escape ใน label (3.51 อ่าน) จึงไม่มีรูปที่ใช้ได้ทุกเครื่อง · ชื่อ field ทุกตัวที่ใช้จริงเป็นชื่อคอลัมน์ | `test_a_merged_field_keeps_its_name`, `test_a_field_name_no_path_can_carry_is_refused_before_anything_is_filed` |
+| R2-7 P3 | `propose()`: อีก connection เสนอค่าเดียวกันหลัง SELECT → เขียนซ้ำ คืน True ขยับเวลา | `DO UPDATE ... WHERE json(merged) != json(proposed)` + คืน rowcount — ตรวจบน SQLite 3.40 ด้วย · การ reject แทรกกลาง (SELECT แล้ว) ยังไม่ serialize | `test_the_same_proposal_filed_meanwhile_by_another_connection_is_not_written_again` |
+| R2-8 P3 | `save_examples`: UPDATE ได้บางแถว (อีกแถวคนเพิ่งเอาไป) → `written = 0` | นับต่อคำถามเมื่อ rowcount > 0; แถวของ contract พูดตามนั้นแล้ว = ไม่มีอะไรรอ (เหมือน `mine and not stale`) | `test_provenance_contract`: `..._counts_a_question_written_even_when_a_person_took_one_of_its_rows_meanwhile` |
+| + | `mcp_servers/requirements.txt` ยัง `mcp>=1.0.0` + `fastmcp` (ไม่มีใคร import) | `mcp==1.26.0` ตรงกับ root, ตัด `fastmcp` (+ README) | — |
+
+**ตรวจซ้ำ diff (ผู้ตรวจ, อ่านอย่างเดียว 2026-09-23):** search rules ยังคืนกฎที่ปิด, test bootstrap เดิม (`inferred/rejected`) ผ่านบน code เก่าด้วย
+และไม่ตรวจคิว, อ้าง path ชั่วคราว — แก้ทั้งสามข้อในรอบเดียวกันนี้ (ด้านบน)
+
+**test ของผู้ตรวจรันซ้ำบน code ใหม่:** R2-2..R2-4, R2-7, R2-8 ผ่าน · `a"b` / `a\b` ล้มด้วย `ValueError` ตามที่ตัดสิน · race ของ analyzer / dimension / bootstrap
+ในชุดของผู้ตรวจ**ไม่ได้ทดสอบอะไรแล้ว** — จุดที่มันเกี่ยว (`before_flush`, `may_replace` ใน bootstrap) ไม่อยู่บนทางเขียนแล้ว คนในจำลองจึงไม่ได้แก้ ·
+test ของเราเกี่ยวที่ `may_replace` ก่อนคำสั่งเขียน (ล้มบน code เดิม) · `_declare` แถวหาย / UNIQUE ชุดอื่น = ข้อจำกัดที่ผู้ตรวจแยกไว้ ไม่ได้แก้
+
+**ยังไม่ได้ทำ / ไม่ได้ตรวจ:** ไม่ได้ commit / push (CI จริงรู้หลัง push) · ไม่ได้ restart — **server รันจาก working tree**: start ครั้งถัดไป = ขึ้นไฟล์ที่แก้นี้
+ด้วย (ไม่ต้อง migrate) · script เก่าที่เขียนตรง (`populate_schema_metadata.py`, `import_master_data.py`, `add_mapping.py`, `insert_golden_example.py`) ยังไม่ผ่าน helper ·
+duplicate check ของ AddMapping / AddRule ยังบอกว่ามีแถว (รวมแถว rejected) ให้โมเดลได้ · pivot / live eval / Telegram / Celery E2E ไม่ได้ตรวจ
+
 ---
 
 ## commit

@@ -257,7 +257,7 @@ ConfigSessionLocal = sessionmaker(bind=config_engine)
 
 ## PLAN_FIX_MASTER (Code Review Remediation) — implementation แล้ว, acceptance บางข้อยังค้าง
 
-ตรวจ source F1–F8 ซ้ำ 2026-09-21: [REVIEW_F1_F8_2026-09-21.md](REVIEW_F1_F8_2026-09-21.md) — F5 manual E2E, F6 deployment และ F7 trace/usage coverage ยังไม่ปิด; รอบนั้นรัน pytest ไม่ได้ (interpreter ที่ลองไม่มี pytest — suite รันด้วย `venv/bin/python3.14`: HEAD `7cdc7af` ผ่าน 1180) · **CI บน main แดง 2026-09-18..22 เพราะ mcp 2.x** — pin `mcp==1.26.0` แล้ว (`36d1867`), รอผลหลัง push
+ตรวจ source F1–F8 ซ้ำ 2026-09-21: [REVIEW_F1_F8_2026-09-21.md](REVIEW_F1_F8_2026-09-21.md) — F5 manual E2E, F6 deployment และ F7 trace/usage coverage ยังไม่ปิด; รอบนั้นรัน pytest ไม่ได้ (interpreter ที่ลองไม่มี pytest — suite รันด้วย `venv/bin/python3.14`: HEAD `7cdc7af` ผ่าน 1180) · **CI บน main แดง 2026-09-18..22 เพราะ mcp 2.x** — pin `mcp==1.26.0` แล้ว (`36d1867`) — CI หลัง pin ผ่าน collection แต่ล้ม 5 test ที่พึ่ง config DB ของเครื่อง dev; fixture แก้แล้ว (`RESULT_P8_PHASE1` §15 R2-5)
 
 F3-A CI, F1 Correctness, F2 Hygiene/Leaks, F4 SQL Hardening, F5 Telegram, F3-B Eval Harness,
 F7 Token/Observability, F6 Reports/Export, F8 Structured Output, F9 A-D (flags OFF),

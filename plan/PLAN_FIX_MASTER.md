@@ -125,7 +125,7 @@ Wave 6 (integration ข้ามระบบ)
 - [x] F7 ใช้ provider usage และ JSON trace ในเส้นทางหลัก
 - [x] F8 ใช้ structured intent + fallback
 - [x] อัปเดตสถานะเอกสารและเชื่อมหลักฐาน source
-- [ ] ยืนยัน CI ล่าสุดบน main และ regression suite ของ revision ที่จะ deploy — 2026-09-22: CI แดงตั้งแต่ 09-18 เพราะ mcp 2.x (pin `36d1867`, รอผลหลัง push); suite ในเครื่องที่ HEAD `7cdc7af` ผ่าน 1180
+- [ ] ยืนยัน CI ล่าสุดบน main และ regression suite ของ revision ที่จะ deploy — 2026-09-22: CI แดงตั้งแต่ 09-18 เพราะ mcp 2.x (pin `36d1867`; CI run 35751495745 / 35810415450 ผ่าน collection แต่ล้ม 5 test ที่พึ่ง config DB ของเครื่อง dev — fixture แก้แล้ว `RESULT_P8_PHASE1` §15); suite ในเครื่องที่ HEAD `7cdc7af` ผ่าน 1180
 - [ ] F5 manual webhook E2E ผ่าน tunnel
 - [ ] F6 ยืนยันตาราง `report_exports` และ export/cleanup บน deployment (go-live เดิมพบตารางหาย) — 2026-09-22: DB จริงยังไม่มีตาราง
 - [ ] F7 ยืนยัน/ปิดช่องว่าง trace early exits และ usage ของ fallback ตามรายงานตรวจ

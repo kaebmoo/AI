@@ -488,8 +488,16 @@
 14. **test ของเราผ่านหมด แต่ผู้ตรวจอีกคนเจอ 9 ข้อ** — race, แถวซ้ำ, แถว rejected ถูกถอนแล้วกลับมา, ทางที่ migration ล้ม, ตัวอ่านที่ลืมระดับแม่: ทุกข้อคือกรณีที่ไม่มี test ·
     ให้ไล่ทั้งช่วง commit ก่อนถือว่า Exit ผ่าน
 
+15. **ปิด repro ครบ ≠ ปิดกฎทั้งระบบ** (ตรวจรอบ 2 — `RESULT_P8_PHASE1` §15) — หลังแก้ 9 ข้อ ยังมีตัวเขียนอีก 4 ทางที่ตรวจก่อนเขียน
+    (`may_replace` แล้ว setattr ORM / UPDATE ด้วย key) → ไล่ `may_replace(` ทุกจุดว่าคำสั่งเขียนที่ตามมามี `replaceable()` ใน WHERE ด้วย
+16. **ทางรับของคนมีหลายประตู** — `/chat/train`, thumbs-up, review, แก้ค่า hierarchy: ประตูที่ไม่ผ่าน `mark_human_edit` / `save_training` รับแล้วแถวไม่เปิด
+    หรือไม่รับเลยแต่ train → ประตูใหม่ใช้ทางเดียวกัน
+17. **path label ของ JSON บน SQLite ต่างรุ่นอ่านต่างกัน** — 3.51 อ่าน escape ใน `$."..."`, 3.40 (venv Python 3.10) ไม่อ่าน → ตรวจบน interpreter ที่ server ใช้
+
 ## จาก CI ที่แดงโดยไม่มีใครเห็น (2026-09-22)
 
 1. **dependency ที่ไม่มีเพดาน major version** — `mcp>=1.26.0` ให้ CI ได้ mcp 2.2.0 (API เปลี่ยน) → ทุก push บน main ล้มตั้งแต่ 2026-09-18
    ขณะที่ในเครื่องยังเป็น 1.26.0 และ suite ผ่าน → pin เวอร์ชันที่ code และ test ใช้จริง (`mcp==1.26.0`); ยกเพดานพร้อมงาน migrate เท่านั้น
 2. **ไม่มีใครดูผล CI หลัง push** — แดง 8 รอบติด 4 วัน ขณะที่งานขึ้นของจริงไปหลายรอบ → ดู `gh run list --branch main` หลังทุก push
+3. **`--maxfail=5` + collection error ซ่อน test ที่พึ่งเครื่อง dev** — พอ collection ผ่าน ล้มอีก 5 (`.env` / config DB ของ dev) → รันแบบ CI ในเครื่อง:
+   checkout สะอาด (`git ls-files` → temp), `env -i` + env ของ workflow, ไม่มี `.env` / DB
