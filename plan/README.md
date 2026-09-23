@@ -22,6 +22,8 @@
 |------|--------|
 | [PLAN_6_SAAS.md](PLAN_6_SAAS.md) | Design only — multi-tenant/SaaS (prerequisite Plan 5 เสร็จแล้ว) — ส่วน Model A/C/D ย้ายไปอยู่ใน Plan 7 — ⚠️ Model B (upload = import) ถูกปรับโดยหลักของเจ้าของ 2026-09-21 (ดู Plan 8 §8) |
 | [PLAN_7_DATA_SOURCE_SERVICE.md](PLAN_7_DATA_SOURCE_SERVICE.md) | 🟡 **Phase 1–6 ✅ + hardening ✅ + go-live ฝั่ง AI ✅ (2026-09-20)** — ปุ่ม portal เปิดเฉพาะ `revenue`; Phase 7 (packaging Tier 2) ยังไม่เริ่ม; ผล: `archive/RESULT_P7_*.md`, `archive/RESULT_F11.md`; งานฝั่ง NT-Report: [PROMPT_NT_REPORT_P7.md](PROMPT_NT_REPORT_P7.md) |
+| [PROMPT_P8_PHASE2.md](PROMPT_P8_PHASE2.md) | สั่งงาน session ใหม่: ปิดงานค้างของ 8.1 (start service, ตรวจหลัง start, push + CI) แล้วเริ่ม Phase 8.2 |
+| [PROMPT_CODEX_REVIEW_2.md](PROMPT_CODEX_REVIEW_2.md) | สั่งผู้ตรวจรอบ 2: การแก้ตามผลตรวจ 9 ข้อ + pin CI (`0868447..369390c`) |
 | [PLAN_8_SELF_SERVICE_ONBOARDING.md](PLAN_8_SELF_SERVICE_ONBOARDING.md) | 📝 **ร่าง 2026-09-21** — ต่อแหล่งข้อมูลเอง → เตรียมพร้อมอัตโนมัติ (pipeline เดียว สองโหมด: อนุมาน + contract) → คนตัดสินเฉพาะที่ไม่แน่ใจ; BYOK, key self-service; D-A/B/C ตัดสินแล้ว; งานแรก: [PROMPT_P8_PHASE0_1.md](PROMPT_P8_PHASE0_1.md) |
 | [PLAN_PENDING_BGE_M3.md](PLAN_PENDING_BGE_M3.md) | **รออนุมัติ** — เปลี่ยน Vanna embedding เป็น BGE-M3 (ห้าม execute จนกว่าจะอนุมัติ) |
 
