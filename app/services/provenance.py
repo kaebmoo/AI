@@ -86,15 +86,31 @@ def missing_provenance(engine) -> list:
     return missing
 
 
-def mark_human_edit(row, table: str, changed: Iterable[str]) -> None:
+def mark_human_edit(row, table: str, changed: Iterable[str], sent: Iterable[str] = ()) -> None:
     """An ORM row a person just changed: theirs (or still declared — after_human_edit), and in use. Taking a proposal
-    switches it on too (the learner writes proposals switched off), unless the person set is_active themselves."""
+    switches it on too (the learner writes proposals switched off), unless the person set is_active themselves —
+    `sent`: what they saved, changed or not."""
     changed = set(changed)
     taking = row.status != ACTIVE
     row.source = after_human_edit(table, row.source, changed)
     row.status = ACTIVE
-    if taking and hasattr(row, "is_active") and "is_active" not in changed:
+    if taking and hasattr(row, "is_active") and "is_active" not in changed | set(sent):
         row.is_active = True
+
+
+def changed_fields(stored, data: Dict[str, Any]) -> list:
+    """The fields of `data` whose value differs from `stored` (a row mapping). A form sends every field, the
+    untouched ones too — only these are a person's edit: a contract row saved as it is stays declared (feed_sales
+    turned manual that way on 2026-09-22, and sales 1.3.3 waited as a proposal instead of reaching the prompt)."""
+    return [key for key, value in data.items() if stored[key] != value]
+
+
+def apply_human_edit(row, table: str, data: Dict[str, Any]) -> None:
+    """Set on an ORM row what a person saved, and label it by what changed (mark_human_edit)."""
+    changed = changed_fields({key: getattr(row, key) for key in data}, data)
+    for key, value in data.items():
+        setattr(row, key, value)
+    mark_human_edit(row, table, changed, sent=data)
 
 
 def _run(conn, sql: str, params: Dict[str, Any]):

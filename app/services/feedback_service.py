@@ -161,15 +161,12 @@ def save_training(db: Session, question: str, sql: str, context: Optional[str], 
     One example per question: the first one found (by id) is the one changed."""
     from sqlalchemy import text
 
-    from app.services.provenance import (ACTIVE, LEARNED, MANUAL, PROPOSED, mark_human_edit, may_replace, propose,
+    from app.services.provenance import (ACTIVE, LEARNED, MANUAL, PROPOSED, apply_human_edit, may_replace, propose,
                                          replaceable)
 
     existing = db.query(GoldenExample).filter(GoldenExample.question_pattern == question).order_by(GoldenExample.id).first()
     if is_admin and existing:
-        existing.expected_sql = sql
-        existing.is_active = True
-        existing.added_by = user_id
-        mark_human_edit(existing, "golden_examples", ["expected_sql"])
+        apply_human_edit(existing, "golden_examples", {"expected_sql": sql, "is_active": True, "added_by": user_id})
     elif existing:  # the UPDATE re-checks: a person may have taken the waiting correction in the meantime
         waiting = may_replace(LEARNED, existing.source, existing.status) and db.query(GoldenExample).filter(
             GoldenExample.id == existing.id, text(replaceable(LEARNED))).update(

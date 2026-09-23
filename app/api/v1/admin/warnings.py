@@ -15,7 +15,7 @@ from app.schemas.admin_schemas import (
     DataWarningResponse,
     DataWarningUpdate,
 )
-from app.services.provenance import ACTIVE, MANUAL, mark_human_edit
+from app.services.provenance import ACTIVE, MANUAL, apply_human_edit
 from app.services.warning_detector import clear_warnings_cache
 from app.core.time_utils import utcnow
 
@@ -92,9 +92,7 @@ def update_data_warning(
         raise HTTPException(status_code=404, detail="Data warning not found")
 
     update_data = data.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(warning, key, value)
-    mark_human_edit(warning, "data_warnings", update_data)
+    apply_human_edit(warning, "data_warnings", update_data)
 
     warning.updated_at = utcnow()
     db.commit()

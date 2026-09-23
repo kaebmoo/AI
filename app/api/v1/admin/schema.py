@@ -33,7 +33,7 @@ from app.schemas.admin_schemas import (
     ViewSummaryListResponse,
 )
 from app.services.ai_service import AIService
-from app.services.provenance import ACTIVE, INFERRED, MANUAL, mark_human_edit, may_replace, propose, replaceable
+from app.services.provenance import ACTIVE, INFERRED, MANUAL, apply_human_edit, mark_human_edit, may_replace, propose, replaceable
 from app.services.query_engine import clear_query_cache
 from app.services.schema_service import SchemaService
 
@@ -119,9 +119,7 @@ def update_schema_column(
         raise HTTPException(status_code=404, detail="Column metadata not found")
 
     update_data = data.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(column, key, value)
-    mark_human_edit(column, "schema_metadata", update_data)
+    apply_human_edit(column, "schema_metadata", update_data)
 
     column.updated_at = utcnow()
     db.commit()

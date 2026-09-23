@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from app.core.time_utils import utcnow
-from app.services.provenance import ACTIVE, MANUAL, after_human_edit
+from app.services.provenance import ACTIVE, MANUAL, after_human_edit, changed_fields
 
 if TYPE_CHECKING:
     from app.services.schema.service import SchemaService
@@ -122,9 +122,14 @@ def update_context(service: "SchemaService", context_id: int, data: Dict) -> Opt
 
         params["updated_at"] = utcnow()
         set_parts.append("updated_at = :updated_at")
-        # a person's edit: theirs — or still declared when only fields the contract never writes changed
-        current = conn.execute(text("SELECT source FROM schema_contexts WHERE id = :id"), {"id": context_id}).scalar()
-        params["source"], params["status"] = after_human_edit("schema_contexts", current, data), ACTIVE
+        # a person's edit: theirs — or still declared when no field the contract writes changed value
+        stored = _normalize_context_row(
+            conn.execute(text("SELECT * FROM schema_contexts WHERE id = :id"), {"id": context_id}).mappings().fetchone()
+        )
+        if stored is None:
+            return None
+        changed = changed_fields(stored, data)
+        params["source"], params["status"] = after_human_edit("schema_contexts", stored["source"], changed), ACTIVE
         set_parts += ["source = :source", "status = :status"]
 
         sql = f"UPDATE schema_contexts SET {', '.join(set_parts)} WHERE id = :id"

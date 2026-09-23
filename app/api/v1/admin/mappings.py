@@ -15,7 +15,7 @@ from app.schemas.admin_schemas import (
     SemanticMappingResponse,
     SemanticMappingUpdate,
 )
-from app.services.provenance import ACTIVE, MANUAL, mark_human_edit
+from app.services.provenance import ACTIVE, MANUAL, apply_human_edit
 from app.services.query_engine import clear_query_cache
 from app.services.schema_service import SchemaService
 from ._shared import mark_brain_dirty
@@ -118,9 +118,7 @@ def update_semantic_mapping(
         if existing:
             raise HTTPException(status_code=400, detail=f"Keyword '{update_data['keyword']}' already exists")
 
-    for key, value in update_data.items():
-        setattr(mapping, key, value)
-    mark_human_edit(mapping, "schema_semantic_mapping", update_data)
+    apply_human_edit(mapping, "schema_semantic_mapping", update_data)
 
     mapping.updated_at = utcnow()
     db.commit()

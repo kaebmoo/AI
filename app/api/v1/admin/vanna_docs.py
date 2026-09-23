@@ -16,7 +16,7 @@ from app.schemas.admin_schemas import (
     VannaDocUpdate,
 )
 from ._shared import mark_brain_dirty
-from app.services.provenance import ACTIVE, MANUAL, mark_human_edit
+from app.services.provenance import ACTIVE, MANUAL, apply_human_edit
 
 router = APIRouter()
 
@@ -115,9 +115,7 @@ def update_vanna_doc(
 
     try:
         update_data = data.model_dump(exclude_unset=True)
-        for key, value in update_data.items():
-            setattr(doc, key, value)
-        mark_human_edit(doc, "vanna_documentation", update_data)
+        apply_human_edit(doc, "vanna_documentation", update_data)
 
         db.commit()
         db.refresh(doc)

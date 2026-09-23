@@ -106,6 +106,35 @@ def test_a_person_editing_a_contract_context(db):
     assert (created["source"], created["status"]) == ("manual", "active")
 
 
+def test_saving_a_form_unchanged_is_not_an_edit(db, monkeypatch):
+    """The admin forms send every field: re-saving a contract row as it is made it manual (feed_sales, 2026-09-22),
+    and the contract's next version waited as a proposal instead of reaching the prompt."""
+    from app.api.v1.admin import vanna_docs
+    from app.schemas.admin_schemas import VannaDocUpdate
+    from app.services.schema import context_store
+    from app.services.schema_service import SchemaService
+    path, engine = db
+    service = SchemaService(config_engine=engine, business_engine=engine)
+    form = {"display_name": None, "description": None, "main_view": "feed_revenue_fact_bu_monthly", "is_active": True,
+            "priority": 0, "keywords": ["รายได้"], "instruction_th": "จาก contract", "instruction_en": None}
+    context_store.update_context(service, 16, form)
+    assert knowledge_db.rows(path, "SELECT source, status FROM schema_contexts WHERE id = 16") == [("declared", "active")]
+    context_store.update_context(service, 16, {**form, "instruction_th": "admin เขียนเอง"})
+    assert knowledge_db.rows(path, "SELECT source FROM schema_contexts WHERE id = 16") == [("manual",)]
+
+    monkeypatch.setattr(vanna_docs, "mark_brain_dirty", lambda: None)
+    with engine.begin() as conn:
+        conn.exec_driver_sql("INSERT INTO vanna_documentation (id, doc_key, title, content, context_name, source, status) "
+                             "VALUES (1, 'k', 't', 'จาก contract', 'feed_revenue', 'declared', 'active')")
+    session = sessionmaker(bind=engine)()
+    doc = VannaDocUpdate(title="t", content="จาก contract", category="guide", context_name="feed_revenue", is_active=True)
+    vanna_docs.update_vanna_doc(doc_id=1, data=doc, _current_user=None, db=session)
+    assert knowledge_db.rows(path, "SELECT source FROM vanna_documentation") == [("declared",)]
+    doc.content = "admin เขียนเอง"
+    vanna_docs.update_vanna_doc(doc_id=1, data=doc, _current_user=None, db=session)
+    assert knowledge_db.rows(path, "SELECT source, content FROM vanna_documentation") == [("manual", "admin เขียนเอง")]
+
+
 def test_a_person_accepting_a_proposed_level_takes_its_values_in_use(db, monkeypatch):
     from app.services import hierarchy_service as hs
     path, engine = db
@@ -174,6 +203,14 @@ def test_a_person_taking_a_proposal_switches_it_on(db):
                                    source="manual", status="active")
     p.mark_human_edit(in_use, "schema_semantic_mapping", {"description": "x"})  # a row a person switched off earlier
     assert in_use.is_active is False
+    as_it_is = SchemaSemanticMapping(keyword="fttx", target_column="c", target_condition="= 1", is_active=False,
+                                     source="learned", status="proposed")
+    p.apply_human_edit(as_it_is, "schema_semantic_mapping", {"target_column": "c"})  # taken without a change
+    assert (as_it_is.source, as_it_is.status, as_it_is.is_active) == ("manual", "active", True)
+    off_as_sent = SchemaSemanticMapping(keyword="xdsl", target_column="c", target_condition="= 1", is_active=False,
+                                        source="learned", status="proposed")
+    p.apply_human_edit(off_as_sent, "schema_semantic_mapping", {"target_column": "c", "is_active": False})
+    assert (off_as_sent.status, off_as_sent.is_active) == ("active", False)  # the form said off: kept off
 
 
 def test_a_person_editing_a_proposed_hierarchy_value_switches_it_on(db, monkeypatch):

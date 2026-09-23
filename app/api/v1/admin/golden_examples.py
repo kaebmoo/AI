@@ -15,7 +15,7 @@ from app.schemas.admin_schemas import (
     GoldenExampleUpdate,
 )
 from app.services.ai_service import AIService
-from app.services.provenance import ACTIVE, MANUAL, mark_human_edit
+from app.services.provenance import ACTIVE, MANUAL, apply_human_edit
 from app.services.query_engine import clear_query_cache
 from ._shared import mark_brain_dirty
 
@@ -111,9 +111,7 @@ def update_golden_example(
         raise HTTPException(status_code=404, detail="Golden example not found")
 
     update_data = data.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(example, key, value)
-    mark_human_edit(example, "golden_examples", update_data)
+    apply_human_edit(example, "golden_examples", update_data)
 
     db.commit()
     db.refresh(example)
