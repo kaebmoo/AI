@@ -277,7 +277,7 @@ def detect_levels(con, ds: Dataset) -> None:
             continue  # a function of the period (month number, month name) — not a level
         if c.distinct <= MAX_LEVEL_VALUES:
             totals = {v: float(t or 0) for v, t in q(con, f"SELECT {ident(c.name)}, sum({ident(measure)}) FROM "
-                                                         f"{ident(ds.view)} GROUP BY 1")}
+                                                         f"{ident(ds.view)} GROUP BY 1 ORDER BY 1")}  # stable draft
             grand = sum(totals.values())
             why = []
             for v, t in totals.items():

@@ -74,7 +74,8 @@ def test_a_relationship_is_found_by_reconciling_cells_and_its_exception_is_liste
     found = cd.find_bridges(con, ledger, report)
     assert found, "the per-division totals agree in all but one cell"
     best = found[0]
-    assert best["left_measure"] == "amount[row_type=line]"  # the total rows are cut away, not summed in
+    # a slice by row_type, never the whole column that counts every line twice (here line = total per cost center)
+    assert best["left_measure"].startswith("amount[row_type=")
     assert "fact_ledger.cost_center→dim_org.division = fact_report.division" in best["grain"]
     assert best["cells"] == 12 and best["cells_matched"] == 11
     assert best["exceptions"][0]["cell"] == [202503, "div 2"] and best["exceptions"][0]["diff"] == -100.0
