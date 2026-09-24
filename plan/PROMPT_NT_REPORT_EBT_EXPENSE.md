@@ -126,3 +126,8 @@ UPDATE schema_metadata SET display_name_th = 'งวด ค.ศ. (YYYYMM)', spec
 = "เดือน … 2568" ตอบเป็น 2026 เพราะตัวอย่างที่ RAG ดึงมาคือ "…พฤษภาคม 2569 → 202605" แล้วโมเดลลอกงวด · eval ที่รันด้วย 3.14 จึงไม่เห็น
 **งานแก้ใน code ที่เสนอ** (task แยก): pass 2 ต้องใส่ filter ที่กฎ / mapping บังคับได้, พิมพ์ description ของ contract, กติกาเวลาใน pass 1,
 ตัวอย่างจาก RAG ต้องไม่กำหนดงวดแทนคำถาม
+
+**ขึ้นของจริง 2026-09-25 00:04** (เจ้าของอนุมัติ; backup ก่อนใส่ใน scratchpad ของ session `backup_20260925/`; mapping id 216; restart บน `b2a5ddd`) ·
+วัดบนสำเนาของ DB จริงหลังขึ้น (Python 3.10 + RAG): **3/5, 3/5** — ข้อ 1, 3, 4 ถูกทุกรอบ · ข้อ 2 ใส่ขอบเขต EBT + ปีถูกแล้ว แต่กรอง
+`expense_group_name LIKE '%ค่าไฟฟ้า%'` แทน `cat_l2_th` (pass 2 ซ่อนผล value lookup ของคอลัมน์ที่ pass 1 ไม่ได้เลือก — แก้ใน code, ไม่เพิ่ม mapping รายรายการ) ·
+ข้อ 5 ต้อง multi-context
