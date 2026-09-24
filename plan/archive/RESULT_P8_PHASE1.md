@@ -503,6 +503,8 @@ test ของเราเกี่ยวที่ `may_replace` ก่อนค
 **ยังไม่ได้ทำ / ไม่ได้ตรวจ:** ไม่ได้ restart — **server รันจาก working tree**: start ครั้งถัดไป = ขึ้น `git log 528be11..HEAD`
 (ไม่ต้อง migrate) · script เก่าที่เขียนตรง (`populate_schema_metadata.py`, `import_master_data.py`, `add_mapping.py`, `insert_golden_example.py`) ยังไม่ผ่าน helper · pivot / live eval / Telegram / Celery E2E ไม่ได้ตรวจ
 
+**ขึ้นของจริง 2026-09-24 22:57:34 (PID 79829, `b58daaf`):** server เดิม (PID 9337, start 2026-09-23 10:46 = `4b73226`) หยุดด้วย SIGINT → start ใหม่คำสั่งเดิมใน Terminal ของ app · ขึ้น `4b73226..b58daaf` = `6a7a4c5` (การแก้ของคนนับเฉพาะ field ที่ค่าเปลี่ยน) + `b58daaf` (ข้อความ duplicate ของ AddMapping / AddRule) — ไม่มี migration · test 1196 passed (แบบ CI) · backup config/app DB ก่อนเริ่ม: scratchpad ของ session `backup_20260924/` · **แก้ DB จริง 1 แถว (เจ้าของอนุมัติ):** `schema_contexts.feed_sales` `manual` → `declared` (เป็น manual เพราะบันทึกฟอร์มโดยไม่แก้ส่วนที่ contract ประกาศ — บั๊กของ `6a7a4c5`) → re-sync: ebt 1.4.3 / expense 1.2.3 / sales 1.3.3 ขึ้นเป็น `declared` ครบ, `knowledge_proposals` = 0 · log: `export_cleanup` ล้ม `no such table: report_exports` (app.db — ไม่เกี่ยวกับสอง commit นี้)
+
 ---
 
 ## commit

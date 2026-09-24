@@ -1,0 +1,22 @@
+{
+  "_doc": "Drill-through from the EBT report into the expense report (2026-09-23). EBT's expense (2 sales divisions, ER/MSP excluded) equals feed_expense of the same cost centers to the satang in 16 of 19 months 202501-202607; 202603-202605 differ by exactly the ER/MSP line (expense_group_name 'ค่าใช้จ่ายตอบแทนแรงงาน-ER'), 202606 by GL 54691907 on 13 cost centers (51,102,551.37) - late-booked June postings the ebt 1.4.2 build missed; ebt 1.4.3 rebuilt it and NT-Report now checks both bridges on every build (manifest.reconcile.bridges). Questions 1 and 4 can be answered from feed_ebt alone (group level, control); 2, 3 and the second part of 5 only from feed_expense (category level, which fact_ebt does not have). Same format and scorer as cross_domain_golden.json: run with --cross-domain.",
+  "allowed_contexts": ["feed_revenue", "feed_expense", "feed_sales", "feed_ebt"],
+  "examples": [
+    {"id": 1, "question": "ค่าเสื่อมราคาที่คิดอยู่ในรายงาน EBT เดือนกรกฎาคม 2569 เท่าไหร่",
+     "parts": [
+       {"context": "feed_ebt", "accept": ["feed_ebt", "feed_expense"], "sql": "SELECT SUM(amount) AS depreciation FROM feed_ebt_fact_ebt WHERE time_key = 202607 AND measure_type = 'ADDITIVE' AND group_1 = '11.ค่าเสื่อมราคาและรายจ่ายตัดบัญชีสินทรัพย์' AND division IN ('สายงานขายและปฏิบัติการลูกค้า 1', 'สายงานขายและปฏิบัติการลูกค้า 2')"}]},
+    {"id": 2, "question": "ค่าไฟฟ้าในค่าใช้จ่ายของรายงาน EBT เดือนกรกฎาคม 2569 เท่าไหร่",
+     "parts": [
+       {"context": "feed_expense", "sql": "SELECT SUM(x.expense_value_thb) AS electricity FROM feed_expense_fact_expense x JOIN feed_expense_dim_org_snapshot o ON o.cost_center = x.cost_center AND CAST(o.effective_month AS INTEGER) = x.time_key WHERE x.time_key = 202607 AND x.cat_l2_th = 'ค่าไฟฟ้า' AND o.division IN ('สายงานขายและปฏิบัติการลูกค้า 1', 'สายงานขายและปฏิบัติการลูกค้า 2')"}]},
+    {"id": 3, "question": "ในรายงาน EBT เดือนกรกฎาคม 2569 ค่าใช้จ่ายดำเนินงานอื่นรายการไหนสูงสุด เท่าไหร่",
+     "parts": [
+       {"context": "feed_expense", "sql": "SELECT SUM(x.expense_value_thb) AS amount FROM feed_expense_fact_expense x JOIN feed_expense_dim_org_snapshot o ON o.cost_center = x.cost_center AND CAST(o.effective_month AS INTEGER) = x.time_key WHERE x.time_key = 202607 AND x.expense_group_name = 'ค่าใช้จ่ายดำเนินงานอื่น' AND o.division IN ('สายงานขายและปฏิบัติการลูกค้า 1', 'สายงานขายและปฏิบัติการลูกค้า 2') GROUP BY x.cat_l2_th ORDER BY amount DESC LIMIT 1"}]},
+    {"id": 4, "question": "ค่าใช้จ่ายตอบแทนแรงงานที่คิดใน EBT เดือนมีนาคม 2569 เท่าไหร่",
+     "parts": [
+       {"context": "feed_ebt", "accept": ["feed_ebt", "feed_expense"], "sql": "SELECT SUM(amount) AS labour FROM feed_ebt_fact_ebt WHERE time_key = 202603 AND measure_type = 'ADDITIVE' AND group_1 = '01.ค่าใช้จ่ายตอบแทนแรงงาน' AND division IN ('สายงานขายและปฏิบัติการลูกค้า 1', 'สายงานขายและปฏิบัติการลูกค้า 2')"}]},
+    {"id": 5, "question": "EBT เดือนกรกฎาคม 2569 และค่าไฟฟ้าที่คิดอยู่ในนั้น",
+     "parts": [
+       {"context": "feed_ebt", "sql": "SELECT ebt_month FROM feed_ebt_fact_ebt_total_monthly WHERE time_key = 202607"},
+       {"context": "feed_expense", "sql": "SELECT SUM(x.expense_value_thb) AS electricity FROM feed_expense_fact_expense x JOIN feed_expense_dim_org_snapshot o ON o.cost_center = x.cost_center AND CAST(o.effective_month AS INTEGER) = x.time_key WHERE x.time_key = 202607 AND x.cat_l2_th = 'ค่าไฟฟ้า' AND o.division IN ('สายงานขายและปฏิบัติการลูกค้า 1', 'สายงานขายและปฏิบัติการลูกค้า 2')"}]}
+  ]
+}

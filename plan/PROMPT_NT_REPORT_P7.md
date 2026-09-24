@@ -198,3 +198,6 @@ revenue **8/10** · expense **8/10** · ebt **8/10** · sales **5/10** (หล�
 - งวดของรายงานที่ published จริง (revenue/sales 2026-08, expense 2026-04, ebt 2026-03) **ไม่ตรงกับงวดที่
   `assistant_reference_202608.md` ใช้** (2026-08 / ebt 2026-07) — ตัวเลขอ้างอิงใช้ได้ก็ต่อเมื่อมีรายงานงวดนั้น
 - `503` (audit เขียนไม่ได้) ตกเข้าสาขา default ของ hook → audit เป็น `upstream_503`; ข้อความ "ลองใหม่ภายหลัง" ถูกแล้ว
+
+## กฎเชื่อม EBT กับ expense / sales feed — 2026-09-23
+prompt แยก: `plan/PROMPT_NT_REPORT_EBT_EXPENSE.md` (ค่าใช้จ่ายของ EBT = expense feed ของ 2 สายงานขาย ไม่รวม ER; ตรงทุกสตางค์ 16/19 งวด, 202606 ต่าง GL 54691907 = 51.10 M รอ NT-Report อธิบาย; รายได้ฐานยอดขาย = sales feed ของ 2 สายการขาย BG 1–7 ตรง 17/19 งวด) — ชุดวัด `scripts/eval/ebt_expense_golden.json`
