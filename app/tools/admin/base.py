@@ -84,3 +84,16 @@ def audit_change(**kwargs) -> None:
         AuditService(db).log_change(**kwargs)
     finally:
         db.close()
+
+
+def duplicate(row, label: str, **content) -> Dict[str, Any]:
+    """The "already there" answer of an add tool, about `row`. It goes to the agent's model: a row's content only
+    while it is in use (status active) — a proposal or a rejected row is named by id and status, nothing it says
+    (Plan 8.1 readers rule; second review round). `label` names what was asked for, from the request itself."""
+    status = getattr(row, "status", None) or "active"
+    if status != "active":
+        return {"success": False, "data": {"id": row.id, "status": status},
+                "message": f"{label} มีแถวสถานะ {status} อยู่แล้ว (id={row.id}) — ตัดสินที่หน้า admin / คิวข้อเสนอ "
+                           "ไม่ใช่เพิ่มซ้ำ"}
+    return {"success": False, "data": {"id": row.id, "status": status, **content},
+            "message": f"{label} มีอยู่แล้ว (id={row.id})"}

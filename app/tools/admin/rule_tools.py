@@ -4,7 +4,7 @@ Rule Tools — Search & Add business rules
 
 from typing import Any, Dict
 
-from app.tools.admin.base import AdminTool
+from app.tools.admin.base import AdminTool, duplicate
 from app.core.time_utils import utcnow
 from app.services.provenance import ACTIVE, MANUAL
 
@@ -135,23 +135,19 @@ class AddRuleTool(AdminTool):
             from app.services.dedup_engine import DedupEngine
             dedup = DedupEngine(db)
             dedup_result = dedup.check_rule_duplicate(rule_code=params["rule_code"])
-            if dedup_result.has_duplicate:
-                return {
-                    "success": False,
-                    "message": f"rule_code '{params['rule_code']}' มีอยู่แล้ว (duplicate_type={dedup_result.duplicate_type}, id={dedup_result.existing_id})",
-                    "data": {"existing_id": dedup_result.existing_id, "duplicate_type": dedup_result.duplicate_type}
-                }
+            existing = db.get(SchemaBusinessRule, dedup_result.existing_id) if dedup_result.has_duplicate else None
+            if dedup_result.has_duplicate and existing is None:  # gone since the check: say only what was asked
+                return {"success": False, "message": f"rule_code '{params['rule_code']}' มีอยู่แล้ว",
+                        "data": {"id": dedup_result.existing_id}}
         except Exception:
             # Fallback: direct DB check
             existing = db.query(SchemaBusinessRule).filter(
                 SchemaBusinessRule.rule_code == params["rule_code"]
             ).first()
-            if existing:
-                return {
-                    "success": False,
-                    "message": f"rule_code '{params['rule_code']}' มีอยู่แล้ว (id={existing.id})",
-                    "data": {"id": existing.id, "rule_code": existing.rule_code, "description": existing.rule_description}
-                }
+
+        if existing:
+            return duplicate(existing, f"rule_code '{params['rule_code']}'", rule_code=existing.rule_code,
+                             description=existing.rule_description)
 
         rule = SchemaBusinessRule(
             rule_code=params["rule_code"],

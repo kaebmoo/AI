@@ -4,7 +4,7 @@ Mapping Tools — Search & Add semantic mappings
 
 from typing import Any, Dict
 
-from app.tools.admin.base import AdminTool
+from app.tools.admin.base import AdminTool, duplicate
 from app.core.time_utils import utcnow
 from app.services.provenance import ACTIVE, MANUAL
 
@@ -143,15 +143,10 @@ class AddMappingTool(AdminTool):
                 keyword=params["keyword"],
                 target_column=params["target_column"],
             )
-            if dedup_result.has_duplicate:
-                return {
-                    "success": False,
-                    "message": f"พบ duplicate ({dedup_result.duplicate_type}): keyword '{params['keyword']}' → {params['target_column']} (existing id={dedup_result.existing_id})",
-                    "data": {
-                        "duplicate_type": dedup_result.duplicate_type,
-                        "existing_id": dedup_result.existing_id,
-                    }
-                }
+            existing = db.get(SchemaSemanticMapping, dedup_result.existing_id) if dedup_result.has_duplicate else None
+            if dedup_result.has_duplicate and existing is None:  # gone since the check: say only what was asked
+                return {"success": False, "message": f"พบ duplicate ({dedup_result.duplicate_type}) ของ keyword "
+                                                     f"'{params['keyword']}'", "data": {"id": dedup_result.existing_id}}
         except Exception:
             # Fallback: basic exact-match check
             existing = db.query(SchemaSemanticMapping).filter(
@@ -160,17 +155,10 @@ class AddMappingTool(AdminTool):
                 SchemaSemanticMapping.is_active == True
             ).first()
 
-            if existing:
-                return {
-                    "success": False,
-                    "message": f"มี mapping สำหรับ keyword '{params['keyword']}' → {params['target_column']} อยู่แล้ว (id={existing.id})",
-                    "data": {
-                        "id": existing.id,
-                        "keyword": existing.keyword,
-                        "target_column": existing.target_column,
-                        "target_condition": existing.target_condition,
-                    }
-                }
+        if existing:
+            return duplicate(existing, f"mapping ของ keyword '{params['keyword']}' → {params['target_column']}",
+                             keyword=existing.keyword, target_column=existing.target_column,
+                             target_condition=existing.target_condition)
 
         target_value = params.get("target_value", "")
         mapping = SchemaSemanticMapping(

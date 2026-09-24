@@ -164,3 +164,37 @@ def test_the_admin_agents_tools_hand_its_model_active_rows_only(db):
         assert mark in sent
     for mark in ("q_wait", "q_no", "kw_wait", "kw_no", "R_WAIT", "R_NO", "R_OFF", "ctx_wait", "ctx_no"):
         assert mark not in sent
+
+
+def test_an_add_tools_duplicate_answer_names_a_waiting_or_rejected_row_without_its_content(db, monkeypatch):
+    """AddMapping / AddRule answer "already there" to the agent's model: the fallback returned the row's condition /
+    description whatever its status — a proposal's or a rejected row's content reached the model (review round 2).
+    DedupEngine's own answer carried only id + type; the tools' fallback (DedupEngine failing) carried the content."""
+    import asyncio
+    import json
+
+    from app.services import dedup_engine
+    from app.tools.admin.mapping_tools import AddMappingTool
+    from app.tools.admin.rule_tools import AddRuleTool
+    path, engine = db
+    with engine.begin() as conn:
+        conn.exec_driver_sql("UPDATE schema_semantic_mapping SET target_condition = 'COND_' || keyword")
+        conn.exec_driver_sql("UPDATE schema_business_rules SET rule_description = 'DESC_' || rule_code")
+    session = sessionmaker(bind=engine)()
+
+    def ask(tool, params):
+        return json.dumps(asyncio.run(tool().execute(params, session)), ensure_ascii=False, default=str)
+
+    for dedup_fails in (True, False):  # the tools' own fallback (where the content leaked), then DedupEngine's path
+        with monkeypatch.context() as m:
+            if dedup_fails:
+                m.setattr(dedup_engine, "DedupEngine", None)
+            for kw in ("kw_wait", "kw_no"):
+                sent = ask(AddMappingTool, {"keyword": kw, "target_column": "c", "target_value": "x"})
+                assert f"COND_{kw}" not in sent and '"success": false' in sent
+            for code in ("R_WAIT", "R_NO"):
+                sent = ask(AddRuleTool, {"rule_code": code, "description": "x", "rule_category": "filter"})
+                assert f"DESC_{code}" not in sent and '"success": false' in sent
+            assert "COND_kw_on" in ask(AddMappingTool, {"keyword": "kw_on", "target_column": "c", "target_value": "x"})
+            assert "DESC_R_ON" in ask(AddRuleTool, {"rule_code": "R_ON", "description": "x", "rule_category": "filter"})
+    assert knowledge_db.rows(path, "SELECT count(*) FROM schema_semantic_mapping") == [(3,)]  # nothing added
