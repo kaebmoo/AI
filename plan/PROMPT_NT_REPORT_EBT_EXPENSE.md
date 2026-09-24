@@ -98,3 +98,31 @@ AI re-sync knowledge จาก contract เอง ฝั่ง AI ไม่ต�
 ### ขึ้นของจริง 2026-09-24 22:57
 - `feed_sales` คืนเป็น `declared` (เจ้าของอนุมัติ; สาเหตุแก้ใน `6a7a4c5`) → re-sync บน config.db จริง: ebt 1.4.3 / expense 1.2.3 / sales 1.3.3 ขึ้นครบ ไม่มีข้อเสนอค้าง, กฎใหม่ 4 ข้อ active — ผู้ใช้เห็น EBT สะสม ก.ค. 366.22 MB (เดิม 417.33)
 - ยังค้างฝั่ง AI: golden 0/5 (ข้างบน) — golden example ของคำถาม "…ใน EBT" (คนละชุดกับข้อสอบ) + mapping หมวด → `cat_l2_th`, แล้ววัดซ้ำ
+
+### แก้ 0/5 ฝั่ง AI — ความรู้ 2 ชิ้น ไม่แก้ code (วัดบนสำเนา 2026-09-24)
+**สาเหตุ:** กฎ `expense_in_ebt_report` ถึงโมเดลทั้งสอง pass แต่ two-pass pass 1 (โมเดล cheap) แทบไม่แปลงเป็น filter และ pass 2 ถูกสั่ง
+"ห้ามเพิ่ม WHERE filter ที่ไม่อยู่ใน Filters ข้างต้น" (`hybrid_flow.py` ~1375) · ตารางคอลัมน์ใน prompt ไม่พิมพ์ description ของ contract จึงไม่รู้ว่า
+ค่าไฟฟ้าอยู่ใน `cat_l2_th` · pass 1 ใส่ปี พ.ศ. ใน `time_key` (256907) · routing: "ค่า/ค่าใช้จ่าย/จ่าย" = 3 คะแนนให้ feed_expense ทุกข้อ
+**ความรู้ที่ใส่** (semantic mapping ถูกคัดลอกเข้า `matched_mappings` ของ pass 1 และ pass 2 ใช้ตามตัว — รอดผ่าน two-pass; metadata = field ที่ contract ไม่เขียน จึงไม่หลุดตอน re-sync):
+```sql
+INSERT INTO schema_semantic_mapping (keyword, keyword_type, target_column, target_condition, full_condition, description, priority, is_active, context_name, source, status)
+VALUES ('EBT', 'term', 'cost_center', '',
+  'cost_center IN (SELECT o.cost_center FROM feed_expense_dim_org_snapshot o WHERE o.division IN (''สายงานขายและปฏิบัติการลูกค้า 1'', ''สายงานขายและปฏิบัติการลูกค้า 2'') AND CAST(o.effective_month AS INTEGER) = time_key) AND expense_group_name <> ''ค่าใช้จ่ายตอบแทนแรงงาน-ER''',
+  'ค่าใช้จ่ายที่คิดในรายงาน EBT = เฉพาะ cost center ของ 2 สายงานขาย ณ งวดนั้น และไม่รวมกลุ่ม ค่าใช้จ่ายตอบแทนแรงงาน-ER — ใส่เงื่อนไขนี้ทุกครั้งที่คำถามพูดถึง EBT',
+  10, 1, 'feed_expense', 'manual', 'active');
+UPDATE schema_metadata SET display_name_th = 'รายการค่าใช้จ่าย (หมวดย่อย L2)', special_notes = 'ชื่อรายการค่าใช้จ่ายย่อย (เช่น ค่าน้ำประปา) — คำถามที่เอ่ยชื่อรายการระดับนี้ให้กรองด้วย cat_l2_th ไม่ใช่ expense_group_name; "รายการไหน" ภายในกลุ่ม = GROUP BY cat_l2_th' WHERE table_name = 'feed_expense_fact_expense' AND column_name = 'cat_l2_th';
+UPDATE schema_metadata SET display_name_th = 'กลุ่มค่าใช้จ่าย (หมวดใหญ่)', special_notes = 'กลุ่มใหญ่ราว 19 กลุ่ม (เช่น ค่าสวัสดิการ, ค่าเช่าและค่าใช้สินทรัพย์) — 1 กลุ่มมีหลายรายการ cat_l2_th; ชื่อที่ต่างกันแค่ส่วนต่อท้าย (เช่น -ER) เป็นคนละกลุ่ม' WHERE table_name = 'feed_expense_fact_expense' AND column_name = 'expense_group_name';
+UPDATE schema_metadata SET display_name_th = 'งวด ค.ศ. (YYYYMM)', special_notes = 'ปี ค.ศ. เสมอ: (ปี พ.ศ. − 543) × 100 + เดือน เช่น มกราคม พ.ศ. 2568 = 202501 — ห้ามใช้เลขปี พ.ศ. ใน time_key' WHERE table_name = 'feed_expense_fact_expense' AND column_name = 'time_key';
+```
+**แถว mapping เป็นสำเนาของกฎ `expense_in_ebt_report` (contract expense 1.2.3)** — ถ้า NT-Report เปลี่ยนขอบเขต EBT ต้องแก้แถวนี้ด้วย; ทางถาวรคือแก้ two-pass ให้เคารพกฎของ context เอง แล้วถอดแถวนี้
+ถอยกลับ: `UPDATE schema_semantic_mapping SET is_active = 0 WHERE keyword = 'EBT' AND context_name = 'feed_expense'` + ตั้ง `display_name_th` / `special_notes` ของ 3 แถวกลับเป็น NULL
+
+| ชุด (Python 3.10 = มี RAG แบบ server จริง) | ก่อน | หลัง |
+|---|---|---|
+| `ebt_expense_golden` (5) | 0/5 | **3/5, 4/5** (agent: 4/5 × 4 รอบ) — ข้อ 5 ต้อง multi-context |
+| `run_eval --context feed_expense` (12) | 8/12, 8/12 | 8/12, 8/12 — ข้อที่ผิดชุดเดียวกัน (69, 70, 72, 73) |
+
+**ปัญหาแยกที่พบ (มีอยู่แล้วบน server จริง ไม่เกี่ยวกับ fix นี้):** feed_expense ได้ 12/12 เมื่อไม่มี RAG (Python 3.14) แต่ 8/12 เมื่อมี RAG — 4 ข้อที่ผิด
+= "เดือน … 2568" ตอบเป็น 2026 เพราะตัวอย่างที่ RAG ดึงมาคือ "…พฤษภาคม 2569 → 202605" แล้วโมเดลลอกงวด · eval ที่รันด้วย 3.14 จึงไม่เห็น
+**งานแก้ใน code ที่เสนอ** (task แยก): pass 2 ต้องใส่ filter ที่กฎ / mapping บังคับได้, พิมพ์ description ของ contract, กติกาเวลาใน pass 1,
+ตัวอย่างจาก RAG ต้องไม่กำหนดงวดแทนคำถาม
