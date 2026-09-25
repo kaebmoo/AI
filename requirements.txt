@@ -1,6 +1,9 @@
 fastapi>=0.128.2
 uvicorn[standard]>=0.40.0
-sqlalchemy
+# SQLAlchemy 2.1 reflects through pg_catalog.pg_collation, which duckdb-engine 0.17 does not have: CI got 2.1.0
+# on 2026-09-25 and every DuckDB schema inspection failed (the file sources' table info). Below 2.1 until
+# duckdb-engine supports it — the live server runs 2.0.25.
+sqlalchemy>=2.0,<2.1
 pydantic
 pydantic-settings
 alembic
