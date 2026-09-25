@@ -112,3 +112,30 @@ def test_every_year_the_text_marks_moves_together():
     assert fix_text("ปี 2566-2565 เพิ่มขึ้น", years) == "ปี 2569-2568 เพิ่มขึ้น"
     assert fix_text("รายได้รวมเดือนสิงหาคม 2568.", answer_years("", "WHERE year = 2026", [])) == \
         "รายได้รวมเดือนสิงหาคม 2569."  # a year that ends a sentence is still a year
+
+
+@pytest.mark.asyncio
+async def test_a_title_that_copied_the_question_keeps_its_year():
+    # portal 2026-09-25: the title copied "ปี 2569" from the question, the body converted 2026 into 2566 — one
+    # year right and one wrong, so no single shift gained anything and the text went out as it was
+    text = "### สัดส่วนรายได้ของ ICT Solution ในปี 2569\n\nรายได้รวมในปี 2566 พบว่า ... ทั้งหมดในปี 2566 ขณะที่"
+    result = await _explain(text, "สัดส่วนรายได้ ระหว่าง ict solution รายย่อย กับ บริการ ict solution เป็นกี่ % ของปี 2569",
+                            "SELECT product_name, SUM(revenue) FROM feed_revenue_fact_product_monthly "
+                            "WHERE year = 2026 AND product_name LIKE '%ict solution%' GROUP BY product_name",
+                            [{"product_name": "ICT Solution", "รายได้รวม": 557427134.57}])
+    assert result["explanation"] == text.replace("ปี 2566", "ปี 2569")
+    # a comparison in the body moves as one; the title's right year is not dragged along to 2572
+    years = answer_years("รายได้ปี 2569 เทียบปีก่อน", "WHERE year IN (2026, 2025)", [])
+    assert fix_text("ปี 2569 เทียบ 2568: ปี 2566 สูงกว่าปี 2565", years) == "ปี 2569 เทียบ 2568: ปี 2569 สูงกว่าปี 2568"
+    assert fix_text("ปี 2569: ปี 2566 สูงกว่าปี 2565", years) == "ปี 2569: ปี 2569 สูงกว่าปี 2568"
+
+
+def test_the_explain_prompt_hands_over_the_converted_years():
+    # converting 2026 was the model's own arithmetic — the prompt now carries the result
+    from app.providers.chart_postprocessor import build_explain_prompt
+
+    prompt = build_explain_prompt("สัดส่วนรายได้ของปี 2569", "SELECT p, SUM(revenue) FROM t WHERE year = 2026 GROUP BY p",
+                                  [{"p": "ICT Solution", "s": 557427134.57}])
+    assert "ค.ศ. 2026 = พ.ศ. 2569" in prompt
+    assert "ปี พ.ศ. ของข้อมูลนี้" not in build_explain_prompt("รายได้แยกกลุ่ม", "SELECT bu, SUM(x) FROM t GROUP BY bu",
+                                                             [{"bu": "Mobile", "s": 1.0}])

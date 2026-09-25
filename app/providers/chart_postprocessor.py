@@ -335,6 +335,14 @@ Example for hierarchical data (hierarchy: {hierarchy_chain}):
   "hierarchy_columns": {json.dumps(example_cols, ensure_ascii=False)}
 }}}}"""
 
+    # The model converted 2026 into "2566" by itself (RESULT_F11 §9): it is handed the converted years instead,
+    # and thai_year.fix_explanation still checks what it writes. Imported here: app.services.ai imports providers.
+    from app.services.ai.thai_year import BE_OFFSET, answer_years
+    years = sorted(answer_years(question, sql, data, schema_metadata))
+    year_rule = ("\n5. **ปี พ.ศ. ของข้อมูลนี้แปลงไว้แล้ว:** "
+                 + ", ".join(f"ค.ศ. {y - BE_OFFSET} = พ.ศ. {y}" for y in years)
+                 + " — เขียนปีตามนี้ ห้ามแปลงปีเอง") if years else ""
+
     return f"""Question: {question}
 SQL: {sql}
 Results ({len(data)} rows):
@@ -347,7 +355,7 @@ CRITICAL RULES:
 1. **SQL is the ground truth** — describe ONLY what the SQL actually queries. If the SQL has no WHERE filter for a province/department, do NOT mention any specific province/department. Look at the SQL's WHERE clause and GROUP BY to understand the scope.
 2. **Dimension columns** (Year/ปี, Month/เดือน, Quarter/ไตรมาส) — NEVER SUM or aggregate them. Report as-is (e.g., "เดือนมกราคม 2568" NOT "เดือนที่ 78").
 3. Only SUM/aggregate **MEASURE columns** (revenue, amount, cost, etc.).
-4. If data has multiple months, summarize each month individually or say "เดือน 1-12" — do NOT add month numbers together.
+4. If data has multiple months, summarize each month individually or say "เดือน 1-12" — do NOT add month numbers together.{year_rule}
 
 Ensure the "explanation" value is formatted as **beautiful Markdown**:
 - Use `###` for main summaries and `####` for subsections.

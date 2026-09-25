@@ -10,8 +10,12 @@ the question typed. A period column is one whose name says so and that the conte
 call a measure (`is_time_column` — the rule of the prompt's date section): 2,568 baht names no year,
 whichever column it sits in. A text whose years already fall inside that set is returned untouched (a
 user who typed the year gets the answer they got before). Otherwise the one shift that puts most of the
-named years on years of the answer is applied to all of them — the slip is constant, so the relative
-years of a comparison (2566 vs 2565 → 2569 vs 2568) survive. No shift that beats leaving it = left as is.
+named years on years of the answer is applied to them — the slip is constant, so the relative years of a
+comparison (2566 vs 2565 → 2569 vs 2568) survive — except a year the text already has right: a title that
+copied the question's "ปี 2569" while the body converted 2026 into "ปี 2566" keeps its 2569. That right
+title also cancels what the shift gains (one year lands, one leaves), so when no shift pays, only the
+years that cannot be right move: neither a year of the answer nor the year before one — the prior year of
+a comparison is computed in SQL (`year_month - 100`) and no literal names it. Nothing better = left as is.
 
 Only a number the text marks as a year is read or rewritten: one after ปี / พ.ศ. / งวด / เดือน / ไตรมาส /
 a month name / "8/", and the years a range or a list carries on with ("ปี 2568-2569", "ระหว่างปี 2566
@@ -83,14 +87,23 @@ def fix_text(text: str, years: Set[int]) -> str:
     if not said or not years or said <= years:
         return text
 
-    def hits(shift: int) -> int:  # distinct years: a prior year named three times is still one year
-        return sum(1 for y in said if y + shift in years)
+    def hits(shift: int, among: Set[int]) -> int:  # distinct years: a prior year named three times is one year
+        return sum(1 for y in among if y + shift in years)
 
-    # most years landed; then no change; then the smallest slip (the model's slip runs low: +k first)
-    best = max({y - s for y in years for s in said} | {0}, key=lambda k: (hits(k), k == 0, -abs(k), k))
-    if best == 0 or hits(best) <= hits(0):
-        return text
-    return _YEAR_SPAN.sub(lambda span: _BE_YEAR.sub(lambda y: str(int(y.group(0)) + best), span.group(0)), text)
+    def slip(among: Set[int]) -> int:
+        # most years landed; then no change; then the smallest slip (the model's slip runs low: +k first)
+        return max({y - s for y in years for s in among} | {0}, key=lambda k: (hits(k, among), k == 0, -abs(k), k))
+
+    best = slip(said)
+    if best != 0 and hits(best, said) > hits(0, said):
+        moved = {y for y in said if y not in years or y + best in years}  # a year already right stays
+    else:
+        moved = {y for y in said - years if y + 1 not in years}  # the years that cannot be right
+        if not moved:
+            return text
+        best = slip(moved)  # never 0: none of them is a year of the answer, so a landing beats staying
+    return _YEAR_SPAN.sub(lambda span: _BE_YEAR.sub(
+        lambda y: str(int(y.group(0)) + best) if int(y.group(0)) in moved else y.group(0), span.group(0)), text)
 
 
 def fix_explanation(explanation: Any, question: str, sql: str, rows, schema_metadata=None) -> Any:
