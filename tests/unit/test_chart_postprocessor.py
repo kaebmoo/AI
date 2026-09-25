@@ -48,6 +48,17 @@ class TestNarrativeCurrencyFormatting:
 
         assert "7,400,000,000 บาท → 7,400 ล้านบาท" in prompt
 
+    def test_prompt_names_point_in_time_columns(self):
+        # `ebt` read at 202608 is the year to date; the text called it "EBT เดือนสิงหาคม" (August is 21.05)
+        meta = [{"column_name": "ebt", "data_type": "double", "is_summable": 0,
+                 "description": "สะสม (YTD) — ไม่ใช่ยอดของเดือน; รายเดือนใช้ ebt_month"},
+                {"column_name": "ebt_month", "data_type": "double", "is_summable": 1, "description": "EBT ของเดือนนั้น"},
+                {"column_name": "division", "data_type": "string", "is_summable": 0, "is_groupable": 1}]
+        prompt = build_explain_prompt("EBT เท่าไร", "SELECT SUM(ebt) FROM t WHERE time_key = 202608",
+                                      [{"ebt": 387272315.43}], schema_metadata=meta)
+        assert "Point-in-time columns" in prompt and "ebt = สะสม (YTD) — ไม่ใช่ยอดของเดือน" in prompt
+        assert "ebt_month =" not in prompt and "division =" not in prompt
+
 
 class TestEnforceCategoricalAxisRule:
     def test_line_chart_over_account_category_downgrades_to_bar_with_warning(self):

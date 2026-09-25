@@ -303,11 +303,20 @@ def build_explain_prompt(
         groupable_cols = [m['column_name'] for m in schema_metadata
                           if m.get('is_groupable') and m.get('dimension_group') != 'time_period'
                           and not m.get('is_summable')]
+        # A cumulative column read at 202608 was written up as "EBT เดือนสิงหาคม 387.27" — August alone is 21.05.
+        # ponytail: a double the contract says not to sum = its point_in_time agg (datafeed_knowledge); store
+        # the agg itself when a contract declares a second non-sum kind
+        point_in_time = [m for m in schema_metadata if m.get('data_type') == 'double' and not m.get('is_summable')]
 
-        if measure_cols or time_cols or groupable_cols:
+        if measure_cols or time_cols or groupable_cols or point_in_time:
             column_hints = "\n\nCOLUMN HINTS (from schema metadata):"
             if measure_cols:
                 column_hints += f"\n  Measure columns (summable): {', '.join(measure_cols)}"
+            if point_in_time:
+                column_hints += ("\n  Point-in-time columns — a value AS OF the period in the WHERE clause, not that month's "
+                                 "amount; name the base (e.g. \"สะสม ม.ค.–ส.ค. 2569\"): "
+                                 + "; ".join(f"{m['column_name']} = {(m.get('description') or '')[:90]}"
+                                             for m in point_in_time))
             if time_cols:
                 column_hints += f"\n  Time columns: {', '.join(time_cols)}"
             if groupable_cols:

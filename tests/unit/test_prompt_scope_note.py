@@ -54,6 +54,49 @@ def test_window_and_anchor_reach_the_prompt(scoped):
     assert prompt.index("ห้ามแคบลงเป็นงวดอ้างอิงเอง") < prompt.index("ไม่เอ่ยถึงช่วงเวลาเลย")
 
 
+def test_no_period_at_all_is_year_to_date(scoped):
+    """"รายได้รวม" on the 202608 report means the year: users handed August asked for the year right after
+    (portal audit, 2026-09-20 and 2026-09-25) — the owner's default since 2026-09-25."""
+    scoped({"year_month": [202607, 202608]})
+    note = hybrid_flow.scope_note()
+    no_period = note[note.index("ไม่เอ่ยถึงช่วงเวลาเลย"):]
+    assert "ยอดสะสมตั้งแต่ต้นปีถึงงวดอ้างอิง 202608" in no_period
+    # a cumulative column is read at one period — summed over the months it is many times too big
+    assert "ห้าม SUM ข้ามเดือน" in no_period
+
+
+def test_pass1_can_write_the_year_to_date_and_pass2_reads_it(scoped, monkeypatch):
+    """In words alone it did nothing: time_range could not hold "year to date", so pass 1 left it empty and
+    pass 2 kept the month or summed every month of the scope (8/15 against 9/15 on a copy, 2026-09-25)."""
+    assert hybrid_flow.intent_period_note() == ""  # unscoped: pass 1's prompt is what it was
+    assert "cumulative" in hybrid_flow.INTENT_SCHEMA["properties"]["time_range"]["properties"]
+    scoped({"year_month": [2025, 2026]})  # a window of years has no month to reach
+    assert hybrid_flow.intent_period_note() == ""
+    scoped({"year_month": [202512, 202607, 202608]})
+    assert '{"year": 2026, "month": 8, "cumulative": true}' in hybrid_flow.intent_period_note()
+
+    class _Service:
+        def format_value_matches(self, *a, **k):
+            return ""
+
+    def pass2(time_range):
+        return hybrid_flow.build_pass2_prompt(service=_Service(), question="q", intent={"time_range": time_range},
+                                              context_table="t", context_thai="รายได้")
+
+    # the cumulative column is named — told only "if there is one", pass 2 summed the monthly column
+    monkeypatch.setattr(hybrid_flow, "_cumulative_columns", lambda table, config_engine=None: ["revenue_ytd"])
+    ytd = pass2({"year": 2026, "month": 8, "cumulative": True})
+    assert "**ยอดสะสม** เดือน 1–8 ปี ค.ศ. 2026 (พ.ศ. 2569) — ใช้คอลัมน์ยอดสะสม revenue_ytd ณ เดือน 8" in ytd
+    # the year alone: its last month in scope — the reference period's for its year, December for a closed one
+    assert "**ยอดสะสม** เดือน 1–8 ปี ค.ศ. 2026" in pass2({"year": 2026, "month": None, "cumulative": True})
+    assert "**ยอดสะสม** เดือน 1–12 ปี ค.ศ. 2025" in pass2({"year": 2025, "month": None, "cumulative": True})
+    # "ปี 69" came back as month 12 — 202612 has no rows yet
+    assert "**ยอดสะสม** เดือน 1–8 ปี ค.ศ. 2026" in pass2({"year": 2026, "month": 12, "cumulative": True})
+    monkeypatch.setattr(hybrid_flow, "_cumulative_columns", lambda table, config_engine=None: [])
+    assert "— SUM รายเดือน เดือน 1–8\n" in pass2({"year": 2026, "month": 8, "cumulative": True})
+    assert "- Time Range: ปี ค.ศ. 2026 (พ.ศ. 2569), เดือน 8\n" in pass2({"year": 2026, "month": 8, "cumulative": False})
+
+
 def test_a_single_period_needs_no_anchor(scoped):
     """One month is its own anchor — the old behaviour, and nothing is claimed about "latest"."""
     scoped({"year_month": [202608]})

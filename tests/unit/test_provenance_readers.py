@@ -84,6 +84,14 @@ def test_the_system_prompts_parts_read_active_rows_only(db):
     assert "ระดับใช้" in rule and "ระดับรอ" not in rule and "ระดับไม่" not in rule
 
 
+def test_the_cumulative_columns_pass2_names_are_active_rows_only(db):
+    from app.services.ai.hybrid_flow import _cumulative_columns
+    _, engine = db
+    with engine.begin() as conn:
+        conn.exec_driver_sql("UPDATE schema_metadata SET data_type = 'double', is_summable = 0 WHERE table_name = 'v'")
+    assert _cumulative_columns("v", engine) == ["col_on"]
+
+
 def test_level_detection_values_and_known_terms_read_active_rows_only(db, monkeypatch):
     from app.services import hierarchy_service as hs
     from app.services.ai import hierarchy_context

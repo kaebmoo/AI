@@ -72,6 +72,25 @@ def _context_tables(context_table: str, config_engine=None) -> Dict[str, List[st
         return {}
 
 
+def _cumulative_columns(context_table: str, config_engine=None) -> List[str]:
+    """Point-in-time measures of a context's tables: a double its contract says not to sum
+    (datafeed_knowledge.sync_schema_metadata) — revenue_ytd, ebt's ebt / expense / sales_base_revenue.
+    Active rows only (Plan 8.1). Empty = none, or config unreachable."""
+    tables = list(_context_tables(context_table, config_engine)) or [context_table]
+    try:
+        from sqlalchemy import bindparam, text
+
+        if config_engine is None:
+            from app.db.session import config_engine
+        with config_engine.connect() as conn:
+            return [row[0] for row in conn.execute(text(
+                "SELECT DISTINCT column_name FROM schema_metadata WHERE table_name IN :tables AND status = 'active' "
+                "AND data_type = 'double' AND is_summable = 0 ORDER BY column_name"
+            ).bindparams(bindparam("tables", expanding=True)), {"tables": tables})]
+    except Exception:
+        return []
+
+
 def table_rule(context_table: str, config_engine=None) -> str:
     """The prompt's table pin. A context is answered from its main view — plus any table of its own
     source that its instruction names (a file source whose main view is a dimensionless totals
@@ -159,34 +178,70 @@ def scope_note() -> str:
     # (expense / ebt: year_month → time_key) — naming only the key pinned the reference period to a
     # column those tables do not have, and ebt kept answering from the wrong year (RESULT_F11 §8)
     columns = request_scope_columns.get() or {}
-    lines, anchored = [], None
+    lines = []
     for key, value in scope.items():
         label = f"{key} (คอลัมน์ `{columns[key]}`)" if columns.get(key) and columns[key] != key else key
         values = value if isinstance(value, (list, tuple)) else [value]
         if len(values) > 6 and all(isinstance(v, int) for v in values):
             newest = max(values)
             lines.append(f"- {label}: {min(values)}–{newest} ({len(values)} ค่า) — ค่าล่าสุด/งวดอ้างอิง = {newest}")
-            anchored = anchored or newest
         else:
             lines.append(f"- {label}: {', '.join(str(v) for v in values)}"
                          + (f" — ค่าล่าสุด/งวดอ้างอิง = {max(values)}" if len(values) > 1
                             and all(isinstance(v, int) for v in values) else ""))
-            if len(values) > 1 and all(isinstance(v, int) for v in values):
-                anchored = anchored or max(values)
     note = ("\n**ขอบเขตข้อมูลของคำขอนี้ — ทุกตารางถูกกรองไว้แล้วเท่านี้:**\n" + "\n".join(lines))
+    anchored = reference_period()
     if anchored is not None:
         # The three cases are ordered on purpose. Saying only "no period mentioned means the reference
         # period" made the model narrow "ปี 69" to that one month as well (RESULT_F11 §7), so the case
         # where the question does name a period has to come first and say "do not narrow it".
+        # No period at all = the year to date (owner, 2026-09-25): twice in the portal's audit a user handed
+        # August asked for the year right after. A cumulative column summed over months is many times too
+        # big, and summed monthly values miss the net of BG8 (26,644.91 against the report's 26,036.32) —
+        # hence the point-in-time row first, for a whole year's total as well.
         note += (
             f"\nSQL ต้องใส่เงื่อนไขงวดเสมอ (ขอบเขตนี้ไม่ได้เจาะจงงวดให้) ตามลำดับนี้:"
             f"\n1. คำถามระบุช่วงเวลาไว้แล้ว (ปี / เดือน / ช่วง) → **ใช้ตามที่ระบุ ห้ามแคบลงเป็นงวดอ้างอิงเอง** "
             f"(เช่น \"ปี 2569\" = ทั้งปี ไม่ใช่เฉพาะเดือนของงวดอ้างอิง)"
             f"\n2. เอ่ยถึงเดือนหรือ \"ล่าสุด\" แต่ไม่ระบุปี → งวดอ้างอิง {anchored}"
-            f"\n3. ไม่เอ่ยถึงช่วงเวลาเลย → งวดอ้างอิง {anchored} (หรือยอดสะสมถึงงวดนั้น)"
+            f"\n3. ไม่เอ่ยถึงช่วงเวลาเลย → **ยอดสะสมตั้งแต่ต้นปีถึงงวดอ้างอิง {anchored}**"
+            f"\nยอดสะสม (ข้อ 3 และยอดรวมของทั้งปีในข้อ 1 — ปีของงวดอ้างอิงมีข้อมูลถึงงวดนั้น) = คอลัมน์ยอดสะสม "
+            f"(point-in-time) ณ เดือนสุดท้ายของช่วงแถวเดียวถ้าตารางมี ห้าม SUM ข้ามเดือน; ไม่มี = SUM รายเดือนของช่วงนั้น "
+            f"(ถามรายเดือน / แนวโน้ม = ยอดรายเดือนตามปกติ)"
             f"\n**ห้ามรวมทุกงวดในขอบเขตเป็นคำตอบเดียว** เว้นแต่คำถามขอช่วงนั้นจริง — "
             f"ขอบเขตมีไว้ให้เทียบงวดกันได้ ไม่ใช่ช่วงเวลาของคำตอบ")
     return note + "\n"
+
+
+def reference_period() -> Optional[int]:
+    """The period a scoped request is about: the largest value of the first scope key that lists several
+    numbers (a caller's window ends at its own period — the portal's year_month ends at the report's month).
+    None when unscoped, or when no key lists several numbers."""
+    from app.services.data_sources import request_scope
+
+    for value in (request_scope.get() or {}).values():
+        values = value if isinstance(value, (list, tuple)) else [value]
+        if len(values) > 1 and all(isinstance(v, int) for v in values):
+            return max(values)
+    return None
+
+
+def intent_period_note() -> str:
+    """Pass 1's time_range for the year to date, as the values to write — "" without a YYYYMM reference period.
+
+    Saying "year to date" in the scope note alone did nothing: time_range was {year, month} and could not
+    hold it, so pass 1 left it empty and pass 2 kept the reference month ("รายได้รวม") or summed every month
+    of the scope ("รายได้ บริการ 10 อันดับแรก") — 8/15 against 9/15 on a copy, 2026-09-25.
+    """
+    anchored = reference_period()
+    if anchored is None or not 1 <= anchored % 100 <= 12:
+        return ""
+    year, month = divmod(anchored, 100)
+    return (f"\n**time_range ใน intent:** คำถามที่ไม่เอ่ยถึงช่วงเวลาเลย (ข้อ 3 — รวมคำถามยอดรวม / จัดอันดับ / สัดส่วน) "
+            f"และยอดรวมของปี {year + 543} (เช่น \"ปีนี้\", \"ปี {(year + 543) % 100}\") → "
+            f"{{\"year\": {year}, \"month\": {month}, \"cumulative\": true}} (ปี {year + 543} มีข้อมูลถึงเดือน {month}); "
+            f"ยอดรวมของปีที่จบแล้ว → month = 12, cumulative = true; cumulative = false เฉพาะคำถามเดือนเดียว "
+            f"(\"เดือนล่าสุด\", \"เดือน ส.ค.\") หรือรายเดือน / แนวโน้ม\n")
 
 
 def build_initial_user_prompt(
@@ -1143,7 +1198,9 @@ INTENT_SCHEMA = {
         },
         "time_range": {
             "type": ["object", "null"],
-            "properties": {"year": {"type": ["integer", "null"]}, "month": {"type": ["integer", "null"]}},
+            "properties": {"year": {"type": ["integer", "null"]}, "month": {"type": ["integer", "null"]},
+                           # true = the year to date: months 1..month of year (intent_period_note)
+                           "cumulative": {"type": ["boolean", "null"]}},
         },
         "ordering": {
             "type": ["object", "null"],
@@ -1197,7 +1254,7 @@ async def extract_intent(
 คำถามใหม่ (follow-up): {question}
 
 **บริบท:** ข้อมูล{context_thai} (ใช้ตาราง {context_table}){intent_table_hint(context_table)}
-{scope_note()}{level_note}
+{scope_note()}{intent_period_note()}{level_note}
 
 ---
 **Task:** อัปเดต intent เดิมตามคำถามใหม่ — คงค่า filter/dimension ที่ไม่ถูกกล่าวถึงไว้ตามเดิม (inherit) และเปลี่ยนเฉพาะส่วนที่คำถามใหม่ระบุ
@@ -1207,7 +1264,7 @@ async def extract_intent(
         prompt_header = f"""คำถาม: {question}
 
 **บริบท:** ข้อมูล{context_thai} (ใช้ตาราง {context_table}){intent_table_hint(context_table)}{history_context}
-{scope_note()}{level_note}
+{scope_note()}{intent_period_note()}{level_note}
 {rag_context}
 
 ---
@@ -1329,6 +1386,22 @@ def build_pass2_prompt(
             parts.append(f"เดือน {time_range['month']}")
         if parts:
             time_text = ", ".join(parts)
+        year, month = time_range.get("year"), time_range.get("month")
+        if time_range.get("cumulative") and year:
+            # the last month of the year in scope: the reference period's for its own year, else December — pass 1
+            # wrote the year alone, or "ปี 69" as month 12, and 202612 had no rows (a copy, 2026-09-25)
+            ref = reference_period()
+            if ref and 1 <= ref % 100 <= 12:
+                last = ref % 100 if ref // 100 == year else 12
+                month = min(month, last) if month else last
+            if month:
+                # the year to date: a cumulative column is read at its last month, never summed (see scope_note);
+                # named here — told only "the cumulative column if there is one", pass 2 summed `revenue` by month
+                columns = _cumulative_columns(context_table)
+                how = (f"ใช้คอลัมน์ยอดสะสม {', '.join(columns)} ณ เดือน {month} แถวเดียว ห้าม SUM ข้ามเดือน "
+                       f"(measure อื่นที่ไม่มีคอลัมน์สะสม: SUM รายเดือน เดือน 1–{month})" if columns
+                       else f"SUM รายเดือน เดือน 1–{month}")
+                time_text = f"**ยอดสะสม** เดือน 1–{month} ปี ค.ศ. {year} (พ.ศ. {year + 543}) — {how}"
 
     ordering_text = "ไม่ระบุ"
     if intent.get("ordering"):
