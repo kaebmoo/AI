@@ -232,16 +232,24 @@ def intent_period_note() -> str:
     Saying "year to date" in the scope note alone did nothing: time_range was {year, month} and could not
     hold it, so pass 1 left it empty and pass 2 kept the reference month ("รายได้รวม") or summed every month
     of the scope ("รายได้ บริการ 10 อันดับแรก") — 8/15 against 9/15 on a copy, 2026-09-25.
+
+    Every case is spelled as the JSON to write: pass 1 copies a JSON faithfully and a rule loosely — told only
+    "cumulative = false for a monthly question", it kept the reference month and answered "รายได้ Mobile
+    รายเดือน" with August alone, or kept cumulative and gave "รายได้ ICT Solution รายเดือน" one year-to-date row.
     """
     anchored = reference_period()
     if anchored is None or not 1 <= anchored % 100 <= 12:
         return ""
     year, month = divmod(anchored, 100)
-    return (f"\n**time_range ใน intent:** คำถามที่ไม่เอ่ยถึงช่วงเวลาเลย (ข้อ 3 — รวมคำถามยอดรวม / จัดอันดับ / สัดส่วน) "
-            f"และยอดรวมของปี {year + 543} (เช่น \"ปีนี้\", \"ปี {(year + 543) % 100}\") → "
-            f"{{\"year\": {year}, \"month\": {month}, \"cumulative\": true}} (ปี {year + 543} มีข้อมูลถึงเดือน {month}); "
-            f"ยอดรวมของปีที่จบแล้ว → month = 12, cumulative = true; cumulative = false เฉพาะคำถามเดือนเดียว "
-            f"(\"เดือนล่าสุด\", \"เดือน ส.ค.\") หรือรายเดือน / แนวโน้ม\n")
+    be = year + 543
+    return (f"\n**time_range ใน intent** (ปี {be} มีข้อมูลถึงเดือน {month}):"
+            f"\n- ไม่เอ่ยถึงช่วงเวลาเลย (ข้อ 3 — รวมคำถามยอดรวม / จัดอันดับ / สัดส่วน) และยอดรวมของปี {be} "
+            f"(\"ปีนี้\", \"ปี {be % 100}\") → {{\"year\": {year}, \"month\": {month}, \"cumulative\": true}}"
+            f"\n- ยอดรวมของปีที่จบแล้ว → {{\"year\": <ปีนั้น>, \"month\": 12, \"cumulative\": true}}"
+            f"\n- เดือนเดียว (\"เดือนล่าสุด\" = เดือน {month}, \"เดือน มี.ค.\" = 3) → "
+            f"{{\"year\": {year}, \"month\": <เดือนนั้น>, \"cumulative\": false}}"
+            f"\n- รายเดือน / แต่ละเดือน / แนวโน้ม → {{\"year\": <ปีที่ถาม หรือ {year}>, \"month\": null, \"cumulative\": false}} "
+            f"และใส่คอลัมน์งวดใน dimensions\n")
 
 
 def build_initial_user_prompt(

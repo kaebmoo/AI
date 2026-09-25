@@ -74,6 +74,8 @@ def test_pass1_can_write_the_year_to_date_and_pass2_reads_it(scoped, monkeypatch
     assert hybrid_flow.intent_period_note() == ""
     scoped({"year_month": [202512, 202607, 202608]})
     assert '{"year": 2026, "month": 8, "cumulative": true}' in hybrid_flow.intent_period_note()
+    # a monthly question: the months of the year, not the reference month ("รายได้ Mobile รายเดือน" got August alone)
+    assert '"month": null, "cumulative": false}' in hybrid_flow.intent_period_note()
 
     class _Service:
         def format_value_matches(self, *a, **k):
