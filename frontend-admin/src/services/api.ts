@@ -37,21 +37,18 @@ api.interceptors.request.use(
     }
 )
 
-// Response interceptor for API calls
-api.interceptors.response.use(
-    (response) => response,
-    async (error) => {
-        const originalRequest = error.config
-
-        // Handle 401 Unauthorized
-        if (error.response?.status === 401 && !originalRequest._retry) {
-            localStorage.removeItem('token')
-            localStorage.removeItem('user')
-            window.location.href = '/login'
-        }
-
-        return Promise.reject(error)
+// 401 → force logout. Registered on the global axios too, because adminService /
+// contextService / providerService call `axios.*` directly and would otherwise
+// just render "Error loading ..." with a dead token still in localStorage.
+const forceLogoutOn401 = (error: any) => {
+    if (error.response?.status === 401 && window.location.pathname !== '/login') {
+        localStorage.removeItem('token')
+        localStorage.removeItem('user')
+        window.location.href = '/login'
     }
-)
+    return Promise.reject(error)
+}
+api.interceptors.response.use((response) => response, forceLogoutOn401)
+axios.interceptors.response.use((response) => response, forceLogoutOn401)
 
 export default api
