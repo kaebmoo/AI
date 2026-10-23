@@ -188,7 +188,7 @@ def rebuild_keyword_index(
                         db_engine=schema_service.get_config_engine(),
                         business_engine=source_resolver.for_context(ctx_name).engine,
                     )
-                    count = ctx_service.build_keyword_index(ctx_name, main_view)
+                    count = ctx_service.build_context_index(ctx_name, main_view)
                 except Exception as exc:
                     logger.warning("Failed to build index for %s: %s", ctx_name, exc)
                 total += count

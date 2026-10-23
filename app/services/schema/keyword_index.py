@@ -80,7 +80,16 @@ def build_keyword_index(service: "SchemaService", context_name: str = "revenue",
                          {"ctx": context_name, "tbl": table_name})
         logger.info("Keyword index of %s not built: llm_data_policy of its source isn't full", table_name)
         return 0
-    columns = get_searchable_columns(service, context_name, table_name)
+    from app.services.schema.prompt_builder import is_time_column
+
+    # a period ('กันยายน 2569') is the period rules' to choose, not a value to filter on: indexing
+    # fact_ebt.month_year_th made Pass 1 filter on it (2026-10-22). A table of periods only has nothing to index.
+    columns = [column for column in get_searchable_columns(service, context_name, table_name) if not is_time_column(column)]
+    if not columns:
+        with service.engine.begin() as conn:
+            conn.execute(text("DELETE FROM keyword_value_index WHERE context_name = :ctx AND table_name = :tbl"),
+                         {"ctx": context_name, "tbl": table_name})
+        return 0
 
     inspector = inspect(service.business_engine)
     try:
@@ -153,6 +162,33 @@ def build_keyword_index(service: "SchemaService", context_name: str = "revenue",
     logger.info("Keyword index built: %s entries for context=%s, table=%s", len(all_rows), context_name, table_name)
     clear_known_terms_cache()
     return len(all_rows)
+
+
+def context_tables(service: "SchemaService", context_name: str, main_view: str) -> List[str]:
+    """The tables a context's questions read: the main view, then every active table of its file source
+    (none for a legacy context — its view is the one table)."""
+    try:
+        with service.engine.connect() as conn:
+            others = [row[0] for row in conn.execute(text(
+                "SELECT st.table_name FROM schema_contexts sc JOIN source_tables st ON st.source_id = sc.source_id "
+                "WHERE sc.name = :ctx AND st.is_active = 1 ORDER BY st.table_name"), {"ctx": context_name})]
+    except SQLAlchemyError:  # a config DB without the file-source registry
+        others = []
+    return [main_view] + [table for table in others if table != main_view]
+
+
+def build_context_index(service: "SchemaService", context_name: str, main_view: str) -> int:
+    """build_keyword_index for every table of the context. The index was the main view's alone, so a
+    value only a detail or dimension table holds was never a known term: "น่าน" is only in
+    feed_ebt_fact_ebt / feed_expense_dim_org_snapshot.sub_unit_fname, and "ebt ของ น่าน" was filtered on
+    `division` of the main view — 0 rows (2026-10-22). Rows of a table the context no longer has go."""
+    tables = context_tables(service, context_name, main_view)
+    total = sum(build_keyword_index(service, context_name, table) for table in tables)
+    with service.engine.begin() as conn:
+        conn.execute(text("DELETE FROM keyword_value_index WHERE context_name = :ctx AND table_name NOT IN "
+                          f"({', '.join(f':t{i}' for i in range(len(tables)))})"),
+                     {"ctx": context_name, **{f"t{i}": table for i, table in enumerate(tables)}})
+    return total
 
 
 def extract_keywords(value: str) -> List[str]:

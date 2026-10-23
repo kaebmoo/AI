@@ -166,6 +166,33 @@ def intent_table_hint(context_table: str, config_engine=None) -> str:
             "ต้องใส่เป็น filter หรือ dimension ด้วยชื่อคอลัมน์นั้นเสมอ แม้ตารางหลักไม่มีคอลัมน์นั้น (ห้ามละไว้)")
 
 
+def value_note(value_matches: Optional[List[Dict]]) -> str:
+    """Pass 1 line: where the question's words occur in the data (the value lookup). Pass 1 chooses the filter
+    columns and never saw the lookup, so it guessed: "ebt ของ น่าน" → division, "ยอดขาย น่าน" →
+    geo_region_broad — 0 rows both, while the value is in sub_unit_fname — and Pass 2 may not add a filter
+    Pass 1 left out, nor sees a match outside Pass 1's columns (2026-10-22). A value only another table holds
+    is named with its table. "" when the lookup found nothing (the prompt as before)."""
+    from app.services.schema.prompt_builder import is_time_column
+
+    found: Dict[str, Dict[str, List[str]]] = {}
+    for match in value_matches or []:
+        if is_time_column(match["column_name"]):  # the period is the period rules', never a text filter
+            continue
+        where = f"{match['other_table']}.{match['column_name']}" if match.get("other_table") else match["column_name"]
+        values = found.setdefault(match.get("keyword", "?"), {}).setdefault(where, [])
+        if match["column_value"] not in values:
+            values.append(match["column_value"])
+    if not found:
+        return ""
+    # one entry per column, with how many values matched: a LIKE that spans several products must be summed
+    # (the first form listed every value — 15 for "แบบ" — and Pass 1 dropped the SUM of "CCTV", 2026-10-22)
+    return ("\nค่าจริงที่พบในข้อมูล: "
+            + "; ".join(f'"{keyword}" → ' + ", ".join(
+                f"{where} = '{values[0]}'" + (f" (+{len(values) - 1} ค่า)" if len(values) > 1 else "")
+                for where, values in list(places.items())[:3]) for keyword, places in found.items())
+            + " — คำในคำถามที่ตรงกับค่าเหล่านี้ให้ใช้คอลัมน์นั้นเป็น filter (ตารางอื่น: ใช้ตาราง/JOIN ตามกฎของ context)")
+
+
 def unfilterable_columns(intent: Dict, context_table: str, config_engine=None, question: Optional[str] = None) -> tuple[List[str], List[str]]:
     """(columns, tables): intent filter/dimension columns the main view lacks but another table of
     the context has, and those tables. A name no table has is left alone — Pass 1 often names a
@@ -281,6 +308,34 @@ def _period_rules(anchored: int) -> str:
             f"(ถามรายเดือน / แนวโน้ม = ยอดรายเดือนตามปกติ)"
             f"\n**ห้ามรวมทุกงวดในขอบเขตเป็นคำตอบเดียว** เว้นแต่คำถามขอช่วงนั้นจริง — "
             f"ขอบเขตมีไว้ให้เทียบงวดกันได้ ไม่ใช่ช่วงเวลาของคำตอบ")
+
+
+NULL_SUM_HINT = ("ผลเป็น NULL ทั้งแถว — SUM ของเงื่อนไขที่ไม่มีแถวคืน NULL และ NULL ทำให้ผลที่บวก/ลบกันเป็น NULL ทั้งก้อน: "
+                 "ครอบแต่ละ SUM ด้วย COALESCE(SUM(...), 0) (SUM(COALESCE(x, 0)) ไม่ช่วย) — คงตาราง ตัวกรอง และสูตรเดิม")
+
+
+def null_arithmetic_error(rows, sql_query: str, retry_history: List[Dict]) -> Optional[str]:
+    """One retry for a row of NULL from SQL that combines aggregates: one part with no rows nulls the whole
+    formula. "ebt ของ น่าน" (revenue − other income − (expense − ER), the contract's formula) had no ER row and
+    answered no data (2026-10-22). A rule saying so in the prompt cost ebt P03/P04 3 of 3 — so it is a check
+    on the result, and a question that gets numbers never meets it."""
+    if not rows or any(value is not None for row in rows for value in row.values()):
+        return None
+    if len(re.findall(r"\b(?:SUM|AVG|MIN|MAX|COUNT)\s*\(", sql_query or "", re.IGNORECASE)) < 2:
+        return None  # one aggregate of nothing is no data
+    if any(entry.get("error") == NULL_SUM_HINT for entry in retry_history):
+        return None
+    return NULL_SUM_HINT
+
+
+def zeros_after_null_retry(rows, retry_history: List[Dict]):
+    """The retry's COALESCE turns "nothing matched" into 0: all zeros after it are the NULL row again — answered
+    (and kept from the outbound channels) as no data, not as 0 baht.
+    ponytail: a real total of exactly 0 after that retry reads as no data too."""
+    if rows and any(entry.get("error") == NULL_SUM_HINT for entry in retry_history) \
+            and all(value is None or (not isinstance(value, str) and value == 0) for row in rows for value in row.values()):
+        return [{key: None for key in row} for row in rows]
+    return rows
 
 
 def is_empty_result(rows) -> bool:
@@ -797,6 +852,7 @@ async def build_first_attempt_prompt(
             trace=trace,
             previous_intent=previous_intent,
             level_note=level_note,
+            value_note=value_note(value_matches),
         )
         if intent_state_enabled and intent_json:
             from app.services.ai import intent_state
@@ -995,6 +1051,13 @@ async def run_hybrid_attempt(
 
     full_data = exec_data.get("data", [])
     logger.info("Hybrid Mode: Success! Got %s rows", len(full_data))
+
+    null_error = null_arithmetic_error(full_data, sql_query, retry_history)
+    if null_error:
+        logger.warning("Hybrid Mode: %s", null_error)
+        retry_history.append({"sql": sql_query, "error": null_error})
+        return None, total_tokens, sql_query
+    full_data = zeros_after_null_retry(full_data, retry_history)
 
     dim_families, schema_metadata, hierarchy_info = await metadata_task
 
@@ -1350,6 +1413,7 @@ async def extract_intent(
     trace=None,
     previous_intent: Optional[Dict] = None,
     level_note: str = "",
+    value_note: str = "",
 ) -> Optional[Dict]:
     del context_name
 
@@ -1362,7 +1426,7 @@ async def extract_intent(
 คำถามใหม่ (follow-up): {question}
 
 **บริบท:** ข้อมูล{context_thai} (ใช้ตาราง {context_table}){intent_table_hint(context_table)}
-{scope_note()}{intent_period_note()}{level_note}
+{scope_note()}{intent_period_note()}{level_note}{value_note}
 
 ---
 **Task:** อัปเดต intent เดิมตามคำถามใหม่ — คงค่า filter/dimension ที่ไม่ถูกกล่าวถึงไว้ตามเดิม (inherit) และเปลี่ยนเฉพาะส่วนที่คำถามใหม่ระบุ
@@ -1372,7 +1436,7 @@ async def extract_intent(
         prompt_header = f"""คำถาม: {question}
 
 **บริบท:** ข้อมูล{context_thai} (ใช้ตาราง {context_table}){intent_table_hint(context_table)}{history_context}
-{scope_note()}{intent_period_note()}{level_note}
+{scope_note()}{intent_period_note()}{level_note}{value_note}
 {rag_context}
 
 ---

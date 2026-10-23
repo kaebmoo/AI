@@ -225,7 +225,15 @@ def lookup_values_from_question(service: Any, question: str, context_name: str, 
             has_hierarchy = False
 
         for keyword in keywords[:5]:
-            matches = schema_service.search_keyword_index(keyword, context_name=context_name, limit=5)
+            # the index covers every table of the context: a value the main view holds stays with the main view;
+            # one only another table holds is labelled with it (a legacy context, one table, is as before)
+            matches = schema_service.search_keyword_index(keyword, context_name=context_name, limit=20)
+            if any(match.get("table_name") == table_name for match in matches):
+                matches = [match for match in matches if match.get("table_name") in (table_name, None)]
+            matches = matches[:5]
+            for match in matches:
+                if match.get("table_name") and match["table_name"] != table_name:
+                    match["other_table"] = match["table_name"]
             if matches:
                 results.extend(matches)
             elif has_hierarchy:
@@ -419,6 +427,11 @@ def format_value_matches_flat(value_matches: List[Dict]) -> str:
         for match in matches[:5]:
             column = match["column_name"]
             value = match["column_value"]
+            other = match.get("other_table")
+            if other:
+                lines.append(f"  - column: `{column}` ของตาราง `{other}` (ไม่มีในตารางหลัก), actual value: `{value}`")
+                lines.append(f"    → recommended: ใช้ตาราง `{other}` (หรือ JOIN ตามกฎของ context) แล้วกรอง `{column} LIKE '%{keyword}%'`")
+                continue
             lines.append(f"  - column: `{column}`, actual value: `{value}`")
             lines.append(f"    → recommended: `{column} LIKE '%{keyword}%'`")
 

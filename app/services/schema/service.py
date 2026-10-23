@@ -502,6 +502,9 @@ class SchemaService:
     def build_keyword_index(self, context_name: str = "revenue", table_name: str = "revenue_search") -> int:
         return keyword_index.build_keyword_index(self, context_name, table_name)
 
+    def build_context_index(self, context_name: str, main_view: str) -> int:
+        return keyword_index.build_context_index(self, context_name, main_view)
+
     def search_keyword_index(self, keyword: str, context_name: str = "revenue", limit: int = 10) -> List[Dict]:
         return keyword_index.search_keyword_index(self, keyword, context_name, limit)
 
