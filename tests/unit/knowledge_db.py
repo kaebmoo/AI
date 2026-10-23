@@ -24,6 +24,13 @@ CREATE TABLE schema_metadata (id INTEGER PRIMARY KEY AUTOINCREMENT, table_name T
     is_summable BOOLEAN DEFAULT 0, is_groupable BOOLEAN DEFAULT 1, hierarchy_level INTEGER, sample_values TEXT,
     special_notes TEXT, conversion_sql TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, dimension_group TEXT DEFAULT NULL, UNIQUE(table_name, column_name));
+CREATE TABLE schema_metrics (id INTEGER PRIMARY KEY AUTOINCREMENT, context_name TEXT NOT NULL, metric_id TEXT NOT NULL,
+    name_th TEXT NOT NULL, synonyms TEXT, extends TEXT, dataset TEXT, period TEXT, dimensions TEXT, terms TEXT,
+    expr TEXT NOT NULL, official_scope TEXT, official_total TEXT, reference TEXT, unit TEXT, note_th TEXT,
+    source TEXT, status TEXT NOT NULL DEFAULT 'active', confidence REAL, is_active INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE UNIQUE INDEX ux_schema_metrics_context_metric ON schema_metrics (context_name, metric_id);
+CREATE INDEX ix_schema_metrics_context_name ON schema_metrics (context_name);
 CREATE TABLE schema_business_rules (id INTEGER PRIMARY KEY AUTOINCREMENT, rule_code TEXT NOT NULL UNIQUE,
     rule_name TEXT NOT NULL, rule_description TEXT NOT NULL, table_name TEXT, applies_to TEXT, example_correct TEXT,
     example_wrong TEXT, severity TEXT DEFAULT 'warning', is_active BOOLEAN DEFAULT 1,

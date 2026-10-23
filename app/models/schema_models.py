@@ -74,6 +74,41 @@ class SchemaMetadata(ProvenanceMixin, ConfigBase):
         }
 
 
+class SchemaMetric(ProvenanceMixin, ConfigBase):
+    """A context's contract-declared metric, with structural inheritance kept as declared."""
+    __tablename__ = "schema_metrics"
+
+    id = Column(Integer, primary_key=True, index=True)
+    context_name = Column(String(100), nullable=False, index=True)
+    metric_id = Column(String(100), nullable=False)
+    name_th = Column(String(200), nullable=False)
+    synonyms = Column(JSON)
+    extends = Column(String(100), nullable=True)
+    dataset = Column(String(200), nullable=True)
+    period = Column(JSON, nullable=True)
+    dimensions = Column(JSON, nullable=True)
+    terms = Column(JSON, nullable=True)
+    expr = Column(Text, nullable=False)
+    official_scope = Column(Text, nullable=True)
+    official_total = Column(JSON, nullable=True)
+    reference = Column(JSON, nullable=True)
+    unit = Column(String(50), nullable=True)
+    note_th = Column(Text, nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("context_name", "metric_id", name="ux_schema_metrics_context_metric"),
+    )
+
+    def to_dict(self):
+        values = {c.name: getattr(self, c.name) for c in self.__table__.columns}
+        for key in ("created_at", "updated_at"):
+            values[key] = values[key].isoformat() if values[key] else None
+        return values
+
+
 class SchemaSemanticMapping(ProvenanceMixin, ConfigBase):
     """
     Maps keywords (abbreviations, business terms) to SQL conditions.

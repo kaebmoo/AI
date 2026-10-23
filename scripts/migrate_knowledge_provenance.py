@@ -86,16 +86,20 @@ def _label_and_queue(engine) -> int:
     try:
         cur.execute("BEGIN IMMEDIATE")
         try:
+            present = {r[0] for r in cur.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+            tables = [t for t in TABLES if t in present]
             labelled = 0
-            if any(cur.execute(f'SELECT 1 FROM "{t}" WHERE {UNKNOWN} LIMIT 1').fetchone() for t in TABLES):
+            if any(cur.execute(f'SELECT 1 FROM "{t}" WHERE {UNKNOWN} LIMIT 1').fetchone() for t in tables):
                 # Labelling provenance is not an edit of the content: a trigger that stamps updated_at on every
                 # UPDATE (vanna_documentation has one) is lifted for the backfill and put back as it was
-                names = ", ".join(f"'{t}'" for t in TABLES)
+                names = ", ".join(f"'{t}'" for t in tables)
                 triggers = cur.execute(
                     f"SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name IN ({names})").fetchall()
                 for name, _ in triggers:
                     cur.execute(f'DROP TRIGGER "{name}"')
                 for sql in BACKFILL:
+                    if sql.split()[1] in TABLES and sql.split()[1] not in present:
+                        continue
                     labelled += cur.execute(sql).rowcount
                 for _, sql in triggers:
                     cur.execute(sql)
@@ -114,8 +118,10 @@ def _label_and_queue(engine) -> int:
 def migrate(config_engine=None) -> dict:
     if config_engine is None:
         from app.db.session import config_engine
-    for table in TABLES:
-        existing = {c["name"] for c in inspect(config_engine).get_columns(table)}
+    inspector = inspect(config_engine)
+    tables = [t for t in TABLES if t in inspector.get_table_names()]
+    for table in tables:
+        existing = {c["name"] for c in inspector.get_columns(table)}
         for column, ddl in COLUMNS:
             if column not in existing:
                 with config_engine.begin() as conn:
@@ -124,7 +130,7 @@ def migrate(config_engine=None) -> dict:
     labelled = _label_and_queue(config_engine)
     with config_engine.connect() as conn:
         summary = {t: conn.execute(text(f'SELECT source, status, COUNT(*) FROM "{t}" GROUP BY 1, 2 ORDER BY 1, 2')).all()
-                   for t in TABLES}
+                   for t in tables}
     print(f"Labelled {labelled} row(s) whose source was unknown")
     for table, rows in summary.items():
         print(f"  {table}: " + ", ".join(f"{s}/{st} {n}" for s, st, n in rows))

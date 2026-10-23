@@ -18,6 +18,8 @@ CREATE TABLE schema_contexts (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE,
     is_active BOOLEAN DEFAULT 1, source_id INTEGER);
 CREATE TABLE schema_metadata (id INTEGER PRIMARY KEY, table_name TEXT NOT NULL, column_name TEXT NOT NULL,
     description TEXT, UNIQUE(table_name, column_name));
+CREATE TABLE schema_metrics (id INTEGER PRIMARY KEY, context_name TEXT NOT NULL, metric_id TEXT NOT NULL,
+    name_th TEXT NOT NULL, expr TEXT NOT NULL, is_active INTEGER DEFAULT 1, UNIQUE(context_name, metric_id));
 CREATE TABLE schema_business_rules (id INTEGER PRIMARY KEY, rule_code TEXT NOT NULL UNIQUE, is_active BOOLEAN DEFAULT 1);
 CREATE TABLE golden_examples (id INTEGER PRIMARY KEY, question_pattern TEXT NOT NULL, category VARCHAR,
     is_active BOOLEAN, added_by INTEGER);

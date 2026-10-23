@@ -19,13 +19,14 @@ import hashlib
 import json
 import logging
 import os
+import re
 import threading
 from typing import Any, Dict, Mapping, Optional, Tuple
 
 import yaml
 from sqlalchemy import text
 
-from app.services.provenance import DECLARED, REJECTED, may_replace, propose, replaceable
+from app.services.provenance import DECLARED, DECLARED_FIELDS, REJECTED, may_replace, propose, replaceable
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,8 @@ FEED_PRIORITY = 1
 WAITS = "คนแก้ส่วนที่ contract ประกาศไว้ — ฉบับใหม่ของ contract รอคนตัดสิน (D-C)"
 # What the contract may withdraw: its own declaration — never a person's row, never one a person rejected
 OWN = "source = 'declared' AND COALESCE(status, 'active') != 'rejected'"
+_metrics_missing_warned = False
+_metrics_warning_lock = threading.Lock()
 
 
 def _declare(conn, table: str, key: Dict[str, Any], values: Dict[str, Any], row: Optional[Mapping],
@@ -231,11 +234,106 @@ def sync_documentation(conn, domain: str, contract: dict, context_name: str) -> 
     return len(docs)
 
 
+def _validate_metric(metric: dict, datasets: dict, earlier_ids: set) -> None:
+    """Check column and expression references on a structurally resolved metric."""
+    dataset = metric.get("dataset")
+    if dataset not in datasets:
+        raise ValueError(f"unknown dataset {dataset!r}")
+    columns = datasets[dataset]
+    period = metric.get("period") or {}
+    for column in (period.get("column"), (period.get("value") or {}).get("cumulative"),
+                   (period.get("value") or {}).get("month")):
+        if column not in columns:
+            raise ValueError(f"unknown period column {column!r} in {dataset}")
+    unknown = set(metric.get("dimensions") or []) - columns
+    if unknown:
+        raise ValueError(f"unknown dimensions {sorted(unknown)} in {dataset}")
+    for name, term in (metric.get("terms") or {}).items():
+        # Literals can contain text that looks like a column predicate, including escaped quotes.
+        where = re.sub(r"'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"", "", term.get("where") or "")
+        used = set(re.findall(r"\b([a-z_][a-z0-9_]*)\s*(?:=|<>|!=|\bIN\b|\bLIKE\b|>|<)", where, re.I))
+        if used - columns:
+            raise ValueError(f"term {name}: unknown columns {sorted(used - columns)} in {dataset}")
+    expr = metric["expr"]
+    if not isinstance(expr, str) or not expr.strip():
+        raise ValueError("expr must be a non-empty string")
+    identifiers = re.sub(r"\bnullif\b|\b\d+(?:\.\d+)?(?:e[+-]?\d+)?\b|[+\-*/(),]", " ", expr, flags=re.I)
+    used = set(identifiers.split())
+    unknown = used - set(metric.get("terms") or {}) - earlier_ids
+    if unknown:
+        raise ValueError(f"unknown expr identifiers {sorted(unknown)}")
+    total = metric.get("official_total")
+    if total is not None:
+        if total.get("dataset") not in datasets:
+            raise ValueError(f"unknown official_total dataset {total.get('dataset')!r}")
+        for key in ("column", "month_column"):
+            if total.get(key) not in datasets[total["dataset"]]:
+                raise ValueError(f"unknown official_total {key} {total.get(key)!r}")
+
+
+def sync_metrics(conn, domain: str, contract: dict, context_name: str) -> int:
+    """Sync valid metric declarations; deployments awaiting the table migration remain usable."""
+    global _metrics_missing_warned
+    metrics = contract.get("metrics") or []
+    try:
+        conn.execute(text("SELECT 1 FROM schema_metrics LIMIT 1"))
+    except Exception:
+        with _metrics_warning_lock:
+            if not _metrics_missing_warned:
+                logger.warning("schema_metrics unavailable; skipping metric sync until the table is migrated")
+                _metrics_missing_warned = True
+        return 0
+    existing = {r["metric_id"]: r for r in conn.execute(text(
+        "SELECT * FROM schema_metrics WHERE context_name = :context"), {"context": context_name}).mappings()}
+    datasets = {d["name"]: {c["name"] for c in d["columns"]} for d in contract["datasets"]}
+    resolved, earlier_ids = {}, set()
+    count = 0
+    for metric in metrics:
+        try:
+            metric_id = metric["id"]
+            parent_id = metric.get("extends")
+            if parent_id is not None and parent_id not in resolved:
+                raise ValueError(f"extends {parent_id!r} is not an earlier metric id")
+            parent = resolved[parent_id] if parent_id is not None else {}
+            effective = dict(metric)
+            for field in ("dataset", "period", "dimensions", "official_scope"):
+                if effective.get(field) is None:
+                    effective[field] = parent.get(field)
+            effective["terms"] = {**(parent.get("terms") or {}), **(metric.get("terms") or {})}
+            resolved[metric_id] = effective
+            _validate_metric(effective, datasets, earlier_ids)
+            values = {field: metric.get(field) for field in sorted(DECLARED_FIELDS["schema_metrics"])}
+            if values["dataset"] is not None:
+                values["dataset"] = f"feed_{domain}_{values['dataset']}"
+            if values["official_total"] is not None:
+                total = values["official_total"]
+                values["official_total"] = {**total, "dataset": f"feed_{domain}_{total['dataset']}"}
+            for field in ("synonyms", "period", "dimensions", "terms", "official_total", "reference"):
+                if values[field] is not None:
+                    values[field] = json.dumps(values[field], ensure_ascii=False, sort_keys=True)
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
+            logger.warning("Skipping metric %s in %s: %s", metric.get("id"), context_name, exc)
+        else:
+            _declare(conn, "schema_metrics", {"context_name": context_name, "metric_id": metric_id}, values,
+                     existing.get(metric_id), insert={"is_active": 1, "status": "active"}, stamp=True)
+            count += 1
+        earlier_ids.add(metric["id"])
+    declared = {m["id"] for m in metrics}
+    for metric_id, row in existing.items():
+        if metric_id not in declared and row["source"] == DECLARED and row["status"] != REJECTED:
+            conn.execute(text(f"DELETE FROM schema_metrics WHERE context_name = :context AND metric_id = :id AND {OWN}"),
+                         {"context": context_name, "id": metric_id})
+    return count
+
+
 def sync_knowledge(conn, domain: str, contract: dict) -> Tuple[str, int, int]:
-    """Context + metadata + docs for one domain, on the caller's transaction."""
+    """Context + metadata + docs + metrics for one domain, on the caller's transaction."""
     context_name = register_context(conn, domain, contract)
-    return (context_name, sync_schema_metadata(conn, domain, contract),
-            sync_documentation(conn, domain, contract, context_name))
+    n_meta = sync_schema_metadata(conn, domain, contract)
+    n_docs = sync_documentation(conn, domain, contract, context_name)
+    n_metrics = sync_metrics(conn, domain, contract, context_name)
+    logger.info("Synced %s metrics for %s", n_metrics, context_name)
+    return context_name, n_meta, n_docs
 
 
 def knowledge_key(contract_bytes: bytes, schema_version: Any) -> str:
