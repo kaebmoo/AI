@@ -24,7 +24,7 @@
 | [PLAN_7_DATA_SOURCE_SERVICE.md](PLAN_7_DATA_SOURCE_SERVICE.md) | 🟡 **Phase 1–6 ✅ + hardening ✅ + go-live ฝั่ง AI ✅ (2026-09-20)** — ปุ่ม portal เปิดเฉพาะ `revenue`; Phase 7 (packaging Tier 2) ยังไม่เริ่ม; ผล: `archive/RESULT_P7_*.md`, `archive/RESULT_F11.md`; งานฝั่ง NT-Report: [PROMPT_NT_REPORT_P7.md](PROMPT_NT_REPORT_P7.md) |
 | [PROMPT_P8_PHASE2.md](PROMPT_P8_PHASE2.md) | สั่งงาน session ใหม่: ปิดงานค้างของ 8.1 (start service, ตรวจหลัง start, push + CI) แล้วเริ่ม Phase 8.2 |
 | [PROMPT_CODEX_REVIEW_2.md](PROMPT_CODEX_REVIEW_2.md) | สั่งผู้ตรวจรอบ 2: การแก้ตามผลตรวจ 9 ข้อ + pin CI (`0868447..369390c`) |
-| [PLAN_8_SELF_SERVICE_ONBOARDING.md](PLAN_8_SELF_SERVICE_ONBOARDING.md) | 📝 **ร่าง 2026-09-21** — ต่อแหล่งข้อมูลเอง → เตรียมพร้อมอัตโนมัติ (pipeline เดียว สองโหมด: อนุมาน + contract) → คนตัดสินเฉพาะที่ไม่แน่ใจ; BYOK, key self-service; D-A/B/C ตัดสินแล้ว; งานแรก: [PROMPT_P8_PHASE0_1.md](PROMPT_P8_PHASE0_1.md) |
+| [PLAN_8_SELF_SERVICE_ONBOARDING.md](PLAN_8_SELF_SERVICE_ONBOARDING.md) | 📝 **ร่าง 2026-09-21** — ต่อแหล่งข้อมูลเอง → เตรียมพร้อมอัตโนมัติ (pipeline เดียว สองโหมด: อนุมาน + contract) → คนตัดสินเฉพาะที่ไม่แน่ใจ; BYOK, key self-service; D-A/B/C ตัดสินแล้ว; งานแรก: [PROMPT_P8_PHASE0_1.md](PROMPT_P8_PHASE0_1.md) · 2026-10-22: ความรู้ global กรองตามคอลัมน์ ✅ + ทิศทาง "เติมความรู้เองเมื่อข้อมูลใหม่เข้า" (§2.1) |
 | [PLAN_PENDING_BGE_M3.md](PLAN_PENDING_BGE_M3.md) | **รออนุมัติ** — เปลี่ยน Vanna embedding เป็น BGE-M3 (ห้าม execute จนกว่าจะอนุมัติ) |
 
 หมายเหตุ: Plan 1B-C (MCP สำหรับผู้เรียกภายนอก + API key auth) ✅ ปิดแล้ว 2026-09-20 ด้วย Plan 7 Phase 6 (facade `/api/v1/mcp` — stateless Streamable HTTP, ไม่ทำ SSE) — ผล: `archive/RESULT_P7_PHASE6.md`; แผนเดิม: `archive/PLAN_1B_MCP_CONSOLIDATION.md`, REMAIN-8
@@ -35,6 +35,7 @@
 |-------|------|
 | Plans 0-5 (เสร็จ 2026-03) | `PLAN_0_FIX_LEGACY_TESTS`, `PLAN_1_ADMIN_AGENT`, `PLAN_1B_MCP_CONSOLIDATION`, `PLAN_2_FEEDBACK_QUERYLOG`, `PLAN_3_SELF_LEARNING`, `PLAN_4_TELEGRAM`, `PLAN_4B_OPENMINICREW_READINESS`, `PLAN_5_DB_MIGRATION`, `PLAN_TEST_MASTER` |
 | F-series (เสร็จ 2026-07-11) | `PLAN_F1`–`PLAN_F11`, `RESULT_F9` (มี measurement protocol รอรันเมื่อเปิด flag), `RESULT_F10` |
+| Plan 8 (ผลวัด) | `RESULT_P8_PHASE0`, `RESULT_P8_PHASE1`, `RESULT_P8_KNOWLEDGE_SCOPE` (2026-10-22 — rule / mapping ที่ไม่ผูก context ถึงเฉพาะ context ที่มีคอลัมน์ที่มันอ้าง) |
 | Refactoring / อื่น ๆ | `NT_AI_REFACTORING_PLAN`, `PLAN_REFACTOR_ADMIN_SCHEMA_AI`, `ADMIN_SPLIT_PLAN`, `CONTEXT_ONBOARDING_WEBADMIN_PLAN`, `NT_AI_ASSISTANT_MEMORY_IMPROVEMENT_PLAN`, `PLAN_VANNA_DB_DRIVEN_DOCS`, `TASK_UPDATE_DOCS` |
 
 > เอกสารใน archive เป็นบันทึกประวัติ ไม่สะท้อนสถานะปัจจุบัน — สถานะจริงดู `PLAN_ROADMAP_MASTER.md`

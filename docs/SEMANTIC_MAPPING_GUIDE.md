@@ -173,8 +173,12 @@ priority         : 8
 | `'pl_costtype'` | เฉพาะ context pl_costtype | mapping เฉพาะ P&L |
 
 **Logic การ filter:**
-- context_name = **NULL** → ส่งไปทุก context (backward compatible)
-- context_name = **'transfer price'** → ส่งเฉพาะเมื่อ user ถามใน transfer price context
+- context_name = **'transfer price'** → ส่งเฉพาะเมื่อ user ถามใน transfer price context (ไม่ตรวจคอลัมน์ — คนผูกไว้เอง)
+- context_name = **NULL** → ส่งไปทุก context **ที่มีคอลัมน์ `target_column` อยู่จริง** (ตั้งแต่ 2026-10-22)
+  - ระบบอ่านคอลัมน์ของแต่ละ context จาก registry เอง (view ของ legacy / ทุกตารางของ file source) — context ที่ลงทะเบียนใหม่ได้กติกานี้ทันที ไม่ต้องตั้งค่าเพิ่ม
+  - เหตุผล: mapping global 188 ข้อเขียนไว้ให้ view เดิม (`department_abbr`, `SERVICE_GROUP`, …) แล้วถูกส่งให้ `feed_*` ที่ไม่มีคอลัมน์เหล่านี้ — prompt ของ feed_ebt มี `department_abbr` 103 ครั้ง
+  - ตัวกรองอยู่ที่ `app/services/schema/knowledge_scope.py` (ตอนอ่านเท่านั้น ไม่แก้แถวใน DB)
+- mapping ที่ควรใช้กับ context เดียวจริง ๆ → ใส่ `context_name` ไปเลย อย่าพึ่งการกรองนี้
 
 ---
 

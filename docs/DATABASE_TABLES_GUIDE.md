@@ -393,7 +393,7 @@ CREATE TABLE schema_contexts (
     updated_at TIMESTAMP,
     -- Plan 7 (scripts/migrate_data_sources.py, migrate_workspaces.py)
     source_id INTEGER REFERENCES data_sources(id),   -- แหล่งข้อมูลของ context ('legacy' = business DB เดิม)
-    scope_columns TEXT,                 -- JSON {"scope key": "column"} ที่ผู้เรียกจำกัดขอบเขตได้; NULL = ไม่รับ scope
+    scope_columns TEXT,                 -- JSON {"scope key": "column" | ["column", ...]} ที่ผู้เรียกจำกัดขอบเขตได้ (หลายชื่อ = ต่อตาราง ชื่อแรกที่มี); NULL = ไม่รับ scope
     workspace_id INTEGER REFERENCES workspaces(id)    -- NULL = 'default'
 );
 ```
@@ -666,12 +666,19 @@ CREATE TABLE keyword_value_index (
 
 ### วิธีสร้าง Index
 
-`keyword_value_index` ถูกสร้างโดย `build_keyword_index()` ใน `app/services/schema/keyword_index.py`:
+`keyword_value_index` ถูกสร้างโดย `build_context_index()` → `build_keyword_index()` ต่อตาราง ใน `app/services/schema/keyword_index.py`
+(ปุ่ม Rebuild Keyword Index ของ admin = `POST /api/v1/admin/config/rebuild-keyword-index`):
 
-1. อ่าน searchable columns จาก `schema_metadata` (is_groupable = 1)
-2. Scan DISTINCT values จากทุก searchable column ใน business DB
-3. สร้าง keyword โดยตัด prefix ภาษาไทย (เช่น "กลุ่มบริการ", "บริการ", "สายงาน", "ฝ่าย", "รายได้") + แยกคำด้วย space/`-`/`&`/`/` แล้ว lowercase
-4. เก็บลง `keyword_value_index` ใน config DB
+1. ตารางของ context: main view + **ทุกตารางของ file source** (`source_tables`) — legacy = view เดียว (2026-10-22: เดิมสร้างจาก main view อย่างเดียว
+   ค่าที่อยู่เฉพาะตารางรายละเอียด/มิติ เช่น "น่าน" ใน `feed_ebt_fact_ebt` / `feed_expense_dim_org_snapshot` จึงไม่เคยถูกรู้จัก); แถวของตารางที่ context ไม่มีแล้วถูกลบ
+2. อ่าน searchable columns จาก `schema_metadata` (is_groupable = 1) — **ไม่รวมคอลัมน์เวลา** (`is_time_column`: งวดเป็นของกฎเรื่องงวด ไม่ใช่ค่าให้กรอง —
+   index `month_year_th` ทำให้ pass 1 กรอง "กันยายน 2569" เป็นข้อความ); ตารางที่มีแต่คอลัมน์เวลา = ล้างแถวของตารางนั้น
+3. Scan DISTINCT values (ข้อความเท่านั้น) จากทุก searchable column ใน source ของ context
+4. สร้าง keyword โดยตัด prefix ภาษาไทย (เช่น "กลุ่มบริการ", "บริการ", "สายงาน", "ฝ่าย", "รายได้") + แยกคำด้วย space/`-`/`&`/`/` แล้ว lowercase
+5. เก็บลง `keyword_value_index` ใน config DB — source ที่ `llm_data_policy` ไม่ใช่ `full` ไม่มี index
+
+ตอนค้น (`hierarchy_context.lookup_values_from_question`): ถ้าตารางหลักมีค่านั้น ใช้ตารางหลักเท่านั้น; ค่าที่อยู่เฉพาะตารางอื่นถูกระบุชื่อตาราง
+("column `x` ของตาราง `t`") และค่าที่ค้นเจอส่งถึง **pass 1** ด้วย (`hybrid_flow.value_note` — สรุปต่อคอลัมน์ + จำนวนค่า, ไม่ส่งค่าเวลา)
 
 ### ตัวอย่างข้อมูล
 

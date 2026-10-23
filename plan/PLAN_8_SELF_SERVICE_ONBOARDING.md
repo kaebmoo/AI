@@ -1,6 +1,7 @@
 # Plan 8: Self-service — ต่อแหล่งข้อมูลเอง พร้อมตอบอัตโนมัติ คนตัดสินเฉพาะที่ระบบไม่แน่ใจ
 
 **สถานะ:** ✅ **8.0 เสร็จ + ขึ้นของจริง 2026-09-21** — คำถามจริง 4/12 → 8/12 (วัดบนสำเนา), legacy eval ไม่ลด, hierarchy `feed_revenue` + code ใหม่อยู่บนของจริง (`plan/archive/RESULT_P8_PHASE0.md`) · ✅ **8.1 เสร็จ + ขึ้นของจริง 2026-09-21 22:06** (`plan/archive/RESULT_P8_PHASE1.md` §12.5) · ตรวจโดย Codex 2026-09-22: 9 ข้อ แก้ครบ (§14) · ข้อตัดสิน D-A / D-B / D-C ตัดสินแล้ว 2026-09-21 (§6) · prompt: 8.0 `plan/PROMPT_P8_PHASE0_1.md` · **8.1 `plan/PROMPT_P8_PHASE1.md`**
+· ✅ **ความรู้ global ถึงเฉพาะ context ที่มีคอลัมน์ที่มันอ้าง — ขึ้นของจริง 2026-10-22** (portal 35→39 / 32→36 จาก 55 สองรอบ, legacy 10/37 ไม่ลด — `plan/archive/RESULT_P8_KNOWLEDGE_SCOPE.md`) · **ทิศทางเจ้าของ 2026-10-22: ความรู้ต้องเติมเองเมื่อข้อมูลใหม่เข้า, ปุ่มใน admin web = ซ่อมแบบ manual** (§2.1)
 **ต่อจาก:** Plan 7 — ครึ่งหลังของเส้นทางผู้ใช้ (ถามตอบผ่าน REST / MCP / Claude Desktop พร้อม scope, policy, audit, quota) **ทำเสร็จแล้ว**
 **เป็นฐานให้:** Plan 6 (Tier 3 multi-tenant / สมัครใช้เอง) — ยังเลื่อนตาม D8 (`PLAN_7` §12); แผนนี้ออกแบบให้ "tenant = workspace" จึงใช้ได้ทั้ง Tier 1 (ภายใน NT), Tier 2 (private deployment ต่อราย) และเป็นฐานของ Tier 3 เมื่อถึง trigger
 **หลักฐาน:** ทุกตัวเลขใน §2 วัดจาก `config.db` / code / server จริง 2026-09-21
@@ -45,6 +46,47 @@
 **สิ่งที่ contract เติมได้ = ใช้อยู่ · สิ่งที่ต้องผ่าน onboarding หรือคนดูแล = ว่างทั้งหมด**
 ผลที่เห็นจริง: legacy `revenue` ประกาศไว้ตั้งแต่ต้นว่า "บริการ / รายบริการ" = `PRODUCT_NAME` แต่ `feed_revenue` ไม่มี —
 คำถามจริงของ portal จึงเลือกชั้นผิด (`RESULT_F11.md` §7)
+
+### 2.1 เครื่องมือ data setup ต่อ context — วัด 2026-10-22 + ทิศทางของเจ้าของ
+
+**เจ้าของ (2026-10-22):** ระบบรองรับข้อมูลใดก็ได้ที่จะมีในอนาคต → เมื่อมีข้อมูลใหม่ ระบบต้องเตรียมความรู้**เอง** โดย admin ไม่ต้องไล่กดทีละหน้า;
+หน้า admin web (Schema Analyzer / Explorer, Data Contexts, Context Onboarding, View Builder / Manager, Dimension Families, Master Data,
+Business Rules, Semantic Mapping, Golden Examples) มีไว้**ซ่อมแบบ manual** ไม่ใช่ทางปกติ
+
+| context | metadata (main view) | dimension family | golden (category = context) | hierarchy (ระดับ) | keyword index | mapping ของตัวเอง | rule ของตัวเอง |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| revenue | 27 | 27 | 7 | 3 | 6,133 | 1 | 9 |
+| expense | 20 | 20 | 8 | 2 | 3,403 | 0 | 0 |
+| transfer price | 17 | 17 | 1 | 2 | 3,421 | 3 | 0 |
+| pl_costtype | 11 | 11 | 0 | 3 | 1,399 | 0 | 12 |
+| feed_revenue | 7 | **0** | 22 | 3 | 15 | 0 | 0 |
+| feed_expense | 18 | **0** | 12 | **0** | 1,620 | 1 | 0 |
+| feed_sales | 25 | **0** | 12 | **0** | 5,547 | 0 | 0 |
+| feed_ebt | 8 | **0** | 36 | **0** | **0** | 0 | 0 |
+
++ ความรู้ไม่ผูก context: rule 50 แถว, mapping 188 แถว — ตั้งแต่ 2026-10-22 ถึงเฉพาะ context ที่มีคอลัมน์ที่มันอ้าง (`schema/knowledge_scope.py`)
+
+ข้อสังเกต (เครื่องมือมีและทำงานได้ แต่**ไม่ถูกเรียกเอง**):
+- **Context Onboarding** ใช้ `sqlite3.connect()` → อ่าน file source ไม่ได้ (เดิม §2) · **View Builder / Manager** สร้าง view ใน business DB → ไม่เกี่ยวกับ file source
+- **keyword index** สร้างจาก **main view เท่านั้น** และเมื่อ admin กด rebuild (`POST /api/v1/admin/config/rebuild-keyword-index`) — `feed_ebt` main view
+  เป็นระดับสายงาน จึงมี 0 แถว แม้ตารางรายละเอียดของ source เดียวกันมีชื่อหน่วยงานย่อย ("น่าน")
+  → ✅ **แก้ 2026-10-22:** สร้างจากทุกตารางของ source (`keyword_index.build_context_index`, ไม่เก็บคอลัมน์เวลา) + pass 1 ได้ค่าที่ค้นเจอ —
+  รันครั้งแรกกับ `feed_*` แล้ว แต่**ยังต้องกดเอง** เมื่อข้อมูลเปลี่ยน (ขั้นอัตโนมัติ = ข้างล่าง) — `plan/archive/RESULT_P8_KNOWLEDGE_SCOPE.md` §8
+- **scope ใช้ชื่อคอลัมน์เดียวต่อ key** (`scope_columns: {year_month: time_key}`) → ภายใต้ scope ตารางที่เรียกคอลัมน์งวดต่างชื่อถูกปิดทั้งตาราง
+  (`feed_expense_dim_org_snapshot.effective_month`) → "ค่าใช้จ่ายของน่าน" จาก portal ตอบไม่ได้ทั้งที่โมเดลเขียน JOIN ถูก — ข้อเสนอ: `scope_columns`
+  รับหลายชื่อต่อ key (ประกาศใน contract ของ NT-Report) → ✅ **ขึ้นของจริง 2026-10-23** (expense 1.2.4, `data_sources.scope_column_names`) —
+  dim ที่ไม่มีคอลัมน์งวดเลยยังปิดภายใต้ scope (RESULT_P8_KNOWLEDGE_SCOPE §9)
+- **dimension family** อ่าน `schema_metadata.dimension_group` — contract ไม่เติม → `feed_*` ทั้งหมด 0
+- **hierarchy** `bootstrap_from_view` อ่าน file source ได้แล้ว แต่รันกับ `feed_revenue` เท่านั้น (มือ, 8.0)
+- ที่**เป็นอัตโนมัติแล้ว**: ความรู้จาก contract (`datafeed_knowledge.ensure_current` — ทุก request stat contract; contract / `schema_version` เปลี่ยน → re-sync + `mark_brain_dirty`)
+
+**ขั้นที่เสนอ (ส่วนหนึ่งของ 8.2):** ต่อ hook ที่ `ensure_current` มีอยู่แล้ว — ไม่ใช่ trigger ใหม่
+- **trigger:** file source = `build_id` ของ manifest เปลี่ยน (ค่าข้อมูลเปลี่ยน) หรือ contract sha เปลี่ยน (โครงเปลี่ยน); legacy = mtime ของ business DB
+- **ทำนอก request:** request แค่ "ตั้งธง" → job ใน `scheduler.py` (หรือ Celery) ทำงานจริง — ห้ามสแกนข้อมูลใน path ของคำถาม
+- **ขั้นต่อ context:** keyword index **ทุกตารางของ source** (เฉพาะ policy `full`) → hierarchy `detect_changes` / bootstrap → dimension family จาก profile / contract
+  → รายงานความพร้อม (ตารางข้างบน ต่อ context)
+- **ทุกการเขียนผ่าน `provenance.py`:** เครื่องไม่ทับ `manual` / `declared`; ที่ทับไม่ได้ = ข้อเสนอเข้าคิว `knowledge_proposals`
+- **ปุ่มใน admin web เรียกฟังก์ชันเดียวกัน** (ซ่อม / บังคับรันทันที)
 
 ### ✅ พบระหว่างสำรวจ — ปิดแล้ว 2026-09-21 (`API_DOCS_ENABLED`, ค่าเริ่มต้นปิด)
 
@@ -103,6 +145,7 @@
 
 ### 8.2 — Pipeline เดียว ทุก source ทั้งสองโหมด (5–7 วัน) — หัวใจของ "อัตโนมัติตั้งแต่ต้นจนจบ"
 - `context_onboarding` อ่านผ่าน `source_resolver` (แบบที่ `hierarchy_service` ทำแล้ว) แทน `sqlite3.connect()`
+- **เติมเองเมื่อข้อมูลใหม่เข้า** (เจ้าของ 2026-10-22) — trigger / ขั้น / กฎการเขียน: §2.1
 - ลำดับ: เชื่อมต่อ → profile → **ความรู้ที่ประกาศ (ถ้ามี contract)** → อนุมานส่วนที่เหลือด้วย LLM → hierarchy → golden (จากข้อมูล / control totals) → รายงานความพร้อม
 - contract เป็น input ที่มีสิทธิ์สูงสุด ไม่ใช่ทางแยก — `datafeed_knowledge` กลายเป็น "ตัวอ่าน contract" ของ pipeline
 - **Exit — พิสูจน์ว่ารองรับสองโหมดจริง:** onboard `feed_revenue` สองครั้งบน source เดียวกัน — ครั้งแรก**ใช้** contract,

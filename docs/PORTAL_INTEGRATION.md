@@ -17,10 +17,13 @@ Request เพิ่มเติมสำหรับ portal (optional ทั้
 ```
 
 ### `scope` — ทำงานอย่างไร
-- key ที่ใช้ได้ต่อ context = `schema_contexts.scope_columns` (`{key: column}`) — context `feed_*` ได้จาก `scope_columns` ใน contract
-  (re-sync อัตโนมัติ); ตอนนี้ (contract 2026-09-19) ทุกโดเมนประกาศ `year_month` (expense/ebt map ไป `time_key`) และ
-  `org_code` → `cost_center` — ไม่มี `scope_exempt`: dataset ที่ไม่มี `cost_center` (เช่น revenue `fact_bu_monthly`,
-  ebt `fact_ebt_total_monthly`, dim ที่ไม่มีงวด) ใช้ไม่ได้เมื่อ scope มี key นั้น
+- key ที่ใช้ได้ต่อ context = `schema_contexts.scope_columns` (`{key: column}` หรือ `{key: [column, ...]}`) — context `feed_*` ได้จาก
+  `scope_columns` ใน contract (re-sync อัตโนมัติ); ตอนนี้ทุกโดเมนประกาศ `year_month` (expense/ebt map ไป `time_key`) และ
+  `org_code` → `cost_center` — ไม่มี `scope_exempt`: dataset ที่ไม่มีคอลัมน์ของ key (เช่น revenue `fact_bu_monthly`,
+  ebt `fact_ebt_total_monthly` ไม่มี `cost_center`, dim ที่ไม่มีงวด) ใช้ไม่ได้เมื่อ scope มี key นั้น
+- **key หนึ่งมีได้หลายชื่อ (2026-10-22):** `{"year_month": ["time_key", "effective_month"]}` — แต่ละตารางถูกกรองด้วยชื่อแรกที่ตัวเองมี
+  (ชื่อแรก = ของ fact หลัก ใช้ใน prompt) — expense 1.2.4 ประกาศให้ `dim_org_snapshot` (ลงงวดไว้ที่ `effective_month`) ใช้ได้ภายใต้ scope:
+  ก่อนหน้านี้ "ค่าใช้จ่ายของหน่วยงาน X" จาก portal JOIN ไปหาหน่วยงานไม่ได้ (`data_sources.scope_column_names`)
 - ค่า: จำนวนเต็มหรือข้อความ หรือ list ของค่าเหล่านั้น (1–1000 ค่า = `IN`); หลาย key = AND
 - **key ที่ context ไม่ประกาศ / ค่าผิดชนิด → HTTP 400** — ไม่มีทางตอบแบบไม่กรอง
 - ระบบห่อทุกตารางของ context ด้วย TEMP view ต่อ query: ตารางที่มีคอลัมน์ครบ = กรองตาม scope, ตารางที่ไม่มี = ใช้ไม่ได้;
