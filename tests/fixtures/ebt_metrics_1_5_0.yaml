@@ -1,0 +1,86 @@
+domain: ebt
+metrics:
+- id: ebt
+  name_th: EBT (กำไรก่อนภาษี ตามรายงาน EBT)
+  synonyms:
+  - EBT
+  - ebt
+  - กำไร
+  - กำไร (ขาดทุน)
+  - ผลประกอบการ
+  - earnings before tax
+  dataset: fact_ebt
+  period:
+    column: time_key
+    value:
+      cumulative: amount_ytd
+      month: amount
+  dimensions:
+  - division
+  - sub_division
+  - unit
+  - sub_unit
+  - sub_division_fname
+  - unit_fname
+  - sub_unit_fname
+  - unit_short_name
+  - cost_center
+  terms:
+    rev:
+      where: measure_type = 'SUBTOTAL' AND group_1 = 'รวมรายได้ทั้งสิ้น'
+    other:
+      where: measure_type = 'ADDITIVE' AND group_1 = '08.รายได้อื่น'
+    exp:
+      where: measure_type = 'SUBTOTAL' AND group_1 = 'รวมค่าใช้จ่ายทั้งสิ้น'
+    er:
+      where: measure_type = 'ADDITIVE' AND group_1 = '01.ค่าใช้จ่ายตอบแทนแรงงาน-ER'
+  expr: rev - other - (exp - er)
+  official_scope: division IN ('สายงานขายและปฏิบัติการลูกค้า 1', 'สายงานขายและปฏิบัติการลูกค้า 2')
+  official_total:
+    dataset: fact_ebt_total_monthly
+    column: ebt
+    month_column: ebt_month
+  reference:
+    control_totals: ebt
+  unit: บาท (THB)
+  note_th: แต่ละ term = ผลรวมของคอลัมน์ค่า (amount_ytd สำหรับยอดสะสม ณ งวดเดียว / amount สำหรับรายเดือน)
+    ของแถวที่ตรงเงื่อนไข ภายในมิติเดียวกัน; term ที่ไม่มีแถวถือเป็น 0; ไม่ใช้แถว COMPUTED 3.1; ยอดทางการ
+    = official_total (2 สายงานขาย) เมื่อไม่ระบุมิติ/หน่วยงาน; หน่วยงานนอก 2 สายงานขายคำนวณได้แต่ไม่ใช่ยอดรวมรายงาน
+- id: ebt_excluding_personnel
+  name_th: EBT ไม่รวมค่าใช้จ่ายบุคลากร
+  synonyms:
+  - ไม่รวมค่าใช้จ่ายบุคลากร
+  - ไม่รวมบุคลากร
+  - ก่อนหักค่าใช้จ่ายบุคลากร
+  - ไม่รวม HR
+  - nohr
+  - EBT ไม่รวมบุคลากร
+  - EBT excluding personnel
+  extends: ebt
+  terms:
+    hr:
+      where: measure_type = 'ADDITIVE' AND group_0 = '02.ค่าใช้จ่าย' AND group_1 IN ('01.ค่าใช้จ่ายตอบแทนแรงงาน',
+        '02.ค่าสวัสดิการ', '03.ค่าใช้จ่ายพัฒนาและฝึกอบรมบุคลากร')
+  expr: ebt + hr
+  official_total:
+    dataset: fact_ebt_total_monthly
+    column: ebt_ex_personnel
+    month_column: ebt_ex_personnel_month
+  reference:
+    control_totals: ebt_ex_personnel
+  unit: บาท (THB)
+  note_th: บวกกลับเฉพาะหมวด 1–3 ชื่อตรง (= hrActual ของรายงาน, QA G5); ไม่บวก '01.ค่าใช้จ่ายตอบแทนแรงงาน-ER'
+    กลับ เพราะถูกตัดออกจากค่าใช้จ่ายในสูตร EBT อยู่แล้ว
+- id: ebt_margin
+  name_th: EBT Margin
+  synonyms:
+  - EBT margin
+  - ebt margin
+  - อัตรากำไร EBT
+  - margin
+  - กำไรต่อรายได้
+  extends: ebt
+  expr: ebt / nullif(rev - other, 0) * 100
+  unit: percent
+  note_th: ฐาน = รายได้ (ฐานยอดขาย) ไม่รวมรายได้อื่น; รายงานแสดง 0.0 เมื่อรายได้ ≤ 0; ไม่เป็น measure
+    ใน control_totals (อัตราส่วนรวมข้ามสายงานไม่ได้)
