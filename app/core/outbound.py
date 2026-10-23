@@ -12,6 +12,7 @@ Internal channels (chat, telegram, admin) are unchanged: there the SQL and the r
 the person needs to see.
 """
 
+import httpx
 from typing import Any, Dict, Optional, Tuple
 
 # code → (HTTP-equivalent status, message). The only error texts these channels ever return.
@@ -28,6 +29,8 @@ ERRORS: Dict[str, Tuple[int, str]] = {
     "query_failed": (422, "ตอบคำถามนี้ไม่ได้ — ลองถามให้เจาะจงขึ้น หรือระบุ context"),
     # the answer exists but could not be recorded: an answer nobody can trace is not sent (NIST AU-5)
     "audit_unavailable": (503, "ระบบบันทึกการใช้งานไม่พร้อม จึงไม่ส่งคำตอบออก — กรุณาลองใหม่ภายหลัง"),
+    # the LLM gateway refused or did not answer (403 model blocked, 5xx, timeout): not the question's fault
+    "llm_unavailable": (503, "ระบบถามตอบใช้งานไม่ได้ชั่วคราว (โมเดลภาษาไม่ตอบสนอง) — กรุณาลองใหม่ภายหลัง"),
     "internal_error": (500, "เกิดข้อผิดพลาดภายใน"),
 }
 
@@ -86,6 +89,9 @@ def code_for(exc: BaseException, named_in_rights: bool = False) -> str:
         return "policy_refused" if named_in_rights else "context_not_allowed"
     if find(exc, SourceUnavailable):
         return "source_unavailable"
+    # ponytail: matcha is the only provider that raises httpx; add anthropic/google error classes if policy ever allows them
+    if find(exc, (httpx.HTTPStatusError, httpx.TransportError)):
+        return "llm_unavailable"
     return "internal_error"
 
 
