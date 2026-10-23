@@ -80,3 +80,13 @@ def test_a_null_formula_is_retried_once_and_zeros_after_it_are_no_data():
     assert hybrid_flow.zeros_after_null_retry([{"ebt": 0}], history) == [{"ebt": None}]
     assert hybrid_flow.zeros_after_null_retry([{"ebt": 24410200.83}], history) == [{"ebt": 24410200.83}]
     assert hybrid_flow.zeros_after_null_retry([{"ebt": 0}], []) == [{"ebt": 0}]  # no retry: a real 0
+
+
+def test_a_filter_on_the_value_the_lookup_found_still_counts_as_asked(monkeypatch):
+    tables = {"feed_x_main": ["division", "ebt"], "feed_x_detail": ["sub_unit", "amount"]}
+    monkeypatch.setattr(hybrid_flow, "_context_tables", lambda table, engine=None: tables)
+    intent = {"filters": [{"column": "sub_unit", "operator": "LIKE", "value": "%ส่วนขายและบริการลูกค้า น่าน%"}]}
+    assert hybrid_flow.unfilterable_columns(intent, "feed_x_main", question="ebt ของ น่าน เป็นเท่าไหร่") == \
+        (["sub_unit"], ["feed_x_detail"])
+    unasked = {"filters": [{"column": "sub_unit", "operator": "=", "value": "ส่วนขายและบริการลูกค้า แพร่"}]}
+    assert hybrid_flow.unfilterable_columns(unasked, "feed_x_main", question="ebt ของ น่าน เป็นเท่าไหร่") == ([], [])

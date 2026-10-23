@@ -207,8 +207,17 @@ def unfilterable_columns(intent: Dict, context_table: str, config_engine=None, q
     if not main_columns:
         return [], []
     def asked(value) -> bool:
-        values = value if isinstance(value, list) else [value]
-        return question is None or any(str(v).strip("%'\" ").lower() in question.lower() for v in values if str(v).strip("%'\" "))
+        # the value, or a word of it: Pass 1 filters with the value the lookup found ('ส่วนขายและบริการลูกค้า น่าน' for
+        # "ebt ของ น่าน"), which the question never holds whole — the filter was then not "asked", and a retry that moved
+        # back to the main view without it went through as EBT 0 (2026-10-23)
+        if question is None:
+            return True
+        q = question.lower()
+        for v in value if isinstance(value, list) else [value]:
+            text_ = str(v).strip("%'\" ").lower()
+            if text_ and (text_ in q or any(len(word) >= 2 and word in q for word in re.split(r"[\s%]+", text_))):
+                return True
+        return False
 
     wanted = {str(f.get("column", "")).lower() for f in intent.get("filters") or []
               if isinstance(f, dict) and asked(f.get("value"))}
