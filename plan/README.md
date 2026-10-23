@@ -25,6 +25,7 @@
 | [PROMPT_P8_PHASE2.md](PROMPT_P8_PHASE2.md) | สั่งงาน session ใหม่: ปิดงานค้างของ 8.1 (start service, ตรวจหลัง start, push + CI) แล้วเริ่ม Phase 8.2 |
 | [PROMPT_CODEX_REVIEW_2.md](PROMPT_CODEX_REVIEW_2.md) | สั่งผู้ตรวจรอบ 2: การแก้ตามผลตรวจ 9 ข้อ + pin CI (`0868447..369390c`) |
 | [PLAN_8_SELF_SERVICE_ONBOARDING.md](PLAN_8_SELF_SERVICE_ONBOARDING.md) | 📝 **ร่าง 2026-09-21** — ต่อแหล่งข้อมูลเอง → เตรียมพร้อมอัตโนมัติ (pipeline เดียว สองโหมด: อนุมาน + contract) → คนตัดสินเฉพาะที่ไม่แน่ใจ; BYOK, key self-service; D-A/B/C ตัดสินแล้ว; งานแรก: [PROMPT_P8_PHASE0_1.md](PROMPT_P8_PHASE0_1.md) · 2026-10-22: ความรู้ global กรองตามคอลัมน์ ✅ + ทิศทาง "เติมความรู้เองเมื่อข้อมูลใหม่เข้า" (§2.1) |
+| [PROMPT_RESEARCH_DECLARED_METRICS.md](PROMPT_RESEARCH_DECLARED_METRICS.md) | 🔍 **research (ยังไม่เริ่ม)** — สูตร/metric ประกาศเป็นข้อมูลแทนกฎที่เป็นข้อความ: "EBT ไม่รวมค่าใช้จ่ายบุคลากร" ตอบผิด, แก้ถ้อยคำ 4 รอบแล้ววน (คำถามอื่นพัง) — ผลที่ต้องส่ง `RESEARCH_DECLARED_METRICS.md` |
 | [PLAN_PENDING_BGE_M3.md](PLAN_PENDING_BGE_M3.md) | **รออนุมัติ** — เปลี่ยน Vanna embedding เป็น BGE-M3 (ห้าม execute จนกว่าจะอนุมัติ) |
 
 หมายเหตุ: Plan 1B-C (MCP สำหรับผู้เรียกภายนอก + API key auth) ✅ ปิดแล้ว 2026-09-20 ด้วย Plan 7 Phase 6 (facade `/api/v1/mcp` — stateless Streamable HTTP, ไม่ทำ SSE) — ผล: `archive/RESULT_P7_PHASE6.md`; แผนเดิม: `archive/PLAN_1B_MCP_CONSOLIDATION.md`, REMAIN-8
