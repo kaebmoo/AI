@@ -73,7 +73,7 @@ class _PromptService(_Service):
     def build_hierarchy_rule_text(self, context_name):
         return ""
 
-    def build_instruction_rules_text(self, main_view):
+    def build_instruction_rules_text(self, main_view, context_name=None):
         return ""
 
 

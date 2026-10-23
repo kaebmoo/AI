@@ -49,10 +49,26 @@ def _build_schema_from_pragma(service: "SchemaService", table_name: str) -> str:
     return schema_text
 
 
-def build_business_rules_text(service: "SchemaService", table_name: str) -> str:
+def scoped_rules(service: "SchemaService", rules: List[Dict], context_name: Optional[str]) -> List[Dict]:
+    """The rules that apply to the context: its own as they are, a table-less one only where the columns it
+    names exist (knowledge_scope) — a rule written for one data set no longer reaches every other."""
+    from app.services.schema.knowledge_scope import GLOBAL_RULE_TABLES, scope_for
+
+    scope = scope_for(service, context_name)
+    if scope is None:
+        return rules
+    return [rule for rule in rules if rule.get("table_name") not in GLOBAL_RULE_TABLES
+            or scope.applies(rule.get("rule_name"), rule.get("rule_description"),
+                             rule.get("example_correct"), rule.get("example_wrong"))]
+
+
+def build_business_rules_text(service: "SchemaService", table_name: str, context_name: Optional[str] = None) -> str:
     rules = service.get_business_rules(table_name, inject_mode="schema_context")
     if not rules:
         return _get_default_business_rules()
+    rules = scoped_rules(service, rules, context_name)
+    if not rules:  # rules exist, none for this context's columns — not the hardcoded fallback either
+        return ""
 
     rules_text = "## Business Rules\n\n"
     for rule in rules:
@@ -109,6 +125,16 @@ def build_semantic_mapping_text(service: "SchemaService", context_name: Optional
     mappings = service.get_semantic_mappings(context_name=context_name)
     if not mappings:
         return _get_default_semantic_mappings()
+    if context_name:
+        # a mapping no context owns, only where its column exists (knowledge_scope)
+        from app.services.schema.knowledge_scope import scope_for
+
+        scope = scope_for(service, context_name)
+        if scope is not None:
+            mappings = [m for m in mappings if m.get("context_name")
+                        or scope.applies(m.get("target_condition"), m.get("full_condition"), column=m.get("target_column"))]
+            if not mappings:
+                return ""
 
     mapping_text = "<semantic_mappings>\n"
     mapping_text += "## 🔥 SEMANTIC MAPPINGS - REFERENCE GUIDE 🔥\n\n"
@@ -199,7 +225,7 @@ def get_schema_context(
 
     context_text = f"# Context: {display_name} ({context_name})\n"
     context_text += build_schema_text(service, table_name=main_view)
-    context_text += "\n\n" + build_business_rules_text(service, table_name=main_view)
+    context_text += "\n\n" + build_business_rules_text(service, table_name=main_view, context_name=context_name)
 
     if not lite_mode:
         if include_semantic_mappings:
@@ -323,7 +349,7 @@ def _build_thai_prompt(
     sql_dialect = "DuckDB" if _is_duckdb(service) else "SQLite"
     context_instructions = context_info.get("instruction_th") or ""
     hierarchy_rule = service.build_hierarchy_rule_text(context_name)
-    instruction_rules = service.build_instruction_rules_text(main_view)
+    instruction_rules = service.build_instruction_rules_text(main_view, context_name)
 
     return f"""<system>
 คุณเป็น AI Assistant สำหรับวิเคราะห์ข้อมูลของ NT (National Telecom)

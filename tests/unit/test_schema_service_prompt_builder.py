@@ -86,7 +86,7 @@ def _create_prompt_service():
         service,
     )
     service.build_instruction_rules_text = MethodType(
-        lambda self, main_view: "## กฎการรักษาบริบท (Context Retention Rules)\nคงบริบทเดิมถ้าผู้ใช้ถามต่อ",
+        lambda self, main_view, context_name=None: "## กฎการรักษาบริบท (Context Retention Rules)\nคงบริบทเดิมถ้าผู้ใช้ถามต่อ",
         service,
     )
     return service

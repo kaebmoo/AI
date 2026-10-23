@@ -291,9 +291,10 @@ class SchemaService:
 - ถ้า Actual Values มีข้อมูลจากหลาย level → ใช้เฉพาะ level ที่ user ถามถึง
 - ห้าม OR ข้ามระดับ — ทำให้ตัวเลขผิดเพี้ยนอย่างมาก"""
 
-    def build_instruction_rules_text(self, main_view: str) -> str:
+    def build_instruction_rules_text(self, main_view: str, context_name: Optional[str] = None) -> str:
         """Build instruction section rules from DB (context_retention, unit_conversion, etc.)"""
-        rules = self.get_business_rules(main_view, inject_mode='instruction')
+        rules = prompt_builder.scoped_rules(self, self.get_business_rules(main_view, inject_mode='instruction'),
+                                            context_name)
         if not rules:
             return ""
 
@@ -437,8 +438,8 @@ class SchemaService:
     def build_schema_text(self, table_name: str) -> str:
         return prompt_builder.build_schema_text(self, table_name)
     
-    def build_business_rules_text(self, table_name: str) -> str:
-        return prompt_builder.build_business_rules_text(self, table_name)
+    def build_business_rules_text(self, table_name: str, context_name: Optional[str] = None) -> str:
+        return prompt_builder.build_business_rules_text(self, table_name, context_name)
     
     def build_sample_values_text(self, table_name: str) -> str:
         return prompt_builder.build_sample_values_text(self, table_name)
