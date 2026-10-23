@@ -74,6 +74,24 @@ class ChartConfig(BaseModel):
     chart_spec: Optional[ChartSpec] = Field(default=None, description="Renderer-neutral declarative chart contract")
 
 
+class SourceAlternative(BaseModel):
+    """Another context the question's keywords match — the chat offers to re-ask there."""
+    context: str
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    keywords: List[str] = []
+
+
+class AnswerSource(BaseModel):
+    """Which context answered, and how far its data runs."""
+    context: str
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    data_period: Optional[int] = None      # YYYYMM (ค.ศ.)
+    data_period_th: Optional[str] = None   # "ก.พ. 2569"
+    alternatives: List[SourceAlternative] = []
+
+
 class ChatResponse(BaseModel):
     id: Optional[int] = None
     conversation_id: Optional[str] = None
@@ -91,3 +109,4 @@ class ChatResponse(BaseModel):
     display_hint: Optional[str] = Field(default=None, description="Table display hint: flat, hierarchical, crosstab")
     hierarchy_columns: Optional[List[str]] = Field(default=None, description="Ordered column names for hierarchical display")
     is_chart_only: bool = Field(default=False, description="True when no SQL was re-executed (chart switch only)")
+    source: Optional[AnswerSource] = Field(default=None, description="Context the answer was read from + alternatives")

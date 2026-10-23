@@ -119,6 +119,7 @@ export default function ChatScreen() {
             hierarchyColumns: m.hierarchy_columns || undefined,
             warnings: m.warnings || undefined,
             confidence: m.confidence || undefined,
+            source: m.source || undefined,
           });
         }
       }
@@ -179,18 +180,27 @@ export default function ChatScreen() {
   // ---------------------------------------------------------------
   // Send message
   // ---------------------------------------------------------------
-  const handleSend = async () => {
-    if (!input.trim()) return;
+  const handleSend = () => sendQuestion(input.trim(), context);
+
+  // The same question from another data source: the selector follows, so a follow-up stays there
+  const handleAskFrom = (question: string, ctx: string) => {
+    if (loading) return;
+    setContext(ctx);
+    sendQuestion(question, ctx);
+  };
+
+  const sendQuestion = async (question: string, ctx: DataContext) => {
+    if (!question) return;
 
     const userMessage: Message = {
       id: Date.now(),
       role: 'user',
-      content: input.trim(),
+      content: question,
     };
 
     const streamingId = `streaming-${Date.now()}`;
     setMessages((prev) => [...prev, userMessage]);
-    setInput('');
+    if (question === input.trim()) setInput('');
     setLoading(true);
     setStatusText('กำลังเริ่มต้น...');
 
@@ -200,7 +210,7 @@ export default function ChatScreen() {
           question: userMessage.content,
           conversation_id: conversationId,
           provider: provider,
-          context: context === 'auto' ? undefined : context,
+          context: ctx === 'auto' ? undefined : ctx,
         },
         {
           onStatus: (status, message) => {
@@ -258,6 +268,7 @@ export default function ChatScreen() {
               chartConfig: response.chart_config,
               displayHint: response.display_hint,
               hierarchyColumns: response.hierarchy_columns,
+              source: response.source || undefined,
             };
 
             // Replace preview message or append
@@ -417,7 +428,7 @@ export default function ChatScreen() {
                     // Per-message boundary: a crash in one bubble (bad chart/table
                     // data) shows a fallback for that message only, never blanks the app
                     <ErrorBoundary label="ChatBubble">
-                      <ChatBubble message={item} onTrain={handleTrain} />
+                      <ChatBubble message={item} onTrain={handleTrain} onAskFrom={handleAskFrom} />
                     </ErrorBoundary>
                   )}
                   contentContainerStyle={{ padding: 16, paddingBottom: 20 }}

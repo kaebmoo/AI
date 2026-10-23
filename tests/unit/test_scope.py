@@ -339,7 +339,7 @@ class TestPinnedForRestrictedKeys:
 
         seen = {}
 
-        async def fake(self, *args):
+        async def fake(self, *args, **kwargs):
             seen["pinned"] = request_pinned.get()
             return "done"
 

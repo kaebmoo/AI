@@ -91,6 +91,55 @@ def _cumulative_columns(context_table: str, config_engine=None) -> List[str]:
         return []
 
 
+def _period_columns(context_table: str, config_engine=None) -> List[str]:
+    """The period column(s) of a context: the time columns of its declared scope mapping
+    (schema_contexts.scope_columns, e.g. year_month → time_key) — never a hardcoded name.
+    Empty = none declared / config unreachable."""
+    try:
+        from sqlalchemy import text
+
+        if config_engine is None:
+            from app.db.session import config_engine
+        with config_engine.connect() as conn:
+            raw = conn.execute(text("SELECT scope_columns FROM schema_contexts WHERE main_view = :t AND is_active = 1"),
+                               {"t": context_table}).scalar()
+        mapping = json.loads(raw or "{}")
+        from app.services.schema.prompt_builder import is_time_column
+
+        # the mapping also holds non-period keys (org_code → cost_center): a filter on those is not one period
+        return [c for c in dict.fromkeys(mapping.values()) if isinstance(c, str) and c and is_time_column(c)]
+    except Exception:
+        return []
+
+
+def cumulative_sum_error(sql_query: str, context_table: str, config_engine=None) -> Optional[str]:
+    """A cumulative (YTD) column summed over more than one period is many times too big — "ข้อมูล EBT
+    เป็นอย่างไรบ้าง" came back as SUM(ebt) over 202601–202609: 4,298M against the report's 571M (2026-10-22).
+    The prompt names the columns and says one row; this is the check behind the words. The SQL is
+    refused and the retry prompt says exactly what to write instead.
+
+    ponytail: regex over the SQL, not a parse — a period equality anywhere, or the period column in
+    GROUP BY (a YTD trend by month), is taken as single-period; a CTE that filters the period inside
+    passes too. Upgrade to the DuckDB parse tree (check_select) if this ever misfires."""
+    cumulative = _cumulative_columns(context_table, config_engine)
+    periods = _period_columns(context_table, config_engine)
+    if not cumulative or not periods:
+        return None
+    summed = [c for c in cumulative if re.search(r'\bSUM\s*\(\s*(?:\w+\.)?"?%s"?\s*\)' % re.escape(c), sql_query, re.I)]
+    if not summed:
+        return None
+    for col in periods:
+        ident = r'(?:\w+\.)?"?%s"?' % re.escape(col)
+        # CAST(time_key AS INTEGER) = 202609 / time_key = 202609 / time_key = '202609'
+        single = re.search(r"(?:%s|CAST\s*\(\s*%s\s+AS\s+\w+\s*\))\s*=\s*'?\d+'?" % (ident, ident), sql_query, re.I)
+        grouped = re.search(r"GROUP\s+BY\b[^;]*?%s" % ident, sql_query, re.I)
+        if single or grouped:
+            return None
+    return (f"คอลัมน์ {', '.join(summed)} เป็นยอดสะสมตั้งแต่ต้นปี (YTD) ณ งวด — SUM ข้ามงวดได้ตัวเลขเกินจริงหลายเท่า "
+            f"ต้องเลือกงวดเดียวเท่านั้น: WHERE {periods[0]} = <งวดที่ต้องการ> (ห้าม BETWEEN / IN หลายงวด / ไม่กรองงวด) "
+            f"แล้วรวมได้เฉพาะข้ามมิติอื่นในงวดนั้น; ถ้าต้องการรวมหลายเดือนจริง ให้ใช้คอลัมน์รายเดือน (*_month) แทน")
+
+
 def table_rule(context_table: str, config_engine=None) -> str:
     """The prompt's table pin. A context is answered from its main view — plus any table of its own
     source that its instruction names (a file source whose main view is a dimensionless totals
@@ -169,11 +218,28 @@ def scope_note() -> str:
     then sums both or picks the wrong one (RESULT_F11 §2). The filter still does the enforcing — this
     only says which period the question is being asked about.
     """
+    from app.services.data_sources import request_prompt_note
+
+    request_note = request_prompt_note.get()
+    if request_note:
+        return f"\n{request_note}\n" + _scope_note()
+    return _scope_note()
+
+
+def _scope_note() -> str:
     from app.services.data_sources import request_scope, request_scope_columns
 
     scope = request_scope.get()
+    anchored = reference_period()
     if not scope:
-        return ""
+        if anchored is None:
+            return ""
+        # no scope (chat / Telegram) but the source says how far its data runs: the same three rules,
+        # anchored on that period — the caller filtered nothing, so the model must filter the period itself
+        # "วันที่ปัจจุบัน" in the system prompt is not a period of the data: pl_costtype (data to 202602) was
+        # asked for 202610 because of it (chat audit 336, 2026-10-22)
+        return ("\n**ข้อมูลของ context นี้มีถึงงวด %d (งวดอ้างอิง = งวดล่าสุดที่มีข้อมูล ไม่ใช่เดือนของวันที่ปัจจุบัน) "
+                "— ทุกตารางมีทุกงวดตั้งแต่ต้นชุดข้อมูล ไม่ได้กรองไว้:**" % anchored) + _period_rules(anchored) + "\n"
     # the caller's key and the column it filters are not the same name for every context
     # (expense / ebt: year_month → time_key) — naming only the key pinned the reference period to a
     # column those tables do not have, and ebt kept answering from the wrong year (RESULT_F11 §8)
@@ -190,16 +256,21 @@ def scope_note() -> str:
                          + (f" — ค่าล่าสุด/งวดอ้างอิง = {max(values)}" if len(values) > 1
                             and all(isinstance(v, int) for v in values) else ""))
     note = ("\n**ขอบเขตข้อมูลของคำขอนี้ — ทุกตารางถูกกรองไว้แล้วเท่านี้:**\n" + "\n".join(lines))
-    anchored = reference_period()
     if anchored is not None:
-        # The three cases are ordered on purpose. Saying only "no period mentioned means the reference
-        # period" made the model narrow "ปี 69" to that one month as well (RESULT_F11 §7), so the case
-        # where the question does name a period has to come first and say "do not narrow it".
-        # No period at all = the year to date (owner, 2026-09-25): twice in the portal's audit a user handed
-        # August asked for the year right after. A cumulative column summed over months is many times too
-        # big, and summed monthly values miss the net of BG8 (26,644.91 against the report's 26,036.32) —
-        # hence the point-in-time row first, for a whole year's total as well.
-        note += (
+        note += _period_rules(anchored)
+    return note + "\n"
+
+
+def _period_rules(anchored: int) -> str:
+    """The three period rules, anchored on `anchored` — shared by the scoped and the unscoped note."""
+    # The three cases are ordered on purpose. Saying only "no period mentioned means the reference
+    # period" made the model narrow "ปี 69" to that one month as well (RESULT_F11 §7), so the case
+    # where the question does name a period has to come first and say "do not narrow it".
+    # No period at all = the year to date (owner, 2026-09-25): twice in the portal's audit a user handed
+    # August asked for the year right after. A cumulative column summed over months is many times too
+    # big, and summed monthly values miss the net of BG8 (26,644.91 against the report's 26,036.32) —
+    # hence the point-in-time row first, for a whole year's total as well.
+    return (
             f"\nSQL ต้องใส่เงื่อนไขงวดเสมอ (ขอบเขตนี้ไม่ได้เจาะจงงวดให้) ตามลำดับนี้:"
             f"\n1. คำถามระบุช่วงเวลาไว้แล้ว (ปี / เดือน / ช่วง) → **ใช้ตามที่ระบุ ห้ามแคบลงเป็นงวดอ้างอิงเอง** "
             f"(เช่น \"ปี 2569\" = ทั้งปี ไม่ใช่เฉพาะเดือนของงวดอ้างอิง)"
@@ -210,20 +281,43 @@ def scope_note() -> str:
             f"(ถามรายเดือน / แนวโน้ม = ยอดรายเดือนตามปกติ)"
             f"\n**ห้ามรวมทุกงวดในขอบเขตเป็นคำตอบเดียว** เว้นแต่คำถามขอช่วงนั้นจริง — "
             f"ขอบเขตมีไว้ให้เทียบงวดกันได้ ไม่ใช่ช่วงเวลาของคำตอบ")
-    return note + "\n"
+
+
+def is_empty_result(rows) -> bool:
+    """No rows, or rows whose every value is NULL — SUM over nothing returns one row of NULL, and "EBT เดือน
+    ตุลาคม 2569" (data to 202602) was explained as "the sum is null" instead of where the data ends (2026-10-22).
+    The same rule as the outbound channels' (outbound.carries_data): this text holds the SQL and must not leave."""
+    from app.core.outbound import carries_data
+
+    return not carries_data(rows)
+
+
+def no_data_message(sql_query: str) -> str:
+    """The 0-row answer (chat; REST and MCP send their own fixed text). It names how far the data runs when that
+    is known: "EBT" on pl_costtype asked for 202610 with data to 202602 and said only "no rows" (2026-10-22)."""
+    from app.services.ai.thai_year import period_th
+
+    period = reference_period()
+    known = (f"- ข้อมูลของแหล่งนี้มีถึงงวด **{period_th(period)}** ({period}) — งวดหลังจากนี้ยังไม่มีข้อมูล\n"
+             if period_th(period) else "")
+    return (f"ไม่พบข้อมูลที่ตรงกับเงื่อนไข\n\nSQL ที่ใช้:\n```sql\n{sql_query}\n```\n\nอาจเป็นเพราะ:\n{known}"
+            f"- ไม่มีข้อมูลที่ตรงกับคำค้นหา\n- ชื่อคอลัมน์หรือค่าที่ใช้ค้นหาอาจไม่ถูกต้อง")
 
 
 def reference_period() -> Optional[int]:
     """The period a scoped request is about: the largest value of the first scope key that lists several
     numbers (a caller's window ends at its own period — the portal's year_month ends at the report's month).
-    None when unscoped, or when no key lists several numbers."""
-    from app.services.data_sources import request_scope
+    Unscoped, or with no key listing several numbers: the period the context's data runs to (its source's
+    manifest, set per request by QueryEngine) — chat and Telegram send no scope, and without an anchor
+    "ข้อมูล EBT เป็นอย่างไรบ้าง" summed twenty months across two years (2026-10-22). None for a legacy
+    source, which has no manifest: its prompt is unchanged."""
+    from app.services.data_sources import request_data_period, request_scope
 
     for value in (request_scope.get() or {}).values():
         values = value if isinstance(value, (list, tuple)) else [value]
         if len(values) > 1 and all(isinstance(v, int) for v in values):
             return max(values)
-    return None
+    return request_data_period.get()
 
 
 def intent_period_note() -> str:
@@ -423,8 +517,8 @@ async def build_explanation(
     schema_metadata: Optional[List[Dict]],
     trace=None,
 ) -> Any:
-    if not data:
-        return f"ไม่พบข้อมูลที่ตรงกับเงื่อนไข\n\nSQL ที่ใช้:\n```sql\n{sql_query}\n```\n\nอาจเป็นเพราะ:\n- ไม่มีข้อมูลที่ตรงกับคำค้นหา\n- ชื่อคอลัมน์หรือค่าที่ใช้ค้นหาอาจไม่ถูกต้อง"
+    if is_empty_result(data):
+        return no_data_message(sql_query)
 
     try:
         import time
@@ -833,6 +927,12 @@ async def run_hybrid_attempt(
         retry_history.append({"sql": sql_query, "error": dropped_error})
         return None, total_tokens, sql_query
 
+    cumulative_error = cumulative_sum_error(sql_query, context_table)
+    if cumulative_error:
+        logger.warning("Hybrid Mode: %s", cumulative_error)
+        retry_history.append({"sql": sql_query, "error": cumulative_error})
+        return None, total_tokens, sql_query
+
     if on_status:
         on_status(RetryStatus(attempt, max_retries, "validating", "Validating SQL"))
 
@@ -898,8 +998,8 @@ async def run_hybrid_attempt(
 
     dim_families, schema_metadata, hierarchy_info = await metadata_task
 
-    if not full_data:
-        explanation = f"ไม่พบข้อมูลที่ตรงกับเงื่อนไข\n\nSQL ที่ใช้:\n```sql\n{sql_query}\n```\n\nอาจเป็นเพราะ:\n- ไม่มีข้อมูลที่ตรงกับคำค้นหา\n- ชื่อคอลัมน์หรือค่าที่ใช้ค้นหาอาจไม่ถูกต้อง"
+    if is_empty_result(full_data):
+        explanation = no_data_message(sql_query)
     else:
         explanation = None
         if template_answers_enabled:
@@ -1406,10 +1506,16 @@ def build_pass2_prompt(
                 # the year to date: a cumulative column is read at its last month, never summed (see scope_note);
                 # named here — told only "the cumulative column if there is one", pass 2 summed `revenue` by month
                 columns = _cumulative_columns(context_table)
-                how = (f"ใช้คอลัมน์ยอดสะสม {', '.join(columns)} ณ เดือน {month} แถวเดียว ห้าม SUM ข้ามเดือน "
-                       f"(measure อื่นที่ไม่มีคอลัมน์สะสม: SUM รายเดือน เดือน 1–{month})" if columns
-                       else f"SUM รายเดือน เดือน 1–{month}")
-                time_text = f"**ยอดสะสม** เดือน 1–{month} ปี ค.ศ. {year} (พ.ศ. {year + 543}) — {how}"
+                if columns:
+                    # "เดือน 1–9" next to the column names read as a range: the model wrote BETWEEN 202601 AND
+                    # 202609 and summed the YTD column over nine months (chat 1534, 2026-10-22) — so the period
+                    # is spelled as the one row to read, and the range only for measures without a YTD column
+                    time_text = (f"**ยอดสะสมถึงเดือน {month} ปี ค.ศ. {year} (พ.ศ. {year + 543})** = แถวของงวด เดือน {month} "
+                                 f"ปี {year} **งวดเดียว** (WHERE งวด = เดือน {month} เท่านั้น — ห้าม BETWEEN, ห้ามรวมเดือน 1–{month}) "
+                                 f"— ใช้คอลัมน์ยอดสะสม {', '.join(columns)} ห้าม SUM ข้ามเดือน "
+                                 f"(เฉพาะ measure ที่ไม่มีคอลัมน์สะสม: SUM รายเดือน เดือน 1–{month})")
+                else:
+                    time_text = f"**ยอดสะสม** เดือน 1–{month} ปี ค.ศ. {year} (พ.ศ. {year + 543}) — SUM รายเดือน เดือน 1–{month}"
 
     ordering_text = "ไม่ระบุ"
     if intent.get("ordering"):

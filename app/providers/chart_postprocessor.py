@@ -352,7 +352,13 @@ Example for hierarchical data (hierarchy: {hierarchy_chain}):
                  + ", ".join(f"ค.ศ. {y - BE_OFFSET} = พ.ศ. {y}" for y in years)
                  + " — เขียนปีตามนี้ ห้ามแปลงปีเอง") if years else ""
 
-    return f"""Question: {question}
+    # chat's note when the picked data source may not hold what is asked: without it here the explanation still
+    # titled revenue "EBT" though the SQL no longer did (2026-10-22)
+    from app.services.data_sources import request_prompt_note
+    request_note = request_prompt_note.get()
+    request_note = f"\n{request_note} — ในคำอธิบายให้เรียกตัวเลขตามคอลัมน์ที่ใช้จริง\n" if request_note else ""
+
+    return f"""Question: {question}{request_note}
 SQL: {sql}
 Results ({len(data)} rows):
 {data_preview}

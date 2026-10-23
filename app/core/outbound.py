@@ -103,10 +103,18 @@ def explanation_text(query_result: Any) -> str:
     return str(explanation or "")
 
 
+def carries_data(rows: Any) -> bool:
+    """A result with at least one non-NULL value. SUM over no rows is one row of NULL: no data, and the engine's
+    text for it is the no-data message with the full SQL in it — sent to the portal for "ebt ของ จังหวัดน่าน"
+    once that text existed (2026-10-22). The engine (hybrid_flow) and these channels share this one rule."""
+    return bool(rows) and any(value is not None for row in rows
+                              for value in (row.values() if isinstance(row, dict) else row))
+
+
 def safe_answer(query_result: Any) -> str:
-    """The answer text for an outside caller: the engine's prose only for a result WITH rows."""
+    """The answer text for an outside caller: the engine's prose only for a result that carries data."""
     if query_result is None:
         return message("query_failed")
     if query_result.error:
         return message(result_code(query_result.error))
-    return explanation_text(query_result) if query_result.data else NO_DATA
+    return explanation_text(query_result) if carries_data(query_result.data) else NO_DATA

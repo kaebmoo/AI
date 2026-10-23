@@ -312,6 +312,18 @@ class TestNothingInternalLeaves:
         asked = self._ask(query_client, empty, include_sql=True).json()  # asked for = its own field, not the prose
         assert asked["sql"] == "SELECT SUM(x) FROM secret_table" and asked["answer"] == NO_DATA
 
+    def test_a_row_of_null_is_no_data_too(self, query_client):
+        """SUM over nothing is one row of NULL. Once the engine answered it with the no-data text (SQL inside),
+        that text reached the portal for "ebt ของ จังหวัดน่าน" — the rows were not empty, only valueless (2026-10-22)."""
+        from app.core.outbound import NO_DATA, carries_data
+
+        null_row = _mock_query_engine_result(explanation=self.NO_ROWS, data=[{"EBT_บาท": None}],
+                                             sql="SELECT SUM(x) FROM secret_table")
+        body = self._ask(query_client, null_row).json()
+        assert body["answer"] == NO_DATA and "secret_table" not in body["answer"]
+        assert not carries_data([]) and not carries_data(None) and not carries_data([{"a": None}, {"a": None}])
+        assert carries_data([{"a": 0}]) and carries_data([{"division": "x", "a": None}])
+
     def test_a_failed_result_gives_a_code_not_the_exception(self, query_client):
         from app.core.outbound import ERRORS
 

@@ -1,6 +1,6 @@
 import api from './api';
 import type { ChartConfig } from '../types/chart';
-import type { DataWarning } from '../services/chat';
+import type { AnswerSource, DataWarning } from '../services/chat';
 
 export interface ConversationItem {
     id: string;
@@ -37,6 +37,7 @@ export interface ConversationMessage {
     hierarchy_columns?: string[] | null;
     warnings?: DataWarning[] | null;
     confidence?: any | null;
+    source?: AnswerSource | null;
     data_truncated?: boolean;
 }
 

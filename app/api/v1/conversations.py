@@ -56,6 +56,7 @@ class ConversationMessageItem(BaseModel):
     hierarchy_columns: Optional[List[str]] = None
     warnings: Optional[List[Dict[str, Any]]] = None
     confidence: Optional[Dict[str, Any]] = None
+    source: Optional[Dict[str, Any]] = None
     data_truncated: bool = False
 
 
@@ -204,6 +205,7 @@ def get_conversation(
             hierarchy_columns=meta.get("hierarchy_columns"),
             warnings=meta.get("warnings"),
             confidence=meta.get("confidence"),
+            source=meta.get("source") if isinstance(meta.get("source"), dict) else None,
             data_truncated=bool(meta.get("data_truncated", False)),
         ))
 

@@ -115,3 +115,14 @@ def fix_explanation(explanation: Any, question: str, sql: str, rows, schema_meta
                 explanation[key] = fix_text(explanation[key], years)
         return explanation
     return fix_text(explanation, years) if isinstance(explanation, str) else explanation
+
+
+_MONTHS_TH = ("ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค.")
+
+
+def period_th(period) -> Optional[str]:
+    """202602 → "ก.พ. 2569"; None for anything that is not an int YYYYMM."""
+    if isinstance(period, bool) or not isinstance(period, int) or not 1 <= period % 100 <= 12:
+        return None
+    return f"{_MONTHS_TH[period % 100 - 1]} {period // 100 + BE_OFFSET}"
+

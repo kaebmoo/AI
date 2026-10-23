@@ -8,6 +8,7 @@ import { DataTable } from './DataTable';
 import { PivotDataView } from './PivotDataView';
 import { ConfidenceBadge, ConfidenceData } from './ConfidenceBadge';
 import { chatService, FeedbackRating, FeedbackCategory } from '@/services/chat';
+import type { AnswerSource } from '@/services/chat';
 import { THAI_FONT_FAMILY } from '@/constants/theme';
 import type { ChartConfig } from '../../types/chart';
 export type { ChartConfig } from '../../types/chart';
@@ -34,17 +35,20 @@ export interface Message {
     hierarchyColumns?: string[];   // Ordered column names for hierarchical display (parent→child)
     question?: string;             // Original question (needed for training)
     feedbackRating?: FeedbackRating; // User's feedback (persisted)
+    source?: AnswerSource;         // Data source the answer was read from + alternatives
 }
 
 interface ChatBubbleProps {
     message: Message;
     onTrain?: (question: string, sql: string) => Promise<void>;
+    /** Re-ask the same question from another data source (sets the selector to it). */
+    onAskFrom?: (question: string, context: string) => void;
 }
 
 // Initial number of rows to show
 const INITIAL_ROWS = 5;
 
-export const ChatBubble = ({ message, onTrain }: ChatBubbleProps) => {
+export const ChatBubble = ({ message, onTrain, onAskFrom }: ChatBubbleProps) => {
     const isUser = message.role === 'user';
     const colorScheme = useColorScheme();
     const isDark = colorScheme === 'dark';
@@ -247,6 +251,25 @@ export const ChatBubble = ({ message, onTrain }: ChatBubbleProps) => {
                     </Text>
                 ) : (
                     <View>
+                        {/* Which data source answered — without it a wrong pick was invisible */}
+                        {message.source && (
+                            <View className="mb-3 pb-2 border-b border-gray-100 dark:border-gray-700">
+                                <Text className="text-xs text-gray-500 dark:text-gray-400" style={{ fontFamily: THAI_FONT_FAMILY }}>
+                                    {'ตอบจาก: '}
+                                    <Text className="font-semibold text-gray-700 dark:text-gray-200">
+                                        {message.source.display_name || message.source.context}
+                                    </Text>
+                                    {message.source.data_period_th ? ` · ข้อมูลถึง ${message.source.data_period_th}` : ''}
+                                </Text>
+                                {message.source.description ? (
+                                    <Text numberOfLines={2} className="text-xs text-gray-400 dark:text-gray-500 mt-0.5"
+                                        style={{ fontFamily: THAI_FONT_FAMILY }}>
+                                        {message.source.description}
+                                    </Text>
+                                ) : null}
+                            </View>
+                        )}
+
                         {/* Markdown Display */}
                         <View style={{ maxWidth: 900 }}>
                             <Markdown
@@ -370,6 +393,31 @@ export const ChatBubble = ({ message, onTrain }: ChatBubbleProps) => {
                                 </Text>
                             </View>
                         ))}
+                    </View>
+                )}
+
+                {/* Same question, another data source the question's keywords also match */}
+                {!isUser && onAskFrom && message.question && (message.source?.alternatives?.length ?? 0) > 0 && (
+                    <View className="mt-3">
+                        <Text className="text-xs text-gray-500 dark:text-gray-400 mb-1.5" style={{ fontFamily: THAI_FONT_FAMILY }}>
+                            ถามคำถามเดียวกันจากแหล่งข้อมูลอื่น:
+                        </Text>
+                        <View className="flex-row flex-wrap gap-2">
+                            {message.source!.alternatives!.map((alt) => (
+                                <TouchableOpacity
+                                    key={alt.context}
+                                    onPress={() => onAskFrom(message.question!, alt.context)}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={`ถามจาก ${alt.display_name || alt.context}`}
+                                    className="px-3 py-1.5 rounded-full border"
+                                    style={{ borderColor: colors.accent }}
+                                >
+                                    <Text className="text-xs font-semibold" style={{ color: colors.accent, fontFamily: THAI_FONT_FAMILY }}>
+                                        {`↻ ${alt.display_name || alt.context}`}
+                                    </Text>
+                                </TouchableOpacity>
+                            ))}
+                        </View>
                     </View>
                 )}
 

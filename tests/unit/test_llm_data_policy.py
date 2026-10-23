@@ -91,7 +91,7 @@ def set_policy(config, policy, providers=None):
                      {"p": policy, "a": providers})
 
 
-def ask(resolver, history=None, mode="hybrid", provider=None, flags=None):
+def ask(resolver, history=None, mode="hybrid", provider=None, flags=None, prompt_note=None):
     """One question through the real QueryEngine → AIService → MatchaProvider; only httpx and MCP are fake."""
     from app.services import query_engine as qe
     from app.services.ai import hierarchy_context
@@ -121,7 +121,7 @@ def ask(resolver, history=None, mode="hybrid", provider=None, flags=None):
          patch.object(hierarchy_context, "extract_keywords_from_question", return_value=["x"]), \
          patch.object(SchemaService, "search_keyword_index", return_value=lookup):
         return asyncio.run(engine.query("รายได้แยกตามสายงาน", context="feed_x", history=history, mode=mode,
-                                        provider=provider, provider_kwargs={"api_key": "k"}))
+                                        provider=provider, provider_kwargs={"api_key": "k"}, prompt_note=prompt_note))
 
 
 HISTORY = [{"role": "user", "content": "ก่อนหน้า"},
@@ -217,6 +217,22 @@ class TestSchemaOnlyPipeline:
             policy, _ = qe._source_policy(resolver.for_context(cached.context_name))
         assert cached.llm_policy == FULL and policy == SCHEMA_ONLY  # _query treats the mismatch as a miss
         engine.close()
+
+
+class TestPromptNote:
+    def test_the_note_reaches_the_provider_and_is_its_own_cache_entry(self, env, fake_llm):
+        """chat's context-mismatch note goes into the system prompt of that request, and an answer produced
+        without it is not served for it (or the other way round) — 2026-10-22."""
+        from app.services import query_engine as qe
+
+        _config, resolver = env
+        ask(resolver, prompt_note="ZQXNOTE แหล่งข้อมูลอาจไม่ตรง")
+        assert "ZQXNOTE" in fake_llm.sent()
+        before = len(fake_llm.requests)
+        ask(resolver)
+        assert len(fake_llm.requests) > before and "ZQXNOTE" not in json.dumps(fake_llm.requests[before:], ensure_ascii=False)
+        keys = [qe._cache_key("q", "matcha", "feed_x"), qe._cache_key("q", "matcha", "feed_x|note:x")]
+        assert keys[0] != keys[1]
 
 
 class TestAggregatedOnly:
@@ -445,6 +461,22 @@ class TestValuesAreNotCopiedOutOfARestrictedSource:
         assert S_DIV in service.get_sample_values("v_x")["division"]
         self.tighten(config, AGGREGATED_ONLY)
         assert service.get_sample_values("v_x") == {}  # suggest-mappings / dimension-families get nothing to send
+
+    def test_latest_period_of_a_legacy_view(self, legacy, monkeypatch):
+        """The reference period of an unscoped legacy question is MAX(year, month) read from the rows — a value,
+        so a restricted request gets none and its prompt stays as it was (2026-10-22)."""
+        from app.services import data_sources
+
+        _biz, engine, _config = legacy
+        monkeypatch.setattr("app.db.session.business_engine", engine)
+        data_sources._legacy_periods.clear()
+        assert data_sources.legacy_data_period("v_x") == 202602
+        for policy in (SCHEMA_ONLY, AGGREGATED_ONLY):
+            token = request_llm_policy.set(RequestPolicy(policy=policy, providers=None, source="legacy", question=""))
+            try:
+                assert data_sources.legacy_data_period("v_x") is None, policy
+            finally:
+                request_llm_policy.reset(token)
 
     def test_keyword_index_is_not_built_and_is_emptied(self, legacy):
         from app.services.schema import keyword_index

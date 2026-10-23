@@ -67,6 +67,12 @@ class ResolvedSource:
                 "build_id": manifest.get("build_id")}
 
     @property
+    def data_period(self) -> Optional[int]:
+        """`data_as_of.period` as an int YYYYMM, or None when there is no manifest or it is not one."""
+        period = (self.data_as_of or {}).get("period")
+        return period if isinstance(period, int) and not isinstance(period, bool) and 1 <= period % 100 <= 12 else None
+
+    @property
     def engine(self):
         """SQLAlchemy engine for schema inspection of this source."""
         if self.adapter is None:
@@ -86,6 +92,83 @@ request_pinned: ContextVar[bool] = ContextVar("request_pinned", default=False)
 # it lands on are not the same name (expense/ebt map `year_month` to `time_key`), and a prompt
 # that names the key alone pins the period to a column the tables do not have (RESULT_F11 §8).
 request_scope_columns: ContextVar[Optional[Dict[str, str]]] = ContextVar("request_scope_columns", default=None)
+# The period (YYYYMM) the answered context's data runs to, from its source's manifest — set by QueryEngine
+# once the source is resolved; None = legacy / no manifest. Without a scope, this is the reference period
+# the prompt's "no period named = the year to date" rule anchors on, so chat and Telegram get the same
+# default as the portal (which sends a scope) instead of summing every month in the file (2026-10-22).
+request_data_period: ContextVar[Optional[int]] = ContextVar("request_data_period", default=None)
+# Chat's note for this request (the picked context may not hold what is asked) — QueryEngine sets it, scope_note()
+# puts it in every user prompt: in the system prompt alone the model still named revenue "EBT" (2026-10-22).
+request_prompt_note: ContextVar[Optional[str]] = ContextVar("request_prompt_note", default=None)
+
+
+_legacy_periods: Dict[tuple, Optional[int]] = {}  # (db path, mtime, view) → YYYYMM; a re-import changes the mtime
+_legacy_periods_lock = threading.Lock()
+
+
+def legacy_data_period(view: Optional[str]) -> Optional[int]:
+    """The latest period (YYYYMM, ค.ศ.) in a legacy business-DB view, read from its own time columns — the
+    legacy counterpart of a file source's manifest period. Without it a legacy context had no reference
+    period and the prompt's "วันที่ปัจจุบัน" stood in: "ข้อมูล EBT เป็นอย่างไรบ้าง" on pl_costtype (data to
+    202602) asked for 202610 and found nothing (chat audit 336, 2026-10-22).
+
+    None under a restricted data policy (it is a value read from the rows), when the view has no
+    recognisable period, or when the business DB can't be read. Cached until the DB file changes."""
+    from app.core.llm_policy import restricted
+
+    if not view or restricted():
+        return None
+    from app.db.session import business_engine
+
+    path = business_engine.url.database
+    try:
+        key = (path, os.path.getmtime(path), view)
+    except (OSError, TypeError):
+        return None
+    with _legacy_periods_lock:
+        if key in _legacy_periods:
+            return _legacy_periods[key]
+    period = _probe_period(business_engine, view)
+    with _legacy_periods_lock:
+        for old in [k for k in _legacy_periods if k[:2] != key[:2]]:
+            del _legacy_periods[old]
+        _legacy_periods[key] = period
+    return period
+
+
+def _probe_period(engine, view: str) -> Optional[int]:
+    """MAX(year × 100 + month) over the view's own year/month columns (พ.ศ. → ค.ศ.), else MAX of a YYYYMM column.
+
+    ponytail: column roles by name (year/ปี, month/เดือน, else any time-named column holding YYYYMM) —
+    the same naming hint build_date_instructions uses. A view whose period columns say nothing gets no
+    anchor (the prompt as before); declare it in scope_columns and read that here if one ever needs it."""
+    from app.services.schema.prompt_builder import is_time_column
+    from app.services.schema.sql_identifiers import quote_identifier as q
+
+    try:
+        names = [c["name"] for c in inspect(engine).get_columns(view)]
+    except Exception:
+        return None
+    timed = [n for n in names if is_time_column(n)]
+    years = [n for n in timed if ("year" in n.lower() or "ปี" in n) and "month" not in n.lower()]
+    months = [n for n in timed if "month" in n.lower() or "เดือน" in n]
+    queries = [f"SELECT MAX(CAST({q(y)} AS INTEGER) * 100 + CAST({q(m)} AS INTEGER)) FROM {q(view)} "
+               f"WHERE CAST({q(m)} AS INTEGER) BETWEEN 1 AND 12" for y in years for m in months]
+    queries += [f"SELECT MAX(CAST({q(c)} AS INTEGER)) FROM {q(view)} WHERE CAST({q(c)} AS INTEGER) BETWEEN 190001 AND 329912"
+                for c in timed if c not in years + months]
+    try:
+        with engine.connect() as conn:
+            for sql in queries:
+                value = conn.execute(text(sql)).scalar()
+                if not isinstance(value, int):
+                    continue
+                if 2400 <= value // 100 <= 3299:  # พ.ศ.
+                    value -= 54300
+                if 1900 <= value // 100 <= 2399 and 1 <= value % 100 <= 12:
+                    return value
+    except Exception:
+        logger.warning("legacy period of %s could not be read", view, exc_info=True)
+    return None
 
 
 class ScopeError(ValueError):

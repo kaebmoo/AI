@@ -27,8 +27,9 @@ from app.services.ai_service import AIService
 from app.services.mcp_client import MCPClientService
 from app.services.admin_config_service import AdminConfigService
 from app.core.llm_policy import FULL, LLMPolicyError, PolicyMCPClient, RequestPolicy, history_without_answers, normalize, request_llm_policy
-from app.services.data_sources import (SourceBoundMCPClient, request_pinned, request_scope,
-                                       request_scope_columns, source_resolver)
+from app.services.data_sources import (LEGACY, SourceBoundMCPClient, legacy_data_period, request_data_period,
+                                       request_pinned, request_prompt_note, request_scope, request_scope_columns,
+                                       source_resolver)
 from app.services import query_audit
 from app.services.retention import stores_results
 from app.services.workspaces import canonical_context, check_context, workspace_of_context
@@ -41,36 +42,45 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
+def context_keyword_hits(question: str, schema_service: SchemaService = None, allowed=None) -> Dict[str, Dict[str, Any]]:
+    """{context: {"keywords": the context's keywords found in the question, "priority", "display_name",
+    "description"}} for every usable context with at least one hit — the router's evidence, also shown to the
+    chat user as the other places a question could be answered from. Empty when contexts can't be read."""
+    question_lower = question.lower()
+    hits: Dict[str, Dict[str, Any]] = {}
+    if not schema_service:
+        return hits
+    try:
+        contexts = schema_service.get_all_contexts()
+        if allowed is not None:
+            contexts = [c for c in contexts if c.get('name') in allowed]
+        for ctx in contexts:
+            ctx_keywords = ctx.get('keywords', [])
+            if isinstance(ctx_keywords, list) and ctx_keywords:
+                found = [kw for kw in ctx_keywords if kw.lower() in question_lower]
+                if found:
+                    hits[ctx.get('name')] = {"keywords": found, "priority": ctx.get('priority', 0),
+                                             "display_name": ctx.get('display_name'),
+                                             "description": ctx.get('description')}
+    except Exception:
+        pass
+    return hits
+
+
 def detect_context_from_question(question: str, schema_service: SchemaService = None, allowed=None) -> str:
     """
     Auto-detect context from user's question using DB keywords.
 
     Standalone function — usable from chat.py or anywhere without QueryEngine instance.
     """
-    question_lower = question.lower()
-    context_scores = {}
-
     def usable(contexts):
         # Phase 4a: a restricted key routes among its own contexts only (allowed = normalised names)
         if allowed is None:
             return contexts
         return [c for c in contexts if c.get('name') in allowed]
 
-    if schema_service:
-        try:
-            contexts = usable(schema_service.get_all_contexts())
-            for ctx in contexts:
-                ctx_name = ctx.get('name')
-                ctx_keywords = ctx.get('keywords', [])
-                priority = ctx.get('priority', 0)
-
-                if isinstance(ctx_keywords, list) and ctx_keywords:
-                    score = sum(1 for kw in ctx_keywords if kw.lower() in question_lower)
-                    if score > 0:
-                        context_scores[ctx_name] = score + (priority * 0.1)
-        except Exception:
-            pass
-
+    hits = context_keyword_hits(question, schema_service, allowed)
+    context_scores = {name: len(hit["keywords"]) + hit["priority"] * 0.1 for name, hit in hits.items()}
     if context_scores:
         return max(context_scores, key=context_scores.get)
 
@@ -238,6 +248,7 @@ class QueryEngineResult:
     data_as_of: Optional[Dict[str, Any]] = None  # Plan 7: manifest period/built_at/build_id; None = legacy
     llm_policy: str = FULL  # Phase 4.5: the source's llm_data_policy this answer was produced under
     cache_hit: bool = False
+    data_period: Optional[int] = None  # YYYYMM the context's data runs to (manifest / legacy view); None = unknown
 
 
 # ---------------------------------------------------------------------------
@@ -389,9 +400,13 @@ class QueryEngine:
         api_key_id: Optional[int] = None,
         channel: Optional[str] = None,
         request_group: Optional[str] = None,
+        prompt_note: Optional[str] = None,
     ) -> QueryEngineResult:
         """
         Main entry point.
+
+        prompt_note: text appended to the system prompt for this request only (chat: the selected context
+        may not hold what the question asks — see chat._context_mismatch); part of the cache key.
 
         api_key_id / channel (Phase 4.5): who is asking and through what — for the query audit only.
         request_group (Phase 5): audit id shared by the sub-questions of one multi-context question.
@@ -420,11 +435,14 @@ class QueryEngine:
         pin = request_pinned.set(allowed_contexts is not None)  # restricted key: see data_sources.request_pinned
         llm = request_llm_policy.set(None)  # Phase 4.5: set once the context's source is known (_execute_query)
         cols = request_scope_columns.set(None)  # filled by the resolver, which reads the context's mapping
+        period = request_data_period.set(None)  # the source's manifest period, once the source is known
+        note = request_prompt_note.set(prompt_note or None)  # into every user prompt (hybrid_flow.scope_note)
         audit = {"user_id": user_id, "api_key_id": api_key_id, "channel": channel, "question": question,
                  "request_group": request_group}
         try:
             engine_result = await self._query(question, provider, context, mode, history, max_retries,
-                                              conversation_id, provider_kwargs, on_status, user_id, scope, allowed_contexts)
+                                              conversation_id, provider_kwargs, on_status, user_id, scope, allowed_contexts,
+                                              prompt_note=prompt_note)
             written = await self._audit(engine_result, scope, audit, getattr(engine_result, "context_name", None))
             if not written and api_key_id is not None:
                 # a channel that holds a key answers a caller we cannot ask afterwards: without the
@@ -442,11 +460,14 @@ class QueryEngine:
         finally:
             request_llm_policy.reset(llm)
             request_scope_columns.reset(cols)
+            request_data_period.reset(period)
+            request_prompt_note.reset(note)
             request_pinned.reset(pin)
             request_scope.reset(token)
 
     async def _query(self, question, provider, context, mode, history, max_retries,
-                     conversation_id, provider_kwargs, on_status, user_id, scope, allowed_contexts=None) -> QueryEngineResult:
+                     conversation_id, provider_kwargs, on_status, user_id, scope, allowed_contexts=None,
+                     prompt_note=None) -> QueryEngineResult:
         """Body of query() — runs with request_scope set."""
         start_time = time.time()
         if context:  # before the cache, before any LLM call — and only the stored name travels on
@@ -463,6 +484,8 @@ class QueryEngine:
         use_cache = not history
         selected_provider_name = provider or ai_config.get("default_provider", settings.AI_PROVIDER)
         context_name_for_cache = context or "auto"
+        if prompt_note:  # another prompt, another answer (keys without a note unchanged)
+            context_name_for_cache += "|note:" + hashlib.sha256(prompt_note.encode()).hexdigest()[:16]
         # scope in the key: the same question under another scope is another answer (unscoped keys unchanged)
         scope_key = json.dumps(scope, sort_keys=True, default=str) if scope else ""
         if scope_key:
@@ -528,6 +551,7 @@ class QueryEngine:
                 start_time=start_time,
                 conversation_id=conversation_id,
                 allowed_contexts=allowed_contexts,
+                prompt_note=prompt_note,
             )
         except BaseException:
             _dedup_release(dedup_key)  # failed — allow immediate retry
@@ -554,6 +578,7 @@ class QueryEngine:
         start_time: float,
         conversation_id: Optional[str] = None,
         allowed_contexts: Optional[frozenset] = None,
+        prompt_note: Optional[str] = None,
     ) -> QueryEngineResult:
         """Query pipeline after cache/dedup gates (split out so dedup can wrap it)."""
         # 1. Detect context → its data source (Plan 7): legacy = business DB เดิม via MCP,
@@ -571,6 +596,15 @@ class QueryEngine:
         llm_policy, llm_providers = _source_policy(source)
         request_llm_policy.set(RequestPolicy(policy=llm_policy, providers=llm_providers,
                                              source=str(source.name), question=question))
+        # the prompt's reference period when the caller sent no scope: a file source's manifest, else the legacy
+        # view's own latest period (read under the policy just set — none for a restricted source)
+        period = source.data_period
+        if period is None and source.source_type == LEGACY:
+            try:  # an optional anchor: never the reason a question fails
+                period = legacy_data_period((schema_service.get_context_info(context_name) or {}).get("main_view"))
+            except Exception:
+                logger.warning("reference period of %s not read", context_name, exc_info=True)
+        request_data_period.set(period)
         if llm_policy != FULL:
             mcp_client = PolicyMCPClient(mcp_client)
             # earlier answers explain earlier rows, and two-pass writes the history into the prompt text
@@ -610,6 +644,8 @@ class QueryEngine:
             rag_enabled=True,
         )
         system_prompt += getattr(source.adapter, "scope_note", "")  # Phase 3: rows are pre-filtered
+        if prompt_note:
+            system_prompt += "\n\n" + prompt_note
 
         # 4. Execute query
 
@@ -678,6 +714,7 @@ class QueryEngine:
             source_version=source.version,
             data_as_of=source.data_as_of,
             llm_policy=llm_policy,
+            data_period=period,
         )
 
         # --- Query Result Cache: store successful result ---

@@ -413,6 +413,10 @@ class TestReviewFindings:
         result = self._ask(world, empty)
         assert not result.isError and result.structuredContent["answer"] == mcp_facade.NO_DATA
         assert "secret_sql" not in result.model_dump_json()
+        # one row of NULL (SUM over nothing) is no data as well — 2026-10-22, the portal got the SQL this way
+        null_row = _result(data=[{"x": None}], explanation=empty.query_result.explanation)
+        result = self._ask(world, null_row)
+        assert result.structuredContent["answer"] == mcp_facade.NO_DATA and "secret_sql" not in result.model_dump_json()
 
     def test_an_answer_with_rows_that_still_quotes_the_sql_is_discarded(self, world):
         result = self._ask(world, _result(data=[{"v": 1}], explanation="ดูจาก SELECT secret_sql FROM t"))

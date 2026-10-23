@@ -16,6 +16,24 @@ export interface DataWarning {
     severity: 'info' | 'warning' | 'important';
 }
 
+/** Another data source the question's keywords match — the chat offers to re-ask there. */
+export interface SourceAlternative {
+    context: string;
+    display_name?: string | null;
+    description?: string | null;
+    keywords?: string[];
+}
+
+/** Which data source answered and how far its data runs. */
+export interface AnswerSource {
+    context: string;
+    display_name?: string | null;
+    description?: string | null;
+    data_period?: number | null;
+    data_period_th?: string | null;   // "ก.พ. 2569"
+    alternatives?: SourceAlternative[];
+}
+
 export interface RetryAttempt {
     attempt: number;
     error_type: string;
@@ -79,6 +97,7 @@ export interface ChatResponse {
     display_hint?: 'hierarchical' | 'crosstab' | 'flat'; // AI recommended table display mode
     hierarchy_columns?: string[];      // Ordered column names for hierarchical display (parent→child)
     is_chart_only?: boolean;           // True when chart-only re-render (no SQL re-executed)
+    source?: AnswerSource | null;      // Data source the answer was read from + alternatives
 }
 
 export interface TrainingRequest {
