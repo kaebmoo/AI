@@ -509,9 +509,15 @@ def build_date_instructions(service: "SchemaService", table_name: str, scope_col
     if scope_columns:
         try:
             mapping = json.loads(scope_columns) if isinstance(scope_columns, str) else scope_columns
-            # the caller's key says what the column means; org_code → cost_center is not a period
-            declared = [v for k, v in mapping.items()
-                        if isinstance(v, str) and any(hint in str(k).lower() for hint in _TIME_HINTS)]
+            from app.services.data_sources import scope_column_names
+
+            # the caller's key says what the column means; org_code → cost_center is not a period. A key with
+            # several names (one per table): the first is the main view's, the others only where present
+            declared = []
+            for key, value in mapping.items():
+                names = scope_column_names(value)
+                if names and any(hint in str(key).lower() for hint in _TIME_HINTS):
+                    declared.append(names[0])
         except (TypeError, ValueError):
             declared = []
 

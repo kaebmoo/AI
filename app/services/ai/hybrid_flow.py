@@ -104,10 +104,13 @@ def _period_columns(context_table: str, config_engine=None) -> List[str]:
             raw = conn.execute(text("SELECT scope_columns FROM schema_contexts WHERE main_view = :t AND is_active = 1"),
                                {"t": context_table}).scalar()
         mapping = json.loads(raw or "{}")
+        from app.services.data_sources import scope_column_names
         from app.services.schema.prompt_builder import is_time_column
 
-        # the mapping also holds non-period keys (org_code → cost_center): a filter on those is not one period
-        return [c for c in dict.fromkeys(mapping.values()) if isinstance(c, str) and c and is_time_column(c)]
+        # the mapping also holds non-period keys (org_code → cost_center): a filter on those is not one period;
+        # a key may go by several names (one per table) — each is that table's period column
+        names = [name for value in mapping.values() for name in scope_column_names(value)]
+        return [c for c in dict.fromkeys(names) if is_time_column(c)]
     except Exception:
         return []
 

@@ -657,9 +657,11 @@ def compare(draft_doc: Dict[str, Any], contract: Dict[str, Any]) -> Dict[str, An
     s["fk"] = f"{fk_ok}/{fk_n}"
     s["period_key"] = draft_doc.get("period_key") == contract.get("period_key")
     s["primary_dataset"] = draft_doc.get("primary_dataset") == contract.get("primary_dataset")
-    org = (contract.get("scope_columns") or {}).get("org_code")
+    from app.services.data_sources import scope_column_names
+
+    org = scope_column_names((contract.get("scope_columns") or {}).get("org_code"))
     asked = " ".join(qn["ask"] for qn in draft_doc["draft"]["questions"] if qn["about"] == "scope_columns.org_code")
-    s["org_scope_offered"] = None if not org else org in asked
+    s["org_scope_offered"] = None if not org else any(name in asked for name in org)
     rules = " ".join(r.get("text", "") for r in contract.get("business_rules") or [])
     flagged = [f"{n}.{lv['column']}" for n, ev in draft_doc["draft"]["evidence"].items() for lv in ev["levels"]]
     s["not_addable_flagged"] = flagged

@@ -97,6 +97,37 @@ class TestFileSourceScope:
         with scoped.engine.connect() as conn:
             assert conn.execute(text("SELECT COUNT(*) FROM feed_x_fact_bu")).scalar() == 0
 
+    def test_a_key_declared_under_several_names_filters_each_table_on_its_own(self, env, tmp_path):
+        # an org snapshot dates its rows by effective_month: with one name per key it was closed under every
+        # period scope, and with it the way from a cost center to its organisation ("ค่าใช้จ่ายของน่าน", 2026-10-22)
+        (tmp_path / "latest" / "dim_snap.csv").write_text(
+            "effective_month,cost_center,unit\n202607,A,Nan\n202608,A,Nan\n202607,B,Phrae\n")
+        snap = [{"name": "effective_month", "type": "BIGINT"}, {"name": "cost_center", "type": "VARCHAR"},
+                {"name": "unit", "type": "VARCHAR"}]
+        with env._engine().begin() as conn:
+            conn.execute(text("INSERT INTO source_tables (source_id, table_name, file_name, columns) "
+                              "VALUES (2, 'feed_x_dim_snap', 'dim_snap.csv', :c)"), {"c": json.dumps(snap)})
+        join = ("SELECT SUM(f.revenue) AS s FROM feed_x_fact_org f JOIN feed_x_dim_snap d "
+                "ON d.cost_center = f.cost_center AND d.effective_month = f.year_month WHERE d.unit = 'Nan'")
+        with pytest.raises(PermissionError):  # one name: the snapshot is closed
+            resolve(env, "feed_x", {"year_month": 202607}).adapter.execute_query(join)
+        with env._engine().begin() as conn:
+            conn.execute(text("UPDATE schema_contexts SET scope_columns = :m WHERE name = 'feed_x'"),
+                         {"m": json.dumps({"year_month": ["year_month", "effective_month"], "org_code": "cost_center"})})
+        assert resolve(env, "feed_x", {"year_month": 202607}).adapter.execute_query(join) == [{"s": 10}]
+        scoped = resolve(env, "feed_x", {"year_month": 202607, "org_code": "B"}).adapter
+        assert scoped.execute_query(join) == [{"s": None}]  # Nan is org A: outside the scope
+        assert scoped.execute_query("SELECT effective_month, cost_center FROM feed_x_dim_snap") == \
+            [{"effective_month": 202607, "cost_center": "B"}]
+        # a table with none of a key's names is still closed, and a malformed declaration is refused
+        with pytest.raises(PermissionError):
+            scoped.execute_query("SELECT * FROM feed_x_fact_bu")
+        with env._engine().begin() as conn:
+            conn.execute(text("UPDATE schema_contexts SET scope_columns = '{\"year_month\": [\"year_month\", 7]}' "
+                              "WHERE name = 'feed_x'"))
+        with pytest.raises(ScopeError):
+            resolve(env, "feed_x", {"year_month": 202607})
+
     def test_prompt_note_names_the_tables_and_an_unusable_main_view(self, env):
         note = resolve(env, "feed_x", {"org_code": "A"}).adapter.scope_note
         assert "org_code = A" in note and "feed_x_dim_org" in note and "ใช้ไม่ได้" not in note

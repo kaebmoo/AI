@@ -195,22 +195,40 @@ def _predicate(column: str, value: Any) -> str:
     return f"{col} = {_literal(value)}"
 
 
-def scope_filters(scope: Dict[str, Any], mapping: Dict[str, str], table_columns: Dict[str, Optional[List[str]]]) -> Dict[str, str]:
-    """{table: predicate} for every table carrying all the scoped columns.
+def scope_column_names(value: Any) -> List[str]:
+    """A scope_columns value: one column, or the names one key goes by in the source's tables, the main one
+    first ({"year_month": ["time_key", "effective_month"]} — expense's org snapshot dates its rows by
+    effective_month, and one name per key closed it under every scope: "ค่าใช้จ่ายของน่าน" from the portal
+    could not be joined to its organisation, 2026-10-22). [] = not a valid declaration."""
+    names = [value] if isinstance(value, str) else value if isinstance(value, list) else []
+    if not names or not all(isinstance(name, str) and name for name in names):
+        return []
+    return list(names)
 
-    mapping: scope key → column (schema_contexts.scope_columns); table_columns: table →
-    its columns, or None to trust the mapping (legacy main view). A table missing a scoped
-    column is left out — under the scope it can't be queried at all.
+
+def scope_filters(scope: Dict[str, Any], mapping: Dict[str, Any], table_columns: Dict[str, Optional[List[str]]]) -> Dict[str, str]:
+    """{table: predicate} for every table carrying a column of every scoped key.
+
+    mapping: scope key → column, or its names in order (schema_contexts.scope_columns); table_columns: table →
+    its columns, or None to trust the mapping (legacy main view: the first name). Each table is filtered on the
+    first name it has; a table with none of a key's names is left out — under the scope it can't be queried at all.
     """
     unknown = sorted(set(scope) - set(mapping))
     if unknown:
         raise ScopeError(f"scope ไม่รู้จัก {unknown} — context นี้รองรับ {sorted(mapping) or 'ไม่มี'}")
-    where = " AND ".join(_predicate(mapping[key], scope[key]) for key in sorted(scope))
-    needed = {mapping[key].lower() for key in scope}
-    filters = {t: where for t, cols in table_columns.items()
-               if cols is None or needed <= {c.lower() for c in cols}}
+    names = {key: scope_column_names(mapping[key]) for key in scope}
+    for key in sorted(scope):  # every value is checked once, whichever tables qualify
+        _predicate(names[key][0], scope[key])
+    filters = {}
+    for table, cols in table_columns.items():
+        have = None if cols is None else {c.lower() for c in cols}
+        chosen = {key: names[key][0] if have is None else next((n for n in names[key] if n.lower() in have), None)
+                  for key in sorted(scope)}
+        if all(chosen.values()):
+            filters[table] = " AND ".join(_predicate(chosen[key], scope[key]) for key in sorted(scope))
     if not filters:
-        raise ScopeError(f"ไม่มีตารางใดของ context นี้ที่มีคอลัมน์ {sorted(needed)} ให้บังคับ scope")
+        needed = sorted({n for key in scope for n in names[key]})
+        raise ScopeError(f"ไม่มีตารางใดของ context นี้ที่มีคอลัมน์ {needed} ให้บังคับ scope")
     return filters
 
 
@@ -392,9 +410,10 @@ class SourceResolver:
             mapping = json.loads(row["scope_columns"] or "{}")
         except ValueError as exc:
             raise ScopeError(f"scope_columns ของ context '{context_name}' ไม่ใช่ JSON") from exc
-        if not isinstance(mapping, dict) or not all(isinstance(v, str) for v in mapping.values()):
-            raise ScopeError(f"scope_columns ของ context '{context_name}' ต้องเป็น {{key: column}}")
-        request_scope_columns.set({k: v for k, v in mapping.items() if k in scope})
+        if not isinstance(mapping, dict) or not all(scope_column_names(v) for v in mapping.values()):
+            raise ScopeError(f"scope_columns ของ context '{context_name}' ต้องเป็น {{key: column หรือ [column, ...]}}")
+        # the prompt speaks of the main view's column: the first name
+        request_scope_columns.set({k: scope_column_names(v)[0] for k, v in mapping.items() if k in scope})
         if source.adapter is None:  # legacy business DB: the context's main view is the only table
             from app.db.session import business_engine
             filters = scope_filters(scope, mapping, {row["main_view"]: None})
