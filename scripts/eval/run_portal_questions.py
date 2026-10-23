@@ -18,6 +18,9 @@ the live server, never the portal's key (they would spend the portal's quota and
 Usage:
     PORTAL_EVAL_API_KEY=<practice key> python -m scripts.eval.run_portal_questions --base-url http://localhost:8001
     python -m scripts.eval.run_portal_questions --score eval_results/portal_real_<ts>.json   # rescore, no calls
+    # another question set of the same shape — the 10-per-report_type sets NT-Report generates from its feeds
+    # (NT-Report/tools/feed/portal_questions.py → DataFeed/eval/portal_questions_<domain>.json):
+    python -m scripts.eval.run_portal_questions --questions <path>.json --base-url http://localhost:8001
 """
 
 import argparse
@@ -215,8 +218,9 @@ def main():
     parser.add_argument("--score", metavar="JSON", help="rescore a saved run (no calls)")
     parser.add_argument("--only", help="comma-separated ids, e.g. P01,P09")
     parser.add_argument("--pause", type=float, default=0.0, help="seconds between questions")
+    parser.add_argument("--questions", type=Path, default=QUESTIONS, help="question set JSON (default: the real portal questions)")
     args = parser.parse_args()
-    spec = json.loads(QUESTIONS.read_text())
+    spec = json.loads(args.questions.read_text(encoding="utf-8"))
 
     if args.score:
         print(report(spec, json.loads(Path(args.score).read_text())["answers"]))
@@ -238,8 +242,10 @@ def main():
         time.sleep(args.pause)
 
     RESULTS_DIR.mkdir(exist_ok=True)
-    out = RESULTS_DIR / f"portal_real_{datetime.now():%Y%m%d_%H%M}.json"
+    tag = "real" if args.questions == QUESTIONS else args.questions.stem.replace("portal_questions_", "")
+    out = RESULTS_DIR / f"portal_{tag}_{datetime.now():%Y%m%d_%H%M}.json"
     out.write_text(json.dumps({"base_url": args.base_url, "at": datetime.now().isoformat(timespec="seconds"),
+                               "questions": str(args.questions), "oracle_build": spec.get("oracle_build"),
                                "answers": answers}, ensure_ascii=False, indent=1))
     print(report(spec, answers))
     print(f"saved {out.relative_to(PROJECT_ROOT)}")

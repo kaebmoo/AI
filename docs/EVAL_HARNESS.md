@@ -113,3 +113,24 @@ report มีทั้ง `accuracy` (strict) และ `accuracy_incl_value_mat
 - ห้าม train / แก้ config DB / import ข้อมูล ระหว่าง eval run
 - คำถามที่ตอบถูกได้หลายรูปแบบ (ต่างแค่ ORDER BY) — การ sort rows จัดการให้แล้ว
   แต่ edge case ใหม่ที่เจอจริงให้จดลง FIX_NOTES
+
+## ชุดคำถามต่อ report_type ของ portal (2026-10-22)
+
+`scripts/eval/run_portal_questions.py` รับ `--questions <json>` เพื่อให้คะแนนชุดคำถามอื่นที่มีรูปแบบเดียวกับ
+`portal_real_questions.json` — NT-Report สร้างชุด 10 ข้อต่อ report_type (revenue / expense / sales / ebt)
+จาก `assistant_reference_202608.md` โดยคำนวณเฉลยจาก `control_totals.csv` ของ build ปัจจุบัน:
+
+```bash
+# ฝั่ง NT-Report — เฉลยตามงวดของ DataFeed/dist/<domain>/latest (สร้างใหม่ทุกครั้งที่ build feed)
+python3 tools/feed/portal_questions.py                      # → DataFeed/eval/portal_questions_<domain>.json
+
+# ฝั่ง AI — server ซ้อม 8001 บนสำเนา config.db/app.db + key ซ้อม (plan/PROMPT_P8_PHASE1.md "วิธีวัดที่ไม่แตะของจริง")
+PORTAL_EVAL_API_KEY=<key ซ้อม> venv/bin/python -m scripts.eval.run_portal_questions \
+    --questions ../NT-Report/DataFeed/eval/portal_questions_expense.json --base-url http://localhost:8001
+venv/bin/python -m scripts.eval.run_portal_questions --questions <ไฟล์เดิม> --score eval_results/portal_expense_<ts>.json
+```
+
+ผลรอบแรก build 202609 (2026-10-22): revenue 8/10 · expense 6/10 · sales 8/10 · ebt 8/10 — ข้อที่ตกเป็นของโมเดลทั้งหมด
+(แปลชื่อกลุ่มเป็นไทยแล้วหาไม่เจอ, กรองกลุ่มค่าใช้จ่ายด้วย `cat_l2_th` แทน `expense_group_name`,
+เทียบเป้าแบบ YTD ชน target รายเดือน, เรียก EBT ว่ากำไรทั้งบริษัท) ดู `eval_results/portal_<domain>_20261022_*.json`
+
