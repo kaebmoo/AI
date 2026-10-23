@@ -4,6 +4,7 @@
         {
             "label": "Start All Services",
             "dependsOn": [
+                "Check Redis",
                 "Backend (FastAPI)",
                 "Worker (Celery)",
                 "User Frontend (Expo Web)",
@@ -16,9 +17,27 @@
             "problemMatcher": []
         },
         {
+            "label": "Stop All Services",
+            "type": "shell",
+            "command": "./start_services.sh stop",
+            "problemMatcher": []
+        },
+        {
+            "label": "Setup (install deps + init DB)",
+            "type": "shell",
+            "command": "./start_services.sh setup",
+            "problemMatcher": []
+        },
+        {
+            "label": "Check Redis",
+            "type": "shell",
+            "command": "redis-cli ping || { echo '❌ Redis not running → brew services start redis'; exit 1; }",
+            "problemMatcher": []
+        },
+        {
             "label": "Backend (FastAPI)",
             "type": "shell",
-            "command": "source venv/bin/activate && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000",
+            "command": "venv/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port 8000",
             "isBackground": true,
             "runOptions": {
                 "instanceLimit": 1
@@ -46,7 +65,7 @@
         {
             "label": "Worker (Celery)",
             "type": "shell",
-            "command": "source venv/bin/activate && celery -A app.celery worker -Q email-queue,celery --loglevel=info",
+            "command": "venv/bin/celery -A app.celery worker -Q email-queue,reports-queue,celery --loglevel=info",
             "isBackground": true,
             "runOptions": {
                 "instanceLimit": 1
