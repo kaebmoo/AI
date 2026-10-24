@@ -24,7 +24,7 @@ OLD_RULES = """**กฎสำคัญ:**
 
 @pytest.fixture
 def metrics():
-    contract = yaml.safe_load((Path(__file__).parents[1] / "fixtures/ebt_metrics_1_5_0.yaml").read_text())
+    contract = yaml.safe_load((Path(__file__).parents[1] / "fixtures/ebt_metrics_1_6_0.yaml").read_text())
     rows = []
     for declaration in contract["metrics"]:
         values = {f.name: declaration.get(f.name) for f in fields(compiler.Metric)}

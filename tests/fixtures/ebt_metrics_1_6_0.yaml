@@ -25,6 +25,7 @@ metrics:
   - sub_unit_fname
   - unit_short_name
   - cost_center
+  - is_hq
   terms:
     rev:
       where: measure_type = 'SUBTOTAL' AND group_1 = 'รวมรายได้ทั้งสิ้น'
@@ -83,4 +84,10 @@ metrics:
   expr: ebt / nullif(rev - other, 0) * 100
   unit: percent
   note_th: ฐาน = รายได้ (ฐานยอดขาย) ไม่รวมรายได้อื่น; รายงานแสดง 0.0 เมื่อรายได้ ≤ 0; ไม่เป็น measure
-    ใน control_totals (อัตราส่วนรวมข้ามสายงานไม่ได้)
+    ใน control_totals (อัตราส่วนรวมข้ามสายงานไม่ได้); เปรียบ/จัดอันดับข้ามหน่วยเฉพาะหน่วยปฏิบัติการ (is_hq
+    = 0) เหมือน dashboard ที่แสดง margin ของหน่วยสนับสนุนเป็น —
+  ranking:
+    scope: is_hq = 0
+    base: rev - other
+    base_name_th: รายได้ (ฐานยอดขาย)
+schema_version: 1.6.0

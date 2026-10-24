@@ -23,7 +23,7 @@ from app.services.database_adapter import check_select
 
 
 LIVE_CONTRACT = Path("/Users/seal/Documents/GitHub/_worktrees/NT-Report-metrics/DataFeed/contracts/ebt.yaml")
-CONTRACT = Path(__file__).parent.parent / "fixtures" / "ebt_metrics_1_5_0.yaml"
+CONTRACT = Path(__file__).parent.parent / "fixtures" / "ebt_metrics_1_6_0.yaml"
 S1 = "สายงานขายและปฏิบัติการลูกค้า 1"
 S2 = "สายงานขายและปฏิบัติการลูกค้า 2"
 NAN = "ส่วนขายและบริการลูกค้า น่าน"
