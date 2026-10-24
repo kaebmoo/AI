@@ -212,7 +212,7 @@ Acceptance: ACC-T, ACC-L; รันกับ config.db สำเนาแล้�
 
 ลำดับกับ phase อื่น: E-01 ก่อน C-0b (hierarchy อัตโนมัติใช้ profile เดียวกัน) · E ทั้งหมดไม่แตะ prompt path จึงขึ้นของจริงได้ทันทีหลัง review
 
-## 6d. Phase C-0c — ratio metric จัดอันดับอย่างมีความหมาย (M-10)
+## 6d. Phase C-0c — ratio metric จัดอันดับอย่างมีความหมาย (M-10) — **ทำแล้ว 2026-10-24** (AI `941cd0a`, NT-Report `b5067b1` ebt 1.6.0; ผลตรง oracle) — เหลือเฉพาะเก็บเป็น case ใน Phase D
 
 ALLOWED (AI): `app/services/ai/metric_compiler.py`, `tests/unit/test_metric_compiler.py`, `tests/fixtures/*.yaml` · (NT-Report) `tools/feed/domains.py`, `EBT/pipeline/03_extract_line_items.py` หรือที่ที่ build `fact_ebt`, `tools/feed/test_metrics_contract.py`
 - AI ก่อน: metric ที่ `expr` มีการหาร (ratio) และคำขอมีมิติหรือจัดอันดับ → ผลลัพธ์มีคอลัมน์**ตัวหาร**คู่ไป (เช่น `รายได้ (ฐานยอดขาย)`), note บอก explain ว่า "margin ของหน่วยที่ฐานรายได้น้อยไม่ควรเปรียบ"; รองรับ `rank_scope` (WHERE fragment ใน contract, ใช้เฉพาะเมื่อ dimensions ไม่ว่าง) — ไม่มีใน contract = พฤติกรรมเดิม

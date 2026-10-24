@@ -34,6 +34,10 @@ AI `main` `ff886c0..01cf5ee` · NT-Report `main` `001c0c3..541b3e1` (contract eb
 - "ebt margin ต่ำสุด 10 ส่วนงาน": ระดับ (`sub_unit`) และสูตรถูก แต่ได้หน่วยสนับสนุนรายได้ 442 บาท margin −47,199,339% และ explain เรียกหน่วยเป็น "ล้านบาท" →
   explain prompt รับ `unit` ของ metric + คอลัมน์ผลลัพธ์ของ metric หน่วย percent ชื่อ "… (%)"; เกณฑ์ตัดหน่วย HQ (`isHQ` ของ dashboard, ไม่อยู่ใน feed) = M-10 / C-0c ในแผน
 
+- **C-0c ทำแล้ว (2026-10-24 เย็น)**: NT-Report `b5067b1` ebt **1.6.0** — `fact_ebt.is_hq` (transform `derive_ebt_is_hq`, กฎเดียวกับ dashboard) + `ebt_margin.ranking: {scope: is_hq = 0, base: rev - other, base_name_th}` (SPEC §5.5 key ใหม่);
+  AI `941cd0a` — `schema_metrics.ranking` (migration เพิ่มคอลัมน์บน config.db จริงแล้ว, backup `~/nt-ai-backups/config-ranking-*.db`), compiler ใส่ `AND (scope)` + คอลัมน์ฐานเมื่อแยกมิติ/จัดอันดับ;
+  dist ebt rebuild → build `20261024T104245Z` (reconcile ok) → `register_file_source --domain ebt` (view ได้ `is_hq`) → "ส่วนงานไหนมี EBT margin ต่ำสุด 10 อันดับ" = นครนายก −13.80% (ฐาน 44.6 ล้าน) … สิงห์บุรี 6.41% ตรง oracle; ผลมีคอลัมน์ `รายได้ (ฐานยอดขาย)` คู่กับ `EBT Margin (%)`
+
 ## ที่ต้องรู้ตอนแก้ต่อ
 - ตัวอ่าน metric ใหม่ต้องกรอง `status='active'` และอ่าน DB ตอน request (prompt cache 6 ชม. ไม่เห็น) · ตัวเขียนผ่าน `_declare`
 - ลำดับขึ้นของ: AI code → migrate → contract/dist ของ NT-Report → `register_file_source` (ตารางได้คอลัมน์ใหม่)
