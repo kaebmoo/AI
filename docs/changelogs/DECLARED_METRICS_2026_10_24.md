@@ -23,6 +23,14 @@ AI `main` `ff886c0..01cf5ee` · NT-Report `main` `001c0c3..541b3e1` (contract eb
 - การแยกตามมิติโดยไม่มีตัวกรอง (เช่น รายศูนย์ต้นทุน) ใส่ `official_scope` แล้ว (D-3) — เดิมไม่ใส่ ทำให้ 2P10201 (สายงานโครงสร้างพื้นฐาน) ขึ้นอันดับ 1; มีตัวกรองยังคำนวณหน่วยนอกขอบเขตได้เหมือนเดิม
   ผลที่ถูก (สะสม ก.ย. 2569, 2 สายงานขาย): ระยอง 130.03 · แหลมฉบัง 124.88 · กรุงเทพกลาง 2 106.81 … สุพรรณบุรี 74.44 ล้านบาท — ยอดสายงานจากสูตรเดียวกันตรง `fact_ebt_division_monthly` (901.53 / −330.68)
 
+- "ฝ่ายที่มี ebt สูงสุด 5 อันดับแรก" ตอบระดับสายงาน (2 แถว, ตัวเลขถูก ระดับผิด) — ความรู้ว่า "ฝ่าย = `unit`" ไม่เคยถึงโมเดล **3 ชั้นซ้อน** (แก้ครบแล้ว 2026-10-24 บ่าย, คำตอบตรง oracle: ภาคตะวันออกตอนล่าง 462.78 … ภาคใต้ตอนบน 245.14 ล้านบาท):
+  1. contract ทุกโดเมนไม่มี `description` ของคอลัมน์ระดับหน่วยงาน → NT-Report `c5f6441` (revenue 2.3.3 / expense 1.2.5 / sales 1.3.4 / ebt 1.5.1: สายงาน > กลุ่ม > ฝ่าย > ส่วน)
+  2. `prompt_builder._build_schema_from_metadata` แสดงเฉพาะ `special_notes` ไม่แสดง `description` ที่ contract sync เขียน → `f94d5e9` (`special_notes or description`)
+  3. schema ใน prompt มีแค่ `main_view` (`fact_ebt_division_monthly`) และ catalog ของ metric ไม่บอกมิติ → `6cda6c6` (`dimension_labels` + catalog "unit (ฝ่าย), …") — **ยังไม่พอ**;
+     ที่ตัดสินจริงคือ `master_hierarchy` ของ `feed_ebt` ซึ่งว่างเปล่า (feed context ไม่เคยมี level) → เพิ่ม 5 ระดับ `manual` ผ่าน `HierarchyService.upsert_level`
+     (สายงาน/กลุ่ม/ฝ่าย/ส่วน/ศูนย์ต้นทุน → division/sub_division/unit/sub_unit/cost_center + detection_keywords) → level note บอก pass 1 ว่า "ฝ่าย → `unit`" — เป็น **config ใน config.db ไม่ใช่ code**;
+     revenue/expense/sales ยังไม่มี level ระดับหน่วยงาน (revenue มี hierarchy ผลิตภัณฑ์อยู่แล้ว 3 ระดับ — ตารางมี UNIQUE(context, level) จึงต้องออกแบบก่อน) → เข้า `plan/PLAN_METRICS_CONVERGENCE.md`
+
 ## ที่ต้องรู้ตอนแก้ต่อ
 - ตัวอ่าน metric ใหม่ต้องกรอง `status='active'` และอ่าน DB ตอน request (prompt cache 6 ชม. ไม่เห็น) · ตัวเขียนผ่าน `_declare`
 - ลำดับขึ้นของ: AI code → migrate → contract/dist ของ NT-Report → `register_file_source` (ตารางได้คอลัมน์ใหม่)

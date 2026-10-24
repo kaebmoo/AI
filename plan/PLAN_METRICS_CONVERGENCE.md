@@ -163,6 +163,18 @@ Acceptance: `pytest tools/feed` เขียว; `python -c "yaml.safe_load"` �
 
 ---
 
+## 6b. Phase C-0b — คำศัพท์ระดับหน่วยงานถึงโมเดลทุกโดเมน (พบ 2026-10-24 บ่าย, ทำได้ก่อน C)
+
+หลักฐาน: "ฝ่ายที่มี ebt สูงสุด 5 อันดับแรก" ตอบระดับสายงานแม้ contract/prompt/catalog บอกแล้วว่า ฝ่าย = `unit`; ที่ตัดสินคือ **`master_hierarchy`** (level note ของ pass 1)
+ซึ่ง feed context ไม่เคยมี — ทำให้ feed_ebt แล้วด้วยมือ (5 ระดับ `manual`); ดู changelog `DECLARED_METRICS_2026_10_24.md` §แก้หลังขึ้นจริง
+
+ALLOWED: `app/services/datafeed_knowledge.py`, `app/services/hierarchy_service.py`, `app/services/ai/hierarchy_context.py`, `tests/unit/test_hierarchy*.py`, `tests/unit/test_schema_metrics_sync.py`
+- **ที่มาเดียว**: contract ประกาศ `org_levels:` (หรืออ่านจาก desc ที่มี "ระดับ N") → `sync_knowledge` เขียน `master_hierarchy` `declared` ของ context นั้น (provenance เหมือน `schema_metrics`;
+  แถว `manual` ที่คนเขียนยังชนะ); keywords ตรวจจับ = คำของระดับ + "ราย<ระดับ>"; ห้ามใช้ "ส่วน" / "กลุ่ม" โดด (ชน ส่วนลด / กลุ่มธุรกิจ)
+- **หลาย hierarchy ต่อ context**: revenue มีผลิตภัณฑ์ 3 ระดับอยู่แล้ว + หน่วยงาน 4 ระดับ → ตาราง `UNIQUE(context_name, level)` ไม่พอ → ตัดสิน: (ก) คอลัมน์ `chain` ใน `master_hierarchy` (migration) · (ข) level 10–14 สำหรับหน่วยงานโดย `format_level_note` แยก chain ตามช่วง · (ค) context ละ chain เดียว (ไม่ทำ revenue)
+- **test ที่พิสูจน์ว่าความรู้ถึงโมเดล**: สำหรับทุก field ที่ sync ลง DB (description, hierarchy, metrics) มี test ว่า text นั้นอยู่ใน prompt ของ pass 1 จริง (`extract_intent` header) — ชั้นแบบนี้ eval คำถามเดี่ยวจับไม่ได้
+Acceptance: ACC-T, ACC-L; วัดด้วย Phase D: คำถาม "<ระดับ>ไหน <metric> สูงสุด N อันดับ" ทุกระดับ × ทุกโดเมนที่มี metric → GROUP BY คอลัมน์ของระดับนั้น
+
 ## 7. งานที่ไม่อยู่ในแผนนี้ (บันทึกไว้ไม่ให้หลง)
 
 - expense metrics (M-7 ข), `is_negative_reversal` / `overrides_audit_layer` — รอบถัดไปหลัง C-02
