@@ -3,6 +3,7 @@
 Usage: import generate, or run python -m scripts.eval.gen_metric_questions --help.
 """
 
+from collections import Counter, defaultdict
 from dataclasses import asdict, fields
 import json
 from pathlib import Path
@@ -226,3 +227,87 @@ def generate(contract: dict, dist_dir: Path, period: int, *, phrasings: int = 3,
     finally:
         conn.close()
     return result
+
+
+def score_case(question: dict, response: dict) -> dict:
+    """Compare oracle values with distinct answer rows, preserving top-N order."""
+    if response.get("error"):
+        return {"ok": False, "note": f"error {response['error']}"}
+    data = response.get("data") or []
+    expected = [row["value"] for row in question["expected_rows"]]
+    if len(data) != len(expected):
+        return {"ok": False, "note": f"rows: got {len(data)} / want {len(expected)}"}
+    percent = question["unit"].strip().casefold() in ("percent", "%")
+
+    def matches(row, value):
+        if value is None:
+            return True
+        numbers = [c for c in row.values() if isinstance(c, (int, float)) and not isinstance(c, bool)]
+        if percent:
+            return any(abs(c - value) <= 0.01 or abs(c * 100 - value) <= 0.01 for c in numbers)
+        return any(abs(c - value) <= 0.5 or abs(c * 1e6 - value) <= 5000 for c in numbers)
+
+    if question["ordered"]:
+        bad = [i + 1 for i, (row, value) in enumerate(zip(data, expected)) if not matches(row, value)]
+        return {"ok": not bad, "note": f"positions differ: {bad}" if bad else ""}
+    used, missing = set(), []
+    # Assign wildcards last so they cannot consume a row needed by a numeric value.
+    for value in sorted(expected, key=lambda v: (v is None, v if v is not None else 0)):
+        index = next((i for i, row in enumerate(data) if i not in used and matches(row, value)), None)
+        if index is None:
+            missing.append(value)
+        else:
+            used.add(index)
+    return {"ok": not missing, "note": f"unmatched expected values: {missing[:3]}" if missing else ""}
+
+
+def path_category(metric_path: str | None, audited: bool) -> str:
+    """Classify the audit path; an unaudited question has no known path."""
+    if not audited:
+        return "unknown"
+    return "compiled" if metric_path and metric_path.startswith("compiled:") else "free-SQL"
+
+
+def report(spec: dict, answers: dict, paths: dict) -> str:
+    """Report answered cases by class, shape/metric/mode, shape, and audit path."""
+    classes, layers, shapes = defaultdict(list), defaultdict(list), defaultdict(list)
+    reasons, results = Counter(), []
+    for q in spec["questions"]:
+        qid = q["id"]
+        if qid not in answers:
+            continue
+        path = paths.get(qid)
+        result = (score_case(q, answers[qid])["ok"], path_category(path, qid in paths))
+        results.append(result)
+        classes[q["class"]].append(result)
+        layers[(q["shape"], q["metric_id"], q["mode"])].append(result)
+        shapes[q["shape"]].append(result)
+        if qid in paths and path and path.startswith("declined:"):
+            reasons[path.removeprefix("declined:")] += 1
+
+    def fraction(items):
+        return f"{sum(ok for ok, _ in items)}/{len(items)}"
+
+    def buckets(items):
+        counts = []
+        for category in ("compiled", "free-SQL", "unknown"):
+            subset = [item for item in items if item[1] == category]
+            if subset:
+                counts.append(f"{category} {fraction(subset)}")
+        return f"{fraction(items)}  [" + " · ".join(counts) + "]"
+
+    lines = [f"{name}  {buckets(classes[name])}" for name in sorted(classes)]
+    lines.append("Layers (shape metric mode)")
+    lines.extend(f"{' '.join(key)}  {buckets(layers[key])}" for key in sorted(layers))
+    lines.append("Shapes")
+    for shape in ("total", "by", "filter", "top5_desc", "top5_asc", "top10_desc", "top10_asc"):
+        if shape in shapes:
+            lines.append(f"{shape}  {fraction(shapes[shape])}")
+    lines.append("Decline reasons (top 5)")
+    lines.extend(f"{reason}  {count}" for reason, count in sorted(reasons.items(), key=lambda r: (-r[1], r[0]))[:5])
+    compiled = [item for item in results if item[1] == "compiled"]
+    audited = sum(category != "unknown" for _, category in results)
+    percent = 100 * len(compiled) / audited if audited else 0
+    lines.append(f"overall {fraction(results)} · compiled {fraction(compiled)} "
+                 f"({percent:.1f}% of audited answered by the compiler)")
+    return "\n".join(lines)

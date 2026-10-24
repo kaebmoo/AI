@@ -145,3 +145,40 @@ build เก่าได้ 10 ข้อเดิม. วิธีวัดท�
 - คำถามระดับหน่วยย่อย (น่าน) ยังไม่มี oracle ใน control_totals → เขียนชุดเล็กด้วยค่าที่เจ้าของยืนยัน (`accept.values` หน่วย MB) รูปแบบเดียวกับ portal_questions
 - ก่อนโทษ code ให้อ่าน intent จริงของ pass 1 ใน log (`Pass 1 complete … Intent:`) — slice 04–06 ของงานนี้มาจากตรงนั้นทั้งหมด
 
+## Eval ที่สร้างจากคำประกาศ metric (Phase D, 2026-10-24)
+
+วัด **gate (M-6 ก)** ว่า pass 1 เลือก metric, มิติ, ตัวกรอง, งวด, เดือน/สะสม และอันดับได้ถูกต้องหรือไม่
+โดยสร้างคำถามจากคำประกาศ metric และใช้ผล `metric_compiler` บน parquet เป็น oracle จึงไม่ได้ตรวจความถูกต้องของสูตรอย่างอิสระ
+สร้างชุดใหม่เมื่อเปลี่ยนงวด แล้วใช้ชุดเดิมตอนให้คะแนนซ้ำ:
+
+```bash
+python -m scripts.eval.gen_metric_questions --contract <contract.yaml> \
+    --dist <dist/ebt/latest> --period 202609 --out eval_results/metric_ebt_202609.json
+PORTAL_EVAL_API_KEY=<key ซ้อม> python -m scripts.eval.run_metric_eval \
+    --questions eval_results/metric_ebt_202609.json --base-url http://localhost:8001 \
+    --audit-db <สำเนา/app.db> --per-class 1
+python -m scripts.eval.run_metric_eval --questions eval_results/metric_ebt_202609.json \
+    --score eval_results/metric_eval_feed_ebt_202609_<YYYYmmdd_HHMM>.json
+```
+
+เลือกข้อด้วย `--only-class REGEX` ก่อน จากนั้น `--per-class K` กระจาย K ข้อต่อ class ตามลำดับ id
+แล้ว `--limit N` เลือก N ข้อแรก; `--pause SECONDS` เว้นระหว่างคำถาม ผลรันบันทึกตัวเลือก, oracle build, คำตอบ และเส้นทาง audit
+ส่วน `--score` อ่านผลที่บันทึกไว้เท่านั้น ไม่เรียก HTTP และไม่ต้องใช้ key หรือฐาน audit
+
+ให้ผ่านเมื่อไม่มี `error` และจำนวนแถวเท่ากับ oracle ทุกแถว: ค่าบาทคลาดเคลื่อนได้ ≤ 0.5 บาท
+หรือเมื่อคำตอบเป็นล้านบาท ใช้ `|cell × 1e6 − expected| ≤ 5000` บาท; ค่า percent คลาดเคลื่อนได้ ≤ 0.01 จุดเปอร์เซ็นต์
+หรือรับ ratio เมื่อ `|cell × 100 − expected| ≤ 0.01` ค่าเซลล์ต้องเป็นตัวเลขและไม่ใช่ bool
+top-N เทียบค่าตามลำดับแถว (ค่าที่เสมอกันสลับกันได้); รูปอื่นเรียงค่าคาดหวังจากน้อยไปมากแล้วจับคู่กับแถวแรกที่ยังไม่ใช้
+แต่ละค่าต้องได้คนละแถว ไม่เทียบชื่อมิติ; expected `None` จับคู่แถวใดก็ได้หลังจับคู่ตัวเลขแล้ว
+
+รายงาน pass/total ต่อ class, ต่อ `(shape, metric_id, mode)`, ต่อรูป total/by/filter/top5_desc/top5_asc/top10_desc/top10_asc,
+เหตุผล decline 5 อันดับ และผลรวม แต่ละ class และชั้น metric แยก `compiled` / `free-SQL` / `unknown`
+อ่าน `metric_path` จาก `query_audit` ในสำเนาแบบ read-only โดยเอาแถวหลังเริ่มรันที่ channel ตรงกับ `request.source`
+และใช้แถวสุดท้ายของข้อความคำถามนั้น: `compiled:` คือ compiled; `declined:` หรือ NULL รวมถึงไม่มีแถวใหม่ คือ free-SQL
+หากไม่ระบุ `--audit-db` จะเป็น unknown เปอร์เซ็นต์ท้ายรายงานคือสัดส่วนข้อที่ compiler ตอบจากข้อที่มีการตรวจ audit
+ส่วนเศษส่วน compiled คือจำนวนผ่าน/จำนวนข้อบนเส้นทาง compiled นับเฉพาะข้อที่มีคำตอบในผลรัน
+
+ใช้ **server ซ้อมบนสำเนา config.db/app.db และข้อมูลที่เกี่ยวข้องที่พอร์ต 8001 เท่านั้น** และชี้ `--audit-db` ไปที่สำเนานั้น
+ตัวรันปฏิเสธพอร์ต 8000; ห้ามใช้ server จริง, portal key หรือ Claude Desktop key ใช้ key ซ้อมที่สร้างบนสำเนาผ่าน `PORTAL_EVAL_API_KEY`
+ไฟล์ชุดคำถามและผลรันอยู่ใน `eval_results/` ซึ่ง git ignores เพราะอาจมีตัวเลขและชื่อหน่วยงานจริง
+
