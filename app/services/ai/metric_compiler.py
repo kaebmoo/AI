@@ -197,24 +197,52 @@ def _orders_by_value(intent: dict, metric: Metric, extra: frozenset[str] = froze
             or (isinstance(column, str) and column.casefold().strip() in _value_names(intent, metric, extra)))
 
 
-def supports(intent: dict, metric: Metric, extra_names: frozenset[str] = frozenset()) -> bool:
+def _reason_detail(value) -> str:
+    return (" ".join(value.split())[:64] or "invalid") if isinstance(value, str) else "invalid"
+
+
+def _support_reason(intent: dict, metric: Metric, extra_names: frozenset[str] = frozenset()) -> str | None:
     try:
         if intent.get("intent_type") not in ("aggregation", "ranking"):
-            return False
-        _validate_shape(intent.get("dimensions", []), intent.get("filters", []), metric)
+            return "shape:intent_type:" + _reason_detail(intent.get("intent_type"))
+        declared = metric.dimensions or ()
+        dimensions = intent.get("dimensions", [])
+        if not isinstance(dimensions, (list, tuple)):
+            return "shape:dimension:invalid"
+        for dimension in dimensions:
+            if dimension not in declared:
+                return "shape:dimension:" + _reason_detail(dimension)
+        filters = intent.get("filters", [])
+        if not isinstance(filters, (list, tuple)):
+            return "shape:filter:invalid"
+        for item in filters:
+            if not isinstance(item, dict):
+                return "shape:filter:invalid"
+            if item.get("column") not in declared:
+                return "shape:filter:" + _reason_detail(item.get("column"))
+            operator, value = item.get("operator"), item.get("value")
+            if operator in ("=", "LIKE") and isinstance(value, str):
+                continue
+            if operator == "IN" and isinstance(value, list) and value and all(isinstance(v, str) for v in value):
+                continue
+            return "shape:filter:" + _reason_detail(operator)
         ordering = intent.get("ordering")
         if ordering is not None:
             if not isinstance(ordering, dict):
-                return False
+                return "shape:ordering:invalid"
             column = ordering.get("column")
             if column not in (*(metric.dimensions or ()), None) and not (
                     isinstance(column, str) and column.casefold().strip() in _value_names(intent, metric, extra_names)):
-                return False
+                return "shape:ordering:" + _reason_detail(column)
             if ordering.get("direction") not in (None, "ASC", "DESC"):
-                return False
-        return True
+                return "shape:ordering:direction"
+        return None
     except (AttributeError, TypeError, ValueError):
-        return False
+        return "shape:invalid"
+
+
+def supports(intent: dict, metric: Metric, extra_names: frozenset[str] = frozenset()) -> bool:
+    return _support_reason(intent, metric, extra_names) is None
 
 
 def _triggered_mappings(intent: dict, question: str, ignore: frozenset[str] = frozenset()) -> list[dict]:
@@ -238,6 +266,18 @@ def plan(
     tables,
 ) -> CompileRequest | None:
     """Choose a declared metric and a supported single-period compile request."""
+    return plan_with_reason(intent, question, resolved, matched, reference, tables)[0]
+
+
+def plan_with_reason(
+    intent: dict,
+    question: str,
+    resolved: dict[str, Metric],
+    matched: list[str],
+    reference: int | None,
+    tables,
+) -> tuple[CompileRequest | None, str | None]:
+    """Choose a compile request or give a short decline reason."""
     metric_id = intent.get("metric_id")
     if isinstance(metric_id, str) and metric_id not in resolved:
         column_matches = [key for key, metric in resolved.items()
@@ -261,7 +301,7 @@ def plan(
             if parent in candidates:
                 break
     if metric_id is None:
-        return None
+        return None, "no_metric"
     metric = resolved[metric_id]
     ignore = set()
     ancestor = metric
@@ -271,45 +311,49 @@ def plan(
         ignore.update(value.casefold().strip() for value in
                       (ancestor.metric_id, ancestor.name_th, *ancestor.synonyms))
         ancestor = resolved.get(ancestor.extends)
-    if _triggered_mappings(intent, question, frozenset(ignore)):
-        return None
+    triggered = _triggered_mappings(intent, question, frozenset(ignore))
+    if triggered:
+        return None, "mapping_triggered:" + _reason_detail(triggered[0]["keyword"].casefold().strip())
     filters = intent.get("filters") or []
     if not isinstance(filters, (list, tuple)):
-        return None
+        return None, "shape:filter:invalid"
     period_column = (metric.period or {}).get("column")
     remaining = []
     period_hint = None
     for item in filters:
         if (isinstance(item, dict) and isinstance(item.get("column"), str)
                 and isinstance(period_column, str) and item["column"].casefold() == period_column.casefold()):
+            if item.get("operator") != "=":
+                return None, "period_filter:operator"
             value = item.get("value")
             if isinstance(value, str) and value.isdecimal():
                 try:
                     value = int(value)
                 except ValueError:
-                    return None
-            if item.get("operator") != "=" or type(value) is not int or not 100001 <= value <= 999912:
-                return None
+                    return None, "period_filter:value"
+            if type(value) is not int or not 100001 <= value <= 999912:
+                return None, "period_filter:value"
             period_hint = value
         else:
             remaining.append(item)
     intent = {**intent, "filters": remaining}
-    if not supports(intent, metric, frozenset(ignore)):
-        return None
+    reason = _support_reason(intent, metric, frozenset(ignore))
+    if reason is not None:
+        return None, reason
     if type(reference) is not int:
-        return None
+        return None, "reference_missing"
     ref_y, ref_m = divmod(reference, 100)
     if not 1 <= ref_y <= 9999 or not 1 <= ref_m <= 12:
-        return None
+        return None, "reference_missing"
     tr = intent.get("time_range") or {}
     if not isinstance(tr, dict):
-        return None
+        return None, "time_range_invalid"
     hint_y, hint_m = divmod(period_hint, 100) if period_hint is not None else (ref_y, ref_m)
     year = tr.get("year") or hint_y
     month = tr.get("month") or hint_m
     if (type(year) is not int or not 1 <= year <= 9999
             or type(month) is not int or not 1 <= month <= 12):
-        return None
+        return None, "time_range_invalid"
     if year == ref_y:
         month = min(month, ref_m)
     mode = "month" if tr.get("month") is not None and not tr.get("cumulative") else "cumulative"
@@ -326,7 +370,7 @@ def plan(
         if _orders_by_value(intent, metric, frozenset(ignore)) else None,
         limit=limit if type(limit) is int and limit > 0 else None,
         official_total_ok=metric.official_total is not None and metric.official_total["dataset"] in tables,
-    )
+    ), None
 
 
 def _quote(name: str) -> str:

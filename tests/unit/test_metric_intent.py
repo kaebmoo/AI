@@ -485,3 +485,146 @@ def test_plan_ranks_child_metric_by_parent_name(metrics, intent):
 def test_plan_rejects_ordering_by_an_unknown_column(metrics, intent):
     selection = intent | RANKING | {"intent_type": "aggregation", "ordering": {"column": "revenue", "direction": "DESC"}}
     assert compiler.plan(selection, "EBT รายศูนย์ต้นทุน", compiler.resolve(metrics), [], 202609, set()) is None
+
+
+@pytest.mark.parametrize("changes,question,reference,reason", [
+    ({"metric_id": "unknown"}, QUESTION, 202609, "no_metric"),
+    ({"matched_mappings": [{"keyword": " น่าน "}, {"keyword": "บุคลากร"}]},
+     QUESTION, 202609, "mapping_triggered:น่าน"),
+    ({"filters": "invalid"}, QUESTION, 202609, "shape:filter:invalid"),
+    ({"filters": [None]}, QUESTION, 202609, "shape:filter:invalid"),
+    ({"intent_type": "trend"}, QUESTION, 202609, "shape:intent_type:trend"),
+    ({"intent_type": None}, QUESTION, 202609, "shape:intent_type:invalid"),
+    ({"dimensions": "division"}, QUESTION, 202609, "shape:dimension:invalid"),
+    ({"dimensions": [5]}, QUESTION, 202609, "shape:dimension:invalid"),
+    ({"dimensions": ["  \n "]}, QUESTION, 202609, "shape:dimension:invalid"),
+    ({"dimensions": ["division", "unknown", "other"]}, QUESTION, 202609, "shape:dimension:unknown"),
+    ({"filters": [{"column": "unknown", "operator": ">", "value": "private"}]},
+     QUESTION, 202609, "shape:filter:unknown"),
+    ({"filters": [{"column": None, "operator": "="}]}, QUESTION, 202609, "shape:filter:invalid"),
+    ({"filters": [{"column": "division", "operator": ">", "value": "private"}]},
+     QUESTION, 202609, "shape:filter:>"),
+    ({"filters": [{"column": "division", "operator": "=", "value": 5}]},
+     QUESTION, 202609, "shape:filter:="),
+    ({"filters": [{"column": "division", "operator": "LIKE", "value": None}]},
+     QUESTION, 202609, "shape:filter:LIKE"),
+    ({"filters": [{"column": "division", "operator": "IN", "value": []}]},
+     QUESTION, 202609, "shape:filter:IN"),
+    ({"filters": [{"column": "division", "operator": "IN", "value": ["private", 5]}]},
+     QUESTION, 202609, "shape:filter:IN"),
+    ({"filters": [{"column": "division", "operator": None, "value": "private"}]},
+     QUESTION, 202609, "shape:filter:invalid"),
+    ({"ordering": []}, QUESTION, 202609, "shape:ordering:invalid"),
+    ({"ordering": {"column": "unknown", "direction": "invalid"}},
+     QUESTION, 202609, "shape:ordering:unknown"),
+    ({"ordering": {"column": 5}}, QUESTION, 202609, "shape:ordering:invalid"),
+    ({"ordering": {"column": "division", "direction": "desc"}},
+     QUESTION, 202609, "shape:ordering:direction"),
+    ({"metrics": 5, "ordering": {"column": "ebt"}}, QUESTION, 202609, "shape:invalid"),
+    ({}, QUESTION, None, "reference_missing"),
+    ({}, QUESTION, "202609", "reference_missing"),
+    ({}, QUESTION, True, "reference_missing"),
+    ({}, QUESTION, 202600, "reference_missing"),
+    ({}, QUESTION, 202613, "reference_missing"),
+    ({}, QUESTION, 12, "reference_missing"),
+    ({}, QUESTION, 1000001, "reference_missing"),
+    ({"time_range": [1]}, QUESTION, 202609, "time_range_invalid"),
+    ({"time_range": {"year": 10000}}, QUESTION, 202609, "time_range_invalid"),
+    ({"time_range": {"month": 13}}, QUESTION, 202609, "time_range_invalid"),
+    ({"time_range": {"year": "2026"}}, QUESTION, 202609, "time_range_invalid"),
+    ({"time_range": {"month": True}}, QUESTION, 202609, "time_range_invalid"),
+    *[pytest.param({"filters": [{"column": "time_key", "operator": operator, "value": value}]},
+                   QUESTION, 202609, reason, id=case)
+      for case, operator, value, reason in [
+          ("period-operator", "<=", 202609, "period_filter:operator"),
+          ("period-operator-before-value", "BETWEEN", [202601, 202609], "period_filter:operator"),
+          ("period-nondecimal", "=", "2026-09", "period_filter:value"),
+          ("period-too-small", "=", 100000, "period_filter:value"),
+          ("period-too-large", "=", 999913, "period_filter:value"),
+          ("period-bool", "=", True, "period_filter:value"),
+          ("period-list", "=", [202609], "period_filter:value"),
+          ("period-float", "=", 202609.0, "period_filter:value"),
+          ("period-none", "=", None, "period_filter:value"),
+          ("period-int-conversion", "=", "1" * 5000, "period_filter:value"),
+      ]],
+])
+def test_plan_with_reason_declines(metrics, intent, changes, question, reference, reason):
+    selection = intent | changes
+    resolved = compiler.resolve(metrics)
+    assert compiler.plan_with_reason(selection, question, resolved, [], reference, set()) == (None, reason)
+    assert compiler.plan(selection, question, resolved, [], reference, set()) is None
+    expected_support = not reason.startswith(("shape:", "period_filter:"))
+    assert compiler.supports(selection, resolved[intent["metric_id"]]) is expected_support
+
+
+@pytest.mark.parametrize("changes,matched", [
+    ({}, []),
+    ({"metric_id": "ebt_ex_personnel_month", "time_range": {"year": 2025, "month": 7}}, []),
+    ({"metric_id": None}, ["ebt", "ebt_excluding_personnel"]),
+    (RANKING | {"intent_type": "ranking", "ordering": {"column": "ebt", "direction": "ASC"}}, []),
+])
+def test_plan_with_reason_success_matches_plan(metrics, intent, changes, matched):
+    selection = intent | changes
+    resolved = compiler.resolve(metrics)
+    request = compiler.plan(selection, QUESTION, resolved, matched, 202609, set())
+    assert request is not None
+    assert compiler.plan_with_reason(selection, QUESTION, resolved, matched, 202609, set()) == (request, None)
+    assert compiler.supports(selection | {"filters": list(request.filters)}, resolved[request.metric_id])
+
+
+def test_plan_with_reason_sanitizes_mapping_keyword(metrics, intent):
+    keyword = "  MIXED\n  " + "Long   Keyword " * 10
+    selection = intent | {"matched_mappings": [{"keyword": keyword, "sql_condition": "private SQL"}]}
+    resolved = compiler.resolve(metrics)
+    question = QUESTION + keyword
+    expected = "mapping_triggered:" + " ".join(keyword.casefold().strip().split())[:64]
+    assert compiler.plan_with_reason(selection, question, resolved, [], 202609, set()) == (None, expected)
+    assert compiler.plan(selection, question, resolved, [], 202609, set()) is None
+    assert len(expected.split(":", 1)[1]) <= 64
+    assert "\n" not in expected and "private" not in expected
+
+
+@pytest.mark.parametrize("time_range,reason", [(None, "time_range_invalid"), ({"year": 2026, "month": 9}, None)])
+def test_plan_with_reason_preserves_period_hint_precedence(metrics, intent, time_range, reason):
+    selection = intent | {"time_range": time_range,
+                          "filters": [{"column": "time_key", "operator": "=", "value": 202513}]}
+    resolved = compiler.resolve(metrics)
+    request = compiler.plan(selection, QUESTION, resolved, [], 202609, set())
+    assert compiler.plan_with_reason(selection, QUESTION, resolved, [], 202609, set()) == (request, reason)
+    assert not compiler.supports(selection, resolved[intent["metric_id"]])
+    if reason is None:
+        assert request == compiler.CompileRequest(intent["metric_id"], 202609, "month", official_total_ok=False)
+    else:
+        assert request is None
+
+
+@pytest.mark.parametrize("outcome,reason", [
+    ("declined", "shape:intent_type:trend"), ("compile_error", "compile_error"), ("compiled", None),
+])
+@pytest.mark.parametrize("with_trace", [True, False])
+async def test_metric_decline_trace_and_log(metrics, intent, monkeypatch, caplog, outcome, reason, with_trace):
+    monkeypatch.setattr(compiler, "load_metrics", lambda c: metrics)
+    monkeypatch.setattr(compiler, "dimension_labels", lambda *a: {})
+    selection = intent | {"intent_type": "trend"} if outcome == "declined" else intent
+    if outcome == "compile_error":
+        monkeypatch.setattr(compiler, "compile", Mock(side_effect=ValueError("private declaration")))
+    trace = SimpleNamespace(stages={}, usage=[]) if with_trace else None
+    caplog.set_level("INFO", logger=hybrid_flow.__name__)
+    prompt, two_pass, compiled = await _first(_service(selection), trace=trace)
+    assert two_pass
+    decline_lines = [record.getMessage() for record in caplog.records
+                     if record.getMessage().startswith("Metric declined:")]
+    if reason is None:
+        assert compiled is not None and prompt == ""
+        assert decline_lines == []
+        if trace is not None:
+            assert trace.stages["metric_compiled"] == intent["metric_id"]
+            assert "metric_declined" not in trace.stages
+    else:
+        assert compiled is None and "Structured Intent" in prompt
+        assert decline_lines == [f"Metric declined: {reason}"]
+        if trace is not None:
+            assert trace.stages["metric_declined"] == reason
+            assert "metric_compiled" not in trace.stages
+        if outcome == "compile_error":
+            assert "Metric compilation failed: private declaration" in caplog.text

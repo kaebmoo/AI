@@ -887,7 +887,7 @@ async def build_first_attempt_prompt(
             if required_columns is not None:
                 required_columns[:] = unfilterable_columns(intent_json, context_table, question=question)[0]
             if metrics:
-                req = metric_compiler.plan(
+                req, reason = metric_compiler.plan_with_reason(
                     intent_json, question, resolved, matched, reference_period(),
                     set(_context_tables(context_table)) | {context_table},
                 )
@@ -897,11 +897,15 @@ async def build_first_attempt_prompt(
                     except ValueError as exc:
                         logger.warning("Metric compilation failed: %s", exc)
                         compiled = None
+                        reason = "compile_error"
                     if compiled is not None:
                         logger.info("Metric compiled: %s (%s)", compiled.metric_id, compiled.table)
                         if trace is not None:
                             trace.stages["metric_compiled"] = compiled.metric_id
                         return "", current_two_pass_enabled, compiled
+                logger.info("Metric declined: %s", reason)
+                if trace is not None:
+                    trace.stages["metric_declined"] = reason
             logger.info("Two-Pass Mode: Pass 1 success. Building Pass 2 prompt.")
             user_prompt = build_pass2_prompt(
                 service=service,
