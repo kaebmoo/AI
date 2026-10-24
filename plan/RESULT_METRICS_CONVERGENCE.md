@@ -6,7 +6,7 @@
 |---|---|---|---|
 | **A** มองเห็นเส้นทางของทุกคำถาม | ✅ **ขึ้นของจริงแล้ว** + push (CI เขียว run 40091378614) | 2026-10-24 | `34845de`, `655faeb` |
 | **D** eval ที่สร้างเองจากคำประกาศ | ✅ **ขึ้นของจริงแล้ว** (main `011cef3`, reload 22:35) + push (CI เขียว run 40107701402) — วัดบน server ซ้อม: 96 → 157/174 หลังแก้ `plan()` | 2026-10-24 | `4cb8c62`, `ecdcc84`, แก้ `plan()` `3cd4e6c` |
-| **E** คำอธิบายคอลัมน์ feed อัตโนมัติ | ✅ บน branch `ai/delegate-phase-e` — **ยังไม่ขึ้นของจริง** (วัดบนสำเนา: คำอธิบายว่าง 49.3% → 23.8%) | 2026-10-24 | `3340f31`, `fc19128`, `fca9163`, `6826f75`, `cc0dfce` |
+| **E** คำอธิบายคอลัมน์ feed อัตโนมัติ | ✅ **ขึ้นของจริงแล้ว** (main `092f33f`, reload 23:47; ยังไม่ push) — วัดบนสำเนา: คำอธิบายว่าง 49.3% → 23.8% | 2026-10-24 | `3340f31`, `fc19128`, `fca9163`, `6826f75`, `cc0dfce` |
 | B ตัวตรวจ SQL ของ pass 2 | ⬜ ยังไม่ทำ | | |
 | C-0b คำศัพท์ระดับหน่วยงานทุกโดเมน | ⬜ ยังไม่ทำ (ระหว่างนี้ feed_ebt + feed_expense เป็นแถว `manual` — §A.6) | | |
 | C-00/C-01 metrics ของ revenue / sales | ⬜ ยังไม่ทำ | | |
@@ -191,3 +191,11 @@ Claude ตรวจรับและวัดผลเอง · ข้อตั
 - ไม่มี migration (`knowledge_proposals` มีอยู่แล้ว) · ไม่แตะ prompt path · ขึ้น = ff main + restart · การกด "ร่างคำอธิบาย" บนของจริงเขียนแถว `inferred`
   ลง `knowledge_proposals` ของ config.db จริง (ไม่มีผลกับคำตอบจนกว่าคนจะรับ)
 - ยังไม่ทำ: ใช้ `fk` ของ contract เป็นข้อเท็จจริง · LLM เรียบเรียงข้อความ (ตัดออกตามข้อ A1)
+
+### E.4 ขึ้นของจริง (2026-10-24 23:47)
+- ff main `07543cd` → `092f33f` · uvicorn `--reload` (port 8000) เริ่ม worker ใหม่ 23:47:25 · route ใหม่ตอบ 401 (มีอยู่ ต้อง login) · admin vite (5173) เสิร์ฟ `Schema.tsx` ใหม่
+- ก่อนขึ้น ซ้อมบน server 8002 + สำเนา config.db/app.db ด้วย call ชุดเดียวกับหน้า Schema (`feed_sales_fact_sales`): ร่าง 8 · รับ 1 (แก้ข้อความ) → แถว `manual`/active ·
+  ปฏิเสธ 1 → proposal `rejected` แถวเดิมไม่เปลี่ยน · ร่างค้าง 6 · inspect ตาราง feed ได้ (114,235 แถว 25 คอลัมน์) · onboard ยังปฏิเสธ (400) ·
+  ไม่ได้คลิกใน browser (extension ของ Chrome ไม่เชื่อมต่อ)
+- NT-Report: **ยังไม่มีอะไรต้องส่ง** — config.db จริงมีแถวคอลัมน์ feed 357 แถวเป็น `declared` ทั้งหมด, export ทั้ง 4 domain ได้ 0 รายการ ·
+  ทางกลับเริ่มเมื่อ admin รับร่างบนของจริงแล้ว: `export_col_meta` → `col_meta` ใน `tools/feed/domains.py` + PATCH → `gen_contract.py` → `build_feed.py` → `pytest tools/feed`
