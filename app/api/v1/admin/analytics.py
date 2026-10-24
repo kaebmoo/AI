@@ -51,12 +51,40 @@ def get_dashboard_stats(
     app_db: Session = Depends(deps.get_db),
 ):
     """Get dashboard statistics."""
+    from app.services.query_audit import ensure_table
+
+    ensure_table(app_db.get_bind())
     return DashboardStatsResponse(
         total_users=app_db.query(User).count(),
         total_mappings=config_db.query(SchemaSemanticMapping).count(),
         total_rules=config_db.query(SchemaBusinessRule).count(),
         total_columns=config_db.query(SchemaMetadata).count(),
+        metric_path=_metric_path_stats(app_db, utcnow() - timedelta(days=7)),
     )
+
+
+def _metric_path_stats(db: Session, since: datetime) -> dict:
+    """Question paths by context, with the five most common decline reasons."""
+    rows = db.execute(text("""
+        SELECT context_name, metric_path, COUNT(*)
+        FROM query_audit
+        WHERE created_at >= :since AND context_name IS NOT NULL
+          AND (channel IS NULL OR channel NOT IN ('report_download', 'report_export', 'dsr_erase'))
+        GROUP BY context_name, metric_path
+    """), {"since": since}).fetchall()
+    stats = {}
+    for context, path, count in rows:
+        entry = stats.setdefault(context, {"compiled": 0, "declined": 0, "none": 0, "top_declined": []})
+        if path is not None and path.startswith("compiled:"):
+            entry["compiled"] += count
+        elif path is not None and path.startswith("declined:"):
+            entry["declined"] += count
+            entry["top_declined"].append({"reason": path[len("declined:"):], "count": count})
+        else:
+            entry["none"] += count
+    for entry in stats.values():
+        entry["top_declined"] = sorted(entry["top_declined"], key=lambda r: (-r["count"], r["reason"]))[:5]
+    return stats
 
 
 @router.get("/dashboard-overview", response_model=dict)

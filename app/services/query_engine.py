@@ -249,6 +249,7 @@ class QueryEngineResult:
     llm_policy: str = FULL  # Phase 4.5: the source's llm_data_policy this answer was produced under
     cache_hit: bool = False
     data_period: Optional[int] = None  # YYYYMM the context's data runs to (manifest / legacy view); None = unknown
+    metric_path: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -704,6 +705,12 @@ class QueryEngine:
         trace.total_s = round(execution_time / 1000, 4)
         emit(trace)
 
+        metric_path = None
+        if "metric_compiled" in trace.stages:
+            metric_path = f"compiled:{trace.stages['metric_compiled']}"
+        elif "metric_declined" in trace.stages:
+            metric_path = f"declined:{trace.stages['metric_declined']}"
+
         # 6. Return combined result
         engine_result = QueryEngineResult(
             query_result=result,
@@ -715,6 +722,7 @@ class QueryEngine:
             data_as_of=source.data_as_of,
             llm_policy=llm_policy,
             data_period=period,
+            metric_path=metric_path,
         )
 
         # --- Query Result Cache: store successful result ---

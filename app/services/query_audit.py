@@ -28,9 +28,11 @@ def ensure_table(bind) -> None:
         if str(bind.url) in _tables_checked:  # someone did it while we waited
             return
         QueryAudit.__table__.create(bind, checkfirst=True)  # an app DB created before Phase 4.5
-        if "request_group" not in {c["name"] for c in inspect(bind).get_columns("query_audit")}:
-            with bind.begin() as conn:  # a table created before Phase 5
-                conn.execute(text("ALTER TABLE query_audit ADD COLUMN request_group VARCHAR"))
+        columns = {c["name"] for c in inspect(bind).get_columns("query_audit")}
+        for name, sql_type in {"request_group": "VARCHAR", "metric_path": "TEXT"}.items():
+            if name not in columns:
+                with bind.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE query_audit ADD COLUMN {name} {sql_type}"))
         _tables_checked.add(str(bind.url))
 
 
@@ -76,6 +78,7 @@ def _from_result(engine_result) -> Dict[str, Any]:
         "provider": engine_result.provider_used,
         "llm_policy": engine_result.llm_policy,
         "cache_hit": engine_result.cache_hit,
+        "metric_path": getattr(engine_result, "metric_path", None),
         "error": result.error or None,
         "execution_time_ms": engine_result.execution_time_ms,
     }

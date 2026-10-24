@@ -237,6 +237,7 @@ class DashboardStatsResponse(BaseModel):
     total_mappings: int
     total_rules: int
     total_columns: int
+    metric_path: dict[str, dict] = Field(default_factory=dict)
 
 
 # ==========================
