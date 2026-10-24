@@ -395,3 +395,13 @@ def test_catalog_names_the_dimensions_with_their_meaning(metrics, tmp_path):
     assert metric_catalog(metrics) == metric_catalog(metrics, None)  # names only, as before
     assert dimension_labels([], engine) == {}
     assert dimension_labels(metrics, object()) is None  # unusable engine → catalog falls back to names
+
+
+def test_percent_metric_column_is_named_as_percent(resolved):
+    """An EBT Margin of -47,199,339 was explained as "-47.2 ล้านบาท" (2026-10-24): the result column now says (%)
+    and baht metrics keep their plain name."""
+    margin = compile(CompileRequest("ebt_margin", 202609, "cumulative", dimensions=("sub_unit",)), resolved)
+    assert margin.sql.rstrip().split(" FROM ")[0].endswith('AS "EBT Margin (%)"')
+    assert margin.unit == "percent"
+    ebt = compile(CompileRequest("ebt", 202609, "cumulative"), resolved)
+    assert 'AS "EBT (กำไรก่อนภาษี ตามรายงาน EBT)"' in ebt.sql and "(%)" not in ebt.sql

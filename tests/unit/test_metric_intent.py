@@ -398,7 +398,8 @@ async def test_precompiled_execution_skips_generation_and_explains_metric(execut
     assert result.metric == {"id": "ebt_excluding_personnel", "name_th": compiled.name_th,
                              "unit": compiled.unit, "official": official, "table": compiled.table}
     assert result.question == QUESTION
-    expected_question = (f"{QUESTION}\n(ตัวชี้วัดที่ใช้: {compiled.name_th} — {compiled.note_th}"
+    unit = f" หน่วย: {compiled.unit}" if compiled.unit else ""
+    expected_question = (f"{QUESTION}\n(ตัวชี้วัดที่ใช้: {compiled.name_th}{unit} — {compiled.note_th}"
                          + (" ; ยอดทางการตามขอบเขตของ metric" if official
                             else " ; ยอดเฉพาะมิติ/หน่วยงานที่กรอง ไม่ใช่ยอดทางการ") + ")")
     assert execution.provider.explanation_question == expected_question

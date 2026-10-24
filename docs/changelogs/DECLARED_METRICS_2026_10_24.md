@@ -31,6 +31,9 @@ AI `main` `ff886c0..01cf5ee` · NT-Report `main` `001c0c3..541b3e1` (contract eb
      (สายงาน/กลุ่ม/ฝ่าย/ส่วน/ศูนย์ต้นทุน → division/sub_division/unit/sub_unit/cost_center + detection_keywords) → level note บอก pass 1 ว่า "ฝ่าย → `unit`" — เป็น **config ใน config.db ไม่ใช่ code**;
      revenue/expense/sales ยังไม่มี level ระดับหน่วยงาน (revenue มี hierarchy ผลิตภัณฑ์อยู่แล้ว 3 ระดับ — ตารางมี UNIQUE(context, level) จึงต้องออกแบบก่อน) → เข้า `plan/PLAN_METRICS_CONVERGENCE.md`
 
+- "ebt margin ต่ำสุด 10 ส่วนงาน": ระดับ (`sub_unit`) และสูตรถูก แต่ได้หน่วยสนับสนุนรายได้ 442 บาท margin −47,199,339% และ explain เรียกหน่วยเป็น "ล้านบาท" →
+  explain prompt รับ `unit` ของ metric + คอลัมน์ผลลัพธ์ของ metric หน่วย percent ชื่อ "… (%)"; เกณฑ์ตัดหน่วย HQ (`isHQ` ของ dashboard, ไม่อยู่ใน feed) = M-10 / C-0c ในแผน
+
 ## ที่ต้องรู้ตอนแก้ต่อ
 - ตัวอ่าน metric ใหม่ต้องกรอง `status='active'` และอ่าน DB ตอน request (prompt cache 6 ชม. ไม่เห็น) · ตัวเขียนผ่าน `_declare`
 - ลำดับขึ้นของ: AI code → migrate → contract/dist ของ NT-Report → `register_file_source` (ตารางได้คอลัมน์ใหม่)

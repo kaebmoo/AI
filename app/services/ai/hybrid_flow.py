@@ -1125,6 +1125,9 @@ async def run_hybrid_attempt(
             if precompiled is not None:
                 explanation_question = (
                     f"{question}\n(ตัวชี้วัดที่ใช้: {precompiled.name_th}"
+                    # the unit travels with the metric: without it the explanation called an EBT Margin of
+                    # -47,199,339 percent "-47.2 ล้านบาท" (2026-10-24)
+                    + (f" หน่วย: {precompiled.unit}" if precompiled.unit else "")
                     + (f" — {precompiled.note_th}" if precompiled.note_th else "")
                     + (" ; ยอดทางการตามขอบเขตของ metric" if precompiled.official
                        else " ; ยอดเฉพาะมิติ/หน่วยงานที่กรอง ไม่ใช่ยอดทางการ")

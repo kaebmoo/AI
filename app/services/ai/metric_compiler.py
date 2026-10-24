@@ -464,7 +464,9 @@ def compile(req: CompileRequest, resolved: dict[str, Metric]) -> Compiled:
                         value = f"%{value}%"
                     predicate = f"{column} {operator} {_literal(value)}"
                 period += f" AND {predicate}"
-        selection = ", ".join([*dims, f"{measure} AS {_quote(metric.name_th)}"])
+        # a ratio's column says so in its name: "EBT Margin (%)" reads as percent in the data block too
+        alias = f"{metric.name_th} (%)" if (metric.unit or "").strip().lower() in ("percent", "%") else metric.name_th
+        selection = ", ".join([*dims, f"{measure} AS {_quote(alias)}"])
         sql = f"SELECT {selection} FROM {_quote(table)} WHERE {period}"
         if dims:
             sql += " GROUP BY " + ", ".join(dims)

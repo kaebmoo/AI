@@ -60,6 +60,7 @@ ACC-L: /Users/seal/Documents/GitHub/AI/venv/bin/ruff check app mcp_servers scrip
 | **M-5** | ยอดสะสมของ measure `agg: sum` ที่ไม่มีคอลัมน์ YTD (sales `amount`, expense `expense_value_thb`) | (ก) **compiler รองรับ `cumulative: {range: true}`** = `period BETWEEN y01 AND yMM` เฉพาะ measure ที่ประกาศ `agg: sum` · (ข) ให้ NT-Report เพิ่มคอลัมน์ `*_ytd` ทุก fact | **(ก)** — compiler รู้จาก contract ว่าคอลัมน์ไหนบวกข้ามงวดได้; (ข) เพิ่มงาน build โดยไม่จำเป็น |
 | **M-6** | oracle ของ eval ที่สร้างเอง | (ก) **compiler + parquet ใน dist** (ทดสอบ "ประตู" — pass 1 เลือกถูกไหม — ไม่ใช่สูตร) · (ข) ผลลัพธ์ที่ NT-Report build ให้ (D-6 ข `fact_ebt_org_monthly` — ทดสอบสูตรด้วย) | **(ก) ก่อน, เพิ่ม (ข) เมื่อ D-6 ข ขึ้น** — สูตรถูกตรวจแล้วโดย `test_metrics_contract.py` + control totals |
 | **M-8** | ร่างคำอธิบายคอลัมน์ feed ที่ว่าง (Phase E) มาจากอะไร | (ก) **profile ค่าจริงก่อน** (prefix ของค่า เช่น 77/114 ค่าขึ้นต้น 'ฝ่าย…' → "ฝ่าย", dtype, key, cardinality, ช่วงงวด) แล้วให้ LLM แค่เรียบเรียง · (ข) LLM จากชื่อคอลัมน์ + ตัวอย่าง 5 ค่า (เดาเก่ง แต่ `unit` → "หน่วย") · (ค) ไม่ร่าง ให้คนเขียนทั้งหมด | **(ก)** — ร่างทุกตัวเป็น `inferred` รอคนรับ ไม่ทับ `declared`/`manual` |
+| **M-10** | จัดอันดับด้วย ratio metric (EBT margin) ข้ามหน่วยที่ไม่มีรายได้ — "ebt margin ต่ำสุด 10 ส่วนงาน" ได้ส่วนวิศวกรรม/สนับสนุน รายได้ 442 บาท margin −47 ล้าน% (2026-10-24); dashboard EBT เองซ่อน margin ของแถว `isHQ=1` อยู่แล้ว แต่ `isHQ` **ไม่อยู่ใน feed** — pipeline คำนวณจาก `SUB_UNIT_FNAME` ขึ้นต้น 'ส่วนขายและบริการลูกค้า ' (=0 ปฏิบัติการ 101 หน่วย, อื่น =1 HQ/สนับสนุน 93 หน่วย; `EBT/pipeline/02_aggregate_hierarchy.py`) | (ก) **NT-Report เพิ่มคอลัมน์ `is_hq` ใน `fact_ebt`** (derived ตามกฎเดียวกับ dashboard, MINOR) + metric ratio ประกาศ `rank_scope: is_hq = 0` ให้ compiler ใส่ WHERE เมื่อจัดอันดับ/แยกมิติ · (ข) AI ประกาศเกณฑ์เอง (รายได้ ≥ X) — เกณฑ์อยู่ผิดฝั่ง · (ค) ตอบทุกหน่วยพร้อมแสดงฐานรายได้คู่กัน + เตือน | **(ก)** + ระหว่างรอ (ค): compiler ของ ratio metric ใส่คอลัมน์ฐาน (ตัวหาร) ในผลลัพธ์เสมอ |
 | **M-9** | คำอธิบายที่คนรับแล้วอยู่ที่ไหนในระยะยาว | (ก) **ไหลกลับ contract** (export เป็น `col_meta` ให้เจ้าของข้อมูลวางใน `domains.py` → PATCH) · (ข) อยู่ใน config.db เป็น `manual` ตลอด | **(ก)** — D-1 ที่มาเดียว; ระหว่างรอ contract แถว `manual` ยังใช้ได้และ contract ไม่ทับ (`may_replace`) |
 | **M-7** | ขอบเขตของ Phase C รอบแรก | (ก) **revenue + sales** (ถามบ่อยสุดบน portal, มี target ให้ทำ `achievement` ต่อได้) · (ข) ทั้งสามโดเมน | **(ก)** — expense รอบถัดไป (`is_negative_reversal`, `overrides` ซับซ้อนกว่า) |
 
@@ -210,6 +211,14 @@ ALLOWED: `scripts/export_col_meta.py` (new), `tests/unit/test_export_col_meta.py
 Acceptance: ACC-T, ACC-L; รันกับ config.db สำเนาแล้ว snippet วางใน `domains.py` ของ worktree NT-Report → `gen_contract` → `pytest tools/feed` เขียว
 
 ลำดับกับ phase อื่น: E-01 ก่อน C-0b (hierarchy อัตโนมัติใช้ profile เดียวกัน) · E ทั้งหมดไม่แตะ prompt path จึงขึ้นของจริงได้ทันทีหลัง review
+
+## 6d. Phase C-0c — ratio metric จัดอันดับอย่างมีความหมาย (M-10)
+
+ALLOWED (AI): `app/services/ai/metric_compiler.py`, `tests/unit/test_metric_compiler.py`, `tests/fixtures/*.yaml` · (NT-Report) `tools/feed/domains.py`, `EBT/pipeline/03_extract_line_items.py` หรือที่ที่ build `fact_ebt`, `tools/feed/test_metrics_contract.py`
+- AI ก่อน: metric ที่ `expr` มีการหาร (ratio) และคำขอมีมิติหรือจัดอันดับ → ผลลัพธ์มีคอลัมน์**ตัวหาร**คู่ไป (เช่น `รายได้ (ฐานยอดขาย)`), note บอก explain ว่า "margin ของหน่วยที่ฐานรายได้น้อยไม่ควรเปรียบ"; รองรับ `rank_scope` (WHERE fragment ใน contract, ใช้เฉพาะเมื่อ dimensions ไม่ว่าง) — ไม่มีใน contract = พฤติกรรมเดิม
+- NT-Report: `fact_ebt.is_hq` (0/1 ตามกฎ dashboard) → ebt MINOR 1.6.0; `ebt_margin.rank_scope: is_hq = 0`; `test_metrics_contract` ตรวจว่า rank_scope อ้างคอลัมน์ที่มี
+- Tests: synthetic มีหน่วย HQ รายได้ 0/เล็ก → จัดอันดับ margin ไม่ติด; หน่วยปฏิบัติการเรียงถูก; `ebt` (ไม่ใช่ ratio) ไม่เปลี่ยน
+Acceptance: ACC-T, ACC-L; `pytest tools/feed`; ถาม "ebt margin ต่ำสุด 10 ส่วนงาน" ได้ 10 หน่วยขาย (นครนายก −13.8% … สิงห์บุรี 6.4% ตาม oracle 2026-10-24)
 
 ## 7. งานที่ไม่อยู่ในแผนนี้ (บันทึกไว้ไม่ให้หลง)
 
