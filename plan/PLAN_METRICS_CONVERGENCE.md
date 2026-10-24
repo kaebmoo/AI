@@ -2,7 +2,7 @@
 
 > เขียน 2026-10-24 หลัง go-live declared metrics (`86584b2`) และการแก้ `e2bc47d` (จัดอันดับตามค่า metric)
 > **สำหรับสั่ง `/delegate` ใน session ใหม่** — แผนนี้คือ brief: §0 ข้อห้าม, §2 ข้อตัดสินที่เจ้าของเคาะ, §3–§7 งานเป็น phase/slice
-> พร้อมไฟล์ที่อนุญาตและ acceptance ต่อ slice. ลำดับที่แนะนำ: **A → D → B → C** (C ต้องรอฝั่ง NT-Report)
+> พร้อมไฟล์ที่อนุญาตและ acceptance ต่อ slice. ลำดับที่แนะนำ: **A → D → E → B → C** (C ต้องรอฝั่ง NT-Report; E ให้ feed มีคำอธิบายครบก่อน C-0b/C-01)
 
 ---
 
@@ -59,6 +59,8 @@ ACC-L: /Users/seal/Documents/GitHub/AI/venv/bin/ruff check app mcp_servers scrip
 | **M-4** | revenue มีตารางสำเร็จรูปต่อ grain (`fact_bu_monthly`, `fact_org_monthly`, `fact_product_monthly`, …) แต่ metric หนึ่งผูก `dataset` เดียว | (ก) **compiler เลือกตารางตามมิติ**: `datasets: [{name, dimensions}]` เลือกตารางเล็กสุดที่มีมิติที่ขอครบ · (ข) ประกาศบนตารางละเอียดสุดตารางเดียว (`fact_org_subproduct_monthly`) แล้ว GROUP BY เอง · (ค) ประกาศ metric แยกต่อ grain (`revenue_by_bu`, `revenue_by_org`, …) | **(ก)** — ตรงกับที่ NT-Report build มาให้ และคำตอบตรง control totals ของ grain นั้นเอง |
 | **M-5** | ยอดสะสมของ measure `agg: sum` ที่ไม่มีคอลัมน์ YTD (sales `amount`, expense `expense_value_thb`) | (ก) **compiler รองรับ `cumulative: {range: true}`** = `period BETWEEN y01 AND yMM` เฉพาะ measure ที่ประกาศ `agg: sum` · (ข) ให้ NT-Report เพิ่มคอลัมน์ `*_ytd` ทุก fact | **(ก)** — compiler รู้จาก contract ว่าคอลัมน์ไหนบวกข้ามงวดได้; (ข) เพิ่มงาน build โดยไม่จำเป็น |
 | **M-6** | oracle ของ eval ที่สร้างเอง | (ก) **compiler + parquet ใน dist** (ทดสอบ "ประตู" — pass 1 เลือกถูกไหม — ไม่ใช่สูตร) · (ข) ผลลัพธ์ที่ NT-Report build ให้ (D-6 ข `fact_ebt_org_monthly` — ทดสอบสูตรด้วย) | **(ก) ก่อน, เพิ่ม (ข) เมื่อ D-6 ข ขึ้น** — สูตรถูกตรวจแล้วโดย `test_metrics_contract.py` + control totals |
+| **M-8** | ร่างคำอธิบายคอลัมน์ feed ที่ว่าง (Phase E) มาจากอะไร | (ก) **profile ค่าจริงก่อน** (prefix ของค่า เช่น 77/114 ค่าขึ้นต้น 'ฝ่าย…' → "ฝ่าย", dtype, key, cardinality, ช่วงงวด) แล้วให้ LLM แค่เรียบเรียง · (ข) LLM จากชื่อคอลัมน์ + ตัวอย่าง 5 ค่า (เดาเก่ง แต่ `unit` → "หน่วย") · (ค) ไม่ร่าง ให้คนเขียนทั้งหมด | **(ก)** — ร่างทุกตัวเป็น `inferred` รอคนรับ ไม่ทับ `declared`/`manual` |
+| **M-9** | คำอธิบายที่คนรับแล้วอยู่ที่ไหนในระยะยาว | (ก) **ไหลกลับ contract** (export เป็น `col_meta` ให้เจ้าของข้อมูลวางใน `domains.py` → PATCH) · (ข) อยู่ใน config.db เป็น `manual` ตลอด | **(ก)** — D-1 ที่มาเดียว; ระหว่างรอ contract แถว `manual` ยังใช้ได้และ contract ไม่ทับ (`may_replace`) |
 | **M-7** | ขอบเขตของ Phase C รอบแรก | (ก) **revenue + sales** (ถามบ่อยสุดบน portal, มี target ให้ทำ `achievement` ต่อได้) · (ข) ทั้งสามโดเมน | **(ก)** — expense รอบถัดไป (`is_negative_reversal`, `overrides` ซับซ้อนกว่า) |
 
 ---
@@ -174,6 +176,40 @@ ALLOWED: `app/services/datafeed_knowledge.py`, `app/services/hierarchy_service.p
 - **หลาย hierarchy ต่อ context**: revenue มีผลิตภัณฑ์ 3 ระดับอยู่แล้ว + หน่วยงาน 4 ระดับ → ตาราง `UNIQUE(context_name, level)` ไม่พอ → ตัดสิน: (ก) คอลัมน์ `chain` ใน `master_hierarchy` (migration) · (ข) level 10–14 สำหรับหน่วยงานโดย `format_level_note` แยก chain ตามช่วง · (ค) context ละ chain เดียว (ไม่ทำ revenue)
 - **test ที่พิสูจน์ว่าความรู้ถึงโมเดล**: สำหรับทุก field ที่ sync ลง DB (description, hierarchy, metrics) มี test ว่า text นั้นอยู่ใน prompt ของ pass 1 จริง (`extract_intent` header) — ชั้นแบบนี้ eval คำถามเดี่ยวจับไม่ได้
 Acceptance: ACC-T, ACC-L; วัดด้วย Phase D: คำถาม "<ระดับ>ไหน <metric> สูงสุด N อันดับ" ทุกระดับ × ทุกโดเมนที่มี metric → GROUP BY คอลัมน์ของระดับนั้น
+
+## 6c. Phase E — คำอธิบายคอลัมน์ feed แบบอัตโนมัติ → admin รับ → ไหลกลับ contract (M-8, M-9)
+
+สภาพ 2026-10-24 (นับจาก config.db จริง): context เดิมมี description/ชื่อไทยครบ 100% (คนเขียน, `manual`); **feed_* 36 ตาราง**
+มี description 15–60% ใน fact / ~10% ใน dim, `display_name_th` = 0, `special_notes` = 0 — ผู้เขียนคนเดียวคือ contract และ
+`gen_contract` เติม `''` ให้คอลัมน์ที่ `col_meta` ไม่พูดถึง. เครื่องมือ auto มีอยู่แล้ว 2 ตัวแต่ไม่ครอบ feed: **Context Onboarding**
+(`/admin/contexts/onboard` — inspect + profile + LLM ร่าง metadata/rules ครบชุด) เปิด business DB ด้วย sqlite path จึงไม่เห็น
+feed ที่เป็น DuckDB บน parquet; **Analyzer** (`/analyze/ai-suggest` → `import` เป็น `inferred`) ต้อง upload schema เอง.
+web admin หน้า Schema แก้ `display_name_th` / `description` / `special_notes` ต่อคอลัมน์ได้แล้ว (PUT `/admin/schema/columns/{id}`) และ
+`may_replace` รับรองว่า contract ไม่ทับของคน
+
+### E-01 — inspector อ่าน feed source ได้
+ALLOWED: `app/services/context_onboarding.py`, `app/services/data_sources.py` (เฉพาะ helper เปิด engine อ่านอย่างเดียวของ source), `app/api/v1/admin/onboarding.py` (`available-views` รวมตาราง feed), `tests/unit/test_context_onboarding*.py`
+- `ViewInspector` รับ engine/connection แทน sqlite path: legacy = sqlite เดิม, feed = DuckDB ของ `data_sources` (อ่านอย่างเดียว, เคารพ `llm_data_policy`: source ที่ไม่ใช่ `full` profile ได้แต่**ไม่ส่งค่าตัวอย่างให้ LLM** — `_values_allowed` มีอยู่แล้ว ใช้ที่เดียวกัน)
+- `available-views` แสดงตาราง `feed_*` พร้อม % คอลัมน์ที่ description ว่าง
+- Tests: inspect ตาราง DuckDB จาก parquet synthetic (fact_ebt ย่อ) ได้ profile เท่ากับ sqlite เดิม; policy ไม่ใช่ full → ไม่มีค่าใน prompt
+Acceptance: ACC-T, ACC-L
+
+### E-02 — ร่างจาก profile ค่าจริง เป็น `inferred` รอคนรับ (M-8 ก)
+ALLOWED: `app/services/context_onboarding.py` (หรือ `app/services/column_drafts.py` new), `app/api/v1/admin/schema.py` (`POST /schema/columns/draft?table=`), `app/services/provenance.py` (ใช้ `propose` เดิม ห้ามแก้กฎ), `frontend-admin/src/pages/Schema.tsx` (ปุ่ม "ร่างคำอธิบาย" + ป้าย `inferred/proposed` + รับ/ปฏิเสธ), `tests/unit/test_column_drafts.py` (new)
+- heuristics ก่อน LLM (deterministic, ทดสอบได้): (1) **prefix ของค่า** ≥ 60% ของค่าที่ไม่ซ้ำขึ้นต้นคำเดียวกัน ("ฝ่าย", "ส่วน", "กลุ่ม", "สายงาน") → ระดับหน่วยงาน + ป้อน C-0b;
+  (2) คอลัมน์คู่ `x` / `x_fname` / `x_sname` / `x_short_name` ที่ค่าสัมพันธ์ 1:1 → "ชื่อเต็ม/ชื่อย่อของ x"; (3) key/fk จาก contract → "รหัส… (join …)"; (4) `agg`/dtype/unit จาก contract → ประโยค SUM ได้/ไม่ได้; (5) งวด (YYYYMM, ช่วง min–max)
+- LLM ใช้แค่**เรียบเรียง**ประโยคไทยจาก facts ข้างบน (ไม่เดาจากชื่อ) — ผ่าน provider ของ context ตาม policy; ไม่มี facts = ไม่ร่าง (ว่างดีกว่าเดาผิด)
+- เขียนเป็น `inferred` + `status=proposed` ด้วย `propose()` เฉพาะคอลัมน์ที่ description ว่าง และไม่มีแถว `manual`/`declared` ที่มีค่า; คนรับในหน้า Schema → `manual`; ปฏิเสธ → `rejected` (contract เขียนทับไม่ได้ตามกฎเดิม)
+- Tests: synthetic fact_ebt → ร่างของ `unit` มีคำว่า "ฝ่าย" และระดับ, ของ `unit_short_name` อ้าง `unit`, ของ `amount_ytd` บอกห้าม SUM ข้ามงวด; คอลัมน์ที่มี description แล้วไม่ถูกแตะ; รันซ้ำ idempotent
+Acceptance: ACC-T, ACC-L · วัด: % คอลัมน์ feed ที่ description ว่าง ก่อน/หลัง (เป้า < 10% หลัง admin รับ)
+
+### E-03 — ไหลกลับ contract (M-9 ก)
+ALLOWED: `scripts/export_col_meta.py` (new), `tests/unit/test_export_col_meta.py` (new), `docs/DATAFEED_INTEGRATION.md` (หัวข้อใหม่)
+- อ่าน `schema_metadata` ที่ `source='manual'` ของ context feed → พิมพ์ snippet `col_meta` ของ `tools/feed/domains.py` (python dict, เรียงตามคอลัมน์, รวม `display_name_th` เป็นคำแรกของ desc เพราะ contract ไม่มีช่องชื่อไทย) ให้เจ้าของข้อมูลวาง → PATCH → เมื่อ contract ประกาศแล้ว sync เห็นว่าค่าเท่ากัน แถว `manual` คงอยู่ (คนยังเป็นเจ้าของ) — ไม่มีความขัดแย้ง
+- ถ้าต้องการให้ contract เป็นเจ้าของอีกครั้ง: admin ลบแถว `manual` → sync ครั้งถัดไปเขียน `declared` (พฤติกรรมเดิม) — บันทึกเป็นขั้นตอนใน docs
+Acceptance: ACC-T, ACC-L; รันกับ config.db สำเนาแล้ว snippet วางใน `domains.py` ของ worktree NT-Report → `gen_contract` → `pytest tools/feed` เขียว
+
+ลำดับกับ phase อื่น: E-01 ก่อน C-0b (hierarchy อัตโนมัติใช้ profile เดียวกัน) · E ทั้งหมดไม่แตะ prompt path จึงขึ้นของจริงได้ทันทีหลัง review
 
 ## 7. งานที่ไม่อยู่ในแผนนี้ (บันทึกไว้ไม่ให้หลง)
 
