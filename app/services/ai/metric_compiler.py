@@ -159,6 +159,63 @@ def supports(intent: dict, metric: Metric) -> bool:
         return False
 
 
+def plan(
+    intent: dict,
+    question: str,
+    resolved: dict[str, Metric],
+    matched: list[str],
+    reference: int | None,
+    tables,
+) -> CompileRequest | None:
+    """Choose a declared metric and a supported single-period compile request."""
+    del question
+    metric_id = intent.get("metric_id")
+    if not isinstance(metric_id, str) or metric_id not in resolved:
+        candidates = [item for item in matched if item in resolved]
+        metric_id = candidates[0] if candidates else None
+        for candidate in candidates:
+            parent = resolved[candidate].extends
+            visited = {candidate}
+            while parent in resolved and parent not in visited:
+                if parent in candidates:
+                    metric_id = candidate
+                    break
+                visited.add(parent)
+                parent = resolved[parent].extends
+            if parent in candidates:
+                break
+    if metric_id is None or intent.get("matched_mappings") or not supports(intent, resolved[metric_id]):
+        return None
+    if type(reference) is not int:
+        return None
+    ref_y, ref_m = divmod(reference, 100)
+    if not 1 <= ref_y <= 9999 or not 1 <= ref_m <= 12:
+        return None
+    tr = intent.get("time_range") or {}
+    if not isinstance(tr, dict):
+        return None
+    year = tr.get("year") or ref_y
+    month = tr.get("month") or ref_m
+    if (type(year) is not int or not 1 <= year <= 9999
+            or type(month) is not int or not 1 <= month <= 12):
+        return None
+    if year == ref_y:
+        month = min(month, ref_m)
+    mode = "month" if tr.get("month") is not None and not tr.get("cumulative") else "cumulative"
+    limit = intent.get("limit")
+    metric = resolved[metric_id]
+    return CompileRequest(
+        metric_id=metric_id,
+        period=year * 100 + month,
+        mode=mode,
+        dimensions=tuple(intent.get("dimensions") or []),
+        filters=tuple(intent.get("filters") or []),
+        order_desc=(intent.get("ordering") or {}).get("direction") != "ASC" if intent.get("intent_type") == "ranking" else None,
+        limit=limit if type(limit) is int and limit > 0 else None,
+        official_total_ok=metric.official_total is not None and metric.official_total["dataset"] in tables,
+    )
+
+
 def _quote(name: str) -> str:
     if not isinstance(name, str) or not name or "\x00" in name:
         raise ValueError("Invalid SQL identifier")

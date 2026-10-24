@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, cast
 
 from app.providers.base import ConfidenceResult, QueryResult, RetryStatus
 from app.providers.chart_postprocessor import postprocess_chart_result
+from app.services.ai import metric_compiler
+from app.services.ai.metric_compiler import Compiled
 from app.services.ai.hierarchy_context import format_level_note, get_column_hierarchies, named_levels
 from app.services.ai.thai_year import fix_explanation
 from app.services.ai.trace import new_trace, record_usage
@@ -794,7 +796,7 @@ async def build_first_attempt_prompt(
     intent_state_enabled: bool = False,
     required_columns: Optional[List[str]] = None,
     domain_words: Optional[List[str]] = None,
-) -> tuple[str, bool]:
+) -> tuple[str, bool, Optional[Compiled]]:
     async def _rag_task() -> str:
         try:
             import time
@@ -851,6 +853,16 @@ async def build_first_attempt_prompt(
             # Phase 4.5: the stored intent is keyed by conversation only — its filter values may be "Actual
             # Values Found" of an earlier turn on a `full` source; a restricted source's prompt doesn't get it
             previous_intent = None if restricted() else intent_state.get_intent(conversation_id)
+        metrics = metric_compiler.load_metrics(context_name)
+        resolved = metric_compiler.resolve(metrics)
+        matched = metric_compiler.match_metrics(question, metrics)
+        metric_block = ""
+        if metrics:
+            metric_block = (
+                "\nmetric ที่ประกาศของ context นี้ (ถ้าคำถามหมายถึง metric ใด ให้ใส่ id ใน metric_id):\n"
+                + metric_compiler.metric_catalog(metrics)
+                + ("\n" + metric_compiler.metric_note(matched, metrics) if matched else "")
+            )
         intent_json = await extract_intent(
             service=service,
             question=question,
@@ -865,15 +877,32 @@ async def build_first_attempt_prompt(
             previous_intent=previous_intent,
             level_note=level_note,
             value_note=value_note(value_matches),
+            metric_note=metric_block,
         )
         if intent_state_enabled and intent_json:
             from app.services.ai import intent_state
             intent_state.set_intent(conversation_id, intent_json)
 
         if intent_json:
-            logger.info("Two-Pass Mode: Pass 1 success. Building Pass 2 prompt.")
             if required_columns is not None:
                 required_columns[:] = unfilterable_columns(intent_json, context_table, question=question)[0]
+            if metrics:
+                req = metric_compiler.plan(
+                    intent_json, question, resolved, matched, reference_period(),
+                    set(_context_tables(context_table)) | {context_table},
+                )
+                if req is not None:
+                    try:
+                        compiled = metric_compiler.compile(req, resolved)
+                    except ValueError as exc:
+                        logger.warning("Metric compilation failed: %s", exc)
+                        compiled = None
+                    if compiled is not None:
+                        logger.info("Metric compiled: %s (%s)", compiled.metric_id, compiled.table)
+                        if trace is not None:
+                            trace.stages["metric_compiled"] = compiled.metric_id
+                        return "", current_two_pass_enabled, compiled
+            logger.info("Two-Pass Mode: Pass 1 success. Building Pass 2 prompt.")
             user_prompt = build_pass2_prompt(
                 service=service,
                 question=question,
@@ -901,7 +930,7 @@ async def build_first_attempt_prompt(
             level_note=level_note,
         )
 
-    return user_prompt, current_two_pass_enabled
+    return user_prompt, current_two_pass_enabled, None
 
 
 def log_unmatched_like_patterns(sql_query: str, context_name: str, question: str) -> None:
@@ -951,6 +980,7 @@ async def run_hybrid_attempt(
     trace=None,
     template_answers_enabled: bool = False,
     required_columns: Optional[List[str]] = None,
+    precompiled: Optional[Compiled] = None,
 ) -> tuple[Optional[QueryResult], int, Optional[str]]:
     logger.info("Hybrid Mode: Generating SQL (attempt %s)", attempt + 1)
 
@@ -962,29 +992,33 @@ async def run_hybrid_attempt(
     )
     metadata_task.add_done_callback(lambda t: t.exception())  # never let it warn "never retrieved"
 
-    response_text, tokens_used, generation_error = await generate_sql_attempt(
-        service,
-        user_prompt,
-        system_prompt,
-        history,
-        attempt,
-        trace=trace,
-    )
-    if generation_error:
-        retry_history.append({"sql": "", "error": generation_error})
-        return None, total_tokens, None
+    if precompiled is not None:
+        sql_query = precompiled.sql
+        logger.info("Hybrid Mode: Using compiled SQL: %s", sql_query)
+    else:
+        response_text, tokens_used, generation_error = await generate_sql_attempt(
+            service,
+            user_prompt,
+            system_prompt,
+            history,
+            attempt,
+            trace=trace,
+        )
+        if generation_error:
+            retry_history.append({"sql": "", "error": generation_error})
+            return None, total_tokens, None
 
-    response_text = response_text or ""
-    logger.info("Hybrid Mode: Got response_text (len=%s)", len(response_text) if response_text else 0)
-    total_tokens += tokens_used
+        response_text = response_text or ""
+        logger.info("Hybrid Mode: Got response_text (len=%s)", len(response_text) if response_text else 0)
+        total_tokens += tokens_used
 
-    sql_query = extract_sql(response_text)
-    _ = extract_explanation(response_text)
+        sql_query = extract_sql(response_text)
+        _ = extract_explanation(response_text)
 
-    if not sql_query:
-        logger.warning("Could not extract SQL from AI response")
-        retry_history.append({"sql": "", "error": "Could not extract SQL from response"})
-        return None, total_tokens, None
+        if not sql_query:
+            logger.warning("Could not extract SQL from AI response")
+            retry_history.append({"sql": "", "error": "Could not extract SQL from response"})
+            return None, total_tokens, None
 
     logger.info("Extracted SQL: %s...", sql_query[:100])
     log_unmatched_like_patterns(sql_query, context_name, question)
@@ -1087,9 +1121,18 @@ async def run_hybrid_attempt(
         if explanation is None:
             if trace is not None:
                 trace.stages["explain_mode"] = "llm"
+            explanation_question = question
+            if precompiled is not None:
+                explanation_question = (
+                    f"{question}\n(ตัวชี้วัดที่ใช้: {precompiled.name_th}"
+                    + (f" — {precompiled.note_th}" if precompiled.note_th else "")
+                    + (" ; ยอดทางการตามขอบเขตของ metric" if precompiled.official
+                       else " ; ยอดเฉพาะมิติ/หน่วยงานที่กรอง ไม่ใช่ยอดทางการ")
+                    + ")"
+                )
             explanation = await build_explanation(
                 service,
-                question,
+                explanation_question,
                 sql_query,
                 full_data,
                 cheap_model,
@@ -1137,6 +1180,13 @@ async def run_hybrid_attempt(
         retry_history=retry_history if retry_history else None,
         confidence=confidence_result,
         usage_breakdown=trace.usage if trace is not None and trace.usage else None,
+        metric={
+            "id": precompiled.metric_id,
+            "name_th": precompiled.name_th,
+            "unit": precompiled.unit,
+            "official": precompiled.official,
+            "table": precompiled.table,
+        } if precompiled is not None else None,
     ), total_tokens, sql_query
 
 
@@ -1255,9 +1305,10 @@ async def query_hybrid(
             logger.info("Hybrid Mode: Using native conversation history (%s messages)", len(history))
 
         user_prompt = ""
+        precompiled = None
 
         if attempt == 0:
-            user_prompt, two_pass_enabled = await build_first_attempt_prompt(
+            user_prompt, two_pass_enabled, precompiled = await build_first_attempt_prompt(
                 service=service,
                 question=question,
                 system_prompt=system_prompt,
@@ -1313,6 +1364,7 @@ async def query_hybrid(
                 start_request=start_request,
                 trace=trace,
                 required_columns=required_columns,
+                precompiled=precompiled,
             )
             trace.attempts = attempt + 1
             if attempt_result:
@@ -1365,6 +1417,7 @@ INTENT_SCHEMA = {
     "properties": {
         "intent_type": {"type": "string", "enum": ["aggregation", "comparison", "trend", "detail", "ranking", "lookup"]},
         "metrics": {"type": "array", "items": {"type": "string"}},
+        "metric_id": {"type": ["string", "null"]},
         "aggregate_function": {"type": "string", "enum": ["SUM", "COUNT", "AVG", "MIN", "MAX"]},
         "dimensions": {"type": "array", "items": {"type": "string"}},
         "filters": {
@@ -1403,13 +1456,16 @@ INTENT_SCHEMA = {
 }
 
 
-def _intent_rules() -> str:
-    return """**กฎสำคัญ:**
+def _intent_rules(with_metrics: bool = False) -> str:
+    rules = """**กฎสำคัญ:**
 1. ตรวจสอบ semantic mappings ใน system prompt ก่อน -- ถ้ามี keyword ที่ตรง ให้ใส่ใน matched_mappings พร้อม sql_condition ที่คัดลอกมาจาก mapping
 2. ถ้า User ระบุปี พ.ศ. ให้แปลงเป็น ค.ศ. (พ.ศ. - 543) ใส่ใน time_range.year
 3. ถ้าไม่แน่ใจค่า filter ให้ใช้ LIKE operator
 4. **Follow-up context**: ถ้ามีประวัติสนทนาก่อนหน้า ให้ใช้เป็นบริบท เช่น ถ้าถามก่อนหน้าเรื่อง "ค่าล่วงเวลา" แล้วถาม "ค่าเฉลี่ยเท่าไหร่" → ต้อง inherit filter "ค่าล่วงเวลา" จากคำถามก่อนหน้าด้วย
 5. ห้ามสร้าง SQL -- ระบุเฉพาะ intent เท่านั้น"""
+    if with_metrics:
+        rules += '\n6. ถ้ามีรายการ "metric ที่ประกาศ" และคำถามหมายถึง metric ใดในนั้น ให้ใส่ id ของมันใน metric_id (id เท่านั้น ห้ามแต่งเอง) และยังระบุ metrics/filters/dimensions ตามปกติ'
+    return rules
 
 
 async def extract_intent(
@@ -1426,6 +1482,7 @@ async def extract_intent(
     previous_intent: Optional[Dict] = None,
     level_note: str = "",
     value_note: str = "",
+    metric_note: str = "",
 ) -> Optional[Dict]:
     del context_name
 
@@ -1438,25 +1495,26 @@ async def extract_intent(
 คำถามใหม่ (follow-up): {question}
 
 **บริบท:** ข้อมูล{context_thai} (ใช้ตาราง {context_table}){intent_table_hint(context_table)}
-{scope_note()}{intent_period_note()}{level_note}{value_note}
+{scope_note()}{intent_period_note()}{level_note}{value_note}{metric_note}
 
 ---
 **Task:** อัปเดต intent เดิมตามคำถามใหม่ — คงค่า filter/dimension ที่ไม่ถูกกล่าวถึงไว้ตามเดิม (inherit) และเปลี่ยนเฉพาะส่วนที่คำถามใหม่ระบุ
 
-{_intent_rules()}"""
+{_intent_rules(with_metrics=bool(metric_note))}"""
     else:
         prompt_header = f"""คำถาม: {question}
 
 **บริบท:** ข้อมูล{context_thai} (ใช้ตาราง {context_table}){intent_table_hint(context_table)}{history_context}
-{scope_note()}{intent_period_note()}{level_note}{value_note}
+{scope_note()}{intent_period_note()}{level_note}{value_note}{metric_note}
 {rag_context}
 
 ---
 **Task:** วิเคราะห์คำถามข้างต้นและระบุ intent
 
-{_intent_rules()}"""
+{_intent_rules(with_metrics=bool(metric_note))}"""
 
     # Text fallback prompt — schema spelled out for parse_intent_json
+    metric_field = '\n  "metric_id": "id ของ metric ที่ประกาศ หรือ null",' if metric_note else ""
     intent_prompt = f"""{prompt_header}
 
 ส่งคืน JSON ที่มีโครงสร้างตามนี้เท่านั้น ห้ามมี text อื่นนอก JSON:
@@ -1464,7 +1522,7 @@ async def extract_intent(
 ```json
 {{
   "intent_type": "aggregation | comparison | trend | detail | ranking | lookup",
-  "metrics": ["column_name_to_aggregate"],
+  "metrics": ["column_name_to_aggregate"],{metric_field}
   "aggregate_function": "SUM | COUNT | AVG | MIN | MAX",
   "dimensions": ["column_for_group_by"],
   "filters": [

@@ -54,7 +54,7 @@ class _Service:
 
 async def _first_prompt(question: str, two_pass: bool, provider=None, domain_words=None):
     service = _Service(provider or _Provider())
-    prompt, _ = await hybrid_flow.build_first_attempt_prompt(
+    prompt, _, _compiled = await hybrid_flow.build_first_attempt_prompt(
         service=service, question=question, system_prompt="", history=None, context_name="feed_revenue",
         context_table="feed_revenue_fact_bu_monthly", context_thai="รายได้", two_pass_enabled=two_pass,
         cheap_model=None, detect_hierarchy_level=hierarchy_context.detect_hierarchy_level,

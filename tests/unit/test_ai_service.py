@@ -457,7 +457,7 @@ SELECT * FROM revenue
     async def test_build_first_attempt_prompt_falls_back_to_initial_prompt(self, legacy_ai_service, monkeypatch):
         monkeypatch.setattr(hybrid_flow, "extract_intent", AsyncMock(return_value=None))
 
-        user_prompt, two_pass_enabled = await hybrid_flow.build_first_attempt_prompt(
+        user_prompt, two_pass_enabled, _compiled = await hybrid_flow.build_first_attempt_prompt(
             service=legacy_ai_service,
             question="รายได้รวม",
             system_prompt="system",

@@ -106,6 +106,7 @@ class QueryResult:
     retry_history: Optional[List[Dict]] = None
     confidence: Optional[ConfidenceResult] = None
     usage_breakdown: Optional[List[Dict]] = None  # per-stage TokenUsage dicts (F7.2)
+    metric: Optional[Dict[str, Any]] = None
 
 
 @dataclass
