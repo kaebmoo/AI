@@ -238,7 +238,7 @@ def test_plan_removes_period_filters_without_mutating_intent(metrics, intent, co
 
 
 @pytest.mark.parametrize("operator,value", [
-    ("<=", 202609), ("BETWEEN", [202601, 202609]), ("=", "2026-09"),
+    ("<", 202609), ("BETWEEN", [202607, 202609]), ("=", "2026-09"),
     ("=", 100000), ("=", 999913), ("=", 202609.0), ("=", None),
 ])
 def test_plan_rejects_unsupported_period_filters(metrics, intent, operator, value):
@@ -536,8 +536,8 @@ def test_plan_rejects_ordering_by_an_unknown_column(metrics, intent):
     *[pytest.param({"filters": [{"column": "time_key", "operator": operator, "value": value}]},
                    QUESTION, 202609, reason, id=case)
       for case, operator, value, reason in [
-          ("period-operator", "<=", 202609, "period_filter:operator"),
-          ("period-operator-before-value", "BETWEEN", [202601, 202609], "period_filter:operator"),
+          ("period-operator", "<", 202609, "period_filter:operator"),
+          ("period-operator-before-value", ">", [202601, 202609], "period_filter:operator"),
           ("period-nondecimal", "=", "2026-09", "period_filter:value"),
           ("period-too-small", "=", 100000, "period_filter:value"),
           ("period-too-large", "=", 999913, "period_filter:value"),
@@ -628,3 +628,77 @@ async def test_metric_decline_trace_and_log(metrics, intent, monkeypatch, caplog
             assert "metric_compiled" not in trace.stages
         if outcome == "compile_error":
             assert "Metric compilation failed: private declaration" in caplog.text
+
+
+def _period(*items):
+    return [{"column": "time_key", "operator": operator, "value": value} for operator, value in items]
+
+
+YTD = {"year": 2026, "month": 9, "cumulative": True}
+MONTH = {"year": 2026, "month": 9, "cumulative": False}
+
+
+@pytest.mark.parametrize("period_filters,time_range,period,mode", [
+    # "สะสมปี 2569" as pass 1 writes it (Phase D measurement: 39 BETWEEN, 6 >=/<= pairs, 1 <= alone)
+    (_period(("BETWEEN", [202601, 202609])), YTD, 202609, "cumulative"),
+    (_period(("BETWEEN", ["202601", "202609"])), MONTH, 202609, "cumulative"),  # the range wins over cumulative: false
+    (_period((">=", 202601), ("<=", 202609)), YTD, 202609, "cumulative"),
+    (_period(("<=", 202609)), YTD, 202609, "cumulative"),
+    (_period(("IN", [202603, 202601, 202602])), None, 202603, "cumulative"),
+    (_period(("BETWEEN", [202606, 202606])), {"month": 6}, 202606, "month"),  # one month is not a range
+])
+def test_plan_reads_a_year_to_date_range_as_cumulative(metrics, intent, period_filters, time_range, period, mode):
+    selection = intent | {"time_range": time_range, "filters": [dict(FILTER), *period_filters]}
+    req, reason = compiler.plan_with_reason(selection, QUESTION, compiler.resolve(metrics), [], 202609, set())
+    assert reason is None
+    assert (req.period, req.mode, req.filters) == (period, mode, (FILTER,))
+
+
+@pytest.mark.parametrize("period_filters,time_range,reason", [
+    (_period(("BETWEEN", [202607, 202609])), YTD, "period_filter:range"),  # Jul–Sep sum: not declared
+    (_period(("BETWEEN", [202509, 202609])), YTD, "period_filter:range"),
+    (_period(("IN", [202601, 202603])), YTD, "period_filter:range"),
+    (_period(("<=", 202609)), MONTH, "period_filter:range"),  # no lower bound and not cumulative
+    (_period((">=", 202601)), YTD, "period_filter:range"),
+    (_period(("=", 202609), ("BETWEEN", [202601, 202609])), YTD, "period_filter:range"),
+    (_period((">=", 202609), ("<=", 202601)), YTD, "period_filter:range"),
+    (_period(("BETWEEN", [202601])), YTD, "period_filter:value"),
+    (_period(("BETWEEN", "202601")), YTD, "period_filter:value"),
+    (_period(("BETWEEN", [202601, 202613])), YTD, "period_filter:value"),
+    (_period(("IN", [])), YTD, "period_filter:value"),
+    (_period(("<", 202609)), YTD, "period_filter:operator"),
+])
+def test_plan_declines_ranges_it_cannot_express(metrics, intent, period_filters, time_range, reason):
+    selection = intent | {"time_range": time_range, "filters": period_filters}
+    assert compiler.plan_with_reason(selection, QUESTION, compiler.resolve(metrics), [], 202609, set()) == (None, reason)
+
+
+LEVEL_QUESTION = "สายงานไหนมี EBT สะสมปี 2569 สูงสุด"
+
+
+def test_a_dimension_label_mapping_does_not_block(metrics, intent):
+    selection = intent | RANKING | {"intent_type": "ranking", "metric_id": "ebt", "dimensions": ["division"],
+                                    "filters": [], "matched_mappings": [{"keyword": "สายงาน", "sql_condition": "x"}]}
+    resolved = compiler.resolve(metrics)
+    assert compiler.plan_with_reason(selection, LEVEL_QUESTION, resolved, [], 202609, set()) == (
+        None, "mapping_triggered:สายงาน")
+    req, reason = compiler.plan_with_reason(selection, LEVEL_QUESTION, resolved, [], 202609, set(),
+                                            {"division": "สายงาน", "unit": "ฝ่าย"})
+    assert reason is None and req.dimensions == ("division",) and req.metric_id == "ebt"
+    # a label of a column the metric does not declare is not a level word of this metric
+    assert compiler.plan(selection, LEVEL_QUESTION, resolved, [], 202609, set(), {"region": "สายงาน"}) is None
+    # another triggered mapping still blocks
+    other = selection | {"matched_mappings": [{"keyword": "สายงาน"}, {"keyword": "สะสม"}]}
+    assert compiler.plan_with_reason(other, LEVEL_QUESTION, resolved, [], 202609, set(), {"division": "สายงาน"}) == (
+        None, "mapping_triggered:สะสม")
+
+
+@pytest.mark.parametrize("labels,compiled_expected", [({"sub_unit": "น่าน"}, True), ({}, False)])
+async def test_hybrid_flow_hands_the_labels_to_plan(metrics, intent, monkeypatch, labels, compiled_expected):
+    monkeypatch.setattr(compiler, "load_metrics", lambda c: metrics)
+    monkeypatch.setattr(compiler, "dimension_labels", lambda *a: labels)
+    selection = intent | {"matched_mappings": [{"keyword": "น่าน", "sql_condition": "x"}]}
+    trace = SimpleNamespace(stages={}, usage=[])
+    prompt, two_pass, compiled = await _first(_service(selection), trace=trace)
+    assert (compiled is not None) is compiled_expected
+    assert trace.stages.get("metric_declined") == (None if compiled_expected else "mapping_triggered:น่าน")

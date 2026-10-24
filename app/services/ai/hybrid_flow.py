@@ -856,11 +856,12 @@ async def build_first_attempt_prompt(
         metrics = metric_compiler.load_metrics(context_name)
         resolved = metric_compiler.resolve(metrics)
         matched = metric_compiler.match_metrics(question, metrics)
+        labels = metric_compiler.dimension_labels(metrics) if metrics else None
         metric_block = ""
         if metrics:
             metric_block = (
                 "\nmetric ที่ประกาศของ context นี้ (ถ้าคำถามหมายถึง metric ใด ให้ใส่ id ใน metric_id):\n"
-                + metric_compiler.metric_catalog(metrics, metric_compiler.dimension_labels(metrics))
+                + metric_compiler.metric_catalog(metrics, labels)
                 + ("\n" + metric_compiler.metric_note(matched, metrics) if matched else "")
             )
         intent_json = await extract_intent(
@@ -889,7 +890,7 @@ async def build_first_attempt_prompt(
             if metrics:
                 req, reason = metric_compiler.plan_with_reason(
                     intent_json, question, resolved, matched, reference_period(),
-                    set(_context_tables(context_table)) | {context_table},
+                    set(_context_tables(context_table)) | {context_table}, labels,
                 )
                 if req is not None:
                     try:
