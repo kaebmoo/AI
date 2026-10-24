@@ -213,7 +213,9 @@ def check_select(sql: str, allowed: set, qualified_ok: bool = True, cur=None) ->
         names = [str(e.get("key", "")).lower() for e in entries]
         for i, entry in enumerate(entries):
             body = entry.get("value") or {}
-            recursive = ((body.get("query") or {}).get("node") or {}).get("type") == "RECURSIVE_CTE_NODE"
+            # DuckDB < 2 serialises the CTE body as value.query.node, DuckDB 2.x as value.query_node
+            query_node = (body.get("query") or {}).get("node") or body.get("query_node") or {}
+            recursive = query_node.get("type") == "RECURSIVE_CTE_NODE"
             walk(body, visible | frozenset(names[:i + 1] if recursive else names[:i]))
         inner = visible | frozenset(names)
         for key, value in node.items():
