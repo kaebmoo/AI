@@ -59,9 +59,15 @@ class SchemaMetadataResponse(SchemaMetadataBase):
     id: int
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    source: Optional[str] = None
+    status: Optional[str] = None
 
     class Config:
         from_attributes = True
+
+
+class ColumnDraftAccept(BaseModel):
+    description: Optional[str] = None
 
 
 # ============================================================

@@ -1,5 +1,6 @@
 """Schema metadata, view builder, and dimension family admin endpoints."""
 
+import json
 import logging
 from datetime import datetime
 from typing import List, Optional
@@ -12,6 +13,7 @@ from app.api import deps
 from app.models.schema_models import SchemaMetadata
 from app.models.user import User
 from app.schemas.admin_schemas import (
+    ColumnDraftAccept,
     DimensionFamilyAnalyzeRequest,
     DimensionFamilyAnalyzeResponse,
     DimensionFamilyBatchUpdate,
@@ -33,6 +35,8 @@ from app.schemas.admin_schemas import (
     ViewSummaryListResponse,
 )
 from app.services.ai_service import AIService
+from app.services.column_drafts import draft_columns
+from app.services.database_adapter import SourceUnavailable
 from app.services.provenance import ACTIVE, INFERRED, MANUAL, apply_human_edit, mark_human_edit, may_replace, propose, replaceable
 from app.services.query_engine import clear_query_cache
 from app.services.schema_service import SchemaService
@@ -61,6 +65,102 @@ def list_schema_columns(
         columns=[SchemaMetadataResponse.model_validate(column) for column in columns],
         total=len(columns),
     )
+
+
+@router.post("/schema/columns/draft")
+def draft_schema_columns(
+    table: str = Query(...),
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_config_db),
+):
+    try:
+        result = draft_columns(db.connection(), table)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Table metadata not found") from exc
+    except SourceUnavailable as exc:
+        logger.exception("Column drafting could not open source for %s", table)
+        raise HTTPException(status_code=503, detail="File source unavailable") from exc
+    db.commit()
+    return result
+
+
+@router.get("/schema/columns/drafts")
+def list_column_drafts(
+    table: str = Query(...),
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_config_db),
+):
+    rows = db.execute(text(
+        "SELECT p.id, json_extract(p.row_key, '$.column_name') AS column_name, "
+        "json_extract(p.proposed, '$.description') AS description, p.confidence, p.reason, p.created_at, "
+        "m.description AS current_description FROM knowledge_proposals p "
+        "LEFT JOIN schema_metadata m ON m.table_name = json_extract(p.row_key, '$.table_name') "
+        "AND m.column_name = json_extract(p.row_key, '$.column_name') "
+        "WHERE p.table_name = 'schema_metadata' AND p.source = 'inferred' AND p.status = 'proposed' "
+        "AND json_extract(p.row_key, '$.table_name') = :t AND json_type(p.proposed, '$.description') = 'text' "
+        "ORDER BY p.id"
+    ), {"t": table}).mappings()
+    return [dict(row) for row in rows]
+
+
+def _open_column_draft(db, proposal_id):
+    row = db.execute(text(
+        "SELECT row_key, proposed FROM knowledge_proposals WHERE id = :id "
+        "AND table_name = 'schema_metadata' AND source = 'inferred' AND status = 'proposed' "
+        "AND json_type(proposed, '$.description') = 'text'"
+    ), {"id": proposal_id}).mappings().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Open column draft not found")
+    return json.loads(row["row_key"]), json.loads(row["proposed"])["description"]
+
+
+def _close_column_draft(db, proposal_id, status):
+    changed = db.execute(text(
+        "UPDATE knowledge_proposals SET status = :status WHERE id = :id AND status = 'proposed'"
+    ), {"id": proposal_id, "status": status}).rowcount
+    if not changed:
+        db.rollback()
+        raise HTTPException(status_code=404, detail="Open column draft not found")
+
+
+@router.post("/schema/columns/drafts/{proposal_id}/accept", response_model=SchemaMetadataResponse)
+def accept_column_draft(
+    proposal_id: int,
+    data: Optional[ColumnDraftAccept] = None,
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_config_db),
+    schema_service: SchemaService = Depends(deps.get_schema_service),
+):
+    key, proposed = _open_column_draft(db, proposal_id)
+    column = db.query(SchemaMetadata).filter_by(table_name=key["table_name"], column_name=key["column_name"]).first()
+    if not column:
+        raise HTTPException(status_code=404, detail="Column metadata not found")
+    description = data.description if data and data.description is not None else proposed
+    if not description.strip():
+        raise HTTPException(status_code=400, detail="Description must not be empty")
+    _close_column_draft(db, proposal_id, "accepted")
+    apply_human_edit(column, "schema_metadata", {"description": description})
+    # Taking a draft transfers ownership even if the row acquired the same text meanwhile.
+    mark_human_edit(column, "schema_metadata", ["description"])
+    column.updated_at = utcnow()
+    db.commit()
+    db.refresh(column)
+    schema_service.refresh_cache()
+    clear_query_cache()
+    mark_brain_dirty()
+    return SchemaMetadataResponse.model_validate(column)
+
+
+@router.post("/schema/columns/drafts/{proposal_id}/reject")
+def reject_column_draft(
+    proposal_id: int,
+    current_user: User = Depends(deps.require_admin),
+    db: Session = Depends(deps.get_config_db),
+):
+    _open_column_draft(db, proposal_id)
+    _close_column_draft(db, proposal_id, "rejected")
+    db.commit()
+    return {"id": proposal_id, "status": "rejected"}
 
 
 @router.get("/schema/columns/{column_id}", response_model=SchemaMetadataResponse)
