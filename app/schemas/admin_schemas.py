@@ -592,6 +592,11 @@ class AvailableView(BaseModel):
     type: str = "view"
     has_config: bool = False
     row_count: Optional[int] = None
+    source: Optional[str] = None
+    context: Optional[str] = None
+    columns_total: Optional[int] = None
+    description_empty: Optional[int] = None
+    description_empty_pct: Optional[float] = None
 
 class AvailableViewsResponse(BaseModel):
     """Response listing available views for onboarding."""
