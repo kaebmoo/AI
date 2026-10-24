@@ -195,6 +195,34 @@ logic อยู่ที่ `app/services/datafeed_knowledge.py` (`gen_docs_from
 - หน้า admin (schema browser, onboarding, keyword index rebuild, sync-brain DDL) ยังเห็นแค่ business DB เดิม
 - query result cache (30 นาที) ผูกกับ build: publish งวดใหม่หรือเปลี่ยน source แล้ว คำตอบเดิมไม่ถูกใช้ต่อ (ไม่ต้อง `refresh-cache`)
 
+## คำอธิบายคอลัมน์: ร่าง → รับ → ไหลกลับ contract (Phase E)
+
+1. Admin เลือกตารางในหน้า Schema แล้วกด **ร่างคำอธิบาย** — ระบบร่างจากข้อเท็จจริงที่ profile ได้
+   เป็นข้อเสนอ `inferred` ใน `knowledge_proposals`; ตรวจแก้แล้วรับหรือปฏิเสธทีละรายการ
+   รับแล้วแถวเป็น `manual`/`active`; ปฏิเสธแล้วแถวเดิมไม่เปลี่ยน
+2. ส่งออกคำอธิบายที่รับแล้วด้วยคำสั่งอ่านอย่างเดียว (ค่าเริ่มต้น `settings.CONFIG_DB_URL`):
+
+   ```bash
+   python -m scripts.export_col_meta --context feed_ebt [--config-db PATH]
+   ```
+
+   stdout เป็น Python dict สำหรับ `col_meta` รวมตามชื่อคอลัมน์ทั้ง domain; คำอธิบายที่ขัดกันข้ามตาราง
+   ไม่ถูกส่งออกและแจ้งทาง stderr ให้แก้ก่อน รักษา `unit`/`agg` เดิมไว้เมื่อวาง `desc`
+3. เจ้าของข้อมูลวางใน `col_meta` ของ domain ใน NT-Report `tools/feed/domains.py`, เพิ่มเวอร์ชัน PATCH
+   แล้วรัน `gen_contract.py` → `build_feed.py` เพื่อเผยแพร่ contract และ feed ชุดใหม่
+4. Request ของ file source เรียก `ensure_current`: แต่ละ process จำ contract stat
+   (inode/size/mtime_ns) กับ `schema_version` ของ build ใน `_seen`; marker เปลี่ยนหรือยังไม่เคยเห็นจึงตรวจ sync
+   โดย key เนื้อหา contract + build schema_version ใน DB กันทำซ้ำข้าม process
+   ถ้า `_declare` พบข้อความและคุณสมบัติที่ contract ประกาศตรงกับแถวเดิม จะไม่มีข้อเสนอใหม่รอ และแถวยังเป็น `manual`
+
+ตัวส่งออกตัดท้าย ` (หน่วย: …)` เพราะ sync เติมจาก `unit` อีกครั้ง และเติม `display_name_th — `
+ถ้าคำอธิบายยังไม่ได้ขึ้นต้นด้วยชื่อไทยนั้น: prefix ที่เติมทำให้ข้อความ contract ต่างจากแถวเดิม
+จึงมีข้อเสนอ `declared` รอ (ไม่เป็นอันตราย แถวของคนยังใช้งานต่อ)
+ถ้าต้องการคืนเจ้าของให้ contract ต้อง **ลบแถว manual จริง** — soft delete ไม่พอ
+เพราะ contract เติมได้เมื่อไม่มีแถว หรือแทนแถวที่ตนมีสิทธิ์เขียน ไม่ทับแถวของคน
+การลบแถวอย่างเดียวไม่กระตุ้น sync: ต้องให้ contract/build เปลี่ยนจน key ใหม่ แล้ว request ถัดไปจึงเขียน `declared`
+แม้เริ่ม process ใหม่ `_seen` จะว่าง แต่ key เดิมใน DB ยังกันการ sync ซ้ำ
+
 ## Generate docs + golden จาก contract (Phase B, C)
 
 ```bash
