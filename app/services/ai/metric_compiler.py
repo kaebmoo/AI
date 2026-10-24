@@ -159,14 +159,14 @@ def supports(intent: dict, metric: Metric) -> bool:
         return False
 
 
-def _triggered_mappings(intent: dict, question: str) -> list[dict]:
+def _triggered_mappings(intent: dict, question: str, ignore: frozenset[str] = frozenset()) -> list[dict]:
     question = question.casefold()
     triggered = []
     for mapping in intent.get("matched_mappings") or []:
         if not isinstance(mapping, dict) or not isinstance(mapping.get("keyword"), str):
             continue
         keyword = mapping["keyword"].casefold().strip()
-        if keyword and keyword in question:
+        if keyword and keyword not in ignore and keyword in question:
             triggered.append(mapping)
     return triggered
 
@@ -202,9 +202,19 @@ def plan(
                 parent = resolved[parent].extends
             if parent in candidates:
                 break
-    if metric_id is None or _triggered_mappings(intent, question):
+    if metric_id is None:
         return None
     metric = resolved[metric_id]
+    ignore = set()
+    ancestor = metric
+    visited = set()
+    while ancestor is not None and ancestor.metric_id not in visited:
+        visited.add(ancestor.metric_id)
+        ignore.update(value.casefold().strip() for value in
+                      (ancestor.metric_id, ancestor.name_th, *ancestor.synonyms))
+        ancestor = resolved.get(ancestor.extends)
+    if _triggered_mappings(intent, question, frozenset(ignore)):
+        return None
     filters = intent.get("filters") or []
     if not isinstance(filters, (list, tuple)):
         return None

@@ -162,7 +162,8 @@ def test_plan_rejects_unsupported_selection(metrics, intent, changes):
     ([{"keyword": "น่าน", "sql_condition": "DIVISION LIKE '%สายงาน%'"}], True),
     ([{"keyword": None}, "x"], False),
     ([{}, {"keyword": ""}, {"keyword": "   "}], False),
-    ([{"keyword": " EBT "}], True),
+    ([{"keyword": " EBT "}], False),
+    ([{"keyword": " น่าน "}], True),
 ])
 def test_plan_ignores_mappings_the_question_did_not_trigger(metrics, intent, mappings, blocked):
     filters = [{"column": "sub_unit", "operator": "LIKE", "value": "%น่าน%"}]
@@ -173,6 +174,28 @@ def test_plan_ignores_mappings_the_question_did_not_trigger(metrics, intent, map
     expected = compiler.CompileRequest("ebt_excluding_personnel", 202609, "cumulative",
                                        filters=tuple(filters), official_total_ok=False)
     assert req == (None if blocked else expected)
+
+
+@pytest.mark.parametrize("extra_mapping", [False, True])
+def test_plan_ignores_metric_mappings_but_other_triggered_mappings_block(metrics, intent, extra_mapping):
+    question = "ถ้าไม่รวมค่าใช้จ่ายบุคลากร จะมี EBT เป็นเท่าไหร่ แบบสะสม"
+    mappings = [{"keyword": "EBT", "sql_condition": "ebt"},
+                {"keyword": "ไม่รวมค่าใช้จ่ายบุคลากร", "sql_condition": "x"}]
+    if extra_mapping:
+        mappings.append({"keyword": "แบบสะสม", "sql_condition": "..."})
+    selection = intent | {"filters": [{"column": "time_key", "operator": "=", "value": 202609}],
+                          "matched_mappings": mappings}
+    req = compiler.plan(selection, question, compiler.resolve(metrics), [], 202609, set())
+    expected = compiler.CompileRequest("ebt_excluding_personnel", 202609, "cumulative",
+                                       filters=(), official_total_ok=False)
+    assert req == (None if extra_mapping else expected)
+
+
+def test_plan_ignores_parent_synonym_mapping(metrics, intent):
+    selection = intent | {"metric_id": "ebt_margin", "filters": [],
+                          "matched_mappings": [{"keyword": "กำไร", "sql_condition": "x"}]}
+    req = compiler.plan(selection, "อัตรากำไร EBT ของกำไรสะสม", compiler.resolve(metrics), [], 202609, set())
+    assert req == compiler.CompileRequest("ebt_margin", 202609, "cumulative", official_total_ok=False)
 
 
 def test_plan_period_filters_and_official_table_registration(metrics, intent):
