@@ -860,7 +860,7 @@ async def build_first_attempt_prompt(
         if metrics:
             metric_block = (
                 "\nmetric ที่ประกาศของ context นี้ (ถ้าคำถามหมายถึง metric ใด ให้ใส่ id ใน metric_id):\n"
-                + metric_compiler.metric_catalog(metrics)
+                + metric_compiler.metric_catalog(metrics, metric_compiler.dimension_labels(metrics))
                 + ("\n" + metric_compiler.metric_note(matched, metrics) if matched else "")
             )
         intent_json = await extract_intent(

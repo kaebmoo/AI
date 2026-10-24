@@ -120,11 +120,13 @@ async def test_no_metrics_keeps_the_previous_header_and_text_schema(monkeypatch)
 
 async def test_catalog_and_specific_match_reach_pass_one_only(metrics, intent, monkeypatch):
     monkeypatch.setattr(compiler, "load_metrics", Mock(return_value=metrics))
+    monkeypatch.setattr(compiler, "dimension_labels", Mock(return_value={"unit": "ฝ่าย"}))
     trace = SimpleNamespace(stages={}, usage=[])
     service = _service(intent)
     prompt, two_pass, compiled = await _first(service, trace=trace)
     header = service.provider.prompts[0]
-    assert compiler.metric_catalog(metrics) in header
+    assert compiler.metric_catalog(metrics, {"unit": "ฝ่าย"}) in header
+    assert "unit (ฝ่าย)" in header and "sub_unit" in header  # ฝ่ายไหน… → dimensions=["unit"], not division
     assert "metric ที่ประกาศไว้และตรงกับคำในคำถาม: ebt = " in header
     assert "ebt_excluding_personnel = EBT ไม่รวมค่าใช้จ่ายบุคลากร" in header
     assert "\n6. ถ้ามีรายการ" in header

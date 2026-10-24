@@ -99,8 +99,42 @@ def metric_note(matched: list[str], metrics: list[Metric]) -> str:
     return "metric ที่ประกาศไว้และตรงกับคำในคำถาม: " + "; ".join(items) if items else ""
 
 
-def metric_catalog(metrics: list[Metric]) -> str:
-    return "\n".join(f"- {m.metric_id}: {m.name_th} (คำพ้อง: {', '.join(m.synonyms)})" for m in metrics)
+def dimension_labels(metrics: list[Metric], config_engine=None) -> dict[str, str] | None:
+    """Short Thai meaning of every declared dimension, from the contract's column description in schema_metadata
+    (e.g. unit → "ฝ่าย"). The schema table of the system prompt shows only the context's main view, so without this
+    pass 1 never learns which column a "ฝ่าย" or "ส่วน" is. None = unavailable (the catalog then lists names only)."""
+    wanted = {(m.dataset, d) for m in metrics if m.dataset for d in (m.dimensions or ())}
+    if not wanted:
+        return {}
+    try:
+        if config_engine is None:
+            from app.db.session import config_engine
+        labels: dict[str, str] = {}
+        with config_engine.connect() as conn:
+            for table in {t for t, _ in wanted}:
+                rows = conn.execute(text(
+                    "SELECT column_name, description FROM schema_metadata WHERE table_name = :t "
+                    "AND COALESCE(status, 'active') = 'active'"), {"t": table}).all()
+                for column, description in rows:
+                    if (table, column) in wanted and isinstance(description, str) and description.strip():
+                        # the meaning is the first clause: "ฝ่าย — ระดับ 3 ของ…; คำถาม…" → "ฝ่าย"
+                        head = description.split(" — ")[0].split(";")[0].strip()
+                        labels.setdefault(column, head[:60])
+        return labels
+    except Exception:
+        logger.debug("Dimension labels unavailable", exc_info=True)
+        return None
+
+
+def metric_catalog(metrics: list[Metric], labels: dict[str, str] | None = None) -> str:
+    lines = []
+    for m in metrics:
+        line = f"- {m.metric_id}: {m.name_th} (คำพ้อง: {', '.join(m.synonyms)})"
+        if labels is not None and m.dimensions:
+            dims = ", ".join(f"{d} ({labels[d]})" if labels.get(d) else d for d in m.dimensions)
+            line += f"\n  มิติ/ตัวกรองที่ใช้ได้ (ชื่อคอลัมน์ → ความหมาย): {dims}"
+        lines.append(line)
+    return "\n".join(lines)
 
 
 @dataclass(frozen=True)

@@ -16,7 +16,7 @@ import yaml
 
 from app.models.schema_models import SchemaMetric
 from app.services.ai.metric_compiler import (
-    CompileRequest, Metric, compile, load_metrics, match_metrics, metric_catalog,
+    CompileRequest, Metric, compile, dimension_labels, load_metrics, match_metrics, metric_catalog,
     metric_note, resolve, supports,
 )
 from app.services.database_adapter import check_select
@@ -370,3 +370,28 @@ def test_compile_ranks_cost_centers_by_value_at_one_period(resolved):
     assert sql.count("CASE WHEN") == 4 and sql.count("amount_ytd") == 4 and '"amount"' not in sql
     assert "รวมรายได้ทั้งสิ้น" in sql and "รวมค่าใช้จ่ายทั้งสิ้น" in sql and "08.รายได้อื่น" in sql and "-ER" in sql
     assert sql.endswith("ORDER BY 3 DESC LIMIT 10")
+
+
+def test_catalog_names_the_dimensions_with_their_meaning(metrics, tmp_path):
+    """"ฝ่ายไหนมี EBT สูงสุด" was grouped by division (2026-10-24): the prompt's schema table shows only the main view
+    (fact_ebt_division_monthly), so the model never saw that `unit` is a ฝ่าย. The catalog now says so."""
+    from tests.unit import knowledge_db
+    engine = knowledge_db.make(tmp_path / "labels.db", seed="""
+        INSERT INTO schema_metadata (table_name, column_name, description) VALUES
+          ('feed_ebt_fact_ebt', 'division', 'สายงาน — ระดับ 1 ของโครงสร้างองค์กร; EBT report รวมเฉพาะ 2 สายงาน'),
+          ('feed_ebt_fact_ebt', 'unit', 'ฝ่าย — ระดับ 3 ของโครงสร้างองค์กร 4 ระดับ'),
+          ('feed_ebt_fact_ebt', 'unit_short_name', 'ชื่อย่อของฝ่าย (เช่น กกง., อป.2) — คู่กับชื่อเต็ม unit_fname'),
+          ('feed_ebt_fact_ebt', 'amount_ytd', 'ยอดสะสม'),
+          ('feed_ebt_fact_ebt_division_monthly', 'division', 'other table');
+    """)
+    labels = dimension_labels(metrics, engine)
+    assert labels == {"division": "สายงาน", "unit": "ฝ่าย", "unit_short_name": "ชื่อย่อของฝ่าย (เช่น กกง., อป.2)"}
+    catalog = metric_catalog(metrics, labels)
+    ebt_line = catalog.split("\n- ebt_excluding_personnel")[0]
+    assert "มิติ/ตัวกรองที่ใช้ได้" in ebt_line and "unit (ฝ่าย)" in ebt_line and "sub_unit," in ebt_line
+    assert "division (สายงาน)" in ebt_line and "cost_center" in ebt_line
+    for forbidden in ("measure_type", "SUM(", "rev - other", "amount_ytd", "official_scope"):
+        assert forbidden not in catalog
+    assert metric_catalog(metrics) == metric_catalog(metrics, None)  # names only, as before
+    assert dimension_labels([], engine) == {}
+    assert dimension_labels(metrics, object()) is None  # unusable engine → catalog falls back to names
