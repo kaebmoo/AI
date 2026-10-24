@@ -134,3 +134,14 @@ venv/bin/python -m scripts.eval.run_portal_questions --questions <ไฟล์�
 (แปลชื่อกลุ่มเป็นไทยแล้วหาไม่เจอ, กรองกลุ่มค่าใช้จ่ายด้วย `cat_l2_th` แทน `expense_group_name`,
 เทียบเป้าแบบ YTD ชน target รายเดือน, เรียก EBT ว่ากำไรทั้งบริษัท) ดู `eval_results/portal_<domain>_20261022_*.json`
 
+## ชุดคำถาม ebt 14 ข้อ + การวัดแบบจับคู่ก่อน/หลัง (2026-10-24)
+
+`portal_questions_ebt.json` มี P11–P14 (EBT ไม่รวมค่าใช้จ่ายบุคลากร: รวม/สายงาน × เดือน/สะสม; P12 = ถ้อยคำผู้ใช้จริง) เมื่อ build มี measure `ebt_ex_personnel` (contract ebt ≥ 1.5.0);
+build เก่าได้ 10 ข้อเดิม. วิธีวัดที่ใช้ตัดสิน declared metrics (`plan/RESULT_P8_DECLARED_METRICS.md` §3) และควรใช้ซ้ำกับการแก้ที่กระทบคำตอบ:
+- server ซ้อม **สองตัว** บนสำเนาคนละชุด (ก่อน = code เดิม, หลัง = code ใหม่; ความรู้/contract เท่ากัน) → สิ่งที่วัดคือผลของ code
+- **restart server ก่อนทุกรอบ** — query cache 30 นาที (`query_engine._QUERY_CACHE_TTL`) ทำให้รอบซ้ำเป็น cache hit (RESULT_F11 §6)
+- ≥ 2 รอบต่อฝั่งบน code สุดท้าย; จับคู่ question-run รอบเดียวกัน → นับคู่ที่ต่างกัน (หลังถูก/ก่อนผิด vs ตรงข้าม) → **McNemar exact**; รายงาน "ถูกครบทุกรอบ" ต่อข้อด้วย
+  (ตัวอย่างขนาด: 10 ข้อ × 2 รอบ มี CI กว้าง ±0.3 — ไม่พอตัดสิน; 63 ข้อ × 2 รอบ × 2 ฝั่ง ≈ 45 นาที)
+- คำถามระดับหน่วยย่อย (น่าน) ยังไม่มี oracle ใน control_totals → เขียนชุดเล็กด้วยค่าที่เจ้าของยืนยัน (`accept.values` หน่วย MB) รูปแบบเดียวกับ portal_questions
+- ก่อนโทษ code ให้อ่าน intent จริงของ pass 1 ใน log (`Pass 1 complete … Intent:`) — slice 04–06 ของงานนี้มาจากตรงนั้นทั้งหมด
+

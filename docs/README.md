@@ -4,7 +4,7 @@ AI Query Assistant สำหรับ NT (National Telecom) — แปลงค�
 ผ่าน Claude / Gemini / Matcha (NT Gateway).
 
 > สำหรับภาพรวมโปรเจกต์และ schema reference ดู [`../CLAUDE.md`](../CLAUDE.md)
-> อัปเดตดัชนีล่าสุด: 2026-07-12
+> อัปเดตดัชนีล่าสุด: 2026-10-24
 
 ## Start here
 
@@ -23,6 +23,7 @@ AI Query Assistant สำหรับ NT (National Telecom) — แปลงค�
 | [INTERNAL_SCHEMA.md](INTERNAL_SCHEMA.md) | Internal schema reference (config tables) |
 | [SEMANTIC_MAPPING_GUIDE.md](SEMANTIC_MAPPING_GUIDE.md) | Semantic mapping — keyword → column/value |
 | [DATAFEED_INTEGRATION.md](DATAFEED_INTEGRATION.md) | DataFeed integration (F10 → Plan 7) — file source (DuckDB, zero-import), knowledge จาก contract, integrity gates, ลงทะเบียนผ่าน CLI / admin API |
+| [DECLARED_METRICS.md](DECLARED_METRICS.md) | **Declared metrics (2026-10-24)** — metric ประกาศใน contract (`metrics:`) → `schema_metrics` → `metric_compiler` ประกอบ SQL แทน pass 2; หลักการ (semantic layer, LLM เลือก/code ประกอบ), โครง YAML, เส้นทางคำถาม, วิธีเพิ่ม metric |
 
 ## API & Integration
 

@@ -29,8 +29,8 @@
 
 ## ที่มา + สถานะของความรู้ (Plan 8.1, 2026-09-21)
 
-9 ตาราง — `schema_contexts`, `schema_metadata`, `schema_business_rules`, `golden_examples`, `schema_semantic_mapping`,
-`master_hierarchy`, `master_hierarchy_values`, `data_warnings`, `vanna_documentation` — มี 3 คอลัมน์ (`scripts/migrate_knowledge_provenance.py`):
+10 ตาราง — `schema_contexts`, `schema_metadata`, `schema_business_rules`, `golden_examples`, `schema_semantic_mapping`,
+`master_hierarchy`, `master_hierarchy_values`, `data_warnings`, `vanna_documentation`, `schema_metrics` (2026-10-24 — metric ที่ contract ประกาศ: `metric_id`, `name_th`, `synonyms`, `dataset`, `period`, `dimensions`, `terms`, `expr`, `official_scope`, `official_total`, `reference`; สร้างด้วย `scripts/migrate_schema_metrics.py`; อ่านโดย `app/services/ai/metric_compiler.py` — `docs/DECLARED_METRICS.md`) — มี 3 คอลัมน์ (`scripts/migrate_knowledge_provenance.py`):
 
 | คอลัมน์ | ค่า |
 |---|---|

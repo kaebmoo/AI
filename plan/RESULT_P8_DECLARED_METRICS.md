@@ -20,6 +20,11 @@
 ตลอดการวัด: compile สำเร็จ 32 คำตอบ, compile ล้ม 0, pass 1 ทั้งหมด 313 ครั้ง · ค่าตอบจาก SQL ที่ code ประกอบ **ตรงกับสูตรของเจ้าของทุกครั้งที่เดินทางนี้**
 สิ่งที่ยังผิดเหมือนเดิมทั้งสองฝั่ง (ไม่ใช่เรื่อง metric): ebt P05 "สัดส่วนต้นทุนต่อรายได้" (ยังไม่มี metric ประกาศ → ตอบถูกแต่ไม่บอกฐาน), P06/P14 "สายงานไหน…สูงกว่า" (ทั้ง LLM และ compiler ให้ LIMIT 1 แต่เฉลยอยาก 2 แถว), P09 ป้าย "2 สายงานขาย", real P10–P12/P14 (มีมาก่อน)
 
+## 1.1 หลักการที่ใช้ (ชื่อตามที่วงการเรียก) — รายละเอียด `docs/DECLARED_METRICS.md` §2
+**semantic / metric layer** (metric เป็นข้อมูลมีโครง ไม่ใช่ร้อยแก้ว) · **LLM เลือก, code ประกอบ** = bounded semantic planning + deterministic compilation (โมเดลเลือก id/มิติ/ตัวกรอง/งวดจากรายการปิด, compiler สร้าง SQL) ·
+**filtered measure + derived expression** สำหรับ "ไม่รวม X" / ratio · **ความแม่นอยู่ใน code ไม่ใช่ prompt** (บทเรียนเดิมของโปรเจกต์) · **contract-first + provenance** (เจ้าของข้อมูลประกาศ = `declared`) · **oracle จากผู้ผลิตข้อมูล** (control totals) ·
+**วัดแบบจับคู่ก่อน/หลังบนสำเนา** (McNemar, ≥2 รอบ, restart ล้าง cache) · **planner–reviewer + coder** (/delegate: Claude วางแผน/ตรวจรับ, Codex เขียน, worktree นอก repo, acceptance ต่อ slice)
+
 ## 2. ที่สร้าง
 
 ### NT-Report (branch `ai/delegate-metrics`, base `9411609` = main, 3 commit, ยังไม่ rebuild dist จริง)

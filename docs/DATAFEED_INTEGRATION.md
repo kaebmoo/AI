@@ -143,6 +143,9 @@ logic อยู่ที่ `app/services/datafeed_knowledge.py` (`gen_docs_from
 - `scope_columns` ใน contract (`{scope key: column}` หรือ `{scope key: [column, ...]}`, Plan 7 Phase 3) → `schema_contexts.scope_columns` —
   กำหนดว่า portal จำกัดขอบเขตด้วย `scope` ได้ด้วย key อะไร; dataset ที่ไม่มีคอลัมน์ของ key ใช้ไม่ได้ภายใต้ scope; key ที่มีหลายชื่อ
   (ตารางเรียกคอลัมน์เดียวกันต่างชื่อ เช่น `dim_org_snapshot.effective_month`) = แต่ละตารางกรองด้วยชื่อแรกที่ตัวเองมี (ดู `docs/PORTAL_INTEGRATION.md`)
+- **`metrics:` ใน contract (2026-10-24, ebt 1.5.0)** → `sync_metrics` → ตาราง `schema_metrics` (`declared`; ต้องมีตารางก่อน: `scripts/migrate_schema_metrics.py` — ไม่มี = ข้ามพร้อม warning,
+  server ยังเริ่มได้) — ตรวจกับ datasets ของ contract ตอน sync (dataset/คอลัมน์งวด/มิติ/คอลัมน์ใน `where`/ชื่อใน `expr`/`official_total`/`extends` ต้องมีจริง; metric ที่ผิดถูกข้าม ตัวอื่นเข้า);
+  `dataset` และ `official_total.dataset` เก็บเป็นชื่อเต็ม `feed_<domain>_<dataset>`; metric ที่ contract เลิกประกาศถูกถอน (เฉพาะแถว `declared`); ผู้ใช้คือ `app/services/ai/metric_compiler.py` — ดู `docs/DECLARED_METRICS.md`
 
 **ย้อนกลับไปใช้ข้อมูลที่ import ไว้ (fallback):**
 `python -m scripts.datafeed.register_file_source --domain revenue --legacy` แล้วรัน

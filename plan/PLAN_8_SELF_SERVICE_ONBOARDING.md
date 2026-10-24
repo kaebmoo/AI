@@ -249,6 +249,7 @@ contract ที่มีเวอร์ชันเข้า pipeline เดิ�
 | hierarchy | functional dependency | สายงาน → ฝ่าย → ส่วน |
 | `control_totals` · `scope_columns` | ยอดรวมรายงวด · คอลัมน์งวด / หน่วยงาน | มีใน contract ทุกโดเมน |
 | **`relationships` (ใหม่)** | key ร่วม + กระทบยอดรายงวดด้วยตัวกรองที่เป็นไปได้ → งวดที่ตรง / ไม่ตรง + ยอดต่าง เป็นหลักฐาน | ebt ↔ expense (ไม่รวม ER), ebt ↔ sales (`sales_line`, BG 1–7) |
+| **`metrics` (มีแล้ว 2026-10-24 — `docs/DECLARED_METRICS.md`)** | measure เดี่ยว (`agg` sum / point_in_time) ร่างได้จาก `control_totals.measures`; **สูตรอนุพันธ์ (ไม่รวม X, ratio) อนุมานไม่ได้ — ถามเจ้าของ**; ร่างต้องผ่าน `test_metrics_contract`-style check (ทุกการอ้างมีจริง) | ebt: `ebt`, `ebt_excluding_personnel`, `ebt_margin` (contract 1.5.0) |
 | คำอธิบายภาษาไทย · คำพ้อง | LLM จากชื่อคอลัมน์ (+ ค่าตัวอย่างเฉพาะ source ที่ policy = `full`) | — |
 
 **ต้องถามเจ้าของเท่านั้น:** ความหมายทางธุรกิจ · ข้อยกเว้น (EBT ตัด ER) · เหตุของความผิดปกติที่เครื่องเจอ (202606) — เครื่องแปลงเป็นคำถามให้

@@ -58,6 +58,9 @@ Response มี `data_as_of` (Plan 7 Phase 2) — ความสดของข
 - ระหว่าง publish (แบบเดิมที่ไม่ atomic) คำถามได้ `error` = `source_unavailable` พร้อมข้อความ "แหล่งข้อมูลของ context นี้ยังไม่พร้อมใช้งาน
   (ข้อมูลอาจกำลังถูก publish) — กรุณาถามใหม่อีกครั้ง" ไม่ใช่คำตอบจากไฟล์ครึ่งไฟล์
 
+คำถามที่ตรงกับ metric ที่ contract ประกาศ (ตั้งแต่ ebt 1.5.0 — `docs/DECLARED_METRICS.md`) ได้ SQL จาก code ไม่ใช่จากโมเดล: `sql` ที่ส่งกลับ (เมื่อขอ) จะเริ่มด้วย `SELECT ((((` หรืออ่านคอลัมน์ยอดทางการตรง ๆ;
+ยังไม่มี field บอกว่าคำตอบเป็น "ยอดทางการ" ใน response (มีใน `QueryResult.metric` ภายใน) — เพิ่มได้ผ่าน `app/core/outbound.py` เมื่อ portal ต้องการ
+
 ## สิ่งที่ response บอก และไม่บอก (hardening 2026-09-20)
 
 `/api/v1/query` ตอบผู้เรียกนอก process จึง**ไม่ส่งของภายในออกไป**: ไม่มี SQL ในข้อความคำตอบ, ไม่มีข้อความ exception,
