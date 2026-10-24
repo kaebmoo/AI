@@ -26,7 +26,10 @@ def _build_schema_from_metadata(metadata: List[Dict], table_name: str) -> str:
     for column in metadata:
         can_sum = "✅" if column.get("is_summable") else "❌"
         can_group = "✅" if column.get("is_groupable") else "❌"
-        notes = column.get("special_notes") or ""
+        # a contract column carries its meaning in `description` (datafeed_knowledge.sync_schema_metadata) and has
+        # no special_notes — until 2026-10-24 that text never reached the prompt, so "ฝ่าย" could not be
+        # mapped to `unit`; a person's special_notes still win when present
+        notes = column.get("special_notes") or column.get("description") or ""
         if column.get("conversion_sql"):
             notes += f" แปลงด้วย: `{column['conversion_sql']}`"
 
