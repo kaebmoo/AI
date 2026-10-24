@@ -449,3 +449,36 @@ async def test_failed_compilation_execution_retries_with_provider_once(execution
     assert result.metric is None and result.sql_query == executions[1]
     assert result.retry_history == [{"sql": executions[0], "error": "Execution failed: retry me"}]
     assert executions[0] != executions[1]
+
+
+RANKING = {"metric_id": "ebt", "dimensions": ["cost_center", "division"], "filters": []}
+
+
+@pytest.mark.parametrize("changes,order_desc,limit", [
+    ({"intent_type": "ranking", "ordering": {"column": "ebt", "direction": "DESC"}, "limit": 10}, True, 10),
+    ({"intent_type": "aggregation", "ordering": {"column": "ebt", "direction": "DESC"}, "limit": 10}, True, 10),
+    ({"intent_type": "aggregation", "ordering": {"column": "EBT (กำไรก่อนภาษี ตามรายงาน EBT)"}}, True, None),
+    ({"intent_type": "aggregation", "ordering": {"column": "ebt", "direction": "ASC"}}, False, None),
+    ({"intent_type": "aggregation", "limit": 10}, True, 10),
+    ({"intent_type": "aggregation", "ordering": {"column": "division", "direction": "ASC"}}, None, None),
+    ({"intent_type": "ranking", "ordering": None}, True, None),
+])
+def test_plan_ranks_by_the_metric_value(metrics, intent, changes, order_desc, limit):
+    """หน่วยงานไหนได้ EBT สูงสุด 10 อันดับแรก — pass 1 names the value in `ordering.column`,
+    or sends aggregation + limit; both compile with ORDER BY the value (query_audit 406/407)."""
+    req = compiler.plan(intent | RANKING | changes, "ศูนย์ต้นทุนไหนมี EBT สะสมสูงสุด 10 อันดับแรก",
+                        compiler.resolve(metrics), ["ebt"], 202609, set())
+    assert req == compiler.CompileRequest("ebt", 202609, "cumulative", dimensions=("cost_center", "division"),
+                                          order_desc=order_desc, limit=limit, official_total_ok=False)
+
+
+def test_plan_ranks_child_metric_by_parent_name(metrics, intent):
+    selection = intent | RANKING | {"metric_id": "ebt_excluding_personnel", "intent_type": "aggregation",
+                                    "ordering": {"column": "ebt", "direction": "DESC"}}
+    req = compiler.plan(selection, "EBT ไม่รวมบุคลากร รายศูนย์ต้นทุน", compiler.resolve(metrics), [], 202609, set())
+    assert req is not None and req.order_desc is True
+
+
+def test_plan_rejects_ordering_by_an_unknown_column(metrics, intent):
+    selection = intent | RANKING | {"intent_type": "aggregation", "ordering": {"column": "revenue", "direction": "DESC"}}
+    assert compiler.plan(selection, "EBT รายศูนย์ต้นทุน", compiler.resolve(metrics), [], 202609, set()) is None

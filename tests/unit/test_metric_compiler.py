@@ -154,8 +154,12 @@ def test_official_scope_from_fact(metric_id, mode, expected, resolved, databases
 def test_grouping_scope_and_ranking(resolved, databases):
     req = CompileRequest("ebt", 202609, "cumulative", dimensions=("division",), order_desc=False)
     compiled, rows = execute(req, resolved, databases)
-    # Grouping removes official_scope, so the out-of-scope division also appears.
-    assert rows == [(S1, 95), (S2, 200), ("สายงานอื่น", 900)]
+    # A breakdown without a filter stays inside official_scope: the out-of-scope division is absent...
+    assert rows == [(S1, 95), (S2, 200)]
+    # ...but a filter that names it still computes it (outside the official total).
+    outside = ({"column": "division", "operator": "=", "value": "สายงานอื่น"},)
+    _, rows = execute(replace(req, filters=outside), resolved, databases)
+    assert rows == [("สายงานอื่น", 900)]
     assert not compiled.official and compiled.sql.endswith('GROUP BY "division" ORDER BY 2 ASC')
     req = replace(req, filters=({"column": "division", "operator": "IN", "value": [S1, S2]},),
                   order_desc=True, limit=1)
@@ -244,7 +248,11 @@ def test_structural_resolution(metrics, resolved):
     ({"filters": [{"column": "division", "operator": "IN", "value": ["a", 1]}]}, False),
     ({"ordering": {"column": "division", "direction": "DESC"}}, True),
     ({"ordering": {"column": None}}, True),
-    ({"ordering": {"column": "ebt", "direction": "DESC"}}, False),
+    ({"ordering": {"column": "ebt", "direction": "DESC"}}, True),
+    ({"ordering": {"column": "EBT (กำไรก่อนภาษี ตามรายงาน EBT)", "direction": "DESC"}}, True),
+    ({"ordering": {"column": "ebt_month"}, "intent_type": "ranking"}, True),
+    ({"ordering": {"column": "EBT สะสม"}, "metrics": ["EBT สะสม"]}, True),
+    ({"ordering": {"column": "revenue", "direction": "DESC"}}, False),
     ({"ordering": {"column": "division", "direction": "random"}}, False),
 ])
 def test_supports(updates, expected, resolved):
@@ -350,3 +358,15 @@ def test_loading_fails_open(caplog):
         assert "Declared metrics unavailable" in caplog.text
     finally:
         engine.dispose()
+
+
+def test_compile_ranks_cost_centers_by_value_at_one_period(resolved):
+    """The live defect (query_audit 407): a prompt-built SQL measured revenue only and summed
+    amount_ytd over nine months. The compiled form has all four terms at a single period."""
+    req = CompileRequest("ebt", 202609, "cumulative", dimensions=("cost_center", "division"),
+                         order_desc=True, limit=10)
+    sql = compile(req, resolved).sql
+    assert "= 202609" in sql and "BETWEEN" not in sql
+    assert sql.count("CASE WHEN") == 4 and sql.count("amount_ytd") == 4 and '"amount"' not in sql
+    assert "รวมรายได้ทั้งสิ้น" in sql and "รวมค่าใช้จ่ายทั้งสิ้น" in sql and "08.รายได้อื่น" in sql and "-ER" in sql
+    assert sql.endswith("ORDER BY 3 DESC LIMIT 10")

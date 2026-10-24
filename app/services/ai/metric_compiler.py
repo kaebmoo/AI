@@ -143,14 +143,35 @@ def _validate_shape(dimensions, filters, metric: Metric) -> None:
         raise ValueError("Unsupported filter operator or value")
 
 
-def supports(intent: dict, metric: Metric) -> bool:
+def _value_names(intent: dict, metric: Metric, extra: frozenset[str] = frozenset()) -> set[str]:
+    """Every name pass 1 may use for the metric's value column: the metric itself, its official
+    columns, and whatever it wrote in metric_id / metrics ("ebt", "EBT สะสม", ...)."""
+    names = {metric.metric_id, metric.name_th, *metric.synonyms,
+             *((metric.official_total or {}).get(key) for key in ("column", "month_column")),
+             intent.get("metric_id"), *(intent.get("metrics") or [])}
+    return {n.casefold().strip() for n in names if isinstance(n, str)} | set(extra)
+
+
+def _orders_by_value(intent: dict, metric: Metric, extra: frozenset[str] = frozenset()) -> bool:
+    """Ranking by the metric value: an explicit ranking, a LIMIT, or an ordering that names the value."""
+    ordering = intent.get("ordering") or {}
+    column = ordering.get("column") if isinstance(ordering, dict) else None
+    return (intent.get("intent_type") == "ranking" or intent.get("limit") is not None
+            or (isinstance(column, str) and column.casefold().strip() in _value_names(intent, metric, extra)))
+
+
+def supports(intent: dict, metric: Metric, extra_names: frozenset[str] = frozenset()) -> bool:
     try:
         if intent.get("intent_type") not in ("aggregation", "ranking"):
             return False
         _validate_shape(intent.get("dimensions", []), intent.get("filters", []), metric)
         ordering = intent.get("ordering")
         if ordering is not None:
-            if not isinstance(ordering, dict) or ordering.get("column") not in (*(metric.dimensions or ()), None):
+            if not isinstance(ordering, dict):
+                return False
+            column = ordering.get("column")
+            if column not in (*(metric.dimensions or ()), None) and not (
+                    isinstance(column, str) and column.casefold().strip() in _value_names(intent, metric, extra_names)):
                 return False
             if ordering.get("direction") not in (None, "ASC", "DESC"):
                 return False
@@ -236,7 +257,7 @@ def plan(
         else:
             remaining.append(item)
     intent = {**intent, "filters": remaining}
-    if not supports(intent, metric):
+    if not supports(intent, metric, frozenset(ignore)):
         return None
     if type(reference) is not int:
         return None
@@ -262,7 +283,10 @@ def plan(
         mode=mode,
         dimensions=tuple(intent.get("dimensions") or []),
         filters=tuple(intent.get("filters") or []),
-        order_desc=(intent.get("ordering") or {}).get("direction") != "ASC" if intent.get("intent_type") == "ranking" else None,
+        # "สูงสุด 10 อันดับ" arrives as ranking, as aggregation + limit, or as ordering by the metric's
+        # own name — all rank by the value; an ordering by a dimension alone keeps the table order
+        order_desc=(intent.get("ordering") or {}).get("direction") != "ASC"
+        if _orders_by_value(intent, metric, frozenset(ignore)) else None,
         limit=limit if type(limit) is int and limit > 0 else None,
         official_total_ok=metric.official_total is not None and metric.official_total["dataset"] in tables,
     )
@@ -392,7 +416,10 @@ def compile(req: CompileRequest, resolved: dict[str, Metric]) -> Compiled:
             measure = _quote(total["month_column" if req.mode == "month" else "column"])
         else:
             measure = f"({expr})"
-            if official and metric.official_scope:
+            # No filter = the question named no unit, so a breakdown stays inside the report's
+            # scope (the EBT report is of the two sales lines); a filter picks units explicitly,
+            # and those outside the scope stay computable (contract: ebt_dimension_breakdown).
+            if not req.filters and metric.official_scope:
                 period += f" AND ({metric.official_scope})"
             for item in req.filters:
                 column, operator, value = _quote(item["column"]), item["operator"], item["value"]

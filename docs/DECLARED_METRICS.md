@@ -63,12 +63,16 @@ metrics:
 2. header ของ pass 1 ได้รายการ metric (ชื่อ + คำพ้อง) + บรรทัด "metric ที่ตรงกับคำในคำถาม" + กฎข้อ 6 ให้ใส่ `metric_id` — context ที่ไม่มี metric prompt เท่าเดิมทุกไบต์
 3. `plan(intent, question, resolved, matched, reference_period, tables)` → `CompileRequest` เมื่อ: `metric_id` ใช้ได้ (หรือ code จับได้ตัวที่เจาะจงกว่า; ชื่อคอลัมน์ของ official_total ก็แปลงให้),
    รูป `aggregation`/`ranking` งวดเดียว, มิติ/ตัวกรองอยู่ในที่ประกาศ, mapping ที่ **ถูกกระตุ้นจริงในคำถามและไม่ใช่ชื่อ metric เอง** = ไม่มี; filter บนคอลัมน์งวดถือเป็นงวด ไม่ใช่ตัวตัดสิทธิ์
-4. `compile()` → SQL หนึ่งคำสั่ง (ไม่มีมิติ/ตัวกรองหน่วยงาน → `official_total` ถ้าตารางลงทะเบียน ไม่งั้น `dataset` + `official_scope`; มีตัวกรองหน่วยงาน → ไม่ใส่ scope และ `official=false`)
+4. `compile()` → SQL หนึ่งคำสั่ง (ไม่มีมิติ/ตัวกรองหน่วยงาน → `official_total` ถ้าตารางลงทะเบียน ไม่งั้น `dataset` + `official_scope`; มีมิติแต่ไม่มีตัวกรอง → `dataset` + `official_scope` และ `official=false`
+   — ผู้ถามไม่ได้เลือกหน่วยงาน การแยกตามมิติจึงอยู่ในขอบเขตของรายงาน (D-3; แก้ 2026-10-24 — เดิมไม่ใส่ scope ทำให้ "ศูนย์ต้นทุนไหน EBT สูงสุด" ได้หน่วยนอก 2 สายงานขาย); มีตัวกรองหน่วยงาน → ไม่ใส่ scope และ `official=false` — หน่วยนอกขอบเขตยังคำนวณได้)
+   · การจัดอันดับ ("สูงสุด 10 อันดับ") = `ORDER BY` ค่าของ metric เมื่อ `intent_type=ranking`, มี `limit`, หรือ `ordering.column` เป็นชื่อของ metric เอง (id / name_th / คำพ้อง / คอลัมน์ official_total / ค่าใน `metrics`);
+   `ordering` ตามคอลัมน์มิติอย่างเดียวไม่เรียง, ตามคอลัมน์ที่ไม่รู้จัก → `plan()` ไม่รับ
    → **ไม่เรียก pass 2** → guard / `validate_sql` / scope wrapper / execute / explain ตามเดิม (ขั้นอธิบายได้ชื่อ metric + note) · `QueryResult.metric` = `{id, name_th, unit, official, table}`
 5. ทุกกรณีที่ `plan()` ไม่รับ → เส้นทางเดิม (LLM เขียน SQL) — จึงไม่มีทางแย่กว่าก่อน
 
 พฤติกรรมของ pass 1 จริง (gpt-4.1-mini) ที่ unit test ไม่เคยเห็นและ `plan()` รองรับแล้ว: ใส่งวดลง `filters` (`time_key = 202609`), เขียน `metric_id` เป็นชื่อคอลัมน์ (`ebt_ex_personnel`),
-สะท้อนชื่อ metric กลับมาเป็น `matched_mappings`, คัดลอก mapping กลาง ("สายงาน") ทั้งที่คำถามไม่มี — ก่อนโทษ compiler ให้อ่าน `Pass 1 complete … Intent:` ใน log ก่อน
+สะท้อนชื่อ metric กลับมาเป็น `matched_mappings`, คัดลอก mapping กลาง ("สายงาน") ทั้งที่คำถามไม่มี, ใส่ชื่อ metric ลง `ordering.column` ("ebt") และส่ง "10 อันดับแรก" มาเป็น `aggregation` + `limit`
+(2026-10-24 — ก่อนแก้ `supports()` ปฏิเสธ ทำให้ EBT รายศูนย์ต้นทุนตกไป pass 2 แล้วได้ SQL ที่นับแต่รายได้และ SUM `amount_ytd` ข้าม 9 เดือน: `query_audit` 407) — ก่อนโทษ compiler ให้อ่าน `Pass 1 complete … Intent:` ใน log ก่อน
 
 ## 5. เพิ่ม/แก้ metric (ลำดับที่ต้องรักษา)
 
