@@ -364,8 +364,10 @@ def plan_with_reason(
                     return None, "period_filter:operator"
                 values = [value] if operator == "=" else value
                 keys = [_month_key(v) for v in values] if isinstance(values, (list, tuple)) and values else [None]
-                if None in keys:
+                if None in keys or (operator == "BETWEEN" and len(keys) != 2):
                     return None, "period_filter:value"
+                if operator == "BETWEEN" and min(keys) // 100 == max(keys) // 100:
+                    keys = [max(keys)]  # BETWEEN y01 AND yMM: the year to date at yMM, not two periods
                 compared.update(keys)
             elif operator == "=":
                 if isinstance(value, str) and value.isdecimal():
@@ -404,11 +406,33 @@ def plan_with_reason(
             return None, "period_filter:range"
         period_hint, range_cumulative = high, low != high
     base_key = None
-    if len(compared) > 2:
-        return None, "period_filter:compare"
     if compared:
-        base_key, period_hint = (min(compared), max(compared)) if len(compared) == 2 else (None, max(compared))
+        # pass 1 writes a comparison's periods as a pair (IN [202509, 202609], [202608, 202609]) or as the months of
+        # each year to date (IN [202601 … 202609, 202501 … 202509]; the earlier year sometimes whole to 202512)
+        years = {}
+        for key in sorted(compared):
+            years.setdefault(key // 100, []).append(key)
+
+        def year_end(keys):
+            if len(keys) == 1:
+                return keys[0]
+            return keys[-1] if keys[0] % 100 == 1 and keys == list(range(keys[0], keys[-1] + 1)) else None
+
+        if len(years) == 1 and len(compared) == 2:
+            base_key, period_hint = sorted(compared)
+        else:
+            ends = [year_end(keys) for _, keys in sorted(years.items())]
+            if len(ends) > 2 or None in ends:
+                return None, "period_filter:compare"
+            period_hint = ends[-1]
+            if len(ends) == 2:
+                # the whole earlier year listed against a year to date: its same period (CMP-1 ก)
+                base_key = ends[0] if ends[0] % 100 <= period_hint % 100 else period_hint - 100
     intent = {**intent, "filters": remaining}
+    if comparison and isinstance(intent.get("dimensions"), (list, tuple)) and isinstance(period_column, str):
+        # "EBT ปีนี้เทียบปีก่อน" with dimensions ["time_key"]: the comparison already puts the periods side by side
+        intent["dimensions"] = [d for d in intent["dimensions"]
+                                if not (isinstance(d, str) and d.casefold() == period_column.casefold())]
     checked = intent
     if comparison:
         # a comparison ranks by the change, which pass 1 names freely (diff_ebt, ebt_change): keep the direction

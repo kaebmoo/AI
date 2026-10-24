@@ -806,3 +806,33 @@ async def test_the_question_back_reaches_the_caller_without_sql(execution, metri
     assert result.clarification is True and result.sql_query == "" and result.data == [] and not result.error
     execution.mcp_client.call_tool.assert_not_awaited()
     assert outbound.safe_answer(result) == result.explanation and "ระดับไหน" in result.explanation
+
+
+YTD_2026 = [202600 + m for m in range(1, 10)]
+
+
+@pytest.mark.parametrize("changes,expected", [
+    # the shapes pass 1 wrote on the practice server after the first round (2026-10-25)
+    ({"filters": _period(("IN", YTD_2026 + [202500 + m for m in range(1, 10)]))}, (202609, 202509, ("division",))),
+    ({"filters": _period(("IN", YTD_2026 + [202500 + m for m in range(1, 13)]))}, (202609, 202509, ("division",))),
+    ({"filters": _period(("IN", YTD_2026), ("IN", [202500 + m for m in range(1, 13)]))}, (202609, 202509, ("division",))),
+    ({"filters": _period(("IN", YTD_2026))}, (202609, 202509, ("division",))),
+    ({"filters": _period(("BETWEEN", [202601, 202609]))}, (202609, 202509, ("division",))),
+    ({"filters": _period(("IN", [202609, 202509])), "dimensions": ["time_key"], "time_range": None}, (202609, 202509, ())),
+])
+def test_plan_reads_the_period_lists_of_a_comparison(metrics, changes, expected):
+    req, reason = compiler.plan_with_reason(COMPARE | changes, "EBT สะสมดีกว่าปีก่อน", compiler.resolve(metrics), [],
+                                            202609, set())
+    assert reason is None
+    assert (req.period, req.base_period, req.dimensions) == expected
+
+
+@pytest.mark.parametrize("values", [[202507, 202508, 202509], [202601, 202603], [202409, 202509, 202609]])
+def test_plan_declines_period_sets_that_are_not_two_periods(metrics, values):
+    selection = COMPARE | {"filters": _period(("IN", values))}
+    if values == [202601, 202603]:  # two months of one year: a pair, compared as given
+        req = compiler.plan(selection, "EBT เทียบ", compiler.resolve(metrics), [], 202609, set())
+        assert (req.period, req.base_period) == (202609, 202601)  # time_range (2026-09) wins as the period
+        return
+    assert compiler.plan_with_reason(selection, "EBT เทียบ", compiler.resolve(metrics), [], 202609, set()) == (
+        None, "period_filter:compare")
