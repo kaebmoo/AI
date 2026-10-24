@@ -29,6 +29,7 @@ def migrate(config_engine=None):
             reference TEXT,
             unit TEXT,
             note_th TEXT,
+            ranking TEXT,
             source TEXT,
             status TEXT NOT NULL DEFAULT 'active',
             confidence REAL,
@@ -40,6 +41,11 @@ def migrate(config_engine=None):
                           "ON schema_metrics (context_name, metric_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_schema_metrics_context_name "
                           "ON schema_metrics (context_name)"))
+        # 2026-10-24: `ranking` ({scope, base, base_name_th}) for tables created before it existed
+        present = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(schema_metrics)")}
+        if "ranking" not in present:
+            conn.execute(text("ALTER TABLE schema_metrics ADD COLUMN ranking TEXT"))
+            print("Added schema_metrics.ranking.")
     print("Ensured schema_metrics and its context/metric unique index and context index exist.")
     print("Migration complete (idempotent).")
 

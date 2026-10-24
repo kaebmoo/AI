@@ -56,3 +56,19 @@ def test_provenance_migration_skips_absent_legacy_tables():
     assert migrate_provenance(engine) == {"schema_business_rules": [("manual", "active", 1)]}
     assert migrate_provenance(engine) == {"schema_business_rules": [("manual", "active", 1)]}
     engine.dispose()
+
+
+def test_migration_adds_ranking_to_a_table_created_before_it():
+    engine = create_engine("sqlite://")
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE schema_metrics (id INTEGER PRIMARY KEY, context_name TEXT NOT NULL, "
+                          "metric_id TEXT NOT NULL, name_th TEXT NOT NULL, expr TEXT NOT NULL, source TEXT, "
+                          "status TEXT NOT NULL DEFAULT 'active', is_active INTEGER DEFAULT 1)"))
+        conn.execute(text("INSERT INTO schema_metrics (context_name, metric_id, name_th, expr) VALUES ('c', 'm', 'n', '1')"))
+    migrate(engine)
+    columns = {c["name"] for c in inspect(engine).get_columns("schema_metrics")}
+    assert "ranking" in columns
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT ranking FROM schema_metrics")).scalar() is None
+    migrate(engine)  # second run: nothing to add
+    engine.dispose()

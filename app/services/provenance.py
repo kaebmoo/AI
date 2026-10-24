@@ -33,7 +33,7 @@ DECLARED_FIELDS = {
     "schema_contexts": frozenset({"main_view", "description", "instruction_th", "scope_columns"}),
     "schema_metadata": frozenset({"description", "data_type", "is_summable", "is_groupable"}),
     "schema_metrics": frozenset({"name_th", "synonyms", "extends", "dataset", "period", "dimensions", "terms", "expr",
-                                  "official_scope", "official_total", "reference", "unit", "note_th"}),
+                                  "official_scope", "official_total", "reference", "unit", "note_th", "ranking"}),
     "vanna_documentation": frozenset({"title", "content", "category", "context_name"}),
     "golden_examples": frozenset({"question_pattern", "expected_sql", "category"}),
 }

@@ -31,6 +31,8 @@ class Metric:
     reference: dict | None
     unit: str | None
     note_th: str | None
+    # {scope, base, base_name_th}: applied to a breakdown/ranking only — see compile()
+    ranking: dict | None = None
 
 
 def load_metrics(context_name: str, config_engine=None) -> list[Metric]:
@@ -47,7 +49,7 @@ def load_metrics(context_name: str, config_engine=None) -> list[Metric]:
             metrics = []
             for row in rows:
                 values = dict(row)
-                for key in ("synonyms", "period", "dimensions", "terms", "official_total", "reference"):
+                for key in ("synonyms", "period", "dimensions", "terms", "official_total", "reference", "ranking"):
                     if isinstance(values[key], str):
                         values[key] = json.loads(values[key])
                 values["synonyms"] = tuple(values["synonyms"] or ())
@@ -158,6 +160,7 @@ class Compiled:
     official: bool
     table: str
     note_th: str | None
+    base_name_th: str | None = None  # the ratio's denominator column, when the result carries one
 
 
 def _validate_shape(dimensions, filters, metric: Metric) -> None:
@@ -421,11 +424,7 @@ def compile(req: CompileRequest, resolved: dict[str, Metric]) -> Compiled:
         if req.order_desc is not None and type(req.order_desc) is not bool:
             raise ValueError("Invalid ordering")
 
-        def expression(current: Metric, visiting: frozenset[str]) -> str:
-            if current.metric_id in visiting:
-                raise ValueError("Cyclic metric expression")
-            if current.dataset != metric.dataset or current.period != metric.period:
-                raise ValueError("Referenced metric must use the same dataset and period mapping")
+        def render(expr_text: str, current: Metric, visiting: frozenset[str]) -> str:
             value = _quote(current.period["value"][req.mode])
 
             def identifier(name: str) -> str:
@@ -438,9 +437,19 @@ def compile(req: CompileRequest, resolved: dict[str, Metric]) -> Compiled:
                     return f"({expression(resolved[name], visiting | {current.metric_id})})"
                 raise ValueError(f"Unknown metric expression identifier: {name}")
 
-            return _Expression(current.expr, identifier).parse()
+            return _Expression(expr_text, identifier).parse()
+
+        def expression(current: Metric, visiting: frozenset[str]) -> str:
+            if current.metric_id in visiting:
+                raise ValueError("Cyclic metric expression")
+            if current.dataset != metric.dataset or current.period != metric.period:
+                raise ValueError("Referenced metric must use the same dataset and period mapping")
+            return render(current.expr, current, visiting)
 
         expr = expression(metric, frozenset())
+        ranking = metric.ranking if metric.ranking is not None else {}
+        if not isinstance(ranking, dict):
+            raise ValueError("Invalid ranking declaration")
         official = not req.dimensions and not req.filters
         total = metric.official_total if official and req.official_total_ok else None
         table = total["dataset"] if total is not None else metric.dataset
@@ -466,14 +475,35 @@ def compile(req: CompileRequest, resolved: dict[str, Metric]) -> Compiled:
                 period += f" AND {predicate}"
         # a ratio's column says so in its name: "EBT Margin (%)" reads as percent in the data block too
         alias = f"{metric.name_th} (%)" if (metric.unit or "").strip().lower() in ("percent", "%") else metric.name_th
-        selection = ", ".join([*dims, f"{measure} AS {_quote(alias)}"])
-        sql = f"SELECT {selection} FROM {_quote(table)} WHERE {period}"
+        # A breakdown or ranking of a ratio across units: the contract's `ranking.scope` keeps units the
+        # report would not compare (EBT margin of a support unit with 442 baht of revenue: -47 million %),
+        # and `ranking.base` puts the denominator beside the ratio so the reader sees the base.
+        base_sql = base_name = None
+        if total is None and (dims or req.order_desc is not None) and ranking:
+            scope = ranking.get("scope")
+            if scope is not None:
+                if not isinstance(scope, str) or not scope.strip():
+                    raise ValueError("Invalid ranking scope")
+                period += f" AND ({scope})"
+            base = ranking.get("base")
+            if base is not None:
+                if not isinstance(base, str) or not base.strip():
+                    raise ValueError("Invalid ranking base")
+                base_sql = render(base, metric, frozenset())
+                base_name = ranking.get("base_name_th") or "ฐาน"
+                if not isinstance(base_name, str):
+                    raise ValueError("Invalid ranking base name")
+        columns = [*dims]
+        if base_sql is not None:
+            columns.append(f"({base_sql}) AS {_quote(base_name)}")
+        columns.append(f"{measure} AS {_quote(alias)}")
+        sql = f"SELECT {', '.join(columns)} FROM {_quote(table)} WHERE {period}"
         if dims:
             sql += " GROUP BY " + ", ".join(dims)
         if req.order_desc is not None:
-            sql += f" ORDER BY {len(dims) + 1} {'DESC' if req.order_desc else 'ASC'}"
+            sql += f" ORDER BY {len(columns)} {'DESC' if req.order_desc else 'ASC'}"
         if req.limit is not None:
             sql += f" LIMIT {req.limit}"
-        return Compiled(sql, metric.metric_id, metric.name_th, metric.unit, official, table, metric.note_th)
+        return Compiled(sql, metric.metric_id, metric.name_th, metric.unit, official, table, metric.note_th, base_name)
     except (KeyError, TypeError, AttributeError, RecursionError) as exc:
         raise ValueError("Invalid metric declaration or compile request") from exc

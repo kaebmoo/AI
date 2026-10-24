@@ -269,6 +269,28 @@ def _validate_metric(metric: dict, datasets: dict, earlier_ids: set) -> None:
         for key in ("column", "month_column"):
             if total.get(key) not in datasets[total["dataset"]]:
                 raise ValueError(f"unknown official_total {key} {total.get(key)!r}")
+    ranking = metric.get("ranking")
+    if ranking is not None:
+        if not isinstance(ranking, dict) or not set(ranking) <= {"scope", "base", "base_name_th"}:
+            raise ValueError("ranking must be a mapping of scope / base / base_name_th")
+        scope = ranking.get("scope")
+        if scope is not None:
+            if not isinstance(scope, str) or not scope.strip():
+                raise ValueError("ranking.scope must be a non-empty predicate")
+            where = re.sub(r"'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"", "", scope)
+            used = set(re.findall(r"\b([a-z_][a-z0-9_]*)\s*(?:=|<>|!=|\bIN\b|\bLIKE\b|>|<)", where, re.I))
+            if used - columns:
+                raise ValueError(f"ranking.scope: unknown columns {sorted(used - columns)} in {dataset}")
+        base = ranking.get("base")
+        if base is not None:
+            if not isinstance(base, str) or not base.strip():
+                raise ValueError("ranking.base must be a non-empty expression")
+            used = set(re.sub(r"\bnullif\b|\b\d+(?:\.\d+)?(?:e[+-]?\d+)?\b|[+\-*/(),]", " ", base, flags=re.I).split())
+            if used - set(metric.get("terms") or {}) - earlier_ids:
+                raise ValueError(f"ranking.base: unknown identifiers {sorted(used - set(metric.get('terms') or {}) - earlier_ids)}")
+        name = ranking.get("base_name_th")
+        if name is not None and (not isinstance(name, str) or not name.strip()):
+            raise ValueError("ranking.base_name_th must be a non-empty string")
 
 
 def sync_metrics(conn, domain: str, contract: dict, context_name: str) -> int:
@@ -308,7 +330,7 @@ def sync_metrics(conn, domain: str, contract: dict, context_name: str) -> int:
             if values["official_total"] is not None:
                 total = values["official_total"]
                 values["official_total"] = {**total, "dataset": f"feed_{domain}_{total['dataset']}"}
-            for field in ("synonyms", "period", "dimensions", "terms", "official_total", "reference"):
+            for field in ("synonyms", "period", "dimensions", "terms", "official_total", "reference", "ranking"):
                 if values[field] is not None:
                     values[field] = json.dumps(values[field], ensure_ascii=False, sort_keys=True)
         except (KeyError, TypeError, ValueError, AttributeError) as exc:

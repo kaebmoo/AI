@@ -94,6 +94,7 @@ class SchemaMetric(ProvenanceMixin, ConfigBase):
     reference = Column(JSON, nullable=True)
     unit = Column(String(50), nullable=True)
     note_th = Column(Text, nullable=True)
+    ranking = Column(JSON, nullable=True)  # {scope, base, base_name_th} for breakdowns/rankings (2026-10-24)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)

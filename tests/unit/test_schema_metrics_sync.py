@@ -190,3 +190,26 @@ def test_missing_table_is_safe_and_warns_once(engine, contract, monkeypatch, cap
     assert sync(engine, contract) == ("feed_ebt", 12, 3)
     assert sync(engine, contract) == ("feed_ebt", 12, 3)
     assert caplog.text.count("schema_metrics unavailable") == 1
+
+
+def test_ranking_is_declared_validated_and_stored(engine, contract):
+    """ebt 1.6.0: `ranking: {scope, base, base_name_th}` on a ratio — stored as JSON; a scope that names a column the
+    dataset lacks, or a base with an unknown identifier, skips that metric (the others still sync)."""
+    contract = deepcopy(contract)
+    contract["datasets"][0]["columns"].append({"name": "is_hq", "dtype": "integer"})
+    contract["metrics"][2]["ranking"] = {"scope": "is_hq = 0", "base": "rev", "base_name_th": "รายได้"}
+    sync(engine, contract)
+    with engine.connect() as conn:
+        row = conn.execute(text("SELECT ranking FROM schema_metrics WHERE metric_id = 'ebt_margin'")).scalar()
+    assert json.loads(row) == {"base": "rev", "base_name_th": "รายได้", "scope": "is_hq = 0"}
+    # an invalid declaration is skipped with a warning: the last valid row stays (existing rule for any invalid metric)
+    for bad in ({"scope": "is_support = 0"}, {"base": "revenue"}, "is_hq = 0", {"extra": 1}):
+        contract["metrics"][2]["ranking"] = bad
+        sync(engine, contract)
+        with engine.connect() as conn:
+            kept = conn.execute(text("SELECT ranking FROM schema_metrics WHERE metric_id = 'ebt_margin'")).scalar()
+        assert json.loads(kept) == {"base": "rev", "base_name_th": "รายได้", "scope": "is_hq = 0"}, bad
+    contract["metrics"][2].pop("ranking")  # withdrawn from the contract → cleared
+    sync(engine, contract)
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT ranking FROM schema_metrics WHERE metric_id = 'ebt_margin'")).scalar() is None

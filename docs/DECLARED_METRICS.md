@@ -52,6 +52,10 @@ metrics:
     extends: ebt
     expr: "ebt / nullif(rev - other, 0) * 100"
     unit: percent                             # ไม่มี official_total / reference (ratio รวม __ALL__ ไม่ได้)
+    ranking:                                  # (ebt 1.6.0) ใช้เฉพาะเมื่อแยกมิติ/จัดอันดับ — ไม่แตะยอดรวมและการค้นหน่วยที่ระบุชื่อ
+      scope: "is_hq = 0"                      #   WHERE เพิ่ม: เปรียบเฉพาะหน่วยปฏิบัติการ (margin ของหน่วยสนับสนุนรายได้ 442 บาท = −47 ล้าน%)
+      base: "rev - other"                     #   expression ตาม grammar เดียวกับ expr → คอลัมน์ตัวหารคู่ไปก่อนค่า metric
+      base_name_th: "รายได้ (ฐานยอดขาย)"       #   ชื่อคอลัมน์นั้น
 ```
 
 กติกา: `expr` ไม่ใช่ SQL เต็ม (ตรวจไวยากรณ์ได้; ชื่อนอก term/metric = ปฏิเสธ) · `where` อ้างได้เฉพาะคอลัมน์ของ dataset (ตรวจตอน sync ฝั่ง AI และ test ฝั่ง NT-Report) ·
@@ -65,6 +69,7 @@ metrics:
    รูป `aggregation`/`ranking` งวดเดียว, มิติ/ตัวกรองอยู่ในที่ประกาศ, mapping ที่ **ถูกกระตุ้นจริงในคำถามและไม่ใช่ชื่อ metric เอง** = ไม่มี; filter บนคอลัมน์งวดถือเป็นงวด ไม่ใช่ตัวตัดสิทธิ์
 4. `compile()` → SQL หนึ่งคำสั่ง (ไม่มีมิติ/ตัวกรองหน่วยงาน → `official_total` ถ้าตารางลงทะเบียน ไม่งั้น `dataset` + `official_scope`; มีมิติแต่ไม่มีตัวกรอง → `dataset` + `official_scope` และ `official=false`
    — ผู้ถามไม่ได้เลือกหน่วยงาน การแยกตามมิติจึงอยู่ในขอบเขตของรายงาน (D-3; แก้ 2026-10-24 — เดิมไม่ใส่ scope ทำให้ "ศูนย์ต้นทุนไหน EBT สูงสุด" ได้หน่วยนอก 2 สายงานขาย); มีตัวกรองหน่วยงาน → ไม่ใส่ scope และ `official=false` — หน่วยนอกขอบเขตยังคำนวณได้)
+   · metric ที่ประกาศ `ranking` และคำขอมีมิติหรือจัดอันดับ (ไม่ใช่ยอดรวม/ไม่ใช่ตัวกรองอย่างเดียว): เพิ่ม `AND (scope)` และคอลัมน์ `base` ก่อนค่า metric; `ORDER BY` ชี้ที่ค่า metric เสมอ
    · การจัดอันดับ ("สูงสุด 10 อันดับ") = `ORDER BY` ค่าของ metric เมื่อ `intent_type=ranking`, มี `limit`, หรือ `ordering.column` เป็นชื่อของ metric เอง (id / name_th / คำพ้อง / คอลัมน์ official_total / ค่าใน `metrics`);
    `ordering` ตามคอลัมน์มิติอย่างเดียวไม่เรียง, ตามคอลัมน์ที่ไม่รู้จัก → `plan()` ไม่รับ
    → **ไม่เรียก pass 2** → guard / `validate_sql` / scope wrapper / execute / explain ตามเดิม (ขั้นอธิบายได้ชื่อ metric + note) · `QueryResult.metric` = `{id, name_th, unit, official, table}`

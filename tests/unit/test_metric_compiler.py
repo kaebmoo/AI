@@ -317,7 +317,7 @@ def test_loading_active_json_rows_and_no_cache(metrics, monkeypatch):
         with engine.begin() as conn:
             for metric in metrics:
                 values = asdict(metric)
-                for key in ("synonyms", "period", "dimensions", "terms", "official_total", "reference"):
+                for key in ("synonyms", "period", "dimensions", "terms", "official_total", "reference", "ranking"):
                     if values[key] is not None:
                         values[key] = json.dumps(values[key], ensure_ascii=False)
                 columns = ", ".join(values)
@@ -405,3 +405,69 @@ def test_percent_metric_column_is_named_as_percent(resolved):
     assert margin.unit == "percent"
     ebt = compile(CompileRequest("ebt", 202609, "cumulative"), resolved)
     assert 'AS "EBT (กำไรก่อนภาษี ตามรายงาน EBT)"' in ebt.sql and "(%)" not in ebt.sql
+
+
+@pytest.fixture(scope="module")
+def ranked(resolved):
+    """ebt_margin with the contract's ranking declaration (ebt 1.6.0): rank/break down operational units only
+    (is_hq = 0) and carry the revenue base beside the ratio."""
+    margin = replace(resolved["ebt_margin"], ranking={"scope": "is_hq = 0", "base": "rev - other",
+                                                      "base_name_th": "รายได้ (ฐานยอดขาย)"})
+    return resolved | {"ebt_margin": margin}
+
+
+@pytest.fixture(scope="module")
+def hq_databases():
+    rows = [  # (time_key, division, sub_unit, is_hq, measure_type, group_0, group_1, amount, amount_ytd)
+        (202609, S1, "ส่วนขายและบริการลูกค้า ก", 0, "SUBTOTAL", "", "รวมรายได้ทั้งสิ้น", 10, 100),
+        (202609, S1, "ส่วนขายและบริการลูกค้า ก", 0, "SUBTOTAL", "", "รวมค่าใช้จ่ายทั้งสิ้น", 9, 90),
+        (202609, S1, "ส่วนขายและบริการลูกค้า ข", 0, "SUBTOTAL", "", "รวมรายได้ทั้งสิ้น", 20, 200),
+        (202609, S1, "ส่วนขายและบริการลูกค้า ข", 0, "SUBTOTAL", "", "รวมค่าใช้จ่ายทั้งสิ้น", 24, 240),
+        (202609, S2, "ส่วนปฏิบัติการวิศวกรรม", 1, "SUBTOTAL", "", "รวมรายได้ทั้งสิ้น", 0.1, 1),
+        (202609, S2, "ส่วนปฏิบัติการวิศวกรรม", 1, "SUBTOTAL", "", "รวมค่าใช้จ่ายทั้งสิ้น", 100, 1000),
+    ]
+    connections = [duckdb.connect(":memory:"), sqlite3.connect(":memory:")]
+    for conn in connections:
+        conn.execute("CREATE TABLE feed_ebt_fact_ebt (time_key INTEGER, division TEXT, sub_unit TEXT, is_hq INTEGER, "
+                     "measure_type TEXT, group_0 TEXT, group_1 TEXT, amount DOUBLE, amount_ytd DOUBLE)")
+        conn.executemany("INSERT INTO feed_ebt_fact_ebt VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+    yield connections
+    for conn in connections:
+        conn.close()
+
+
+def test_ranking_scope_and_base_apply_to_breakdowns_only(ranked, hq_databases):
+    """"ebt margin ต่ำสุด 10 ส่วนงาน" (2026-10-24) ranked support units with a few hundred baht of revenue
+    first (-47,199,339 %). With the declaration: HQ rows are out, the base column travels with the ratio,
+    ORDER BY points at the ratio past the base, and a plain total is untouched."""
+    req = CompileRequest("ebt_margin", 202609, "cumulative", dimensions=("sub_unit",), order_desc=False, limit=10)
+    compiled, rows = execute(req, ranked, hq_databases)
+    assert compiled.base_name_th == "รายได้ (ฐานยอดขาย)"
+    assert "AND (is_hq = 0)" in compiled.sql and 'AS "รายได้ (ฐานยอดขาย)"' in compiled.sql
+    assert compiled.sql.endswith('GROUP BY "sub_unit" ORDER BY 3 ASC LIMIT 10')
+    assert [(r[0], r[1], round(r[2], 1)) for r in rows] == [("ส่วนขายและบริการลูกค้า ข", 200, -20.0),
+                                                            ("ส่วนขายและบริการลูกค้า ก", 100, 10.0)]
+    # the official total (no dimension, no filter) is the whole scope: no is_hq, no base column
+    total, _ = execute(CompileRequest("ebt_margin", 202609, "cumulative"), ranked, hq_databases)
+    assert "is_hq" not in total.sql and "ฐานยอดขาย" not in total.sql and total.base_name_th is None
+    # a filter alone is a lookup of named units, not a comparison across them: scope stays off
+    one, _ = execute(replace(CompileRequest("ebt_margin", 202609, "cumulative"),
+                             filters=({"column": "sub_unit", "operator": "=", "value": "ส่วนปฏิบัติการวิศวกรรม"},)),
+                     ranked, hq_databases)
+    assert "is_hq" not in one.sql
+    # a ranking without a dimension still ranks the fact table inside the scope, with the base
+    top, _ = execute(CompileRequest("ebt_margin", 202609, "cumulative", order_desc=True, limit=1), ranked, hq_databases)
+    assert "AND (is_hq = 0)" in top.sql and top.sql.endswith("ORDER BY 2 DESC LIMIT 1")
+    # metrics without a ranking declaration compile exactly as before
+    plain, _ = execute(CompileRequest("ebt", 202609, "cumulative", dimensions=("sub_unit",), order_desc=True), ranked, hq_databases)
+    assert "is_hq" not in plain.sql and plain.sql.endswith('GROUP BY "sub_unit" ORDER BY 2 DESC')
+
+
+@pytest.mark.parametrize("ranking", [
+    "is_hq = 0", {"scope": ""}, {"scope": 1}, {"base": ""}, {"base": "unknown_term"}, {"base": "rev; drop table x"},
+    {"base": "rev", "base_name_th": 5},
+])
+def test_reject_bad_ranking_declarations(ranked, ranking):
+    metric = replace(ranked["ebt_margin"], ranking=ranking)
+    with pytest.raises(ValueError):
+        compile(CompileRequest("ebt_margin", 202609, "cumulative", dimensions=("sub_unit",)), ranked | {"ebt_margin": metric})
