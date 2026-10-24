@@ -132,13 +132,15 @@ def test_measured_contract_and_hierarchy_facts_only_queue_proposals(feed):
     assert "ฝ่าย" in unit["description"] and "ระดับ 3" in unit["description"]
     assert "สายงาน > กลุ่ม > ฝ่าย > ส่วน > ศูนย์ต้นทุน" in unit["description"]
     assert unit["facts"]["prefix"] == {"word": "ฝ่าย", "share": 0.75, "level_number": 3}
-    assert "75%" in unit["description"]
+    assert "ค่าส่วนใหญ่ขึ้นต้นด้วย 'ฝ่าย' — ตรงกับชื่อระดับ" in unit["description"]
+    assert "%" not in unit["description"]
     assert "INACTIVE" not in unit["description"] and "PROPOSED" not in unit["description"]
     assert "ชื่อย่อของ unit (คู่ 1:1)" in drafts["unit_short_name"]["description"]
     assert "ห้าม SUM ข้ามงวด" in drafts["amount_ytd"]["description"]
     assert "SUM ข้ามงวดได้" in drafts["amount"]["description"]
     assert "หน่วย: บาท" in drafts["amount"]["description"]
-    assert "202601–202609" in drafts["time_key"]["description"]
+    assert drafts["time_key"]["description"] == "งวด ค.ศ. YYYYMM; เป็นส่วนของคีย์ของตาราง"
+    assert drafts["time_key"]["facts"]["period"] == {"min": 202601, "max": 202609}
     assert drafts["time_key"]["facts"]["key"] == ["cost_center"]
     assert {d["column_name"] for d in result["skipped"]} == {"division", "opaque", "row_rejected"}
     assert "untracked" not in drafts
@@ -147,6 +149,45 @@ def test_measured_contract_and_hierarchy_facts_only_queue_proposals(feed):
     assert _snapshot(feed) == before
     assert knowledge_db.rows(feed.path, "SELECT source, status, count(*) FROM knowledge_proposals GROUP BY source, status") == [
         ("inferred", "proposed", 6)]
+
+
+def test_same_columns_across_context_tables_have_identical_draft_text(feed):
+    other_table = "feed_ebt_fact_other"
+    other_path = feed.data_path.with_name("fact_other.csv")
+    with feed.data_path.open(newline="") as f:
+        header, *rows = csv.reader(f)
+    with other_path.open("w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(header)
+        for row in rows:
+            row[0] = 202701
+            row[2] = row[2].replace("ทีม Delta", "ฝ่าย Delta")
+            writer.writerow(row)
+    contract = yaml.safe_load(feed.contract_path.read_text())
+    dataset = contract["datasets"][0]
+    dataset["keys"] = ["time_key", "unit", "cost_center"]
+    contract["datasets"].append({**dataset, "name": "fact_other", "keys": [*dataset["keys"], "division"]})
+    feed.contract_path.write_text(yaml.safe_dump(contract, allow_unicode=True))
+    with feed.config.begin() as conn:
+        conn.execute(text(
+            "INSERT INTO source_tables (source_id, table_name, file_name, columns) "
+            "SELECT source_id, :other, :file, columns FROM source_tables WHERE table_name = :t"
+        ), {"other": other_table, "file": other_path.name, "t": TABLE})
+        conn.execute(text(
+            "INSERT INTO schema_metadata (table_name, column_name, description, source, status) "
+            "SELECT :other, column_name, description, source, status FROM schema_metadata WHERE table_name = :t"
+        ), {"other": other_table, "t": TABLE})
+    first = {d["column_name"]: d for d in _draft(feed)["drafts"]}
+    with feed.config.begin() as conn:
+        second = {d["column_name"]: d for d in draft_columns(conn, other_table)["drafts"]}
+    assert first["time_key"]["facts"]["period"] == {"min": 202601, "max": 202609}
+    assert second["time_key"]["facts"]["period"] == {"min": 202701, "max": 202701}
+    assert first["unit"]["facts"]["prefix"]["share"] == 0.75
+    assert second["unit"]["facts"]["prefix"]["share"] == 1.0
+    for name in ("time_key", "unit", "cost_center"):
+        assert second[name]["facts"]["key"] == [*first[name]["facts"]["key"], "division"]
+    assert {name: d["description"] for name, d in first.items()} == {
+        name: d["description"] for name, d in second.items()}
 
 
 @pytest.mark.parametrize("policy", ["aggregated_only", "schema_only"])
@@ -382,11 +423,13 @@ def test_abbreviations_and_name_siblings_without_bare_column(extended_feed):
 
 def test_year_and_month_facts_require_integer_time_profile(extended_feed):
     drafts = {d["column_name"]: d for d in _draft(extended_feed)["drafts"]}
-    assert "ปี ค.ศ. ช่วง 2025–2026" in drafts["year_ce"]["description"]
+    assert drafts["year_ce"]["description"] == "ปี ค.ศ."
+    assert drafts["year_ce"]["facts"]["period"] == {"min": 2025, "max": 2026, "kind": "year_ce"}
     for name in ("year_be", "year_th"):
-        assert "ปี พ.ศ. ช่วง 2568–2569" in drafts[name]["description"]
+        assert drafts[name]["description"] == "ปี พ.ศ."
+        assert drafts[name]["facts"]["period"] == {"min": 2568, "max": 2569, "kind": "year_be"}
     assert "เดือน (1–12)" in drafts["month_no"]["description"]
-    assert "งวด ค.ศ. YYYYMM ช่วง 202601–202609" in drafts["time_key"]["description"]
+    assert drafts["time_key"]["description"] == "งวด ค.ศ. YYYYMM; เป็นส่วนของคีย์ของตาราง"
     assert "number" not in drafts
 
 

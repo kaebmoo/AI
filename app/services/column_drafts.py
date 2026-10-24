@@ -119,17 +119,16 @@ def _description(facts):
         f = facts["prefix"]
         note = (f" — ตรงกับชื่อระดับ '{f['word']}' (ระดับ {f['level_number']}) ของโครงสร้าง"
                 if "level_number" in f else "")
-        parts.append(f"ค่าส่วนใหญ่ขึ้นต้นด้วย '{f['word']}' ({f['share']:.0%}){note}")
+        parts.append(f"ค่าส่วนใหญ่ขึ้นต้นด้วย '{f['word']}'{note}")
     if "period" in facts:
         f = facts["period"]
         if f.get("kind") == "month":
             parts.append("เดือน (1–12)")
         else:
             label = {"year_ce": "ปี ค.ศ.", "year_be": "ปี พ.ศ."}.get(f.get("kind"), "งวด ค.ศ. YYYYMM")
-            parts.append(f"{label} ช่วง {f['min']}–{f['max']}")
+            parts.append(label)
     if "key" in facts:
-        others = facts["key"]
-        parts.append("เป็นส่วนของคีย์ของตาราง" + (f" (ร่วมกับ {', '.join(others)})" if others else ""))
+        parts.append("เป็นส่วนของคีย์ของตาราง")
     if "measure" in facts:
         f = facts["measure"]
         if f.get("agg") == "point_in_time":
