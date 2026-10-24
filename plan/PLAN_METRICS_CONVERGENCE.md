@@ -18,7 +18,7 @@
 
 **Acceptance ที่ใช้ทุก slice (จาก root ของ worktree):**
 ```
-ACC-T: env -i HOME=/Users/seal PATH=/usr/bin:/bin SECRET_KEY=ci-test-secret-key-not-for-prod REDIS_URL=redis://localhost:6379/0 ALLOWED_EMAIL_DOMAINS='["nt.th"]' CONFIG_DB_URL=sqlite:///.ai/db/config.db DATABASE_URL=sqlite:///.ai/db/app.db /Users/seal/Documents/GitHub/AI/venv/bin/python3.14 -I -m pytest tests -q --maxfail=5 -p no:cacheprovider   → exit 0 (baseline 2026-10-24: 1426 passed, 3 skipped)
+ACC-T: env -i HOME=/Users/seal PATH=/usr/bin:/bin SECRET_KEY=ci-test-secret-key-not-for-prod REDIS_URL=redis://localhost:6379/0 ALLOWED_EMAIL_DOMAINS='["nt.th"]' CONFIG_DB_URL=sqlite:///.ai/db/config.db DATABASE_URL=sqlite:///.ai/db/app.db /Users/seal/Documents/GitHub/AI/venv/bin/python3.14 -I -m pytest tests -q --maxfail=5 -p no:cacheprovider   → exit 0 (baseline 2026-10-24 เย็น: 1440 passed, 3 skipped — หลัง C-0c)
 ACC-L: /Users/seal/Documents/GitHub/AI/venv/bin/ruff check app mcp_servers scripts --select E9,F63,F7,F82   → exit 0
 ```
 
@@ -234,4 +234,12 @@ Acceptance: ACC-T, ACC-L; `pytest tools/feed`; ถาม "ebt margin ต่ำ�
 /delegate ทำตาม plan/PLAN_METRICS_CONVERGENCE.md Phase A (slice A-01, A-02) ใน worktree นี้ บน branch จาก main;
 ข้อตัดสิน M-1 = ก, M-3 = ก; acceptance ACC-T/ACC-L ตาม §0; หยุดก่อนรัน migration บน app.db จริง
 ```
-Phase ถัดไปสั่งแยก run (D แล้ว B แล้ว C-00; C-01 เป็น run ในโปรเจกต์ NT-Report) — แต่ละ run จบด้วยการเติม `plan/RESULT_METRICS_CONVERGENCE.md`
+Phase ถัดไปสั่งแยก run ตามลำดับ **A → D → E → B → C-0b → C-00/C-01** (C-0c ทำแล้ว 2026-10-24; C-01 และส่วน NT-Report ของ C-0b/E เป็น run ในโปรเจกต์ NT-Report
+ที่ worktree `_worktrees/NT-Report-metrics`) — ใส่ข้อตัดสิน M-* ที่ phase นั้นใช้ลงใน prompt ทุกครั้ง (D: M-6; E: M-8, M-9; B: M-2; C: M-4, M-5, M-7)
+แต่ละ run จบด้วยการเติม `plan/RESULT_METRICS_CONVERGENCE.md`
+
+ตัวอย่าง phase ถัดไป:
+```
+/delegate ทำตาม plan/PLAN_METRICS_CONVERGENCE.md Phase D (slice D-01, D-02) ใน worktree นี้ บน branch จาก main;
+ข้อตัดสิน M-6 = ก; acceptance ACC-T/ACC-L ตาม §0; server ซ้อม port 8001 บนสำเนา .ai/db เท่านั้น
+```
