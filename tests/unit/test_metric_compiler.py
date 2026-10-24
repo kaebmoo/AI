@@ -471,3 +471,78 @@ def test_reject_bad_ranking_declarations(ranked, ranking):
     metric = replace(ranked["ebt_margin"], ranking=ranking)
     with pytest.raises(ValueError):
         compile(CompileRequest("ebt_margin", 202609, "cumulative", dimensions=("sub_unit",)), ranked | {"ebt_margin": metric})
+
+
+def _single(resolved, databases, metric_id, period, mode, dimension):
+    sql = compile(CompileRequest(metric_id, period, mode, dimensions=(dimension,)), resolved).sql
+    return dict(databases[0].execute(sql).fetchall())
+
+
+# ebt_margin by unit needs is_hq (its ranking scope): covered on hq_databases below
+@pytest.mark.parametrize("metric_id", ["ebt", "ebt_excluding_personnel"])
+@pytest.mark.parametrize("mode", ["cumulative", "month"])
+def test_comparison_by_unit_is_both_single_periods_and_their_change(resolved, databases, metric_id, mode):
+    req = CompileRequest(metric_id, 202609, mode, dimensions=("sub_unit",), base_period=202608, order_desc=True)
+    compiled, rows = execute(req, resolved, databases)
+    now = _single(resolved, databases, metric_id, 202609, mode, "sub_unit")
+    then = _single(resolved, databases, metric_id, 202608, mode, "sub_unit")
+    # only units with rows in both periods: น่าน has 202608 rows, ส่วน X / Y do not
+    assert [r[0] for r in rows] == [NAN]
+    unit, before, after, change = rows[0]
+    assert (before, after, change) == (pytest.approx(then[NAN]), pytest.approx(now[NAN]), pytest.approx(now[NAN] - then[NAN]))
+    label = "สะสม " if mode == "cumulative" else ""
+    alias = compiled.name_th
+    assert f'AS "{alias} {label}08/2569"' in compiled.sql and f'AS "{alias} {label}09/2569"' in compiled.sql
+    assert 'AS "ผลต่าง"' in compiled.sql
+    assert compiled.compare == f"เทียบ {label}09/2569 กับ {label}08/2569; ผลต่าง = {label}09/2569 − {label}08/2569"
+    assert "IN (202608, 202609)" in compiled.sql and compiled.sql.endswith("ORDER BY 4 DESC")
+    assert compiled.base_name_th is None
+
+
+@pytest.mark.parametrize("change,kept", [("up", [NAN]), ("down", []), (None, [NAN])])
+def test_comparison_keeps_the_units_that_moved_the_asked_way(resolved, databases, change, kept):
+    # น่าน: EBT 35 at 202609 against 100000 - 100000 - 100000 = -100000 at 202608 (its 202608 rows: revenue,
+    # other income, expense, labour of 100000 each) — it went up
+    req = CompileRequest("ebt", 202609, "cumulative", dimensions=("sub_unit",), base_period=202608, change=change,
+                         order_desc=change != "down")
+    compiled, rows = execute(req, resolved, databases)
+    assert [r[0] for r in rows] == kept
+    if change:
+        assert ("> 0" if change == "up" else "< 0") in compiled.sql and "แสดงเฉพาะหน่วยที่" in compiled.compare
+    else:
+        assert "แสดงเฉพาะ" not in compiled.compare
+
+
+def test_comparison_total_reads_the_official_table_for_both_periods(resolved, databases):
+    compiled, rows = execute(CompileRequest("ebt", 202609, "cumulative", base_period=202608), resolved, databases)
+    assert compiled.official and compiled.table == "feed_ebt_fact_ebt_total_monthly"
+    assert rows == [(None, 295, None)]  # the synthetic official table has no 202608 row
+    assert "HAVING" not in compiled.sql and "แสดงเฉพาะ" not in compiled.compare
+    # a named unit is a lookup: no presence or change filter that could empty it
+    one, rows = execute(replace(CompileRequest("ebt", 202609, "cumulative", base_period=202608, change="up"),
+                                filters=NAN_FILTER), resolved, databases)
+    assert "HAVING" not in one.sql and len(rows) == 1
+
+
+def test_comparison_of_a_ranked_ratio_keeps_the_scope_but_not_for_a_named_unit(ranked, hq_databases):
+    by_unit = compile(CompileRequest("ebt_margin", 202609, "cumulative", dimensions=("sub_unit",), base_period=202509,
+                                     order_desc=True), ranked)
+    assert "AND (is_hq = 0)" in by_unit.sql and "ฐานยอดขาย" not in by_unit.sql
+    named = compile(CompileRequest("ebt_margin", 202609, "cumulative", base_period=202509, order_desc=True,
+                                   filters=({"column": "sub_unit", "operator": "=", "value": "ส่วนปฏิบัติการวิศวกรรม"},)),
+                    ranked)
+    assert "is_hq" not in named.sql
+
+
+@pytest.mark.parametrize("changes", [{"base_period": 202609}, {"base_period": 202610}, {"base_period": "202608"},
+                                     {"base_period": 202608, "change": "sideways"}])
+def test_comparison_rejects_bad_requests(resolved, changes):
+    with pytest.raises(ValueError):
+        compile(replace(CompileRequest("ebt", 202609, "cumulative", dimensions=("sub_unit",)), **changes), resolved)
+
+
+def test_single_period_sql_is_unchanged_by_the_comparison_code(resolved):
+    req = CompileRequest("ebt", 202609, "month", dimensions=("division",), order_desc=False, limit=3)
+    sql = compile(req, resolved).sql
+    assert "IN (202608" not in sql and "CAST(\"time_key\" AS INTEGER) = 202609" in sql and "HAVING" not in sql
+    assert sql.endswith('GROUP BY "division" ORDER BY 2 ASC LIMIT 3')

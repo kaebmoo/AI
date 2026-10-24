@@ -702,3 +702,107 @@ async def test_hybrid_flow_hands_the_labels_to_plan(metrics, intent, monkeypatch
     prompt, two_pass, compiled = await _first(_service(selection), trace=trace)
     assert (compiled is not None) is compiled_expected
     assert trace.stages.get("metric_declined") == (None if compiled_expected else "mapping_triggered:น่าน")
+
+
+# the intents pass 1 wrote for comparison questions on the practice server (2026-10-25, PLAN_METRICS_COMPARISON §1)
+COMPARE = {"intent_type": "comparison", "metrics": ["ebt"], "metric_id": "ebt", "dimensions": ["division"],
+           "filters": [], "time_range": YTD, "ordering": None, "limit": None}
+
+
+@pytest.mark.parametrize("question,changes,expected", [
+    ("สายงานไหน EBT ดีกว่าปีก่อนหน้าบ้าง", {}, (202609, 202509, "cumulative", "up", True)),
+    ("สายงานไหนมี EBT สะสมแย่ลงกว่าปีที่แล้ว", {"ordering": {"column": "ebt", "direction": "ASC"}, "limit": 10},
+     (202609, 202509, "cumulative", "down", False)),
+    ("EBT เดือนกันยายนเทียบกับเดือนสิงหาคม ฝ่ายไหนเพิ่มขึ้น",
+     {"metrics": ["ebt_month"], "dimensions": ["unit"], "time_range": None,
+      "filters": _period(("IN", [202608, 202609])), "ordering": {"column": "diff_ebt", "direction": "DESC"}},
+     (202609, 202608, "month", "up", True)),
+    ("สายงานไหนมี EBT margin เทียบกับปีก่อน", {"metric_id": "ebt_margin", "filters": _period(("BETWEEN", [202509, 202609])),
+                                               "ordering": {"column": "ebt_margin", "direction": "ASC"}},
+     (202609, 202509, "cumulative", None, False)),
+    ("EBT ปีนี้เทียบกับปีก่อนดีขึ้นหรือแย่ลง", {"dimensions": []}, (202609, 202509, "cumulative", None, True)),
+])
+def test_plan_compiles_a_comparison(metrics, question, changes, expected):
+    req, reason = compiler.plan_with_reason(COMPARE | changes, question, compiler.resolve(metrics), [], 202609, set())
+    assert reason is None
+    assert (req.period, req.base_period, req.mode, req.change, req.order_desc) == expected
+
+
+@pytest.mark.parametrize("changes,reason", [
+    ({"filters": _period(("IN", [202507, 202508, 202509]))}, "period_filter:compare"),
+    ({"filters": _period((">=", 202509))}, "period_filter:operator"),
+    ({"filters": _period(("IN", ["2025-09"]))}, "period_filter:value"),
+    ({"filters": _period(("IN", [202609]))}, None),  # one period: compared with a year before
+    ({"time_range": {"year": 1, "month": 9}}, "period_filter:compare"),  # nothing a year before
+    ({"dimensions": ["region"]}, "shape:dimension:region"),
+])
+def test_plan_comparison_period_and_shape_errors(metrics, changes, reason):
+    req, got = compiler.plan_with_reason(COMPARE | changes, "EBT เทียบกับปีก่อน", compiler.resolve(metrics), [], 202609, set())
+    assert got == reason
+    if reason is None:
+        assert (req.period, req.base_period) == (202609, 202509)
+
+
+def test_supports_still_says_no_to_a_comparison(metrics):
+    assert not compiler.supports(COMPARE, compiler.resolve(metrics)["ebt"])
+    assert compiler.plan(COMPARE | {"intent_type": "aggregation"}, "EBT", compiler.resolve(metrics), [], 202609,
+                         set()).base_period is None
+
+
+HIERARCHY = [{"level": 0, "label_th": "สายงาน", "label_en": "division", "columns": ["division"],
+              "detection_keywords": ["สายงาน"]},
+             {"level": 3, "label_th": "ส่วน", "label_en": "sub_unit", "columns": ["sub_unit"],
+              "detection_keywords": ["ส่วนงาน", "รายส่วน"]}]
+
+
+async def _ask(service, question, **kwargs):
+    return await hybrid_flow.build_first_attempt_prompt(
+        service=service, question=question, system_prompt="system", history=None,
+        context_name="feed_ebt", context_table="feed_ebt_fact_ebt", context_thai="EBT",
+        two_pass_enabled=True, cheap_model=None, detect_hierarchy_level=lambda *a: None,
+        format_value_matches=service.format_value_matches, get_vanna_context_string=lambda q: "",
+        lookup_values_from_question=lambda *a: [], on_status=None, attempt=0, max_retries=1, **kwargs,
+    )
+
+
+@pytest.mark.parametrize("question,dimensions,asks", [
+    ("EBT ของหน่วยงานไหน ดีกว่าปีก่อนหน้าบ้าง", ["division"], True),
+    ("จังหวัดไหน มี ebt ดีขึ้นกว่าปีก่อนบ้าง", ["sub_division_fname"], True),
+    ("ส่วนงานไหน EBT ดีกว่าปีก่อน (หน่วยงานขาย)", ["sub_unit"], False),  # a level is named
+    ("EBT ของหน่วยงาน ส่วนขายและบริการลูกค้า น่าน", [], False),           # one named unit, no breakdown
+    ("สายงานไหน EBT ดีกว่าปีก่อน", ["division"], False),
+])
+async def test_a_breakdown_by_a_generic_unit_word_asks_back(metrics, monkeypatch, question, dimensions, asks):
+    monkeypatch.setattr(compiler, "load_metrics", lambda c: metrics)
+    monkeypatch.setattr(compiler, "dimension_labels", lambda *a: {})
+    monkeypatch.setattr(hybrid_flow, "get_column_hierarchies", lambda: {"feed_ebt": HIERARCHY})
+    trace = SimpleNamespace(stages={}, usage=[])
+    prompt, _, result = await _ask(_service(COMPARE | {"dimensions": dimensions}), question, trace=trace)
+    if asks:
+        assert isinstance(result, compiler.Clarification) and prompt == ""
+        assert "สายงาน, ส่วน" in result.text and trace.stages["metric_declined"] == "clarify:level"
+        assert "SELECT" not in result.text
+    else:
+        assert not isinstance(result, compiler.Clarification)
+
+
+async def test_the_question_back_reaches_the_caller_without_sql(execution, metrics, monkeypatch):
+    from app.core import outbound
+    monkeypatch.setattr(compiler, "load_metrics", lambda c: metrics)
+    monkeypatch.setattr(compiler, "dimension_labels", lambda *a: {})
+    monkeypatch.setattr(hybrid_flow, "get_column_hierarchies", lambda: {"feed_ebt": HIERARCHY})
+    monkeypatch.setattr(hybrid_flow, "resolve_context_info", lambda *a, **kw: (
+        SimpleNamespace(get_context_info=lambda c: {}), "feed_ebt_fact_ebt", "EBT"))
+    execution.provider.intent = COMPARE
+    execution.get_vanna_context_string = lambda q: ""
+    execution.lookup_values_from_question = lambda *a: []
+    execution.detect_hierarchy_level = lambda *a: None
+    execution.extract_sql = execution.extract_explanation = lambda text: text
+    execution.log_value_corrections = Mock()
+    execution.prepare_data_for_explanation = lambda data, **kw: data
+    result = await hybrid_flow.query_hybrid(execution, "EBT ของหน่วยงานไหน ดีกว่าปีก่อนหน้าบ้าง", "system",
+                                            max_retries=1, two_pass_enabled=True, value_verification_enabled=False,
+                                            context_name="feed_ebt")
+    assert result.clarification is True and result.sql_query == "" and result.data == [] and not result.error
+    execution.mcp_client.call_tool.assert_not_awaited()
+    assert outbound.safe_answer(result) == result.explanation and "ระดับไหน" in result.explanation

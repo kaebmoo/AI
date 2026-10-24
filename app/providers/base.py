@@ -107,6 +107,7 @@ class QueryResult:
     confidence: Optional[ConfidenceResult] = None
     usage_breakdown: Optional[List[Dict]] = None  # per-stage TokenUsage dicts (F7.2)
     metric: Optional[Dict[str, Any]] = None
+    clarification: bool = False  # the explanation is a question back to the asker, no data by design
 
 
 @dataclass

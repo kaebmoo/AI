@@ -271,3 +271,41 @@ def test_cli(contract, dist, tmp_path):
     assert missing.returncode != 0 and "fact_ebt.parquet" in missing.stderr
     for result in (invalid, missing):
         assert "Traceback" not in result.stderr and len(result.stderr.splitlines()) == 1
+
+
+def test_compare_shapes_replay_the_compiler_and_ask_the_way_plan_reads(contract, dist, tmp_path):
+    # a year before: every 202609 row again at 202509 with half the amounts, so EBT moves both ways
+    year_on_year = tmp_path / "yoy"
+    year_on_year.mkdir()
+    for path in dist.glob("*.parquet"):
+        source = str(path).replace("'", "''")
+        halves = ", ".join(f'"{name}" / 2 AS "{name}"' for name, kind, *_ in
+                           duckdb.execute(f"DESCRIBE SELECT * FROM read_parquet('{source}')").fetchall() if kind == "DOUBLE")
+        duckdb.execute(f"COPY (SELECT * FROM read_parquet('{source}') UNION ALL "
+                       f"SELECT * REPLACE (202509 AS time_key, {halves}) "
+                       f"FROM read_parquet('{source}') WHERE time_key = 202609"
+                       f") TO '{year_on_year / path.name}' (FORMAT PARQUET)")
+    plain = generate(contract, year_on_year, 202609)
+    spec = generate(contract, year_on_year, 202609, compare=True)
+    compare = [q for q in spec["questions"] if q["shape"].startswith("compare")]
+    unchanged = [{k: v for k, v in q.items() if k != "id"} for q in spec["questions"] if q not in compare]
+    assert unchanged == [{k: v for k, v in q.items() if k != "id"} for q in plain["questions"]]
+    assert any(q["expected_rows"] for q in compare if q["shape"] == "compare_up")
+    shapes = Counter(q["shape"] for q in compare)
+    kept = len({q["dimension"] for q in plain["questions"] if q["dimension"]})
+    assert shapes == {"compare_total": 3 * 2 * 3, "compare_up": 3 * 2 * kept * 3}
+    resolved = metric_compiler.resolve(contract_metrics(contract))
+    with open_dist(year_on_year, "ebt") as conn:
+        for q in compare:
+            request = dict(q["request"], dimensions=tuple(q["request"]["dimensions"]), filters=tuple(q["request"]["filters"]))
+            req = metric_compiler.CompileRequest(**request)
+            assert req.base_period == 202509 and req.change == ("up" if q["shape"] == "compare_up" else None)
+            rows = conn.execute(metric_compiler.compile(req, resolved).sql).fetchall()
+            assert [row["value"] for row in q["expected_rows"]] == [
+                round(float(row[-1]), 2) if row[-1] is not None else None for row in rows]
+            assert all(value is None or value > 0 for value in (row["value"] for row in q["expected_rows"])) \
+                or q["shape"] == "compare_total"
+            assert "ปีก่อน" in q["question"]
+            ups = [w for w in metric_compiler.CHANGE_WORDS["up"] if w in q["question"]]
+            downs = [w for w in metric_compiler.CHANGE_WORDS["down"] if w in q["question"]]
+            assert bool(ups) == (q["shape"] == "compare_up") and not downs

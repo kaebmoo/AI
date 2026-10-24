@@ -149,6 +149,24 @@ class CompileRequest:
     order_desc: bool | None = None
     limit: int | None = None
     official_total_ok: bool = True
+    base_period: int | None = None  # a comparison: the value at period against the value at base_period
+    change: str | None = None       # a comparison across units keeps only those that went "up" / "down"
+
+
+@dataclass(frozen=True)
+class Clarification:
+    """A question back to the asker instead of an answer (PLAN_METRICS_COMPARISON CMP-3 ค)."""
+    text: str
+
+
+# ponytail: short word lists — pass 1 has no field for "which way" and the owner chose to show only the units
+# that moved the way the question asks (CMP-2 ข); grow them when the eval or audit shows a miss
+CHANGE_WORDS = {
+    "up": ("ดีกว่า", "ดีขึ้น", "เพิ่มขึ้น", "สูงขึ้น", "สูงกว่า", "มากขึ้น", "มากกว่า", "เติบโต", "โตขึ้น"),
+    "down": ("แย่กว่า", "แย่ลง", "ลดลง", "ต่ำลง", "ต่ำกว่า", "น้อยลง", "น้อยกว่า", "ถดถอย"),
+}
+# words that name an org unit without naming a level: the owner chose to ask back (CMP-3 ค)
+GENERIC_UNIT_WORDS = ("หน่วยงาน", "จังหวัด")
 
 
 @dataclass(frozen=True)
@@ -161,6 +179,7 @@ class Compiled:
     table: str
     note_th: str | None
     base_name_th: str | None = None  # the ratio's denominator column, when the result carries one
+    compare: str | None = None       # what a comparison compared, for the explanation
 
 
 def _validate_shape(dimensions, filters, metric: Metric) -> None:
@@ -331,14 +350,24 @@ def plan_with_reason(
     if not isinstance(filters, (list, tuple)):
         return None, "shape:filter:invalid"
     period_column = (metric.period or {}).get("column")
+    comparison = intent.get("intent_type") == "comparison"
     remaining = []
     period_hint = None
     lows, highs = [], []
+    compared = set()  # a comparison's periods as pass 1 wrote them: IN [202608, 202609], BETWEEN [202509, 202609]
     for item in filters:
         if (isinstance(item, dict) and isinstance(item.get("column"), str)
                 and isinstance(period_column, str) and item["column"].casefold() == period_column.casefold()):
             operator, value = item.get("operator"), item.get("value")
-            if operator == "=":
+            if comparison:
+                if operator not in ("=", "IN", "BETWEEN"):
+                    return None, "period_filter:operator"
+                values = [value] if operator == "=" else value
+                keys = [_month_key(v) for v in values] if isinstance(values, (list, tuple)) and values else [None]
+                if None in keys:
+                    return None, "period_filter:value"
+                compared.update(keys)
+            elif operator == "=":
                 if isinstance(value, str) and value.isdecimal():
                     try:
                         value = int(value)
@@ -374,8 +403,19 @@ def plan_with_reason(
                 or (low is not None and low != high and low != high // 100 * 100 + 1)):
             return None, "period_filter:range"
         period_hint, range_cumulative = high, low != high
+    base_key = None
+    if len(compared) > 2:
+        return None, "period_filter:compare"
+    if compared:
+        base_key, period_hint = (min(compared), max(compared)) if len(compared) == 2 else (None, max(compared))
     intent = {**intent, "filters": remaining}
-    reason = _support_reason(intent, metric, frozenset(ignore))
+    checked = intent
+    if comparison:
+        # a comparison ranks by the change, which pass 1 names freely (diff_ebt, ebt_change): keep the direction
+        ordering = intent.get("ordering")
+        checked = {**intent, "intent_type": "aggregation",
+                   "ordering": {"direction": ordering.get("direction")} if isinstance(ordering, dict) else ordering}
+    reason = _support_reason(checked, metric, frozenset(ignore))
     if reason is not None:
         return None, reason
     if type(reference) is not int:
@@ -395,19 +435,37 @@ def plan_with_reason(
     if year == ref_y:
         month = min(month, ref_m)
     mode = "month" if tr.get("month") is not None and not tr.get("cumulative") and not range_cumulative else "cumulative"
+    period = year * 100 + month
     limit = intent.get("limit")
+    order_desc = (intent.get("ordering") or {}).get("direction") != "ASC" \
+        if not comparison and _orders_by_value(intent, metric, frozenset(ignore)) else None
+    base_period = change = None
+    if comparison:
+        # "EBT_month กันยายนเทียบสิงหาคม": pass 1 names the month column and no time_range — month against month
+        month_column = (metric.official_total or {}).get("month_column")
+        named = [intent.get("metric_id"), *(intent.get("metrics") if isinstance(intent.get("metrics"), list) else [])]
+        if (isinstance(month_column, str) and not tr.get("cumulative")
+                and any(isinstance(n, str) and n.casefold() == month_column.casefold() for n in named)):
+            mode = "month"
+        base_period = base_key if base_key is not None else period - 100  # CMP-1 ก: the same period a year before
+        if not base_period < period or not 100001 <= base_period:
+            return None, "period_filter:compare"
+        moves = [way for way, words in CHANGE_WORDS.items() if any(word in question for word in words)]
+        change = moves[0] if len(moves) == 1 else None
+        order_desc = change != "down" if change else (intent.get("ordering") or {}).get("direction") != "ASC"
     return CompileRequest(
         metric_id=metric_id,
-        period=year * 100 + month,
+        period=period,
         mode=mode,
         dimensions=tuple(intent.get("dimensions") or []),
         filters=tuple(intent.get("filters") or []),
         # "สูงสุด 10 อันดับ" arrives as ranking, as aggregation + limit, or as ordering by the metric's
         # own name — all rank by the value; an ordering by a dimension alone keeps the table order
-        order_desc=(intent.get("ordering") or {}).get("direction") != "ASC"
-        if _orders_by_value(intent, metric, frozenset(ignore)) else None,
+        order_desc=order_desc,
         limit=limit if type(limit) is int and limit > 0 else None,
         official_total_ok=metric.official_total is not None and metric.official_total["dataset"] in tables,
+        base_period=base_period,
+        change=change,
     ), None
 
 
@@ -494,8 +552,14 @@ class _Expression:
         raise ValueError("Invalid metric expression operand")
 
 
+def _period_label(period: int, mode: str) -> str:
+    """09/2569 (พ.ศ.), with "สะสม" in front of a year to date."""
+    return f"{'สะสม ' if mode == 'cumulative' else ''}{period % 100:02d}/{period // 100 + 543}"
+
+
 def compile(req: CompileRequest, resolved: dict[str, Metric]) -> Compiled:
-    """Compile a single-period SELECT; invalid or unsupported input raises ValueError."""
+    """Compile a single-period SELECT, or a two-period comparison when `base_period` is set; invalid or
+    unsupported input raises ValueError."""
     try:
         metric = resolved[req.metric_id]
         _validate_shape(req.dimensions, req.filters, metric)
@@ -505,8 +569,12 @@ def compile(req: CompileRequest, resolved: dict[str, Metric]) -> Compiled:
             raise ValueError("Period and limit must be integers; limit must be nonnegative")
         if req.order_desc is not None and type(req.order_desc) is not bool:
             raise ValueError("Invalid ordering")
+        compare = req.base_period is not None
+        if compare and (type(req.base_period) is not int or not req.base_period < req.period
+                        or req.change not in (None, "up", "down")):
+            raise ValueError("Invalid comparison")
 
-        def render(expr_text: str, current: Metric, visiting: frozenset[str]) -> str:
+        def render(expr_text: str, current: Metric, visiting: frozenset[str], when: str = "") -> str:
             value = _quote(current.period["value"][req.mode])
 
             def identifier(name: str) -> str:
@@ -514,19 +582,19 @@ def compile(req: CompileRequest, resolved: dict[str, Metric]) -> Compiled:
                     where = current.terms[name]["where"]
                     if not isinstance(where, str) or not where.strip():
                         raise ValueError("Missing term predicate")
-                    return f"(COALESCE(SUM(CASE WHEN ({where}) THEN {value} END), 0))"
+                    return f"(COALESCE(SUM(CASE WHEN ({where}){when} THEN {value} END), 0))"
                 if name in resolved:
-                    return f"({expression(resolved[name], visiting | {current.metric_id})})"
+                    return f"({expression(resolved[name], visiting | {current.metric_id}, when)})"
                 raise ValueError(f"Unknown metric expression identifier: {name}")
 
             return _Expression(expr_text, identifier).parse()
 
-        def expression(current: Metric, visiting: frozenset[str]) -> str:
+        def expression(current: Metric, visiting: frozenset[str], when: str = "") -> str:
             if current.metric_id in visiting:
                 raise ValueError("Cyclic metric expression")
             if current.dataset != metric.dataset or current.period != metric.period:
                 raise ValueError("Referenced metric must use the same dataset and period mapping")
-            return render(current.expr, current, visiting)
+            return render(current.expr, current, visiting, when)
 
         expr = expression(metric, frozenset())
         ranking = metric.ranking if metric.ranking is not None else {}
@@ -535,12 +603,20 @@ def compile(req: CompileRequest, resolved: dict[str, Metric]) -> Compiled:
         official = not req.dimensions and not req.filters
         total = metric.official_total if official and req.official_total_ok else None
         table = total["dataset"] if total is not None else metric.dataset
-        period = f'CAST({_quote(metric.period["column"])} AS INTEGER) = {req.period}'
+        period_key = f'CAST({_quote(metric.period["column"])} AS INTEGER)'
+        # a comparison reads both periods in one pass; each side of it adds its own period to every term
+        period = (f"{period_key} IN ({req.base_period}, {req.period})" if compare
+                  else f"{period_key} = {req.period}")
         dims = [_quote(d) for d in req.dimensions]
         if total is not None:
             measure = _quote(total["month_column" if req.mode == "month" else "column"])
+            if compare:  # the official table holds one row per period
+                now, then = (f"MAX(CASE WHEN {period_key} = {p} THEN {measure} END)" for p in (req.period, req.base_period))
         else:
             measure = f"({expr})"
+            if compare:
+                now, then = (f"({expression(metric, frozenset(), f' AND {period_key} = {p}')})"
+                             for p in (req.period, req.base_period))
             # No filter = the question named no unit, so a breakdown stays inside the report's
             # scope (the EBT report is of the two sales lines); a filter picks units explicitly,
             # and those outside the scope stay computable (contract: ebt_dimension_breakdown).
@@ -559,16 +635,17 @@ def compile(req: CompileRequest, resolved: dict[str, Metric]) -> Compiled:
         alias = f"{metric.name_th} (%)" if (metric.unit or "").strip().lower() in ("percent", "%") else metric.name_th
         # A breakdown or ranking of a ratio across units: the contract's `ranking.scope` keeps units the
         # report would not compare (EBT margin of a support unit with 442 baht of revenue: -47 million %),
-        # and `ranking.base` puts the denominator beside the ratio so the reader sees the base.
+        # and `ranking.base` puts the denominator beside the ratio so the reader sees the base. A comparison
+        # always orders by its change, so there only a breakdown ranks units; a named unit stays itself.
         base_sql = base_name = None
-        if total is None and (dims or req.order_desc is not None) and ranking:
+        if total is None and (dims or (req.order_desc is not None and not compare)) and ranking:
             scope = ranking.get("scope")
             if scope is not None:
                 if not isinstance(scope, str) or not scope.strip():
                     raise ValueError("Invalid ranking scope")
                 period += f" AND ({scope})"
             base = ranking.get("base")
-            if base is not None:
+            if base is not None and not compare:
                 if not isinstance(base, str) or not base.strip():
                     raise ValueError("Invalid ranking base")
                 base_sql = render(base, metric, frozenset())
@@ -576,16 +653,35 @@ def compile(req: CompileRequest, resolved: dict[str, Metric]) -> Compiled:
                 if not isinstance(base_name, str):
                     raise ValueError("Invalid ranking base name")
         columns = [*dims]
-        if base_sql is not None:
-            columns.append(f"({base_sql}) AS {_quote(base_name)}")
-        columns.append(f"{measure} AS {_quote(alias)}")
+        having = []
+        compare_note = None
+        if compare:
+            label_now, label_then = _period_label(req.period, req.mode), _period_label(req.base_period, req.mode)
+            columns += [f"{then} AS {_quote(f'{alias} {label_then}')}", f"{now} AS {_quote(f'{alias} {label_now}')}",
+                        f"({now}) - ({then}) AS {_quote('ผลต่าง (จุด %)' if alias != metric.name_th else 'ผลต่าง')}"]
+            if dims and total is None:
+                # units in both periods only; "ดีกว่าปีก่อน" keeps those that went up (CMP-2 ข)
+                having = [f"COUNT(CASE WHEN {period_key} = {p} THEN 1 END) > 0" for p in (req.base_period, req.period)]
+                if req.change is not None:
+                    having.append(f"({now}) - ({then}) {'>' if req.change == 'up' else '<'} 0")
+            compare_note = (f"เทียบ {label_now} กับ {label_then}; ผลต่าง = {label_now} − {label_then}"
+                            + ("" if req.change is None or not having
+                               else "; แสดงเฉพาะหน่วยที่ผลต่าง > 0 (ดีขึ้น)" if req.change == "up"
+                               else "; แสดงเฉพาะหน่วยที่ผลต่าง < 0 (แย่ลง)"))
+        else:
+            if base_sql is not None:
+                columns.append(f"({base_sql}) AS {_quote(base_name)}")
+            columns.append(f"{measure} AS {_quote(alias)}")
         sql = f"SELECT {', '.join(columns)} FROM {_quote(table)} WHERE {period}"
         if dims:
             sql += " GROUP BY " + ", ".join(dims)
+        if having:
+            sql += " HAVING " + " AND ".join(having)
         if req.order_desc is not None:
             sql += f" ORDER BY {len(columns)} {'DESC' if req.order_desc else 'ASC'}"
         if req.limit is not None:
             sql += f" LIMIT {req.limit}"
-        return Compiled(sql, metric.metric_id, metric.name_th, metric.unit, official, table, metric.note_th, base_name)
+        return Compiled(sql, metric.metric_id, metric.name_th, metric.unit, official, table, metric.note_th, base_name,
+                        compare_note)
     except (KeyError, TypeError, AttributeError, RecursionError) as exc:
         raise ValueError("Invalid metric declaration or compile request") from exc

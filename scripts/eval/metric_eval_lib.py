@@ -48,6 +48,16 @@ TEMPLATES = {
     "top5_asc": ASC_TEMPLATES,
     "top10_desc": DESC_TEMPLATES,
     "top10_asc": ASC_TEMPLATES,
+    "compare_total": (
+        "{word} {period}เทียบกับปีก่อนเป็นอย่างไร",
+        "{word} {period}เปลี่ยนไปจากงวดเดียวกันปีก่อนเท่าไหร่",
+        "ขอเปรียบเทียบ{word} {period}กับปีก่อน",
+    ),
+    "compare_up": (
+        "{label}ไหนมี{word} {period}ดีกว่าปีก่อน",
+        "ขอรายชื่อ{label}ที่{word} {period}ดีขึ้นจากปีก่อน",
+        "{label}ใดบ้างที่{word} {period}เพิ่มขึ้นเมื่อเทียบกับปีก่อน",
+    ),
 }
 
 
@@ -119,8 +129,9 @@ def _phrases(metric: Metric, shape: str, mode: str, period: int, label: str,
 
 
 def generate(contract: dict, dist_dir: Path, period: int, *, phrasings: int = 3,
-             max_rows: int = 50, contract_name: str = "") -> dict:
-    """Build shape × metric × mode × dimension cases using only compiler SQL."""
+             max_rows: int = 50, contract_name: str = "", compare: bool = False) -> dict:
+    """Build shape × metric × mode × dimension cases using only compiler SQL; `compare` adds the
+    year-on-year shapes (compare_total, compare_up per dimension)."""
     if type(period) is not int or not 100001 <= period <= 999912 or not 1 <= period % 100 <= 12:
         raise ValueError("period must be YYYYMM with a month from 1 to 12")
     if type(phrasings) is not int or phrasings < 3:
@@ -184,12 +195,14 @@ def generate(contract: dict, dist_dir: Path, period: int, *, phrasings: int = 3,
                     result["skipped"].append({"metric_id": metric.metric_id, "mode": mode,
                                               "dimension": dim, "shape": None, "reason": reason})
 
-                def add(shape, dim=None, value=None, order_desc=None, limit=None):
+                def add(shape, dim=None, value=None, order_desc=None, limit=None, change=None, compare=False):
                     class_id = f"{shape}:{metric.metric_id}:{mode}" + (f":{dim}" if dim else "")
                     req = CompileRequest(
                         metric.metric_id, period, mode, dimensions=(dim,) if dim and shape != "filter" else (),
                         filters=({"column": dim, "operator": "=", "value": value},) if shape == "filter" else (),
                         order_desc=order_desc, limit=limit, official_total_ok=official_ok,
+                        # against the same period a year before (PLAN_METRICS_COMPARISON CMP-1 ก)
+                        base_period=period - 100 if compare else None, change=change,
                     )
                     try:
                         rows = conn.execute(metric_compiler.compile(req, resolved).sql).fetchall()
@@ -197,7 +210,7 @@ def generate(contract: dict, dist_dir: Path, period: int, *, phrasings: int = 3,
                                          value=round(float(row[-1]), 2) if row[-1] is not None else None) for row in rows]
                     except Exception as exc:
                         raise ValueError(f"{class_id}: {exc}") from exc
-                    if shape == "by" and len(rows) > max_rows:
+                    if shape in ("by", "compare_up") and len(rows) > max_rows:
                         result["skipped"].append({"metric_id": metric.metric_id, "mode": mode, "dimension": dim,
                                                   "shape": shape, "reason": "rows>max_rows", "rows": len(rows)})
                         return
@@ -224,6 +237,10 @@ def generate(contract: dict, dist_dir: Path, period: int, *, phrasings: int = 3,
                     for n in (5, 10):
                         for desc in (True, False):
                             add(f"top{n}_{'desc' if desc else 'asc'}", dim, order_desc=desc, limit=n)
+                    if compare:
+                        add("compare_up", dim, order_desc=True, change="up", compare=True)
+                if compare:
+                    add("compare_total", order_desc=True, compare=True)
     finally:
         conn.close()
     return result

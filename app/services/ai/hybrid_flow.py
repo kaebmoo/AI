@@ -796,7 +796,7 @@ async def build_first_attempt_prompt(
     intent_state_enabled: bool = False,
     required_columns: Optional[List[str]] = None,
     domain_words: Optional[List[str]] = None,
-) -> tuple[str, bool, Optional[Compiled]]:
+) -> tuple[str, bool, Optional[Compiled | metric_compiler.Clarification]]:
     async def _rag_task() -> str:
         try:
             import time
@@ -887,6 +887,17 @@ async def build_first_attempt_prompt(
         if intent_json:
             if required_columns is not None:
                 required_columns[:] = unfilterable_columns(intent_json, context_table, question=question)[0]
+            word = next((w for w in metric_compiler.GENERIC_UNIT_WORDS if w in question), None) if metrics else None
+            if word and hierarchy and not levels and intent_json.get("dimensions"):
+                # "หน่วยงานไหน… / จังหวัดไหน…" asks for a breakdown without naming a level: the model answered
+                # with สายงาน or กลุ่ม (audit 453/454) — the owner chose to ask which level (CMP-3 ค)
+                names = ", ".join(level["label_th"] for level in sorted(hierarchy, key=lambda level: level["level"]))
+                logger.info("Metric declined: clarify:level")
+                if trace is not None:
+                    trace.stages["metric_declined"] = "clarify:level"
+                return "", current_two_pass_enabled, metric_compiler.Clarification(
+                    f'คำว่า "{word}" ใช้ได้หลายระดับ — ต้องการแยกตามระดับไหน: {names}? '
+                    f'กรุณาถามใหม่โดยใส่ชื่อระดับแทนคำว่า "{word}"')
             if metrics:
                 req, reason = metric_compiler.plan_with_reason(
                     intent_json, question, resolved, matched, reference_period(),
@@ -1134,6 +1145,7 @@ async def run_hybrid_attempt(
                     # -47,199,339 percent "-47.2 ล้านบาท" (2026-10-24)
                     + (f" หน่วย: {precompiled.unit}" if precompiled.unit else "")
                     + (f" — {precompiled.note_th}" if precompiled.note_th else "")
+                    + (f" ; {precompiled.compare}" if precompiled.compare else "")
                     + (" ; ยอดทางการตามขอบเขตของ metric" if precompiled.official
                        else " ; ยอดเฉพาะมิติ/หน่วยงานที่กรอง ไม่ใช่ยอดทางการ")
                     + ")"
@@ -1339,6 +1351,11 @@ async def query_hybrid(
                 required_columns=required_columns,
                 domain_words=(temp_schema.get_context_info(context_name) or {}).get("keywords"),
             )
+            if isinstance(precompiled, metric_compiler.Clarification):
+                trace.attempts = 1
+                return QueryResult(question=question, sql_query="", data=[], explanation=precompiled.text,
+                                   tokens_used=sum(u["input_tokens"] + u["output_tokens"] for u in trace.usage),
+                                   provider=service.provider_name, clarification=True)
         else:
             user_prompt = build_retry_user_prompt(
                 question=question,

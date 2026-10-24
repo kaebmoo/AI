@@ -123,4 +123,7 @@ def safe_answer(query_result: Any) -> str:
         return message("query_failed")
     if query_result.error:
         return message(result_code(query_result.error))
+    # a question back, built from level names — no SQL in it; `is True`: anything else stays fail-closed
+    if getattr(query_result, "clarification", False) is True:
+        return explanation_text(query_result)
     return explanation_text(query_result) if carries_data(query_result.data) else NO_DATA

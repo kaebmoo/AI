@@ -29,12 +29,13 @@ def main():
     parser.add_argument("--period", type=int, required=True)
     parser.add_argument("--phrasings", type=int, default=3)
     parser.add_argument("--max-rows", type=int, default=50)
+    parser.add_argument("--compare", action="store_true", help="add year-on-year shapes (compare_total, compare_up)")
     parser.add_argument("--out", type=Path)
     args = parser.parse_args()
     try:
         contract = yaml.safe_load(args.contract.read_text(encoding="utf-8"))
         spec = generate(contract, args.dist, args.period, phrasings=args.phrasings,
-                        max_rows=args.max_rows, contract_name=str(args.contract))
+                        max_rows=args.max_rows, contract_name=str(args.contract), compare=args.compare)
         output = args.out or PROJECT_ROOT / "eval_results" / f"metric_{contract['domain']}_{args.period}.json"
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(spec, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
