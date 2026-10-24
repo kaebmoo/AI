@@ -159,6 +159,18 @@ def supports(intent: dict, metric: Metric) -> bool:
         return False
 
 
+def _triggered_mappings(intent: dict, question: str) -> list[dict]:
+    question = question.casefold()
+    triggered = []
+    for mapping in intent.get("matched_mappings") or []:
+        if not isinstance(mapping, dict) or not isinstance(mapping.get("keyword"), str):
+            continue
+        keyword = mapping["keyword"].casefold().strip()
+        if keyword and keyword in question:
+            triggered.append(mapping)
+    return triggered
+
+
 def plan(
     intent: dict,
     question: str,
@@ -168,7 +180,6 @@ def plan(
     tables,
 ) -> CompileRequest | None:
     """Choose a declared metric and a supported single-period compile request."""
-    del question
     metric_id = intent.get("metric_id")
     if not isinstance(metric_id, str) or metric_id not in resolved:
         candidates = [item for item in matched if item in resolved]
@@ -184,7 +195,7 @@ def plan(
                 parent = resolved[parent].extends
             if parent in candidates:
                 break
-    if metric_id is None or intent.get("matched_mappings") or not supports(intent, resolved[metric_id]):
+    if metric_id is None or _triggered_mappings(intent, question) or not supports(intent, resolved[metric_id]):
         return None
     if type(reference) is not int:
         return None

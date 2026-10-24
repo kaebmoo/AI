@@ -150,11 +150,29 @@ async def test_metric_header_and_schema_in_fresh_and_followup(metrics, previous_
 
 
 @pytest.mark.parametrize("changes", [
-    {"intent_type": "trend"}, {"matched_mappings": [{"keyword": "x", "sql_condition": "x = 1"}]},
+    {"intent_type": "trend"}, {"matched_mappings": [{"keyword": "น่าน", "sql_condition": "x = 1"}]},
     {"metric_id": "bogus"},
 ])
 def test_plan_rejects_unsupported_selection(metrics, intent, changes):
     assert compiler.plan(intent | changes, QUESTION, compiler.resolve(metrics), [], 202609, set()) is None
+
+
+@pytest.mark.parametrize("mappings,blocked", [
+    ([{"keyword": "สายงาน", "sql_condition": "DIVISION LIKE '%สายงาน%'"}], False),
+    ([{"keyword": "น่าน", "sql_condition": "DIVISION LIKE '%สายงาน%'"}], True),
+    ([{"keyword": None}, "x"], False),
+    ([{}, {"keyword": ""}, {"keyword": "   "}], False),
+    ([{"keyword": " EBT "}], True),
+])
+def test_plan_ignores_mappings_the_question_did_not_trigger(metrics, intent, mappings, blocked):
+    filters = [{"column": "sub_unit", "operator": "LIKE", "value": "%น่าน%"}]
+    smoke_intent = intent | {"metric_id": "ebt_ex_personnel", "filters": filters,
+                             "matched_mappings": mappings}
+    req = compiler.plan(smoke_intent, QUESTION + " จะเป็นเท่าไหร่", compiler.resolve(metrics),
+                        ["ebt", "ebt_excluding_personnel"], 202609, set())
+    expected = compiler.CompileRequest("ebt_excluding_personnel", 202609, "cumulative",
+                                       filters=tuple(filters), official_total_ok=False)
+    assert req == (None if blocked else expected)
 
 
 def test_plan_period_filters_and_official_table_registration(metrics, intent):
