@@ -202,6 +202,91 @@ def test_plan_period_selection(metrics, intent, time_range, period, mode):
     assert (req.period, req.mode) == (period, mode)
 
 
+@pytest.mark.parametrize("column,value", [("time_key", 202609), ("time_key", "202609"), ("TIME_KEY", 202609)])
+def test_plan_removes_period_filters_without_mutating_intent(metrics, intent, column, value):
+    period_filter = {"column": column, "operator": "=", "value": value}
+    selection = intent | {"filters": [dict(period_filter)]}
+    req = compiler.plan(selection, QUESTION, compiler.resolve(metrics), [], 202609, set())
+    assert req == compiler.CompileRequest("ebt_excluding_personnel", 202609, "cumulative",
+                                          official_total_ok=False)
+    assert selection == intent | {"filters": [period_filter]}
+
+
+@pytest.mark.parametrize("operator,value", [
+    ("<=", 202609), ("BETWEEN", [202601, 202609]), ("=", "2026-09"),
+    ("=", 100000), ("=", 999913), ("=", 202609.0), ("=", None),
+])
+def test_plan_rejects_unsupported_period_filters(metrics, intent, operator, value):
+    selection = intent | {"filters": [{"column": "time_key", "operator": operator, "value": value}]}
+    assert compiler.plan(selection, QUESTION, compiler.resolve(metrics), [], 202609, set()) is None
+
+
+@pytest.mark.parametrize("time_range,hint,period,mode", [
+    (None, 202507, 202507, "cumulative"),
+    ({"year": 2026, "month": 9, "cumulative": False}, 202609, 202609, "month"),
+    ({"year": 2026, "month": 9, "cumulative": True}, 202507, 202609, "cumulative"),
+    ({"year": 2025}, 202607, 202507, "cumulative"),
+    ({"month": 8}, 202507, 202508, "month"),
+    (None, 202612, 202609, "cumulative"),
+    (None, 202513, None, None),
+])
+def test_plan_period_hint_precedence_and_mode(metrics, intent, time_range, hint, period, mode):
+    selection = intent | {"time_range": time_range,
+                          "filters": [{"column": "time_key", "operator": "=", "value": hint}]}
+    req = compiler.plan(selection, QUESTION, compiler.resolve(metrics), [], 202609, set())
+    if period is None:
+        assert req is None
+    else:
+        assert (req.period, req.mode, req.filters) == (period, mode, ())
+
+
+def test_plan_last_period_hint_wins_and_preserves_dimension_filters(metrics, intent):
+    filters = [{"column": "time_key", "operator": "=", "value": 202501}, dict(FILTER),
+               {"column": "time_key", "operator": "=", "value": "202507"}]
+    selection = intent | {"time_range": None, "filters": filters}
+    req = compiler.plan(selection, QUESTION, compiler.resolve(metrics), [], 202609, set())
+    assert req == compiler.CompileRequest("ebt_excluding_personnel", 202507, "cumulative",
+                                          filters=(FILTER,), official_total_ok=False)
+
+
+@pytest.mark.parametrize("metric_id,expected", [
+    ("ebt_ex_personnel", "ebt_excluding_personnel"),
+    ("ebt_ex_personnel_month", "ebt_excluding_personnel"),
+    ("EBT_EX_PERSONNEL", "ebt_excluding_personnel"),
+    ("ebt", "ebt"), ("unknown_col", None),
+])
+def test_plan_resolves_official_total_column_names(metrics, intent, metric_id, expected):
+    req = compiler.plan(intent | {"metric_id": metric_id}, QUESTION, compiler.resolve(metrics), [], 202609, set())
+    if expected is None:
+        assert req is None
+    else:
+        assert req.metric_id == expected and req.mode == "cumulative"
+
+
+def test_plan_month_column_name_uses_time_range_mode(metrics, intent):
+    selection = intent | {"metric_id": "ebt_ex_personnel_month",
+                          "time_range": {"year": 2026, "month": 9, "cumulative": False}}
+    req = compiler.plan(selection, QUESTION, compiler.resolve(metrics), [], 202609, set())
+    assert (req.metric_id, req.mode) == ("ebt_excluding_personnel", "month")
+
+
+def test_plan_column_alias_must_be_unique_and_metric_id_wins(metrics, intent):
+    resolved = compiler.resolve(metrics)
+    total = {**resolved["ebt"].official_total, "column": "ebt_ex_personnel"}
+    resolved["ebt"] = replace(resolved["ebt"], official_total=total)
+    selection = intent | {"metric_id": "ebt_ex_personnel"}
+    assert compiler.plan(selection, QUESTION, resolved, [], 202609, set()) is None
+    assert compiler.plan(selection, QUESTION, resolved, ["ebt"], 202609, set()).metric_id == "ebt"
+    resolved["ebt_excluding_personnel"] = replace(resolved["ebt_excluding_personnel"],
+                                                 official_total={**total, "column": "ebt"})
+    assert compiler.plan(intent | {"metric_id": "ebt"}, QUESTION, resolved, [], 202609, set()).metric_id == "ebt"
+
+
+def test_supports_still_rejects_period_filters(metrics, intent):
+    selection = intent | {"filters": [{"column": "time_key", "operator": "=", "value": 202609}]}
+    assert not compiler.supports(selection, compiler.resolve(metrics)[intent["metric_id"]])
+
+
 @pytest.mark.parametrize("time_range", [
     {"year": "2026"}, {"year": True}, {"year": -1}, {"year": 10000},
     {"month": "9"}, {"month": True}, {"month": -1}, {"month": 13},

@@ -181,6 +181,13 @@ def plan(
 ) -> CompileRequest | None:
     """Choose a declared metric and a supported single-period compile request."""
     metric_id = intent.get("metric_id")
+    if isinstance(metric_id, str) and metric_id not in resolved:
+        column_matches = [key for key, metric in resolved.items()
+                          if any(isinstance(column, str) and column.casefold() == metric_id.casefold()
+                                 for column in ((metric.official_total or {}).get("column"),
+                                                (metric.official_total or {}).get("month_column")))]
+        if len(column_matches) == 1:
+            metric_id = column_matches[0]
     if not isinstance(metric_id, str) or metric_id not in resolved:
         candidates = [item for item in matched if item in resolved]
         metric_id = candidates[0] if candidates else None
@@ -195,7 +202,31 @@ def plan(
                 parent = resolved[parent].extends
             if parent in candidates:
                 break
-    if metric_id is None or _triggered_mappings(intent, question) or not supports(intent, resolved[metric_id]):
+    if metric_id is None or _triggered_mappings(intent, question):
+        return None
+    metric = resolved[metric_id]
+    filters = intent.get("filters") or []
+    if not isinstance(filters, (list, tuple)):
+        return None
+    period_column = (metric.period or {}).get("column")
+    remaining = []
+    period_hint = None
+    for item in filters:
+        if (isinstance(item, dict) and isinstance(item.get("column"), str)
+                and isinstance(period_column, str) and item["column"].casefold() == period_column.casefold()):
+            value = item.get("value")
+            if isinstance(value, str) and value.isdecimal():
+                try:
+                    value = int(value)
+                except ValueError:
+                    return None
+            if item.get("operator") != "=" or type(value) is not int or not 100001 <= value <= 999912:
+                return None
+            period_hint = value
+        else:
+            remaining.append(item)
+    intent = {**intent, "filters": remaining}
+    if not supports(intent, metric):
         return None
     if type(reference) is not int:
         return None
@@ -205,8 +236,9 @@ def plan(
     tr = intent.get("time_range") or {}
     if not isinstance(tr, dict):
         return None
-    year = tr.get("year") or ref_y
-    month = tr.get("month") or ref_m
+    hint_y, hint_m = divmod(period_hint, 100) if period_hint is not None else (ref_y, ref_m)
+    year = tr.get("year") or hint_y
+    month = tr.get("month") or hint_m
     if (type(year) is not int or not 1 <= year <= 9999
             or type(month) is not int or not 1 <= month <= 12):
         return None
@@ -214,7 +246,6 @@ def plan(
         month = min(month, ref_m)
     mode = "month" if tr.get("month") is not None and not tr.get("cumulative") else "cumulative"
     limit = intent.get("limit")
-    metric = resolved[metric_id]
     return CompileRequest(
         metric_id=metric_id,
         period=year * 100 + month,
