@@ -257,6 +257,13 @@ def _triggered_mappings(intent: dict, question: str, ignore: frozenset[str] = fr
     return triggered
 
 
+def _month_key(value) -> int | None:
+    """A YYYYMM bound of a period range (int or decimal string with a real month), else None."""
+    if isinstance(value, str) and value.isdecimal():
+        value = int(value)
+    return value if type(value) is int and 100001 <= value <= 999912 and 1 <= value % 100 <= 12 else None
+
+
 def plan(
     intent: dict,
     question: str,
@@ -264,9 +271,10 @@ def plan(
     matched: list[str],
     reference: int | None,
     tables,
+    labels: dict[str, str] | None = None,
 ) -> CompileRequest | None:
     """Choose a declared metric and a supported single-period compile request."""
-    return plan_with_reason(intent, question, resolved, matched, reference, tables)[0]
+    return plan_with_reason(intent, question, resolved, matched, reference, tables, labels)[0]
 
 
 def plan_with_reason(
@@ -276,8 +284,9 @@ def plan_with_reason(
     matched: list[str],
     reference: int | None,
     tables,
+    labels: dict[str, str] | None = None,
 ) -> tuple[CompileRequest | None, str | None]:
-    """Choose a compile request or give a short decline reason."""
+    """Choose a compile request or give a short decline reason. `labels` = dimension_labels()."""
     metric_id = intent.get("metric_id")
     if isinstance(metric_id, str) and metric_id not in resolved:
         column_matches = [key for key, metric in resolved.items()
@@ -311,7 +320,11 @@ def plan_with_reason(
         ignore.update(value.casefold().strip() for value in
                       (ancestor.metric_id, ancestor.name_th, *ancestor.synonyms))
         ancestor = resolved.get(ancestor.extends)
-    triggered = _triggered_mappings(intent, question, frozenset(ignore))
+    # "ฝ่ายไหน…" names a declared dimension: a mapping on that word (the global 'สายงาน', or one pass 1
+    # invents for ส่วน / กลุ่ม) must not send the question to free SQL — the dimension already carries it
+    level_words = {label.casefold().strip() for dim, label in (labels or {}).items()
+                   if dim in (metric.dimensions or ()) and isinstance(label, str) and label.strip()}
+    triggered = _triggered_mappings(intent, question, frozenset(ignore | level_words))
     if triggered:
         return None, "mapping_triggered:" + _reason_detail(triggered[0]["keyword"].casefold().strip())
     filters = intent.get("filters") or []
@@ -320,22 +333,47 @@ def plan_with_reason(
     period_column = (metric.period or {}).get("column")
     remaining = []
     period_hint = None
+    lows, highs = [], []
     for item in filters:
         if (isinstance(item, dict) and isinstance(item.get("column"), str)
                 and isinstance(period_column, str) and item["column"].casefold() == period_column.casefold()):
-            if item.get("operator") != "=":
-                return None, "period_filter:operator"
-            value = item.get("value")
-            if isinstance(value, str) and value.isdecimal():
-                try:
-                    value = int(value)
-                except ValueError:
+            operator, value = item.get("operator"), item.get("value")
+            if operator == "=":
+                if isinstance(value, str) and value.isdecimal():
+                    try:
+                        value = int(value)
+                    except ValueError:
+                        return None, "period_filter:value"
+                if type(value) is not int or not 100001 <= value <= 999912:
                     return None, "period_filter:value"
-            if type(value) is not int or not 100001 <= value <= 999912:
-                return None, "period_filter:value"
-            period_hint = value
+                period_hint = value
+            elif operator in ("BETWEEN", "IN", ">=", "<="):
+                bounds = value if operator in ("BETWEEN", "IN") else [value]
+                keys = [_month_key(v) for v in bounds] if isinstance(bounds, (list, tuple)) else [None]
+                if not keys or None in keys or (operator == "BETWEEN" and len(keys) != 2):
+                    return None, "period_filter:value"
+                if operator == "IN" and sorted(set(keys)) != list(range(min(keys), max(keys) + 1)):
+                    return None, "period_filter:range"  # not consecutive months of one year
+                if operator != "<=":
+                    lows.append(min(keys))
+                if operator != ">=":
+                    highs.append(max(keys))
+            else:
+                return None, "period_filter:operator"
         else:
             remaining.append(item)
+    range_cumulative = False
+    if lows or highs:
+        # "สะสม / ตั้งแต่ต้นปี" arrives as time_key BETWEEN y01 AND yMM (or >= and <=, IN the months, or <= yMM
+        # with time_range.cumulative): the year to date at yMM — the metric's cumulative value. A range that
+        # starts in another month is a multi-month sum the declarations cannot express.
+        time_range = intent.get("time_range")
+        low, high = (max(lows) if lows else None), (min(highs) if highs else None)
+        if (period_hint is not None or high is None or (low is not None and low > high)
+                or (low is None and not (isinstance(time_range, dict) and time_range.get("cumulative") is True))
+                or (low is not None and low != high and low != high // 100 * 100 + 1)):
+            return None, "period_filter:range"
+        period_hint, range_cumulative = high, low != high
     intent = {**intent, "filters": remaining}
     reason = _support_reason(intent, metric, frozenset(ignore))
     if reason is not None:
@@ -356,7 +394,7 @@ def plan_with_reason(
         return None, "time_range_invalid"
     if year == ref_y:
         month = min(month, ref_m)
-    mode = "month" if tr.get("month") is not None and not tr.get("cumulative") else "cumulative"
+    mode = "month" if tr.get("month") is not None and not tr.get("cumulative") and not range_cumulative else "cumulative"
     limit = intent.get("limit")
     return CompileRequest(
         metric_id=metric_id,
