@@ -28,8 +28,7 @@ router = APIRouter()
 
 
 def _refuse_contract_driven(view_name: str) -> None:
-    """Onboarding inspects the legacy business DB. A file-source table has a stale copy there under the
-    same name: onboarding it would overwrite the knowledge generated from the owner's contract."""
+    """Full onboarding would overwrite knowledge generated from the owner's contract."""
     owner = registered_tables().get(view_name)
     if owner:
         raise HTTPException(status_code=400, detail=(
@@ -141,7 +140,6 @@ async def inspect_context(
     """Lightweight inspection only."""
     from app.services.context_onboarding import ContextOnboardingService
 
-    _refuse_contract_driven(request.view_name)
     service = ContextOnboardingService(_get_business_db_path())
     try:
         inspection = service.inspect(request.view_name)

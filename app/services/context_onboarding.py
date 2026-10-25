@@ -16,6 +16,9 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
+from sqlalchemy import inspect as inspect_engine
+from sqlalchemy.engine import Connection, Engine
+
 from app.services.provenance import as_json, merged_proposal
 
 logger = logging.getLogger(__name__)
@@ -205,13 +208,22 @@ class DataInspector:
         re.IGNORECASE
     )
 
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str | Engine):
         self.db_path = db_path
+        self.engine = db_path if isinstance(db_path, Engine) else None
 
-    def _connect(self) -> sqlite3.Connection:
+    def _connect(self) -> sqlite3.Connection | Connection:
+        if self.engine is not None:
+            return self.engine.connect()
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
+
+    def _execute(self, conn, sql: str):
+        """Keep named row access identical on SQLite and SQLAlchemy connections."""
+        if self.engine is not None:
+            return conn.exec_driver_sql(sql).mappings()
+        return conn.execute(sql)
 
     def inspect(self, view_name: str) -> InspectionResult:
         """Full inspection of a view. Returns InspectionResult."""
@@ -273,15 +285,18 @@ class DataInspector:
         finally:
             conn.close()
 
-    def _get_schema(self, conn: sqlite3.Connection, view_name: str) -> List[ColumnProfile]:
-        """Get column schema from PRAGMA."""
-        cursor = conn.execute(f"PRAGMA table_info('{view_name}')")
+    def _get_schema(self, conn: sqlite3.Connection | Connection, view_name: str) -> List[ColumnProfile]:
+        """Reflect file-source columns; keep legacy PRAGMA inspection unchanged."""
+        if self.engine is not None:
+            schema = inspect_engine(self.engine).get_columns(view_name)
+        else:
+            schema = conn.execute(f"PRAGMA table_info('{view_name}')").fetchall()
         columns = []
-        for row in cursor.fetchall():
+        for row in schema:
             col = ColumnProfile(
                 name=row['name'],
-                data_type=row['type'] or 'TEXT',
-                nullable=not row['notnull'],
+                data_type=str(row['type'] or 'TEXT'),
+                nullable=row['nullable'] if self.engine is not None else not row['notnull'],
             )
             # Detect time columns by name
             if self.TIME_PATTERNS.search(col.name):
@@ -293,17 +308,17 @@ class DataInspector:
             columns.append(col)
         return columns
 
-    def _get_row_count(self, conn: sqlite3.Connection, view_name: str) -> int:
-        row = conn.execute(f'SELECT COUNT(*) as cnt FROM "{view_name}"').fetchone()
+    def _get_row_count(self, conn: sqlite3.Connection | Connection, view_name: str) -> int:
+        row = self._execute(conn, f'SELECT COUNT(*) as cnt FROM "{view_name}"').fetchone()
         return row['cnt'] if row else 0
 
-    def _profile_column(self, conn: sqlite3.Connection, view_name: str,
+    def _profile_column(self, conn: sqlite3.Connection | Connection, view_name: str,
                         col: ColumnProfile, total_rows: int):
         """Profile a single column: distinct count, nulls, samples, stats."""
         col.total_count = total_rows
 
         # Distinct count + null count
-        row = conn.execute(
+        row = self._execute(conn,
             f'SELECT COUNT(DISTINCT "{col.name}") as dc, '
             f'SUM(CASE WHEN "{col.name}" IS NULL THEN 1 ELSE 0 END) as nc '
             f'FROM "{view_name}"'
@@ -311,11 +326,12 @@ class DataInspector:
         col.distinct_count = row['dc'] or 0
         col.null_count = row['nc'] or 0
 
-        # Check for empty string values
+        # DuckDB's typed columns cannot all be compared directly with an empty string.
+        empty_check = f'CAST("{col.name}" AS VARCHAR)' if self.engine is not None else f'"{col.name}"'
         try:
-            row2 = conn.execute(
+            row2 = self._execute(conn,
                 f"SELECT COUNT(*) as ec FROM \"{view_name}\" "
-                f"WHERE \"{col.name}\" = ''"
+                f"WHERE {empty_check} = ''"
             ).fetchone()
             if row2 and row2['ec'] > 0:
                 col.has_empty_values = True
@@ -324,31 +340,31 @@ class DataInspector:
 
         # Sample values (up to 10)
         try:
-            samples = conn.execute(
+            samples = self._execute(conn,
                 f'SELECT DISTINCT "{col.name}" FROM "{view_name}" '
-                f'WHERE "{col.name}" IS NOT NULL AND "{col.name}" != \'\' '
+                f'WHERE "{col.name}" IS NOT NULL AND {empty_check} != \'\' '
                 f'LIMIT 10'
             ).fetchall()
-            col.sample_values = [s[0] for s in samples]
+            col.sample_values = [s[col.name] for s in samples]
         except Exception:
             pass
 
         # All distinct values if < 100
         if col.distinct_count < 100:
             try:
-                all_vals = conn.execute(
+                all_vals = self._execute(conn,
                     f'SELECT DISTINCT "{col.name}" FROM "{view_name}" '
-                    f'WHERE "{col.name}" IS NOT NULL AND "{col.name}" != \'\' '
+                    f'WHERE "{col.name}" IS NOT NULL AND {empty_check} != \'\' '
                     f'ORDER BY "{col.name}"'
                 ).fetchall()
-                col.all_distinct = [v[0] for v in all_vals]
+                col.all_distinct = [v[col.name] for v in all_vals]
             except Exception:
                 pass
 
         # Numeric stats
         if col.is_numeric:
             try:
-                stats = conn.execute(
+                stats = self._execute(conn,
                     f'SELECT MIN("{col.name}") as mn, MAX("{col.name}") as mx, '
                     f'AVG("{col.name}") as av, SUM("{col.name}") as sm '
                     f'FROM "{view_name}" WHERE "{col.name}" IS NOT NULL'
@@ -376,18 +392,19 @@ class DataInspector:
             if len(upper_vals) < len(str_vals):
                 col.has_case_inconsistency = True
 
-    def _cross_column_analysis(self, conn: sqlite3.Connection, view_name: str,
+    def _cross_column_analysis(self, conn: sqlite3.Connection | Connection, view_name: str,
                                value_col: str, category_col: str) -> Optional[CrossColumnAnalysis]:
         """Analyze how a value column varies by a category column."""
+        empty_check = f'CAST("{category_col}" AS VARCHAR)' if self.engine is not None else f'"{category_col}"'
         try:
-            rows = conn.execute(
+            rows = self._execute(conn,
                 f'SELECT "{category_col}" as cat, '
                 f'SUM("{value_col}") as total, '
                 f'MIN("{value_col}") as mn, '
                 f'MAX("{value_col}") as mx, '
                 f'COUNT(*) as cnt '
                 f'FROM "{view_name}" '
-                f'WHERE "{category_col}" IS NOT NULL AND "{category_col}" != \'\' '
+                f'WHERE "{category_col}" IS NOT NULL AND {empty_check} != \'\' '
                 f'GROUP BY "{category_col}" '
                 f'ORDER BY "{category_col}"'
             ).fetchall()
@@ -482,13 +499,13 @@ class DataInspector:
 
         return issues
 
-    def _detect_date_range(self, conn: sqlite3.Connection, view_name: str,
+    def _detect_date_range(self, conn: sqlite3.Connection | Connection, view_name: str,
                            time_cols: List[str]) -> Optional[Dict]:
         """Detect date range from time columns."""
         result = {}
         for tc in time_cols:
             try:
-                row = conn.execute(
+                row = self._execute(conn,
                     f'SELECT MIN("{tc}") as mn, MAX("{tc}") as mx '
                     f'FROM "{view_name}" WHERE "{tc}" IS NOT NULL'
                 ).fetchone()
@@ -1219,6 +1236,7 @@ class ContextOnboardingService:
         # validated against the config DB (config_db_path, default CONFIG_DB_URL) — handing
         # them the business DB made apply write to the wrong DB and validate fail (REMAIN-9.1)
         self.db_path = db_path
+        self.config_db_path = config_db_path
         self.inspector = DataInspector(db_path)
         self.llm_analyzer = LLMAnalyzer(db_path)
         self.applicator = ConfigApplicator(config_db_path)
@@ -1226,7 +1244,13 @@ class ContextOnboardingService:
 
     def inspect(self, view_name: str) -> InspectionResult:
         """Phase 1: SQL-based data inspection."""
+        from app.services.data_sources import registered_tables, source_resolver
+
         logger.info(f"Phase 1: Inspecting view '{view_name}'...")
+        owner = registered_tables().get(view_name)
+        if owner:
+            # Resolution errors must propagate: legacy may hold a stale copy of this table.
+            return DataInspector(source_resolver.for_context(owner['context']).engine).inspect(view_name)
         return self.inspector.inspect(view_name)
 
     async def analyze(self, inspection: InspectionResult,
@@ -1331,6 +1355,9 @@ class ContextOnboardingService:
 
     def list_available_views(self) -> Dict:
         """List all views/tables with their onboarding status."""
+        from app.services.data_sources import registered_tables, source_resolver
+
+        feed_tables = registered_tables()
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
@@ -1344,27 +1371,34 @@ class ContextOnboardingService:
 
         # Get configured contexts from config DB (schema_contexts may be in separate DB)
         configured_views = set()
+        descriptions = {}
         try:
             from app.config import settings
-            config_url = settings.CONFIG_DB_URL
-            if config_url:
-                config_db_path = config_url.replace("sqlite:///", "").replace("sqlite://", "")
-                config_conn = sqlite3.connect(config_db_path)
+
+            config_db_path = self.config_db_path or (self.applicator.db_path if settings.CONFIG_DB_URL else self.db_path)
+            config_conn = sqlite3.connect(config_db_path)
+            try:
                 configured_views = {
                     row[0] for row in config_conn.execute(
                         "SELECT main_view FROM schema_contexts WHERE is_active = 1"
                     ).fetchall()
                 }
+                descriptions = {
+                    (table, column): description
+                    for table, column, description in config_conn.execute(
+                        "SELECT table_name, column_name, description FROM schema_metadata"
+                    )
+                }
+            finally:
                 config_conn.close()
-            else:
-                cursor.execute("SELECT main_view FROM schema_contexts WHERE is_active = 1")
-                configured_views = {row[0] for row in cursor.fetchall()}
         except Exception:
             pass
 
         unconfigured = []
         configured = []
         for name, obj_type in all_objects:
+            if name in feed_tables:
+                continue
             # Skip internal/config tables by prefix or exact name
             if (name.startswith(self._INTERNAL_TABLE_PREFIXES)
                     or name in self._INTERNAL_TABLE_NAMES):
@@ -1382,6 +1416,11 @@ class ContextOnboardingService:
                 "type": obj_type,
                 "has_config": name in configured_views,
                 "row_count": row_count,
+                "source": "legacy",
+                "context": None,
+                "columns_total": None,
+                "description_empty": None,
+                "description_empty_pct": None,
             }
 
             if name in configured_views:
@@ -1390,4 +1429,24 @@ class ContextOnboardingService:
                 unconfigured.append(item)
 
         conn.close()
+        for name, owner in feed_tables.items():
+            columns = owner['columns']
+            empty = sum(not (descriptions.get((name, col['name'])) or '').strip() for col in columns)
+            try:
+                inspector = DataInspector(source_resolver.for_context(owner['context']).engine)
+                with inspector._connect() as source_conn:
+                    row_count = inspector._get_row_count(source_conn, name)
+            except Exception:
+                row_count = None
+            configured.append({
+                "name": name,
+                "type": "view",
+                "has_config": True,
+                "row_count": row_count,
+                "source": "file",
+                "context": owner['context'],
+                "columns_total": len(columns),
+                "description_empty": empty,
+                "description_empty_pct": round(empty * 100 / len(columns), 1) if columns else 0.0,
+            })
         return {"unconfigured": unconfigured, "configured": configured}

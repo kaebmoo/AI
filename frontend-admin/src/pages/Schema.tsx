@@ -1,18 +1,23 @@
-import React, { useState } from 'react';
-import { Table, Button, Space, Modal, Form, Input, Select, Switch, Tag, message, Popconfirm } from 'antd';
+import React, { useEffect, useState } from 'react';
+import { Table, Button, Space, Modal, Form, Input, Select, Switch, Tag, message, Popconfirm, Card } from 'antd';
 import { EditOutlined, PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getSchemaColumns, updateSchemaColumn, createSchemaColumn, deleteSchemaColumn } from '../services/schema';
-import type { SchemaMetadata } from '../services/schema';
+import { getSchemaColumns, updateSchemaColumn, createSchemaColumn, deleteSchemaColumn, draftColumns, getColumnDrafts, acceptColumnDraft, rejectColumnDraft } from '../services/schema';
+import type { SchemaMetadata, ColumnDraft } from '../services/schema';
+import type { AxiosError } from 'axios';
 import type { ColumnsType } from 'antd/es/table';
 
 const { TextArea } = Input;
+const sourceColors: Record<string, string> = { declared: 'blue', manual: 'green', inferred: 'orange', learned: 'purple' };
+const statusColors: Record<string, string> = { proposed: 'gold', rejected: 'red' };
 
 const Schema: React.FC = () => {
     const [isModalVisible, setIsModalVisible] = useState(false);
     const [editingId, setEditingId] = useState<number | null>(null);
     const [isCreating, setIsCreating] = useState(false);
     const [searchText, setSearchText] = useState('');
+    const [selectedTable, setSelectedTable] = useState<string>();
+    const [draftEdits, setDraftEdits] = useState<Record<number, string>>({});
     const [form] = Form.useForm();
     const queryClient = useQueryClient();
 
@@ -20,6 +25,58 @@ const Schema: React.FC = () => {
         queryKey: ['schema'],
         queryFn: () => getSchemaColumns()
     });
+
+    const { data: drafts, error: draftsError, isFetching: draftsLoading } = useQuery<ColumnDraft[], AxiosError<{ detail?: string }>>({
+        queryKey: ['columnDrafts', selectedTable],
+        queryFn: () => getColumnDrafts(selectedTable!),
+        enabled: !!selectedTable
+    });
+
+    useEffect(() => {
+        if (draftsError) {
+            message.error(`โหลดคำอธิบายฉบับร่างไม่สำเร็จ: ${draftsError.response?.data?.detail || draftsError.message}`);
+        }
+    }, [draftsError]);
+
+    const draftMutation = useMutation({
+        mutationFn: draftColumns,
+        onSuccess: (result) => {
+            message.success(`เพิ่มฉบับร่างใหม่ ${result.drafted} รายการ ข้าม ${result.skipped.length} คอลัมน์`);
+            return queryClient.invalidateQueries({ queryKey: ['columnDrafts', result.table] });
+        },
+        onError: (error: any) => {
+            message.error(`ร่างคำอธิบายไม่สำเร็จ: ${error.response?.data?.detail || error.message}`);
+        }
+    });
+
+    const refreshDraftsAndSchema = () => Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['columnDrafts'] }),
+        queryClient.invalidateQueries({ queryKey: ['schema'] })
+    ]);
+
+    const acceptDraftMutation = useMutation({
+        mutationFn: ({ id, description }: { id: number; description: string }) => acceptColumnDraft(id, description),
+        onSuccess: () => {
+            message.success('รับคำอธิบายแล้ว');
+            return refreshDraftsAndSchema();
+        },
+        onError: (error: any) => {
+            message.error(`รับคำอธิบายไม่สำเร็จ: ${error.response?.data?.detail || error.message}`);
+        }
+    });
+
+    const rejectDraftMutation = useMutation({
+        mutationFn: rejectColumnDraft,
+        onSuccess: () => {
+            message.success('ปฏิเสธคำอธิบายแล้ว');
+            return refreshDraftsAndSchema();
+        },
+        onError: (error: any) => {
+            message.error(`ปฏิเสธคำอธิบายไม่สำเร็จ: ${error.response?.data?.detail || error.message}`);
+        }
+    });
+
+    const draftActionPending = acceptDraftMutation.isPending || rejectDraftMutation.isPending;
 
     const updateMutation = useMutation({
         mutationFn: ({ id, data }: { id: number; data: any }) => updateSchemaColumn(id, data),
@@ -146,6 +203,17 @@ const Schema: React.FC = () => {
             )
         },
         {
+            title: 'แหล่งที่มา',
+            key: 'source',
+            width: 180,
+            render: (_, record) => (
+                <Space wrap>
+                    {record.source ? <Tag color={sourceColors[record.source]}>{record.source}</Tag> : '-'}
+                    {record.status && record.status !== 'active' && <Tag color={statusColors[record.status]}>{record.status}</Tag>}
+                </Space>
+            )
+        },
+        {
             title: 'Actions',
             key: 'actions',
             width: 80,
@@ -195,9 +263,90 @@ const Schema: React.FC = () => {
                 </Space>
             </div>
 
+            <Space wrap style={{ marginBottom: 16 }}>
+                <Select
+                    aria-label="เลือกตาราง"
+                    placeholder="เลือกตาราง"
+                    showSearch
+                    allowClear
+                    optionFilterProp="label"
+                    value={selectedTable}
+                    onChange={setSelectedTable}
+                    options={Array.from(new Set(data?.columns.map(c => c.table_name) || [])).map(table => ({ label: table, value: table }))}
+                    style={{ minWidth: 300 }}
+                />
+                <Button
+                    disabled={!selectedTable || draftActionPending}
+                    loading={draftMutation.isPending}
+                    onClick={() => selectedTable && draftMutation.mutate(selectedTable)}
+                >
+                    ร่างคำอธิบาย
+                </Button>
+            </Space>
+
+            {selectedTable && !!drafts?.length && (
+                <Card title={`คำอธิบายฉบับร่าง — ${selectedTable}`} style={{ marginBottom: 16 }}>
+                    <Table<ColumnDraft>
+                        rowKey="id"
+                        dataSource={drafts}
+                        loading={draftsLoading}
+                        pagination={false}
+                        scroll={{ x: 900 }}
+                        columns={[
+                            { title: 'คอลัมน์', dataIndex: 'column_name', width: 180 },
+                            { title: 'สถานะ', key: 'status', width: 160, render: () => <Tag color="orange">inferred · proposed</Tag> },
+                            {
+                                title: 'ความมั่นใจ', dataIndex: 'confidence', width: 110,
+                                render: (confidence: number | null) => confidence == null ? '-' : `${Math.round(confidence * 100)}%`
+                            },
+                            { title: 'เหตุผล', dataIndex: 'reason', width: 220 },
+                            {
+                                title: 'คำอธิบาย (แก้ไขได้)', key: 'description', width: 350,
+                                render: (_, draft) => (
+                                    <TextArea
+                                        aria-label={`คำอธิบาย ${draft.column_name}`}
+                                        autoSize={{ minRows: 3, maxRows: 8 }}
+                                        value={draftEdits[draft.id] ?? draft.description}
+                                        disabled={draftActionPending}
+                                        onChange={e => setDraftEdits(previous => ({ ...previous, [draft.id]: e.target.value }))}
+                                    />
+                                )
+                            },
+                            {
+                                title: 'การดำเนินการ', key: 'actions', width: 180,
+                                render: (_, draft) => (
+                                    <Space>
+                                        <Button
+                                            type="primary"
+                                            disabled={draftActionPending || !(draftEdits[draft.id] ?? draft.description).trim()}
+                                            loading={acceptDraftMutation.isPending && acceptDraftMutation.variables?.id === draft.id}
+                                            onClick={() => acceptDraftMutation.mutate({ id: draft.id, description: draftEdits[draft.id] ?? draft.description })}
+                                        >
+                                            รับ
+                                        </Button>
+                                        <Popconfirm
+                                            title="ปฏิเสธคำอธิบายฉบับร่างนี้?"
+                                            okText="ปฏิเสธ"
+                                            cancelText="ยกเลิก"
+                                            disabled={draftActionPending}
+                                            onConfirm={() => rejectDraftMutation.mutate(draft.id)}
+                                        >
+                                            <Button danger disabled={draftActionPending} loading={rejectDraftMutation.isPending && rejectDraftMutation.variables === draft.id}>
+                                                ปฏิเสธ
+                                            </Button>
+                                        </Popconfirm>
+                                    </Space>
+                                )
+                            }
+                        ]}
+                    />
+                </Card>
+            )}
+
             <Table
                 columns={columns}
                 dataSource={data?.columns.filter((col: SchemaMetadata) => {
+                    if (selectedTable && col.table_name !== selectedTable) return false;
                     if (!searchText) return true;
                     const lowerSearch = searchText.toLowerCase();
                     return (

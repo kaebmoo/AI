@@ -6,7 +6,7 @@
 |---|---|---|---|
 | **A** มองเห็นเส้นทางของทุกคำถาม | ✅ **ขึ้นของจริงแล้ว** + push (CI เขียว run 40091378614) | 2026-10-24 | `34845de`, `655faeb` |
 | **D** eval ที่สร้างเองจากคำประกาศ | ✅ **ขึ้นของจริงแล้ว** (main `011cef3`, reload 22:35) + push (CI เขียว run 40107701402) — วัดบน server ซ้อม: 96 → 157/174 หลังแก้ `plan()` | 2026-10-24 | `4cb8c62`, `ecdcc84`, แก้ `plan()` `3cd4e6c` |
-| E คำอธิบายคอลัมน์ feed อัตโนมัติ | ⬜ ยังไม่ทำ | | |
+| **E** คำอธิบายคอลัมน์ feed อัตโนมัติ | ✅ **ขึ้นของจริงแล้ว** (main `092f33f`, reload 23:47; ยังไม่ push) — วัดบนสำเนา: คำอธิบายว่าง 49.3% → 23.8% | 2026-10-24 | `3340f31`, `fc19128`, `fca9163`, `6826f75`, `cc0dfce` |
 | B ตัวตรวจ SQL ของ pass 2 | ⬜ ยังไม่ทำ | | |
 | C-0b คำศัพท์ระดับหน่วยงานทุกโดเมน | ⬜ ยังไม่ทำ (ระหว่างนี้ feed_ebt + feed_expense เป็นแถว `manual` — §A.6) | | |
 | C-00/C-01 metrics ของ revenue / sales | ⬜ ยังไม่ทำ | | |
@@ -159,6 +159,47 @@ Claude ตรวจรับและวัดผลเอง · ข้อตั
   ถัดไป: ดู `metric_path` ของคำถาม EBT จริงใน `/admin/stats` (§A.5) · scripts/tests ของ D ไม่มีผลกับ server ·
   ถอยกลับ: `git revert 3cd4e6c` บน main (ไม่มี migration)
 - รันชุดใหม่เมื่อข้อมูลเดือนใหม่: `gen_metric_questions --period <YYYYMM>` แล้ว `run_metric_eval` (คำสั่งใน `docs/EVAL_HARNESS.md`)
+
+---
+
+## E. คำอธิบายคอลัมน์ feed อัตโนมัติ (E-01, E-02, E-03) — 2026-10-24
+
+**วิธีทำ:** `/delegate` run `20261024-2015` (worktree `_worktrees/AI-phase-e`, branch `ai/delegate-phase-e`, base `be89108`, merge main `011cef3` แล้ว) —
+Codex เขียน code 5 slice (slice 02 สองรอบ: รอบแรกตัดคำนำหน้าตามช่องว่างซึ่งใช้กับชื่อหน่วยงานไทยไม่ได้ — ร่างได้ 2 จาก ~60 คอลัมน์),
+Claude ตรวจรับและวัดผลเอง · ข้อตัดสิน M-8 = ก, M-9 = ก · ไม่มี LLM ในการร่าง (template ไทยจากข้อเท็จจริงที่วัดได้) ·
+บันทึก run + probe: `.ai/20261024-2015/` (ไม่อยู่ใน git)
+
+### E.1 ที่สร้าง
+| commit | เนื้อหา |
+|---|---|
+| `3340f31` (E-01) | `DataInspector` อ่านผ่าน path หรือ SQLAlchemy Engine · `inspect` ของตาราง feed ไปที่ engine ของ source (`source_resolver.for_context`) ไม่ fallback ไป copy เก่า · `available-views` แสดงตาราง feed + `description_empty` / `description_empty_pct` · `/contexts/onboard/inspect` รับ feed (onboard / apply-sql ยังปฏิเสธ) |
+| `fc19128` (E-02) | `app/services/column_drafts.py`: ข้อเท็จจริง = ระดับจาก `master_hierarchy`, คู่ `_fname/_sname/_short_name/_abbr`, คำนำหน้าจาก `level_label_th` (≥ 60%), YYYYMM / เดือน / ปี ค.ศ.–พ.ศ., คีย์ของ contract, agg/unit · เคารพ `llm_data_policy` (ไม่ full = ข้อเท็จจริงจาก contract เท่านั้น) · เข้าคิว `knowledge_proposals` เป็น `inferred` ผ่าน `propose()` · API `POST /admin/schema/columns/draft`, `GET …/drafts`, `POST …/drafts/{id}/accept` (→ `manual`/active), `…/reject` |
+| `fca9163` (E-02 UI) | หน้า Schema: เลือกตาราง, "ร่างคำอธิบาย", แก้ข้อความแล้วรับ/ปฏิเสธ, ป้าย source/status |
+| `6826f75` (E-03) | `python -m scripts.export_col_meta --context feed_<domain>` (อ่านอย่างเดียว): แถว `manual` + active → snippet `col_meta` สำหรับ NT-Report, รวมต่อคอลัมน์ทุกตาราง, ข้อความขัดกันออก stderr · หัวข้อใหม่ใน `docs/DATAFEED_INTEGRATION.md` |
+| `cc0dfce` (แก้) | ข้อความร่างไม่ใส่รายชื่อคีย์ต่อตาราง ช่วงค่า และ % (เก็บใน `facts`) — `col_meta` ผูกชื่อคอลัมน์ทั้ง domain และช่วงปีจะล้าสมัยเมื่อเดือนใหม่เข้า |
+
+ผลทดสอบ: ACC-T 1514 → 1569 (E อย่างเดียว) → **1666 passed, 3 skipped** หลัง merge main (รวม D); ACC-L ผ่าน; `npm --prefix frontend-admin run build` ผ่าน
+
+### E.2 ผล (สำเนา config.db + CSV จริงของ DataFeed `dist/<domain>/latest`)
+- ร่างครบ 36 ตาราง feed → 91 ร่าง · รับทั้งหมด: คำอธิบายว่าง **176/357 (49.3%) → 85/357 (23.8%)** — **ไม่ถึงเป้า < 10%**:
+  คอลัมน์ที่เหลือ (เช่น `month_th`, `geo_cluster`, dim ส่วนใหญ่ของ expense 55/85) ไม่มีข้อเท็จจริงให้วัด จึงไม่ร่าง (ว่างดีกว่าเดาผิด) — ต้องให้คนเขียน
+- export: ebt 3 · revenue 18 (ขัดกันจริง 2: `service_group_nt`, `service_group_seq` เป็นคีย์ในบางตาราง) · sales 8 · expense 6
+- ทางกลับ (จำลองในหน่วยความจำแทนข้อ A6): ใส่ `desc` ที่ export ลง contract จริงทั้ง 4 แล้ว `sync_schema_metadata` → แถว `manual` เปลี่ยน 0/250 ·
+  ข้อเสนอ `declared` ที่เปิดอยู่มาจากสองคอลัมน์ที่ไม่ได้ export เท่านั้น
+
+### E.3 ข้อจำกัด / ขึ้นของจริง
+- ยังไม่ได้ตรวจ: คลิก UI ใน browser จริง · NT-Report `gen_contract` + `pytest tools/feed` (worktree ใหม่ไม่มีข้อมูลดิบ)
+- ไม่มี migration (`knowledge_proposals` มีอยู่แล้ว) · ไม่แตะ prompt path · ขึ้น = ff main + restart · การกด "ร่างคำอธิบาย" บนของจริงเขียนแถว `inferred`
+  ลง `knowledge_proposals` ของ config.db จริง (ไม่มีผลกับคำตอบจนกว่าคนจะรับ)
+- ยังไม่ทำ: ใช้ `fk` ของ contract เป็นข้อเท็จจริง · LLM เรียบเรียงข้อความ (ตัดออกตามข้อ A1)
+
+### E.4 ขึ้นของจริง (2026-10-24 23:47)
+- ff main `07543cd` → `092f33f` · uvicorn `--reload` (port 8000) เริ่ม worker ใหม่ 23:47:25 · route ใหม่ตอบ 401 (มีอยู่ ต้อง login) · admin vite (5173) เสิร์ฟ `Schema.tsx` ใหม่
+- ก่อนขึ้น ซ้อมบน server 8002 + สำเนา config.db/app.db ด้วย call ชุดเดียวกับหน้า Schema (`feed_sales_fact_sales`): ร่าง 8 · รับ 1 (แก้ข้อความ) → แถว `manual`/active ·
+  ปฏิเสธ 1 → proposal `rejected` แถวเดิมไม่เปลี่ยน · ร่างค้าง 6 · inspect ตาราง feed ได้ (114,235 แถว 25 คอลัมน์) · onboard ยังปฏิเสธ (400) ·
+  ไม่ได้คลิกใน browser (extension ของ Chrome ไม่เชื่อมต่อ)
+- NT-Report: **ยังไม่มีอะไรต้องส่ง** — config.db จริงมีแถวคอลัมน์ feed 357 แถวเป็น `declared` ทั้งหมด, export ทั้ง 4 domain ได้ 0 รายการ ·
+  ทางกลับเริ่มเมื่อ admin รับร่างบนของจริงแล้ว: `export_col_meta` → `col_meta` ใน `tools/feed/domains.py` + PATCH → `gen_contract.py` → `build_feed.py` → `pytest tools/feed`
 
 ---
 

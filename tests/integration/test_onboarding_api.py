@@ -15,6 +15,7 @@ from app.services.context_onboarding import (
     InspectionResult,
     ValidationResult,
 )
+from tests.unit.test_context_onboarding_feed import TABLE, feed_source  # noqa: F401
 
 
 # ============================================================
@@ -223,3 +224,40 @@ class TestOnboardingAPI:
                 json={"view_name": "test_view", "sql_statements": []},
             )
         assert response.status_code == 400
+
+
+class TestFeedOnboardingAPI:
+    def test_inspect_accepts_feed_table(self, admin_client, feed_source):
+        with patch('app.api.v1.admin.onboarding._get_business_db_path', return_value=str(feed_source.legacy_path)):
+            response = admin_client.post('/api/v1/admin/contexts/onboard/inspect', json={'view_name': TABLE})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload['status'] == 'ok'
+        assert payload['inspection']['row_count'] == feed_source.row_count
+        assert len(payload['inspection']['columns']) == 6
+
+    @pytest.mark.parametrize(('endpoint', 'extra'), [
+        ('', {'inspect_only': True}),
+        ('', {'dry_run': True}),
+        ('/apply-sql', {'sql_statements': ["SELECT 1"]}),
+    ])
+    def test_feed_writes_still_refused(self, admin_client, feed_source, endpoint, extra):
+        with patch('app.services.context_onboarding.ContextOnboardingService') as service:
+            response = admin_client.post(f'/api/v1/admin/contexts/onboard{endpoint}',
+                                         json={'view_name': TABLE, **extra})
+        assert response.status_code == 400
+        assert 'contract' in response.json()['detail']
+        service.assert_not_called()
+
+    def test_available_views_preserves_feed_fields(self, admin_client, feed_source):
+        with patch('app.api.v1.admin.onboarding._get_business_db_path', return_value=str(feed_source.legacy_path)):
+            response = admin_client.get('/api/v1/admin/contexts/onboard/available-views')
+        assert response.status_code == 200
+        payload = response.json()
+        feed = [v for v in payload['configured'] + payload['unconfigured'] if v['name'] == TABLE]
+        assert len(feed) == 1
+        assert feed[0]['source'] == 'file'
+        assert feed[0]['context'] == 'feed_ebt'
+        assert feed[0]['columns_total'] == 6
+        assert feed[0]['description_empty'] == 4
+        assert feed[0]['description_empty_pct'] == 66.7
