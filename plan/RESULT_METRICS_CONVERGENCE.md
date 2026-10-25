@@ -11,7 +11,7 @@
 | C-0b คำศัพท์ระดับหน่วยงานทุกโดเมน | ⬜ ยังไม่ทำ (ระหว่างนี้ feed_ebt + feed_expense เป็นแถว `manual` — §A.6) | | |
 | C-00/C-01 metrics ของ revenue / sales | ⬜ ยังไม่ทำ | | |
 | C-0c ratio จัดอันดับอย่างมีความหมาย | ✅ ทำก่อนแผนนี้ (`941cd0a`, ebt 1.6.0) | 2026-10-24 | |
-| **CMP** เทียบสองงวดบนเส้นทาง compile (`plan/PLAN_METRICS_COMPARISON.md`) | ✅ บน branch `ai/delegate-metrics` — **ยังไม่ขึ้นของจริง** (ชุดเทียบปีก่อน 3 → 20/27 บน server ซ้อม) | 2026-10-25 | `a54f76a`, `0a32b92` |
+| **CMP** เทียบสองงวดบนเส้นทาง compile (`plan/PLAN_METRICS_COMPARISON.md`) | ✅ **ขึ้นของจริงแล้ว** (main `862915c` = merge กับ Phase E, reload 07:32 2026-10-25) + push — วัดบน server ซ้อม: ชุดเทียบปีก่อน 3 → 20/27 | 2026-10-25 | `a54f76a`, `0a32b92` |
 
 ---
 
@@ -251,5 +251,6 @@ class ที่ผลเกิน 50 แถวข้าม), 1 คำถาม�
 - "ส่วนไหน / กลุ่มไหน" (คำโดด) ยังได้ `division` → C-0b
 - คำว่า "หน่วยงาน" / "จังหวัด" ถามกลับเฉพาะ context ที่มี metric ประกาศ (ตอนนี้ feed_ebt); context อื่นพฤติกรรมเดิม
 - `CHANGE_WORDS` เป็นรายการคำสั้น ๆ ใน code (ponytail) — เติมเมื่อ audit `metric_path` แสดงคำถามที่พลาด
-- **ยังไม่ขึ้นของจริง**: แตะ prompt path + ช่องทางขาออก (`outbound.safe_answer`) — ขึ้น = ff main (`--reload`) แล้วถามคำถาม 453/454 บน portal จริง ·
-  ไม่มี migration · ถอยกลับ: `git revert 0a32b92 a54f76a`
+- **ขึ้นของจริงแล้ว 2026-10-25 07:32**: main ขยับไประหว่างทาง (Phase E `6640cae`) → merge main เข้า branch (`862915c`, ชนกันแค่ไฟล์นี้),
+  ACC-T 1708 passed → ff main `6640cae..862915c` → worker ของ `--reload` เริ่มใหม่ 07:32:50 · ถัดไป: ถามคำถาม 453/454 บน portal จริง
+  แล้วดู `metric_path` (`declined:clarify:level` / `compiled:ebt`) · ไม่มี migration · ถอยกลับ: `git revert -m 1 862915c` หรือ `git revert 0a32b92 a54f76a`
