@@ -571,6 +571,10 @@ def plan_with_reason(
         threshold = _threshold_side(question, line)
         if threshold is not None and order_desc is None:
             order_desc = threshold == "above"
+        if threshold is not None and not re.search(r"\d", question):
+            # "ฝ่ายไหนยังไม่ถึงเป้า" asks for every unit on that side; live audit 471 got pass 1's invented
+            # limit 10 and an answer that called those 10 "ทั้งหมด" (the report: 24)
+            limit = None
     base_period = change = None
     if comparison:
         # "EBT_month กันยายนเทียบสิงหาคม": pass 1 names the month column and no time_range — month against month

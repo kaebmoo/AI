@@ -277,3 +277,13 @@ def test_a_freely_named_ordering_ranks_by_the_metric(resolved, column):
               "ordering": {"column": column, "direction": "DESC"}, "limit": 3}
     req, reason = plan_with_reason(intent, "ฝ่ายไหนทำยอดขายได้เกินเป้ามากที่สุด 3 อันดับ", resolved, [], 202609, set())
     assert reason is None and (req.threshold, req.order_desc, req.limit) == ("above", True, 3)
+
+
+@pytest.mark.parametrize("question,limit", [("ฝ่ายไหนยอดขายยังไม่ถึงเป้า", None),
+                                            ("ฝ่ายไหนทำยอดขายได้เกินเป้ามากที่สุด 3 อันดับ", 3)])
+def test_a_threshold_list_keeps_a_limit_only_when_the_question_gives_a_number(resolved, question, limit):
+    """Live audit 471 (2026-10-26): pass 1 sent limit 10 for "ยังไม่ถึงเป้า" and the answer said 10 units in all."""
+    intent = {"intent_type": "aggregation", "metric_id": "sales_vs_target", "dimensions": ["unit_fname"], "filters": [],
+              "ordering": {"column": "amount", "direction": "ASC"}, "limit": 10 if limit is None else limit}
+    req, reason = plan_with_reason(intent, question, resolved, [], 202609, set())
+    assert reason is None and req.limit == limit
