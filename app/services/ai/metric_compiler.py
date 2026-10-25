@@ -663,11 +663,16 @@ def compile(req: CompileRequest, resolved: dict[str, Metric]) -> Compiled:
         # always orders by its change, so there only a breakdown ranks units; a named unit stays itself.
         base_sql = base_name = None
         if total is None and (dims or (req.order_desc is not None and not compare)) and ranking:
+            # Scoping explicitly named units can exclude HQ units and leave the result with 0 rows.
+            named = bool(req.filters) and all(
+                any(item["column"] == d and item["operator"] == "=" for item in req.filters)
+                for d in req.dimensions)
             scope = ranking.get("scope")
             if scope is not None:
                 if not isinstance(scope, str) or not scope.strip():
                     raise ValueError("Invalid ranking scope")
-                period += f" AND ({scope})"
+                if not named:
+                    period += f" AND ({scope})"
             base = ranking.get("base")
             if base is not None and not compare:
                 if not isinstance(base, str) or not base.strip():
