@@ -422,8 +422,8 @@ def plan_with_reason(
     period_column = (metric.period or {}).get("column")
     comparison = intent.get("intent_type") == "comparison"
     line = (metric.ranking or {}).get("threshold") if isinstance(metric.ranking, dict) else None
-    if intent.get("intent_type") == "lookup" and isinstance(line, dict):
-        comparison = True  # "หน่วยงานที่ยอดขายมากกว่าเป้ามีหน่วยไหนบ้าง" arrives as a lookup too
+    if intent.get("intent_type") in ("lookup", "detail") and isinstance(line, dict):
+        comparison = True  # "หน่วยงานที่ยอดขายมากกว่าเป้ามีหน่วยไหนบ้าง" arrives as a lookup or a detail too
     if comparison and isinstance(line, dict):
         # "ยอดขายเทียบเป้า": a metric measured against its declared line compares with that line (the target),
         # not with the same period a year before
@@ -766,8 +766,9 @@ def compile(req: CompileRequest, resolved: dict[str, Metric]) -> Compiled:
             # and those outside the scope stay computable (contract: ebt_dimension_breakdown).
             if not req.filters and metric.official_scope:
                 period += f" AND ({metric.official_scope})"
-            # filters on one column are alternatives ("ฝ่าย A และฝ่าย B" arrives as two LIKE filters on unit_fname)
-            by_column: dict[str, list[str]] = {}
+            # filters on one column with one operator are alternatives ("ฝ่าย A และฝ่าย B" arrives as two LIKE
+            # filters on unit_fname; two = can never both hold); mixed operators (= X with LIKE 'ส่วน') narrow
+            by_column: dict[tuple[str, str], list[str]] = {}
             for item in req.filters:
                 column, operator, value = _quote(item["column"]), item["operator"], item["value"]
                 if operator == "IN":
@@ -776,9 +777,13 @@ def compile(req: CompileRequest, resolved: dict[str, Metric]) -> Compiled:
                     if operator == "LIKE" and "%" not in value:
                         value = f"%{value}%"
                     predicate = f"{column} {operator} {_literal(value)}"
-                by_column.setdefault(column, []).append(predicate)
-            for predicates in by_column.values():
-                period += f" AND {predicates[0]}" if len(predicates) == 1 else f" AND ({' OR '.join(predicates)})"
+                by_column.setdefault((column, operator), []).append(predicate)
+            columns_operators = {}
+            for column, operator in by_column:
+                columns_operators.setdefault(column, set()).add(operator)
+            for (column, _), predicates in by_column.items():
+                alternatives = len(predicates) > 1 and len(columns_operators[column]) == 1
+                period += " AND " + (f"({' OR '.join(predicates)})" if alternatives else " AND ".join(predicates))
         # a ratio's column says so in its name: "EBT Margin (%)" reads as percent in the data block too
         alias = f"{metric.name_th} (%)" if (metric.unit or "").strip().lower() in ("percent", "%") else metric.name_th
         # A breakdown or ranking of a ratio across units: the contract's `ranking.scope` keeps units the
@@ -834,8 +839,7 @@ def compile(req: CompileRequest, resolved: dict[str, Metric]) -> Compiled:
                 # sales vs target: units without a target have no % to compare (`positive`), and "มากกว่าเป้า"
                 # keeps the units on the asked side of the declared line (`threshold`)
                 positive = ranking.get("positive")
-                named = any(item["column"] in req.dimensions for item in req.filters)
-                if positive is not None and not named:  # a unit asked for by name keeps its row
+                if positive is not None and not named:  # a unit asked for by name (see scope above) keeps its row
                     if not isinstance(positive, str) or not positive.strip():
                         raise ValueError("Invalid ranking positive")
                     having.append(f"({render(positive, metric, frozenset())}) > 0")

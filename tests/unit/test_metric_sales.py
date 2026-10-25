@@ -262,8 +262,10 @@ def test_a_january_span_in_the_question_is_a_year_to_date(resolved, question, ti
     assert reason is None and (req.period, req.mode) == expected
 
 
-def test_a_lookup_against_the_target_is_read_like_an_aggregation(resolved):
-    intent = {"intent_type": "lookup", "metric_id": "sales_vs_target", "dimensions": ["unit_fname"], "filters": []}
+@pytest.mark.parametrize("intent_type", ["lookup", "detail"])
+def test_a_lookup_against_the_target_is_read_like_an_aggregation(resolved, intent_type):
+    """Practice rounds 3 (lookup) and 8 (detail): the detail one went to free SQL and returned 0 rows."""
+    intent = {"intent_type": intent_type, "metric_id": "sales_vs_target", "dimensions": ["unit_fname"], "filters": []}
     req, reason = plan_with_reason(intent, QUESTION, resolved, [], 202609, set())
     assert reason is None and (req.threshold, req.order_desc, req.base_period) == ("above", True, None)
 
