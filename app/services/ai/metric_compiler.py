@@ -11,6 +11,8 @@ import re
 
 from sqlalchemy import text
 
+from app.services.ai.thai_year import _MONTHS, _MONTHS_SHORT
+
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +33,10 @@ class Metric:
     reference: dict | None
     unit: str | None
     note_th: str | None
-    # {scope, base, base_name_th}: applied to a breakdown/ranking only — see compile()
+    # {scope, base, base_name_th, positive, threshold}: applied to a breakdown/ranking only — see compile()
     ranking: dict | None = None
+    # [{expr, name_th}]: values shown before the metric's own column (sales: ยอดขาย and เป้า beside the %)
+    extra_columns: list | None = None
 
 
 def load_metrics(context_name: str, config_engine=None) -> list[Metric]:
@@ -49,7 +53,8 @@ def load_metrics(context_name: str, config_engine=None) -> list[Metric]:
             metrics = []
             for row in rows:
                 values = dict(row)
-                for key in ("synonyms", "period", "dimensions", "terms", "official_total", "reference", "ranking"):
+                for key in ("synonyms", "period", "dimensions", "terms", "official_total", "reference", "ranking",
+                            "extra_columns"):
                     if isinstance(values[key], str):
                         values[key] = json.loads(values[key])
                 values["synonyms"] = tuple(values["synonyms"] or ())
@@ -151,6 +156,7 @@ class CompileRequest:
     official_total_ok: bool = True
     base_period: int | None = None  # a comparison: the value at period against the value at base_period
     change: str | None = None       # a comparison across units keeps only those that went "up" / "down"
+    threshold: str | None = None    # a breakdown keeps units "above" / "below" the metric's ranking.threshold
 
 
 @dataclass(frozen=True)
@@ -167,6 +173,17 @@ CHANGE_WORDS = {
 }
 # words that name an org unit without naming a level: the owner chose to ask back (CMP-3 ค)
 GENERIC_UNIT_WORDS = ("หน่วยงาน", "จังหวัด")
+_MONTH_NAMES = "|".join(re.escape(m) for m in (*_MONTHS, *_MONTHS_SHORT))
+# "ม.ค.-ก.ย." / "มกราคม ถึง กันยายน": a year to date at the end month, however pass 1 filled time_range
+_YEAR_TO_DATE_SPAN = re.compile(rf"(?:ม\.ค\.|มกราคม)\s*(?:-|–|ถึง(?:เดือน)?)\s*({_MONTH_NAMES})")
+
+
+def _year_to_date_end(question: str) -> int | None:
+    found = _YEAR_TO_DATE_SPAN.search(question)
+    if found is None:
+        return None
+    name = found[1]
+    return (_MONTHS.index(name) if name in _MONTHS else _MONTHS_SHORT.index(name)) + 1
 
 
 @dataclass(frozen=True)
@@ -264,16 +281,64 @@ def supports(intent: dict, metric: Metric, extra_names: frozenset[str] = frozens
     return _support_reason(intent, metric, extra_names) is None
 
 
-def _triggered_mappings(intent: dict, question: str, ignore: frozenset[str] = frozenset()) -> list[dict]:
+def _threshold_side(question: str, line: dict) -> str | None:
+    """"มากกว่าเป้า" → above, "ไม่ถึงเป้า" → below, from the contract's words. Below words are cut out first:
+    "ไม่ถึงเป้า" contains the above word "ถึงเป้า"."""
+    below = [w for w in line.get("below") or () if isinstance(w, str) and w]
+    above = [w for w in line.get("above") or () if isinstance(w, str) and w]
+    rest = question
+    for word in sorted(below, key=len, reverse=True):
+        rest = rest.replace(word, " ")
+    is_below, is_above = rest != question, any(word in rest for word in above)
+    return None if is_below == is_above else "below" if is_below else "above"
+
+
+def _triggered_mappings(intent: dict, question: str, ignore: frozenset[str] = frozenset(),
+                        names: frozenset[str] = frozenset(), defining: dict | None = None) -> list[dict]:
+    """Mappings whose keyword is in the question, except `ignore` words, keywords that contain one of the
+    metric's own `names` (pass 1 invents "ยอดขายเทียบเป้า" around the synonym "เทียบเป้า") and conditions that only
+    restate the terms (pass 1 invents "ยอดขาย" → metric = 'actual')."""
     question = question.casefold()
     triggered = []
     for mapping in intent.get("matched_mappings") or []:
         if not isinstance(mapping, dict) or not isinstance(mapping.get("keyword"), str):
             continue
         keyword = mapping["keyword"].casefold().strip()
-        if keyword and keyword not in ignore and keyword in question:
+        if (keyword and keyword not in ignore and keyword in question
+                and not any(name and name in keyword for name in names)
+                and not _restates_definition(mapping.get("sql_condition"), defining or {})):
             triggered.append(mapping)
     return triggered
+
+
+_TERM_LITERAL = re.compile(r"\b([a-z_][a-z0-9_]*)\s*(?:=|\bIN\b)\s*(\((?:\s*'(?:''|[^'])*'\s*,?)+\)|'(?:''|[^'])*')", re.I)
+
+
+def _defining_values(metric: Metric) -> dict[str, set[str]]:
+    """Columns that every term picks by literal (sales: metric = 'actual' / 'target'), with the values they pick.
+    pass 1 repeats them as filters (metric = 'actual') — they are the metric's own definition, not a selection."""
+    columns: dict[str, set[str]] | None = None
+    for term in metric.terms.values():
+        found: dict[str, set[str]] = {}
+        for column, values in _TERM_LITERAL.findall((term.get("where") or "") if isinstance(term, dict) else ""):
+            found.setdefault(column.casefold(), set()).update(
+                v.replace("''", "'") for v in re.findall(r"'((?:''|[^'])*)'", values))
+        columns = found if columns is None else {
+            c: columns[c] | found[c] for c in columns.keys() & found.keys()}
+    declared = {d.casefold() for d in metric.dimensions or ()}
+    return {c: v for c, v in (columns or {}).items() if c not in declared}
+
+
+def _restates_definition(condition, defining: dict[str, set[str]]) -> bool:
+    """A condition made only of `column = 'value'` / `IN (...)` that the terms already choose."""
+    if not isinstance(condition, str) or not defining:
+        return False
+    found = _TERM_LITERAL.findall(condition)
+    for column, values in found:
+        picked = {v.replace("''", "'") for v in re.findall(r"'((?:''|[^'])*)'", values)}
+        if column.casefold() not in defining or not picked <= defining[column.casefold()]:
+            return False
+    return bool(found) and not re.sub(r"\b(?:AND|OR)\b|[()\s]", "", _TERM_LITERAL.sub(" ", condition), flags=re.I)
 
 
 def _month_key(value) -> int | None:
@@ -343,7 +408,12 @@ def plan_with_reason(
     # invents for ส่วน / กลุ่ม) must not send the question to free SQL — the dimension already carries it
     level_words = {label.casefold().strip() for dim, label in (labels or {}).items()
                    if dim in (metric.dimensions or ()) and isinstance(label, str) and label.strip()}
-    triggered = _triggered_mappings(intent, question, frozenset(ignore | level_words))
+    # the metric's own names: id / name / synonyms, and what its extra columns show ("ยอดขายบริการ (บาท)" → ยอดขายบริการ)
+    names = ignore | {re.sub(r"\s*\([^)]*\)\s*$", "", extra["name_th"]).casefold().strip()
+                      for extra in metric.extra_columns or ()
+                      if isinstance(extra, dict) and isinstance(extra.get("name_th"), str)}
+    triggered = _triggered_mappings(intent, question, frozenset(ignore | level_words), frozenset(names),
+                                    _defining_values(metric))
     if triggered:
         return None, "mapping_triggered:" + _reason_detail(triggered[0]["keyword"].casefold().strip())
     filters = intent.get("filters") or []
@@ -351,7 +421,29 @@ def plan_with_reason(
         return None, "shape:filter:invalid"
     period_column = (metric.period or {}).get("column")
     comparison = intent.get("intent_type") == "comparison"
+    line = (metric.ranking or {}).get("threshold") if isinstance(metric.ranking, dict) else None
+    if intent.get("intent_type") == "lookup" and isinstance(line, dict):
+        comparison = True  # "หน่วยงานที่ยอดขายมากกว่าเป้ามีหน่วยไหนบ้าง" arrives as a lookup too
+    if comparison and isinstance(line, dict):
+        # "ยอดขายเทียบเป้า": a metric measured against its declared line compares with that line (the target),
+        # not with the same period a year before
+        ordering = intent.get("ordering")
+        dimensions = intent.get("dimensions")
+        intent = {**intent, "intent_type": "aggregation",
+                  "ordering": {"direction": ordering.get("direction")} if isinstance(ordering, dict) else ordering,
+                  # pass 1 adds the period as a dimension of a comparison; the target sits beside each unit instead
+                  "dimensions": [d for d in dimensions if not (isinstance(d, str) and isinstance(period_column, str)
+                                                                and d.casefold() == period_column.casefold())]
+                  if isinstance(dimensions, list) else dimensions}
+        comparison = False
+    ordering = intent.get("ordering")
+    if (isinstance(line, dict) and isinstance(ordering, dict)
+            and ordering.get("column") not in (*(metric.dimensions or ()), None)):
+        # a metric measured against its line ranks by its own value; pass 1 names that freely
+        # ("achievement_diff", "amount - target_amt") — the actual and target travel beside it
+        intent = {**intent, "ordering": {"direction": ordering.get("direction")}}
     remaining = []
+    defining = _defining_values(metric)
     period_hint = None
     lows, highs = [], []
     compared = set()  # a comparison's periods as pass 1 wrote them: IN [202608, 202609], BETWEEN [202509, 202609]
@@ -391,6 +483,12 @@ def plan_with_reason(
                     highs.append(max(keys))
             else:
                 return None, "period_filter:operator"
+        elif (isinstance(item, dict) and isinstance(item.get("column"), str)
+              and item["column"].casefold() in defining
+              and item.get("operator") in ("=", "IN")
+              and set(item["value"] if isinstance(item.get("value"), list) else [item.get("value")])
+              <= defining[item["column"].casefold()]):
+            continue  # metric = 'actual': the terms already choose it
         else:
             remaining.append(item)
     range_cumulative = False
@@ -456,13 +554,23 @@ def plan_with_reason(
     if (type(year) is not int or not 1 <= year <= 9999
             or type(month) is not int or not 1 <= month <= 12):
         return None, "time_range_invalid"
+    span_end = _year_to_date_end(question) if not comparison else None
+    if span_end is not None:
+        month = span_end
     if year == ref_y:
         month = min(month, ref_m)
-    mode = "month" if tr.get("month") is not None and not tr.get("cumulative") and not range_cumulative else "cumulative"
+    mode = ("month" if tr.get("month") is not None and not tr.get("cumulative") and not range_cumulative
+            and span_end is None else "cumulative")
     period = year * 100 + month
     limit = intent.get("limit")
     order_desc = (intent.get("ordering") or {}).get("direction") != "ASC" \
         if not comparison and _orders_by_value(intent, metric, frozenset(ignore)) else None
+    threshold = None
+    if isinstance(line, dict) and not comparison and intent.get("dimensions"):
+        # "หน่วยงานที่ยอดขายมากกว่าเป้า": the units on the asked side of the line, best (or worst) first
+        threshold = _threshold_side(question, line)
+        if threshold is not None and order_desc is None:
+            order_desc = threshold == "above"
     base_period = change = None
     if comparison:
         # "EBT_month กันยายนเทียบสิงหาคม": pass 1 names the month column and no time_range — month against month
@@ -490,6 +598,7 @@ def plan_with_reason(
         official_total_ok=metric.official_total is not None and metric.official_total["dataset"] in tables,
         base_period=base_period,
         change=change,
+        threshold=threshold,
     ), None
 
 
@@ -597,9 +706,14 @@ def compile(req: CompileRequest, resolved: dict[str, Metric]) -> Compiled:
         if compare and (type(req.base_period) is not int or not req.base_period < req.period
                         or req.change not in (None, "up", "down")):
             raise ValueError("Invalid comparison")
+        if req.threshold not in (None, "above", "below"):
+            raise ValueError("Invalid threshold side")
+        # no year-to-date column declared (sales holds monthly amounts): the year to date is the sum of the
+        # months from 01 to the period
+        summed = req.mode == "cumulative" and not metric.period["value"].get("cumulative")
 
         def render(expr_text: str, current: Metric, visiting: frozenset[str], when: str = "") -> str:
-            value = _quote(current.period["value"][req.mode])
+            value = _quote(current.period["value"]["month" if summed else req.mode])
 
             def identifier(name: str) -> str:
                 if name in current.terms:
@@ -627,10 +741,16 @@ def compile(req: CompileRequest, resolved: dict[str, Metric]) -> Compiled:
         official = not req.dimensions and not req.filters
         total = metric.official_total if official and req.official_total_ok else None
         table = total["dataset"] if total is not None else metric.dataset
+        if total is not None and summed:
+            raise ValueError("An official total needs a year-to-date column")
         period_key = f'CAST({_quote(metric.period["column"])} AS INTEGER)'
+
+        def in_period(p: int) -> str:
+            return f"{period_key} BETWEEN {p // 100 * 100 + 1} AND {p}" if summed else f"{period_key} = {p}"
+
         # a comparison reads both periods in one pass; each side of it adds its own period to every term
-        period = (f"{period_key} IN ({req.base_period}, {req.period})" if compare
-                  else f"{period_key} = {req.period}")
+        period = (f"({in_period(req.base_period)} OR {in_period(req.period)})" if compare and summed
+                  else f"{period_key} IN ({req.base_period}, {req.period})" if compare else in_period(req.period))
         dims = [_quote(d) for d in req.dimensions]
         if total is not None:
             measure = _quote(total["month_column" if req.mode == "month" else "column"])
@@ -639,13 +759,15 @@ def compile(req: CompileRequest, resolved: dict[str, Metric]) -> Compiled:
         else:
             measure = f"({expr})"
             if compare:
-                now, then = (f"({expression(metric, frozenset(), f' AND {period_key} = {p}')})"
+                now, then = (f"({expression(metric, frozenset(), f' AND {in_period(p)}')})"
                              for p in (req.period, req.base_period))
             # No filter = the question named no unit, so a breakdown stays inside the report's
             # scope (the EBT report is of the two sales lines); a filter picks units explicitly,
             # and those outside the scope stay computable (contract: ebt_dimension_breakdown).
             if not req.filters and metric.official_scope:
                 period += f" AND ({metric.official_scope})"
+            # filters on one column are alternatives ("ฝ่าย A และฝ่าย B" arrives as two LIKE filters on unit_fname)
+            by_column: dict[str, list[str]] = {}
             for item in req.filters:
                 column, operator, value = _quote(item["column"]), item["operator"], item["value"]
                 if operator == "IN":
@@ -654,7 +776,9 @@ def compile(req: CompileRequest, resolved: dict[str, Metric]) -> Compiled:
                     if operator == "LIKE" and "%" not in value:
                         value = f"%{value}%"
                     predicate = f"{column} {operator} {_literal(value)}"
-                period += f" AND {predicate}"
+                by_column.setdefault(column, []).append(predicate)
+            for predicates in by_column.values():
+                period += f" AND {predicates[0]}" if len(predicates) == 1 else f" AND ({' OR '.join(predicates)})"
         # a ratio's column says so in its name: "EBT Margin (%)" reads as percent in the data block too
         alias = f"{metric.name_th} (%)" if (metric.unit or "").strip().lower() in ("percent", "%") else metric.name_th
         # A breakdown or ranking of a ratio across units: the contract's `ranking.scope` keeps units the
@@ -685,7 +809,7 @@ def compile(req: CompileRequest, resolved: dict[str, Metric]) -> Compiled:
                         f"({now}) - ({then}) AS {_quote('ผลต่าง (จุด %)' if alias != metric.name_th else 'ผลต่าง')}"]
             if dims and total is None:
                 # units in both periods only; "ดีกว่าปีก่อน" keeps those that went up (CMP-2 ข)
-                having = [f"COUNT(CASE WHEN {period_key} = {p} THEN 1 END) > 0" for p in (req.base_period, req.period)]
+                having = [f"COUNT(CASE WHEN {in_period(p)} THEN 1 END) > 0" for p in (req.base_period, req.period)]
                 if req.change is not None:
                     having.append(f"({now}) - ({then}) {'>' if req.change == 'up' else '<'} 0")
             compare_note = (f"เทียบ {label_now} กับ {label_then}; ผลต่าง = {label_now} − {label_then}"
@@ -693,9 +817,29 @@ def compile(req: CompileRequest, resolved: dict[str, Metric]) -> Compiled:
                                else "; แสดงเฉพาะหน่วยที่ผลต่าง > 0 (ดีขึ้น)" if req.change == "up"
                                else "; แสดงเฉพาะหน่วยที่ผลต่าง < 0 (แย่ลง)"))
         else:
+            if total is None:
+                for extra in metric.extra_columns or ():
+                    columns.append(f"({render(extra['expr'], metric, frozenset())}) AS {_quote(extra['name_th'])}")
             if base_sql is not None:
                 columns.append(f"({base_sql}) AS {_quote(base_name)}")
             columns.append(f"{measure} AS {_quote(alias)}")
+            if total is None and dims and ranking:
+                # sales vs target: units without a target have no % to compare (`positive`), and "มากกว่าเป้า"
+                # keeps the units on the asked side of the declared line (`threshold`)
+                positive = ranking.get("positive")
+                named = any(item["column"] in req.dimensions for item in req.filters)
+                if positive is not None and not named:  # a unit asked for by name keeps its row
+                    if not isinstance(positive, str) or not positive.strip():
+                        raise ValueError("Invalid ranking positive")
+                    having.append(f"({render(positive, metric, frozenset())}) > 0")
+                if req.threshold is not None:
+                    line = ranking.get("threshold")
+                    value = line.get("value") if isinstance(line, dict) else None
+                    if type(value) not in (int, float):
+                        raise ValueError("Invalid ranking threshold")
+                    sign = ">=" if req.threshold == "above" else "<"
+                    having.append(f"{measure} {sign} {value}")
+                    compare_note = f"แสดงเฉพาะหน่วยที่ {alias} {'≥' if sign == '>=' else '<'} {value}"
         sql = f"SELECT {', '.join(columns)} FROM {_quote(table)} WHERE {period}"
         if dims:
             sql += " GROUP BY " + ", ".join(dims)

@@ -30,6 +30,7 @@ def migrate(config_engine=None):
             unit TEXT,
             note_th TEXT,
             ranking TEXT,
+            extra_columns TEXT,
             source TEXT,
             status TEXT NOT NULL DEFAULT 'active',
             confidence REAL,
@@ -46,6 +47,10 @@ def migrate(config_engine=None):
         if "ranking" not in present:
             conn.execute(text("ALTER TABLE schema_metrics ADD COLUMN ranking TEXT"))
             print("Added schema_metrics.ranking.")
+        # 2026-10-25: `extra_columns` ([{expr, name_th}] — sales vs target shows ยอดขาย and เป้า beside the %)
+        if "extra_columns" not in present:
+            conn.execute(text("ALTER TABLE schema_metrics ADD COLUMN extra_columns TEXT"))
+            print("Added schema_metrics.extra_columns.")
     print("Ensured schema_metrics and its context/metric unique index and context index exist.")
     print("Migration complete (idempotent).")
 

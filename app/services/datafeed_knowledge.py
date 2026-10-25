@@ -241,10 +241,14 @@ def _validate_metric(metric: dict, datasets: dict, earlier_ids: set) -> None:
         raise ValueError(f"unknown dataset {dataset!r}")
     columns = datasets[dataset]
     period = metric.get("period") or {}
-    for column in (period.get("column"), (period.get("value") or {}).get("cumulative"),
-                   (period.get("value") or {}).get("month")):
+    # no `cumulative` = the year to date is the sum of the months (sales holds monthly amounts only)
+    cumulative = (period.get("value") or {}).get("cumulative")
+    for column in (period.get("column"), (period.get("value") or {}).get("month"),
+                   *(() if cumulative is None else (cumulative,))):
         if column not in columns:
             raise ValueError(f"unknown period column {column!r} in {dataset}")
+    if cumulative is None and metric.get("official_total") is not None:
+        raise ValueError("official_total needs a cumulative period column")
     unknown = set(metric.get("dimensions") or []) - columns
     if unknown:
         raise ValueError(f"unknown dimensions {sorted(unknown)} in {dataset}")
@@ -269,10 +273,38 @@ def _validate_metric(metric: dict, datasets: dict, earlier_ids: set) -> None:
         for key in ("column", "month_column"):
             if total.get(key) not in datasets[total["dataset"]]:
                 raise ValueError(f"unknown official_total {key} {total.get(key)!r}")
+
+    def check_expression(where: str, value) -> None:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{where} must be a non-empty expression")
+        used = set(re.sub(r"\bnullif\b|\b\d+(?:\.\d+)?(?:e[+-]?\d+)?\b|[+\-*/(),]", " ", value, flags=re.I).split())
+        if used - set(metric.get("terms") or {}) - earlier_ids:
+            raise ValueError(f"{where}: unknown identifiers {sorted(used - set(metric.get('terms') or {}) - earlier_ids)}")
+
+    extra = metric.get("extra_columns")
+    if extra is not None:
+        if not isinstance(extra, list) or not extra:
+            raise ValueError("extra_columns must be a non-empty list")
+        for item in extra:
+            if not isinstance(item, dict) or set(item) != {"expr", "name_th"}:
+                raise ValueError("each extra column is {expr, name_th}")
+            check_expression("extra_columns.expr", item["expr"])
+            if not isinstance(item["name_th"], str) or not item["name_th"].strip():
+                raise ValueError("extra_columns.name_th must be a non-empty string")
     ranking = metric.get("ranking")
     if ranking is not None:
-        if not isinstance(ranking, dict) or not set(ranking) <= {"scope", "base", "base_name_th"}:
-            raise ValueError("ranking must be a mapping of scope / base / base_name_th")
+        if not isinstance(ranking, dict) or not set(ranking) <= {"scope", "base", "base_name_th", "positive", "threshold"}:
+            raise ValueError("ranking must be a mapping of scope / base / base_name_th / positive / threshold")
+        if ranking.get("positive") is not None:
+            check_expression("ranking.positive", ranking["positive"])
+        line = ranking.get("threshold")
+        if line is not None:
+            if (not isinstance(line, dict) or not set(line) <= {"value", "above", "below"}
+                    or type(line.get("value")) not in (int, float)):
+                raise ValueError("ranking.threshold must be {value, above, below} with a numeric value")
+            words = [*(line.get("above") or []), *(line.get("below") or [])]
+            if not words or not all(isinstance(w, str) and w.strip() for w in words):
+                raise ValueError("ranking.threshold needs non-empty above / below words")
         scope = ranking.get("scope")
         if scope is not None:
             if not isinstance(scope, str) or not scope.strip():
@@ -281,13 +313,8 @@ def _validate_metric(metric: dict, datasets: dict, earlier_ids: set) -> None:
             used = set(re.findall(r"\b([a-z_][a-z0-9_]*)\s*(?:=|<>|!=|\bIN\b|\bLIKE\b|>|<)", where, re.I))
             if used - columns:
                 raise ValueError(f"ranking.scope: unknown columns {sorted(used - columns)} in {dataset}")
-        base = ranking.get("base")
-        if base is not None:
-            if not isinstance(base, str) or not base.strip():
-                raise ValueError("ranking.base must be a non-empty expression")
-            used = set(re.sub(r"\bnullif\b|\b\d+(?:\.\d+)?(?:e[+-]?\d+)?\b|[+\-*/(),]", " ", base, flags=re.I).split())
-            if used - set(metric.get("terms") or {}) - earlier_ids:
-                raise ValueError(f"ranking.base: unknown identifiers {sorted(used - set(metric.get('terms') or {}) - earlier_ids)}")
+        if ranking.get("base") is not None:
+            check_expression("ranking.base", ranking["base"])
         name = ranking.get("base_name_th")
         if name is not None and (not isinstance(name, str) or not name.strip()):
             raise ValueError("ranking.base_name_th must be a non-empty string")
@@ -330,7 +357,8 @@ def sync_metrics(conn, domain: str, contract: dict, context_name: str) -> int:
             if values["official_total"] is not None:
                 total = values["official_total"]
                 values["official_total"] = {**total, "dataset": f"feed_{domain}_{total['dataset']}"}
-            for field in ("synonyms", "period", "dimensions", "terms", "official_total", "reference", "ranking"):
+            for field in ("synonyms", "period", "dimensions", "terms", "official_total", "reference", "ranking",
+                          "extra_columns"):
                 if values[field] is not None:
                     values[field] = json.dumps(values[field], ensure_ascii=False, sort_keys=True)
         except (KeyError, TypeError, ValueError, AttributeError) as exc:

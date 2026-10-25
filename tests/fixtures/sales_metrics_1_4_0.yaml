@@ -1,0 +1,85 @@
+# metrics: of NT-Report DataFeed/contracts/sales.yaml 1.4.0 (sales_vs_target) — kept equal by
+# tests/unit/test_metric_sales.py when the NT-Report worktree is present
+domain: sales
+schema_version: 1.4.0
+metrics:
+- id: sales_vs_target
+  name_th: ยอดขายเทียบเป้า (% Achievement)
+  synonyms:
+  - เทียบเป้า
+  - เทียบกับเป้า
+  - เทียบเป้าหมาย
+  - เทียบกับเป้าหมาย
+  - '% เทียบเป้า'
+  - '% achievement'
+  - achievement
+  - ผลสำเร็จเทียบเป้า
+  - มากกว่าเป้า
+  - สูงกว่าเป้า
+  - เกินเป้า
+  - ทะลุเป้า
+  - ถึงเป้า
+  - บรรลุเป้า
+  - ต่ำกว่าเป้า
+  - น้อยกว่าเป้า
+  - ไม่ถึงเป้า
+  - ไม่บรรลุเป้า
+  - พลาดเป้า
+  - ขาดเป้า
+  dataset: fact_sales
+  period:
+    column: year_month
+    value:
+      month: amount
+  dimensions:
+  - sales_line
+  - sales_group
+  - sales_dept
+  - unit_fname
+  - sales_line_current
+  - sales_group_current
+  - sales_dept_current
+  - unit_fname_current
+  - business_group
+  - service_group
+  - product_code
+  - product_name
+  - geo_cluster
+  - geo_region_broad
+  terms:
+    actual:
+      where: metric = 'actual' AND substr(business_group, 1, 2) IN ('1.', '2.', '3.',
+        '4.', '5.', '6.', '7.')
+    target:
+      where: metric = 'target' AND substr(business_group, 1, 2) IN ('1.', '2.', '3.',
+        '4.', '5.', '6.', '7.')
+  expr: actual / nullif(target, 0) * 100
+  unit: percent
+  extra_columns:
+  - expr: actual
+    name_th: ยอดขายบริการ (บาท)
+  - expr: target
+    name_th: เป้ายอดขาย (บาท)
+  ranking:
+    positive: target
+    threshold:
+      value: 100
+      above:
+      - มากกว่าเป้า
+      - สูงกว่าเป้า
+      - เกินเป้า
+      - ทะลุเป้า
+      - ถึงเป้า
+      - บรรลุเป้า
+      below:
+      - ต่ำกว่าเป้า
+      - น้อยกว่าเป้า
+      - ไม่ถึงเป้า
+      - ไม่บรรลุเป้า
+      - พลาดเป้า
+      - ขาดเป้า
+  note_th: '% = ยอดขายบริการ / เป้า × 100 ของ 7 กลุ่มธุรกิจบริการ (BG 1–7) เหมือน
+    KPI ในรายงานยอดขาย — ไม่รวม ''8.รายได้อื่น'' ทั้งยอดขายและเป้า (ยอดขายรวมทั้งบริษัทแบบ
+    full disclosure รวม BG 8 จึงเทียบเป้าไม่ได้); ยอดสะสม = ผลรวมรายเดือนตั้งแต่ ม.ค.
+    ถึงงวด; แยกรายหน่วยเฉพาะหน่วยที่มีเป้า > 0 (หน่วยที่มียอดขายแต่ไม่มีเป้า = ''ไม่มีเป้า''
+    ไม่ใช่ ''เกินเป้า''); ถึงเป้า = % ≥ 100'
