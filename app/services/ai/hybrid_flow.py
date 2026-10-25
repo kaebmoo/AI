@@ -4,9 +4,10 @@ import logging
 import re
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, cast
 
+from app.core.outbound import message
 from app.providers.base import ConfidenceResult, QueryResult, RetryStatus
 from app.providers.chart_postprocessor import postprocess_chart_result
-from app.services.ai import metric_compiler
+from app.services.ai import metric_compiler, sql_invariants
 from app.services.ai.metric_compiler import Compiled
 from app.services.ai.hierarchy_context import format_level_note, get_column_hierarchies, named_levels
 from app.services.ai.thai_year import fix_explanation
@@ -74,9 +75,10 @@ def _context_tables(context_table: str, config_engine=None) -> Dict[str, List[st
         return {}
 
 
-def _cumulative_columns(context_table: str, config_engine=None) -> List[str]:
-    """Point-in-time measures of a context's tables: a double its contract says not to sum
-    (datafeed_knowledge.sync_schema_metadata) — revenue_ytd, ebt's ebt / expense / sales_base_revenue.
+def _double_columns(context_table: str, summable: bool, config_engine=None) -> List[str]:
+    """Double measures of a context's tables, classified by contract agg
+    (datafeed_knowledge.sync_schema_metadata): summable or point-in-time (e.g. revenue_ytd,
+    ebt's ebt / expense / sales_base_revenue) that must not be summed across periods.
     Active rows only (Plan 8.1). Empty = none, or config unreachable."""
     tables = list(_context_tables(context_table, config_engine)) or [context_table]
     try:
@@ -87,10 +89,18 @@ def _cumulative_columns(context_table: str, config_engine=None) -> List[str]:
         with config_engine.connect() as conn:
             return [row[0] for row in conn.execute(text(
                 "SELECT DISTINCT column_name FROM schema_metadata WHERE table_name IN :tables AND status = 'active' "
-                "AND data_type = 'double' AND is_summable = 0 ORDER BY column_name"
-            ).bindparams(bindparam("tables", expanding=True)), {"tables": tables})]
+                "AND data_type = 'double' AND is_summable = :summable ORDER BY column_name"
+            ).bindparams(bindparam("tables", expanding=True)), {"tables": tables, "summable": 1 if summable else 0})]
     except Exception:
         return []
+
+
+def _cumulative_columns(context_table: str, config_engine=None) -> List[str]:
+    return _double_columns(context_table, False, config_engine)
+
+
+def _summable_columns(context_table: str, config_engine=None) -> List[str]:
+    return _double_columns(context_table, True, config_engine)
 
 
 def _period_columns(context_table: str, config_engine=None) -> List[str]:
@@ -118,31 +128,41 @@ def _period_columns(context_table: str, config_engine=None) -> List[str]:
 
 
 def cumulative_sum_error(sql_query: str, context_table: str, config_engine=None) -> Optional[str]:
-    """A cumulative (YTD) column summed over more than one period is many times too big — "ข้อมูล EBT
-    เป็นอย่างไรบ้าง" came back as SUM(ebt) over 202601–202609: 4,298M against the report's 571M (2026-10-22).
-    The prompt names the columns and says one row; this is the check behind the words. The SQL is
-    refused and the retry prompt says exactly what to write instead.
-
-    ponytail: regex over the SQL, not a parse — a period equality anywhere, or the period column in
-    GROUP BY (a YTD trend by month), is taken as single-period; a CTE that filters the period inside
-    passes too. Upgrade to the DuckDB parse tree (check_select) if this ever misfires."""
+    """Refuse blocking period invariants and guide retries. Audit 407's SUM(COALESCE(YTD, 0))
+    escaped the regex guard and inflated the answer, so inspect the parse tree."""
     cumulative = _cumulative_columns(context_table, config_engine)
     periods = _period_columns(context_table, config_engine)
     if not cumulative or not periods:
         return None
-    summed = [c for c in cumulative if re.search(r'\bSUM\s*\(\s*(?:\w+\.)?"?%s"?\s*\)' % re.escape(c), sql_query, re.I)]
-    if not summed:
+    summable = _summable_columns(context_table, config_engine)
+    try:
+        violations = sql_invariants.check(sql_query, cumulative, summable, periods)
+    except Exception:
+        # ponytail: a checker bug must not block answers.
+        logger.warning("Hybrid Mode: invariant checker failed")
         return None
-    for col in periods:
-        ident = r'(?:\w+\.)?"?%s"?' % re.escape(col)
-        # CAST(time_key AS INTEGER) = 202609 / time_key = 202609 / time_key = '202609'
-        single = re.search(r"(?:%s|CAST\s*\(\s*%s\s+AS\s+\w+\s*\))\s*=\s*'?\d+'?" % (ident, ident), sql_query, re.I)
-        grouped = re.search(r"GROUP\s+BY\b[^;]*?%s" % ident, sql_query, re.I)
-        if single or grouped:
-            return None
-    return (f"คอลัมน์ {', '.join(summed)} เป็นยอดสะสมตั้งแต่ต้นปี (YTD) ณ งวด — SUM ข้ามงวดได้ตัวเลขเกินจริงหลายเท่า "
-            f"ต้องเลือกงวดเดียวเท่านั้น: WHERE {periods[0]} = <งวดที่ต้องการ> (ห้าม BETWEEN / IN หลายงวด / ไม่กรองงวด) "
-            f"แล้วรวมได้เฉพาะข้ามมิติอื่นในงวดนั้น; ถ้าต้องการรวมหลายเดือนจริง ให้ใช้คอลัมน์รายเดือน (*_month) แทน")
+    for v in violations:
+        if not v.blocking:
+            logger.info("Hybrid Mode: %s %s columns=%s", v.code, v.name, v.columns)
+    for v in violations:
+        if not v.blocking:
+            continue
+        prefix = f"{v.code} {v.name}: "
+        if v.code == "I1":
+            return (prefix + f"คอลัมน์ {', '.join(v.columns)} เป็นยอดสะสมตั้งแต่ต้นปี (YTD) ณ งวด — SUM ข้ามงวดได้ตัวเลขเกินจริงหลายเท่า "
+                    f"ต้องเลือกงวดเดียวเท่านั้น: WHERE {periods[0]} = <งวดที่ต้องการ> (ห้าม BETWEEN / IN หลายงวด / ไม่กรองงวด) "
+                    f"แล้วรวมได้เฉพาะข้ามมิติอื่นในงวดนั้น; ถ้าต้องการรวมหลายเดือนจริง ให้ใช้คอลัมน์รายเดือน (*_month) แทน")
+        return (prefix + f"คอลัมน์ {', '.join(v.columns)} เป็นยอดสะสมตั้งแต่ต้นปี (YTD) ณ งวด แต่ query อ่านโดยไม่มีเงื่อนไขงวด "
+                f"ต้องเลือกงวดเดียว: WHERE {periods[0]} = <งวดที่ต้องการ> หรือแสดงคอลัมน์งวด {periods[0]} ในแต่ละแถว")
+    return None
+
+
+def invariant_code(error: str) -> Optional[str]:
+    """Recognize our blocking retry messages, never SQL or arbitrary validation errors."""
+    for code, name in (("I1", "ytd_summed_across_periods"), ("I2", "ytd_without_period")):
+        if error.startswith(f"{code} {name}: "):
+            return code
+    return None
 
 
 def table_rule(context_table: str, config_engine=None) -> str:
@@ -1398,6 +1418,25 @@ async def query_hybrid(
         except RECOVERABLE_FLOW_EXCEPTIONS as exc:
             logger.error("Hybrid Mode error: %s", exc)
             retry_history.append({"sql": sql_query or "", "error": str(exc)})
+
+    code = invariant_code(retry_history[-1]["error"]) if retry_history else None
+    if code is not None:
+        trace.stages["invariant"] = code
+        logger.warning("Hybrid Mode: last attempt still violates %s; refusing answer", code)
+        if trace.usage:
+            total_tokens = sum(u["input_tokens"] + u["output_tokens"] for u in trace.usage)
+        return QueryResult(
+            question=question,
+            sql_query="",
+            data=[],
+            explanation=message("query_failed"),
+            tokens_used=total_tokens,
+            provider=service.provider_name,
+            error="query_failed",
+            retry_count=max_retries + 1,
+            retry_history=retry_history,
+            usage_breakdown=trace.usage or None,
+        )
 
     # F9-D attempt 3: rescue via read-only tool loop (mcp mode) — same tools,
     # same read-only permissions; only when explicitly enabled and within budget

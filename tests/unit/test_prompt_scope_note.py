@@ -248,6 +248,7 @@ def test_a_cumulative_column_summed_over_periods_is_refused(monkeypatch):
     2026-10-22). The prompt said one row in words; the attempt is refused and the retry is told what to write."""
     monkeypatch.setattr(hybrid_flow, "_cumulative_columns", lambda t, config_engine=None: ["ebt", "expense"])
     monkeypatch.setattr(hybrid_flow, "_period_columns", lambda t, config_engine=None: ["time_key"])
+    monkeypatch.setattr(hybrid_flow, "_summable_columns", lambda t, config_engine=None: ["ebt_month"])
 
     def refused(sql):
         return hybrid_flow.cumulative_sum_error(sql, "t") is not None
@@ -256,6 +257,8 @@ def test_a_cumulative_column_summed_over_periods_is_refused(monkeypatch):
     assert refused("SELECT SUM(ebt) FROM t")  # no period at all
     assert refused('SELECT SUM("ebt") FROM t WHERE time_key IN (202608, 202609)')
     assert refused("SELECT SUM(ebt) FROM t WHERE cost_center = '1B00000'")  # an equality, but not on the period
+    assert refused("SELECT cost_center, SUM(COALESCE(ebt, 0)) FROM t WHERE CAST(time_key AS INTEGER) BETWEEN 202601 AND 202609 GROUP BY cost_center")
+    assert hybrid_flow.cumulative_sum_error("SELECT SUM(ebt) FROM t", "t").startswith("I1 ytd_summed_across_periods: ")
     assert "WHERE time_key = <งวดที่ต้องการ>" in hybrid_flow.cumulative_sum_error("SELECT SUM(ebt) FROM t", "t")
     # one period, summed across the other dimensions — the right way to read it
     assert not refused("SELECT SUM(ebt) FROM t WHERE time_key = 202609")
@@ -269,12 +272,49 @@ def test_a_cumulative_column_summed_over_periods_is_refused(monkeypatch):
 
 def test_no_cumulative_columns_or_no_period_column_means_no_check(monkeypatch):
     sql = "SELECT SUM(revenue) FROM revenue_search"
+    def unexpected_summable_query(*args):
+        pytest.fail("summable columns must not be queried without cumulative and period columns")
+
+    monkeypatch.setattr(hybrid_flow, "_summable_columns", unexpected_summable_query)
     monkeypatch.setattr(hybrid_flow, "_period_columns", lambda t, config_engine=None: ["year_month"])
     monkeypatch.setattr(hybrid_flow, "_cumulative_columns", lambda t, config_engine=None: [])
     assert hybrid_flow.cumulative_sum_error(sql, "revenue_search") is None  # a legacy view: unchanged
     monkeypatch.setattr(hybrid_flow, "_cumulative_columns", lambda t, config_engine=None: ["revenue"])
     monkeypatch.setattr(hybrid_flow, "_period_columns", lambda t, config_engine=None: [])
     assert hybrid_flow.cumulative_sum_error(sql, "revenue_search") is None  # cannot tell a period: no guess
+
+
+def test_ytd_without_period_names_the_invariant_and_columns(monkeypatch):
+    monkeypatch.setattr(hybrid_flow, "_cumulative_columns", lambda *a: ["ebt"])
+    monkeypatch.setattr(hybrid_flow, "_period_columns", lambda *a: ["time_key"])
+    monkeypatch.setattr(hybrid_flow, "_summable_columns", lambda *a: [])
+    error = hybrid_flow.cumulative_sum_error("SELECT cost_center, ebt FROM t WHERE cost_center = '1'", "t")
+    assert error.startswith("I2 ytd_without_period: ")
+    assert "ebt" in error and "WHERE time_key = <งวดที่ต้องการ>" in error
+
+
+def test_invariant_checker_exception_does_not_block_or_log_sql(monkeypatch, caplog):
+    monkeypatch.setattr(hybrid_flow, "_cumulative_columns", lambda *a: ["ebt"])
+    monkeypatch.setattr(hybrid_flow, "_period_columns", lambda *a: ["time_key"])
+    monkeypatch.setattr(hybrid_flow, "_summable_columns", lambda *a: [])
+    sql = "SELECT SUM(COALESCE(ebt, 0)) FROM t"
+
+    def broken_check(*args):
+        raise RuntimeError(sql)
+
+    monkeypatch.setattr(hybrid_flow.sql_invariants, "check", broken_check)
+    assert hybrid_flow.cumulative_sum_error(sql, "t") is None
+    assert "invariant checker failed" in caplog.text
+    assert sql not in caplog.text
+
+
+def test_monthly_invariant_is_logged_without_refusal(monkeypatch, caplog):
+    monkeypatch.setattr(hybrid_flow, "_cumulative_columns", lambda *a: ["ebt"])
+    monkeypatch.setattr(hybrid_flow, "_period_columns", lambda *a: ["time_key"])
+    monkeypatch.setattr(hybrid_flow, "_summable_columns", lambda *a: ["ebt_month"])
+    with caplog.at_level("INFO", logger=hybrid_flow.__name__):
+        assert hybrid_flow.cumulative_sum_error("SELECT SUM(ebt_month) FROM t", "t") is None
+    assert "I3 month_summed_as_ytd" in caplog.text and "ebt_month" in caplog.text
 
 
 def test_the_latest_period_of_a_legacy_view_is_read_from_its_own_columns(tmp_path):

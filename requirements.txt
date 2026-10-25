@@ -32,7 +32,10 @@ tenacity
 mcp==1.26.0
 
 # Plan 7: file sources read in place (allowed_paths/lock_configuration verified on 1.5.5)
-duckdb>=1.5
+# Below 2: DuckDB 2.0 serialises function arguments as arguments[].expression (1.x: children), so
+# app/services/ai/sql_invariants.py no longer sees SUM(amount_ytd) and the guard passes it — CI got 2.0.0
+# on 2026-10-25. The live server runs 1.5.5; teach sql_invariants the 2.x tree before lifting this.
+duckdb>=1.5,<2
 duckdb-engine>=0.17
 
 # Integration
