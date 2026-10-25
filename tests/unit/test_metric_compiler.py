@@ -480,10 +480,58 @@ def test_named_ratio_unit_keeps_hq_rows(ranked, hq_databases, dimensions, order_
 ])
 def test_ratio_breakdown_filters_that_do_not_name_the_dimension_keep_scope(ranked, hq_databases, column, operator, value):
     req = CompileRequest("ebt_margin", 202609, "cumulative", dimensions=("sub_unit",),
+                         order_desc=True if operator == "LIKE" else None,
                          filters=({"column": column, "operator": operator, "value": value},))
     compiled, rows = execute(req, ranked, hq_databases)
     assert "AND (is_hq = 0)" in compiled.sql
     assert rows == []
+
+
+@pytest.mark.parametrize("operator,value", [
+    ("LIKE", "ส่วนปฏิบัติการวิศวกรรม"), ("IN", ["ส่วนปฏิบัติการวิศวกรรม"]),
+])
+def test_named_ratio_lookup_without_ordering_keeps_hq_rows(ranked, hq_databases, operator, value):
+    req = CompileRequest("ebt_margin", 202609, "cumulative", dimensions=("sub_unit",),
+                         filters=({"column": "sub_unit", "operator": operator, "value": value},))
+    compiled, rows = execute(req, ranked, hq_databases)
+    assert "is_hq" not in compiled.sql
+    assert rows == [("ส่วนปฏิบัติการวิศวกรรม", 1, -99900)]
+
+
+def test_ratio_ranking_with_like_filter_keeps_scope(ranked, hq_databases):
+    req = CompileRequest("ebt_margin", 202609, "cumulative", dimensions=("sub_unit",), order_desc=False, limit=10,
+                         filters=({"column": "sub_unit", "operator": "LIKE", "value": "ส่วน"},))
+    compiled, rows = execute(req, ranked, hq_databases)
+    assert "AND (is_hq = 0)" in compiled.sql
+    assert compiled.sql.endswith('GROUP BY "sub_unit" ORDER BY 3 ASC LIMIT 10')
+    assert rows == [("ส่วนขายและบริการลูกค้า ข", 200, -20), ("ส่วนขายและบริการลูกค้า ก", 100, 10)]
+
+
+@pytest.mark.parametrize("order_desc", [None, False])
+def test_ratio_with_mixed_dimension_filters_is_named_only_without_ordering(ranked, hq_databases, order_desc):
+    req = CompileRequest("ebt_margin", 202609, "cumulative", dimensions=("sub_unit",), order_desc=order_desc,
+                         filters=({"column": "sub_unit", "operator": "=", "value": "ส่วนปฏิบัติการวิศวกรรม"},
+                                  {"column": "sub_unit", "operator": "LIKE", "value": "ส่วน"}))
+    compiled, rows = execute(req, ranked, hq_databases)
+    assert ("AND (is_hq = 0)" in compiled.sql) is (order_desc is not None)
+    assert rows == ([("ส่วนปฏิบัติการวิศวกรรม", 1, -99900)] if order_desc is None else [])
+
+
+@pytest.mark.parametrize("order_desc", [None, False])
+def test_ratio_filter_without_dimensions_stays_named(ranked, hq_databases, order_desc):
+    req = CompileRequest("ebt_margin", 202609, "cumulative", order_desc=order_desc,
+                         filters=({"column": "sub_unit", "operator": "LIKE", "value": "ส่วนปฏิบัติการวิศวกรรม"},))
+    compiled, rows = execute(req, ranked, hq_databases)
+    assert "is_hq" not in compiled.sql
+    assert rows == ([(1, -99900)] if order_desc is not None else [(-99900,)])
+
+
+def test_comparison_of_a_named_ratio_like_dimension_omits_scope(ranked, hq_databases):
+    req = CompileRequest("ebt_margin", 202609, "cumulative", dimensions=("sub_unit",), base_period=202509,
+                         filters=({"column": "sub_unit", "operator": "LIKE", "value": "ส่วนปฏิบัติการวิศวกรรม"},))
+    compiled, _ = execute(req, ranked, hq_databases)
+    assert "is_hq" not in compiled.sql
+    assert compiled.base_name_th is None
 
 
 @pytest.mark.parametrize("name_division", [False, True])
