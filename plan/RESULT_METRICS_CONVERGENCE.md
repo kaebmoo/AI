@@ -254,3 +254,49 @@ class ที่ผลเกิน 50 แถวข้าม), 1 คำถาม�
 - **ขึ้นของจริงแล้ว 2026-10-25 07:32**: main ขยับไประหว่างทาง (Phase E `6640cae`) → merge main เข้า branch (`862915c`, ชนกันแค่ไฟล์นี้),
   ACC-T 1708 passed → ff main `6640cae..862915c` → worker ของ `--reload` เริ่มใหม่ 07:32:50 · ถัดไป: ถามคำถาม 453/454 บน portal จริง
   แล้วดู `metric_path` (`declined:clarify:level` / `compiled:ebt`) · ไม่มี migration · ถอยกลับ: `git revert -m 1 862915c` หรือ `git revert 0a32b92 a54f76a`
+
+## SALES. ยอดขายเทียบเป้า (`sales_vs_target`, sales 1.4.0) — 2026-10-25
+
+**ที่มา:** คำถามจริง (portal audit 463, MCP 464–466) "หน่วยงานที่ยอดขายมากกว่าเป้ามีหน่วยไหนบ้าง" ได้ 71 หน่วย — รายงาน `NT_Sales_Report_Workbook_202609.xlsx`
+ชีต `Sales_Dept_Summary` มี **5** (62 จาก 71 ไม่มีเป้าเลย; ฝ่ายบริหารการเงินฯ 2,001 ล้าน "เกินเป้า 1,876 ล้าน" คือ 8.รายได้อื่นทั้งก้อน — รายงาน: 53,740 บาท ไม่มีเป้า)
+และ "ยอดขายรวมทั้งบริษัทเทียบเป้า" ได้ "สูงกว่าเป้า 627 ล้าน" (30,197 vs 29,570 — ยอดขายรวม BG 8 เทียบเป้าที่ไม่มี BG 8) ทั้งที่รายงาน = 27,317 / 29,570 = **92.38% At Risk**.
+ทุกข้อเป็น free SQL (`metric_path` ว่าง): KPI ของรายงาน = BG 1–7 เท่านั้น; จัดกลุ่ม `unit_fname` หรือ `sales_dept_current` ก็ได้ 5 หน่วยเท่ากันเมื่อกรอง BG 1–7
+
+### SALES.1 ที่สร้าง (Claude เขียนเอง)
+- NT-Report (`ai/…` worktree `NT-Report-metrics`): `DOMAINS["sales"]["metrics"]` = `sales_vs_target` → contract 1.4.0 (MINOR) · `test_metrics_contract` รับ period ไม่มี `cumulative`, `extra_columns`, `ranking.positive/threshold` + test ใหม่ · CHANGELOG, SPEC §5.5
+- AI compiler: period ไม่มีคอลัมน์สะสม = `BETWEEN y01 AND yMM` ของคอลัมน์รายเดือน (เทียบสองงวดด้วย) · `extra_columns` · `ranking.positive` (ไม่ใช้เมื่อตัวกรองระบุชื่อหน่วย) ·
+  `ranking.threshold` + `CompileRequest.threshold` · ตัวกรองหลายตัวบนคอลัมน์เดียว = OR (เดิม AND → 0 แถว) · `schema_metrics.extra_columns` (migrate script) + validation ใน `sync_metrics`
+- `plan()` รับพฤติกรรม pass 1 ที่เห็นจริง (`docs/DECLARED_METRICS.md` §4): ตัวกรอง/ mapping ที่เป็นนิยามของ metric (`metric = 'actual'`), mapping ที่ keyword มีชื่อ metric อยู่ข้างใน,
+  ช่วง "ม.ค.-ก.ย." = ยอดสะสม, metric ที่มี threshold: comparison/lookup = เทียบกับเป้า และ ordering ชื่อแต่งเอง = เรียงตามค่า
+- test: `tests/unit/test_metric_sales.py` (fixture `sales_metrics_1_4_0.yaml` = contract) — ACC-T 1708 → **1743 passed, 3 skipped**; NT-Report `pytest tools/feed` 38 → 39
+
+### SALES.2 ผลวัด (server ซ้อม 127.0.0.1:8001, สำเนา config.db/app.db/Chroma ของจริง 14:50, contract ชี้ worktree, key ซ้อม id 6)
+11 คำถาม × 7 รอบ (restart ก่อนทุกรอบ) — ผลดิบ `.ai/eval/sales_vs_target_r1…r7.json`; เฉลย = รายงาน 202609 (รายฝ่าย/สายงาน/รวม) และ feed BG 1–7 (เดือน, กลุ่มธุรกิจ)
+
+| รอบ | โค้ด | ถูก | compiled (จาก 9 ข้อเทียบเป้า) | decline ที่เหลือ |
+|---|---|---|---|---|
+| r1 | metric อย่างเดียว | 3/11 | 1 | `shape:filter:metric` ×6, `mapping_triggered:ยอดขายเทียบเป้า`, `shape:dimension:year_month` |
+| r2 | + ตัวกรองนิยาม, keyword มีชื่อ, OR, period ออกจากมิติ | 8/11 | 6 | mapping แต่ง ("ยอดขาย", "ยอดขายบริการรวมทั้งบริษัท"), ordering `achievement_diff` |
+| r3 | + mapping ที่เป็นนิยาม / ชื่อคอลัมน์ที่แสดง | 8/11 | 7 | `lookup`, ordering `amount - target_amt`; Q4 ได้ ก.ย. เดือนเดียว (pass 1 `cumulative: false`) |
+| r4 | + ช่วง ม.ค.-…, lookup | 11/11 | 9 | — |
+| r5 | (เดิม) | 10/11 | 8 | ordering `achievement_diff` |
+| r6–r7 | + ordering ชื่อแต่งเอง = ค่า | **11/11, 11/11** | **9, 9** | — |
+
+คำตอบที่ compiled ตรงรายงานทุกตัวเลข: 5 ฝ่ายเกินเป้า (รสส. 232.11%, อดจ. 126.72%, ปอธ. 120.92%, ททค. 112.17%, สกบ. 111.54%), 24 ฝ่ายไม่ถึงเป้า,
+บลบ. 95.78% / พธย. 19.21%, รายสายงาน 11 แถวตรง `Sales_Dept_Summary` ทุกแถว ("หน่วยงานอื่น" ไม่มีเป้า → ไม่แสดง), ก.ย. 2569 = 3,149.82 / 3,449.24 ล้าน = 91.32%,
+รวม ม.ค.–ก.ย. 27,317.01 / 29,570.15 ล้าน = 92.38%, รายกลุ่มธุรกิจ 7 แถว · R1/R2 (ยอดขายเฉย ๆ) ยังไม่ผ่าน metric (`no_metric`) และยังได้ full disclosure 3,385.51 / 30,197.03 ล้าน
+
+**ไม่ถดถอยฝั่ง EBT** (โค้ดเดียวกัน, server ซ้อมเดียวกัน — การแก้ `plan()` ใช้กับทุก metric): ชุดเต็ม 702 ข้อ 612/702 (compiler 95.6%), ชุดเทียบปีก่อน 783 ข้อ 674/783 ·
+จับคู่กับข้อเดิมของ §D (174 ข้อ): 157 → **153** (ดีขึ้น 4 แย่ลง 8, McNemar exact p ≈ 0.39); ข้อที่แย่ลงทั้ง 8 ไม่ได้มาจากโค้ดนี้ — pass 1 ใส่ `group_0` (3), lookup (1),
+mapping "เดือน" (1), เลือก `unit_short_name` แทน `unit` (1), "กลุ่ม" → `division` (2, C-0b) · ชุดเทียบของ §CMP (27 ข้อ): 20 → **20** (2/2; ข้อที่แย่ลงคือ "เดือนกันยายน" ที่ pass 1 ไม่ให้ `time_range`
+→ สะสม = CMP.3 เดิม) · ผล: `eval_results/metric_eval_feed_ebt_202609_20261025_1635.json`, `…_1810.json`
+
+### SALES.3 ที่ยังไม่ทำ / ข้อควรรู้
+- **ยังไม่ขึ้นของจริง** — ลำดับ: AI ก่อน (merge → `scripts/migrate_schema_metrics.py` บน config.db จริง **ก่อน restart** — ไม่งั้น `load_metrics` อ่านคอลัมน์ `extra_columns` ไม่ได้
+  และปิด metric ทุก context) → NT-Report merge (server จริงอ่าน `NT-Report/DataFeed/contracts/sales.yaml` ของ main checkout และ re-sync เองใน request ถัดไป);
+  rebuild dist ไม่จำเป็น (schema/ข้อมูลเท่าเดิม) นอกจากอยากให้ SCHEMA.md ของ build แสดง metric
+- "เกินเป้ามากที่สุด" อ่านเป็น % สูงสุด (ไม่ใช่ส่วนต่างเป็นบาท) — ถ้าต้องการส่วนต่าง ประกาศ metric `sales_vs_target_gap` (actual − target, บาท) เพิ่ม
+- ตัวกรองที่เป็นนิยาม: ใน ebt `group_1` / `measure_type` ถูกทุก term เลือกด้วยค่าคงที่ จึงเข้ากฎเดียวกัน — ถ้า pass 1 เลือก metric ebt แล้วกรอง `group_1 = 'รวมรายได้ทั้งสิ้น'`
+  จะได้ EBT แทนการตกไป free SQL (ไม่เห็นในชุดวัด 1,485 ข้อ; ถ้าเกิด ให้ประกาศ selector ใน contract แทนการเดาจาก term)
+- ช่วงที่ไม่เริ่ม ม.ค. ("ก.ค.-ก.ย.") ยังอ่านตาม pass 1 (มักเป็นเดือนสุดท้าย) — compiler ยังไม่มีรูปผลรวมหลายเดือนกลางปี
+- ยอดขายเฉย ๆ (ไม่เทียบเป้า) ยังเป็น free SQL ตามกฎ `sales_total_scope` (full disclosure รวม BG 8) — ไม่ได้ประกาศ metric `sales`

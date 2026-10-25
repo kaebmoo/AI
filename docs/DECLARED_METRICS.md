@@ -58,6 +58,25 @@ metrics:
       base_name_th: "รายได้ (ฐานยอดขาย)"       #   ชื่อคอลัมน์นั้น
 ```
 
+ยอดขายเทียบเป้า (sales 1.4.0, 2026-10-25) ใช้ key เพิ่ม 4 อย่าง:
+
+```yaml
+  - id: sales_vs_target
+    period: {column: year_month, value: {month: amount}}   # ไม่มี cumulative = ยอดสะสม SUM เดือน 01..งวด (BETWEEN y01 AND yMM)
+    terms:
+      actual: {where: "metric = 'actual' AND substr(business_group, 1, 2) IN ('1.', '2.', '3.', '4.', '5.', '6.', '7.')"}
+      target: {where: "metric = 'target' AND substr(business_group, 1, 2) IN ('1.', '2.', '3.', '4.', '5.', '6.', '7.')"}
+    expr: "actual / nullif(target, 0) * 100"
+    unit: percent
+    extra_columns:                                         # แสดงก่อนค่า metric ทั้งยอดรวมและรายหน่วย (ไม่ใช้กับ official_total / การเทียบสองงวด)
+      - {expr: actual, name_th: "ยอดขายบริการ (บาท)"}
+      - {expr: target, name_th: "เป้ายอดขาย (บาท)"}
+    ranking:                                               # ใช้เมื่อแยกมิติเท่านั้น
+      positive: target                                     #   HAVING (target) > 0 — ยกเว้นเมื่อตัวกรองระบุชื่อหน่วยของมิติที่จัดกลุ่ม
+      threshold: {value: 100, above: [มากกว่าเป้า, เกินเป้า, ถึงเป้า, …], below: [ไม่ถึงเป้า, ต่ำกว่าเป้า, …]}
+                                                           #   คำในคำถาม → HAVING ค่า >= 100 / < 100 และเรียงค่า มาก→น้อย / น้อย→มาก
+```
+
 กติกา: `expr` ไม่ใช่ SQL เต็ม (ตรวจไวยากรณ์ได้; ชื่อนอก term/metric = ปฏิเสธ) · `where` อ้างได้เฉพาะคอลัมน์ของ dataset (ตรวจตอน sync ฝั่ง AI และ test ฝั่ง NT-Report) ·
 `name_th` / `synonyms` / `unit` / `note_th` / `official_total` / `reference` / `expr` **ไม่สืบทอด** · ตัวอย่างและ test: `tests/fixtures/ebt_metrics_1_5_0.yaml`, `tests/unit/test_metric_compiler.py`
 
@@ -79,10 +98,20 @@ metrics:
 สะท้อนชื่อ metric กลับมาเป็น `matched_mappings`, คัดลอก mapping กลาง ("สายงาน") ทั้งที่คำถามไม่มี, ใส่ชื่อ metric ลง `ordering.column` ("ebt") และส่ง "10 อันดับแรก" มาเป็น `aggregation` + `limit`
 (2026-10-24 — ก่อนแก้ `supports()` ปฏิเสธ ทำให้ EBT รายศูนย์ต้นทุนตกไป pass 2 แล้วได้ SQL ที่นับแต่รายได้และ SUM `amount_ytd` ข้าม 9 เดือน: `query_audit` 407) — ก่อนโทษ compiler ให้อ่าน `Pass 1 complete … Intent:` ใน log ก่อน
 
+พฤติกรรมของ pass 1 ที่เจอกับ `sales_vs_target` บน server ซ้อม (2026-10-25, 7 รอบ × 11 คำถาม) และ `plan()` รับแล้ว — ใช้กับทุก metric ยกเว้นที่ระบุ:
+- ตัวกรองที่เป็น**นิยามของ metric เอง** (`metric = 'actual'`, `metric IN ('actual','target')`) = คอลัมน์ที่ไม่ใช่มิติ ที่ทุก term เลือกด้วยค่าคงที่ และค่าที่กรองอยู่ในค่าที่ term เลือก → ตัดทิ้ง
+  (`metric = 'forecast'` ยังปฏิเสธ); mapping ที่ pass 1 แต่งขึ้นซึ่ง condition เป็นนิยามเดียวกัน (`ยอดขาย` → `metric = 'actual'`) ไม่บล็อก
+- mapping ที่ keyword **มีชื่อของ metric อยู่ข้างใน** ("ยอดขายเทียบเป้า" ⊃ "เทียบเป้า") หรือชื่อคอลัมน์ที่ metric แสดง ("ยอดขายบริการรวมทั้งบริษัท" ⊃ "ยอดขายบริการ" ของ `extra_columns`) ไม่บล็อก
+- ตัวกรองหลายตัวบนคอลัมน์เดียว = ทางเลือก (OR): "ฝ่าย A และฝ่าย B" มาเป็น LIKE สองตัวบน `unit_fname` — เดิม AND กันจนได้ 0 แถว
+- คำถามที่มีช่วง "ม.ค.-ก.ย." / "มกราคม ถึง …" = ยอดสะสมถึงเดือนท้าย แม้ pass 1 ใส่ `cumulative: false` (ช่วงที่ไม่เริ่ม ม.ค. ยังอ่านตาม pass 1)
+- เฉพาะ metric ที่ประกาศ `ranking.threshold`: `comparison` / `lookup` = เทียบกับเส้น ไม่ใช่กับปีก่อน (อ่านเป็น aggregation, ตัด period ออกจาก dimensions);
+  `ordering.column` ที่ไม่ใช่มิติ ("achievement_diff", "amount - target_amt") = เรียงตามค่าของ metric
+
 ## 5. เพิ่ม/แก้ metric (ลำดับที่ต้องรักษา)
 
 1. NT-Report: แก้ `DOMAINS[<domain>]["metrics"]` ใน `tools/feed/domains.py` → bump `schema_version` (PATCH ถ้าแค่ metric/กฎ, MINOR ถ้าเพิ่มคอลัมน์อ้างอิง) → `gen_contract.py --domain <d>` → `pytest tools/feed` (`test_metrics_contract.py` ตรวจการอ้าง) → `build_feed.py --domain <d>`
-2. AI: ตาราง `schema_metrics` ต้องมีแล้ว (`scripts/migrate_schema_metrics.py`, idempotent) — contract ที่เปลี่ยน re-sync เองใน request ถัดไป; ถ้าคอลัมน์ของ dataset เปลี่ยน → `register_file_source --domain <d>`
+2. AI: ตาราง `schema_metrics` ต้องมีแล้ว (`scripts/migrate_schema_metrics.py`, idempotent — 2026-10-25 เพิ่มคอลัมน์ `extra_columns`:
+   **ต้องรันก่อน restart** ไม่งั้น `load_metrics` อ่านไม่ได้และปิด metric ทุกตัวของทุก context) — contract ที่เปลี่ยน re-sync เองใน request ถัดไป; ถ้าคอลัมน์ของ dataset เปลี่ยน → `register_file_source --domain <d>`
 3. ตรวจ: `SELECT metric_id, source, status FROM schema_metrics WHERE context_name='feed_<d>'`; log `Metric compiled: <id>`
 4. metric ของ legacy context (ไม่มี contract) ยังไม่มีทางประกาศ (admin UI = งานถัดไป); ถ้าใส่ตรงลงตารางให้ `source='manual'`
 
