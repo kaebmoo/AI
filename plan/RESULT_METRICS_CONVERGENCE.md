@@ -7,7 +7,7 @@
 | **A** มองเห็นเส้นทางของทุกคำถาม | ✅ **ขึ้นของจริงแล้ว** + push (CI เขียว run 40091378614) | 2026-10-24 | `34845de`, `655faeb` |
 | **D** eval ที่สร้างเองจากคำประกาศ | ✅ **ขึ้นของจริงแล้ว** (main `011cef3`, reload 22:35) + push (CI เขียว run 40107701402) — วัดบน server ซ้อม: 96 → 157/174 หลังแก้ `plan()` | 2026-10-24 | `4cb8c62`, `ecdcc84`, แก้ `plan()` `3cd4e6c` |
 | **E** คำอธิบายคอลัมน์ feed อัตโนมัติ | ✅ **ขึ้นของจริงแล้ว** (main `092f33f`, reload 23:47; ยังไม่ push) — วัดบนสำเนา: คำอธิบายว่าง 49.3% → 23.8% | 2026-10-24 | `3340f31`, `fc19128`, `fca9163`, `6826f75`, `cc0dfce` |
-| B ตัวตรวจ SQL ของ pass 2 | ⬜ ยังไม่ทำ | | |
+| **B** ตัวตรวจ SQL ของ pass 2 | 🟡 **ทำแล้วบน branch `ai/delegate-20261025-0951` — รอเจ้าของสั่งขึ้น** (ไม่ ff main, ไม่ push) — B-01 ข้าม; วัดบน server ซ้อม: 156 → 160/174, ผิดอย่างมั่นใจ 14 → 10 (ชั้น invariant 0 → 0) | 2026-10-25 | `aee811c`, `9ef7cf0`, `d8ce4e6`, `553566b`, `233daa1` |
 | C-0b คำศัพท์ระดับหน่วยงานทุกโดเมน | ⬜ ยังไม่ทำ (ระหว่างนี้ feed_ebt + feed_expense เป็นแถว `manual` — §A.6) | | |
 | C-00/C-01 metrics ของ revenue / sales | ⬜ ยังไม่ทำ | | |
 | C-0c ratio จัดอันดับอย่างมีความหมาย | ✅ ทำก่อนแผนนี้ (`941cd0a`, ebt 1.6.0) | 2026-10-24 | |
@@ -200,6 +200,80 @@ Claude ตรวจรับและวัดผลเอง · ข้อตั
   ไม่ได้คลิกใน browser (extension ของ Chrome ไม่เชื่อมต่อ)
 - NT-Report: **ยังไม่มีอะไรต้องส่ง** — config.db จริงมีแถวคอลัมน์ feed 357 แถวเป็น `declared` ทั้งหมด, export ทั้ง 4 domain ได้ 0 รายการ ·
   ทางกลับเริ่มเมื่อ admin รับร่างบนของจริงแล้ว: `export_col_meta` → `col_meta` ใน `tools/feed/domains.py` + PATCH → `gen_contract.py` → `build_feed.py` → `pytest tools/feed`
+
+---
+
+## B. ตัวตรวจ SQL ของ pass 2 ตาม invariant ของ contract (B-02, B-03; B-01 ข้าม) + ranking.scope ของหน่วยที่ระบุชื่อ — 2026-10-25
+
+**วิธีทำ:** `/delegate` run `20261025-0951` (worktree `.claude/worktrees/vigorous-edison-ffcc57`, branch `ai/delegate-20261025-0951`,
+base `1d004bc` = main) — Codex เขียน code 5 slice รอบเดียวทุก slice, Claude ตรวจรับและวัดผลเอง · ข้อตัดสิน **M-2 = ก** (fail closed) ·
+บันทึก run + ผลดิบ: `.ai/20261025-0951/`, `.ai/eval/` (ไม่อยู่ใน git)
+
+**ข้าม B-01** (`schema_contexts.measure_agg` + `scripts/migrate_schema_contexts_measures.py`) — ตัดสินโดย session ต้นทางแทนเจ้าของ:
+agg ต่อคอลัมน์มีอยู่แล้วใน `schema_metadata` (`sync_schema_metadata` เขียน double + `is_summable` 0/1 จาก `columns[].agg` /
+`control_totals.measures[].agg` ของ contract; `_cumulative_columns` อ่านแถว active) — ทำ B-01 = ที่เก็บ agg ชุดที่สอง + migration
+config.db จริงโดยไม่ได้อะไรเพิ่ม · **ไม่มี migration ใน run นี้** · ข้อจำกัดที่ยอมรับ: admin แก้ `is_summable` ได้ (แถวเป็น `manual`) = การตัดสินของคน
+
+### B.1 ที่สร้าง
+| commit | เนื้อหา |
+|---|---|
+| `aee811c` (slice 01) | compiler: ไม่ใส่ `ranking.scope` (`is_hq = 0`) เมื่อทุกมิติที่ขอถูกกรองด้วย `=` บนคอลัมน์ของมันเอง (ถามหน่วยที่ระบุชื่อ ไม่ใช่จัดอันดับ) — ทั้งงวดเดียวและเทียบสองงวด · +11 tests |
+| `9ef7cf0` (B-02) | `app/services/ai/sql_invariants.py`: `check(sql, point_in_time, summable, period_columns)` บน parse tree ของ DuckDB (`json_serialize_sql` แบบ `check_select`) — **I1** `ytd_summed_across_periods` (SUM/AVG ของคอลัมน์ point-in-time ใน block ที่ไม่ได้ปักงวดเดียว และไม่ GROUP BY งวด), **I2** `ytd_without_period` (อ้างคอลัมน์ point-in-time โดย block ไม่มีเงื่อนไข/คอลัมน์งวดเลย), **I3** `month_summed_as_ytd` (เตือนเท่านั้น) · มองทะลุ CTE / subquery / alias / `CAST` / `::` / `= (SELECT MAX…)` / `IN (ค่าเดียว)` / pivot `SUM(CASE WHEN งวด = X …)` / window `PARTITION BY งวด` · +99 tests: audit 407 → I1, SQL ของ compiler ทุกรูป (30 + ranking) → ไม่มี violation |
+| `d8ce4e6` (B-03) | `hybrid_flow.cumulative_sum_error` (จุดเดิม — guard ชุดเดียว) เปลี่ยนจาก regex เป็น `sql_invariants.check`; ข้อความ retry ขึ้นต้นด้วย `<code> <name>: ` + คอลัมน์ (ใน prompt เท่านั้น); ตัวตรวจพัง → log แล้วปล่อยผ่าน · attempt สุดท้ายยังละเมิด → `error = "query_failed"`, explanation = `outbound.message("query_failed")`, `sql_query = ""`, `trace.stages["invariant"]`, **ไม่ใช้ tool-loop rescue** (SQL ที่ไม่มีใครตรวจ) · +18 tests |
+| `553566b` (slice 04, พบจากการวัด) | pass 1 ส่งหน่วยที่ระบุชื่อเป็น `LIKE` ("EBT Margin ของสายงานบริหารองค์กร" → `division LIKE …` + มิติ division, ไม่มี ordering) → ยังโดน `is_hq = 0` → 0 แถว: กฎใหม่ = ทุกมิติมีตัวกรองบนคอลัมน์ตัวเอง และ (ทุกตัวเป็น `=` **หรือ** ไม่มี ordering); `LIKE`/`IN` ที่มี ordering ยังเป็นการจัดอันดับในขอบเขต · +8 tests |
+| `233daa1` (slice 05) | `_double_columns` query เดียวของ schema_metadata; `_cumulative_columns` / `_summable_columns` เป็น wrapper (เงื่อนไขของ session ต้นทาง: ไม่คัด query ซ้ำ) · +1 test |
+
+ผลทดสอบ: ACC-T 1708 → **1845 passed, 3 skipped**; ACC-L ผ่าน; import ด้วย Python 3.10 ผ่าน
+
+**จุดที่ต่างจากแผน §5:** (1) เส้นทาง compile ยังผ่าน guard (test เดิม `test_precompiled_sql_still_runs_guards` ตรึงไว้ และ SQL ของ compiler ทุกรูปผ่าน) ·
+(2) I3 ไม่จับคู่ `ebt_month ↔ ebt` ด้วยชื่อ — เตือนเมื่อ SUM คอลัมน์ summable ข้ามงวดในตารางของ context ที่มีคอลัมน์ point-in-time (ทั้งสองรายการจาก schema_metadata ชุดเดียว; จับคู่รายคอลัมน์ต้องเดาชื่อ) ·
+(3) จุดที่ ~1667 (`_cumulative_columns` ใน prompt ยอดสะสม) ไม่ใช่ guard — ไม่เปลี่ยน
+
+### B.2 วิธีวัด
+- ชุด 174 ข้อของ §D (ebt 202609, 1 ข้อต่อ class, ชุดเดียวกัน) + ชุด portal (NT-Report `DataFeed/eval/portal_questions_{revenue,sales,expense,ebt}.json` + `scripts/eval/portal_real_questions.json`)
+  — ชุดหลังคือเส้นทาง free-SQL ที่มีคอลัมน์ YTD (`revenue_ytd`) ซึ่งชุด ebt ไม่แตะ
+- server ซ้อม 127.0.0.1 บนสำเนาแยกต่อ server ของ config.db / app.db / Chroma (สำรอง 09:50 แบบ read-only) + สำเนา `nt_fi_report.sqlite`, key ซ้อม id 6 บนสำเนา,
+  Python 3.10 (มี RAG), ไม่มี Telegram/อีเมล · **ก่อน** = main `1d004bc` (port 8023, worktree แยก) · **หลัง** = branch `233daa1` (port 8024) ·
+  ตรวจหลัง B (slice 01–03 เท่านั้น, port 8022) ด้วย · app.db / config.db จริงไม่ถูกแตะ (api_keys สูงสุดยังเป็น 5)
+- "ผิดอย่างมั่นใจ" = ไม่มี error, มีแถวที่มีค่า, ไม่ตรง oracle · "ชั้น invariant" = SQL ของคำตอบนั้นละเมิด I1/I2 (ตรวจย้อนด้วย `sql_invariants.check`)
+
+### B.3 ผล
+| ชุด ebt 174 ข้อ | ก่อน (`1d004bc`) | หลัง B (`d8ce4e6`) | **หลัง (`233daa1`)** |
+|---|---|---|---|
+| ถูก | 156 | 157 | **160** |
+| ผิดอย่างมั่นใจ | 14 | 11 | **10** |
+| — ในนั้น SQL ละเมิด I1/I2 | 0 | 0 | **0** |
+| ตอบไม่ได้ (query_failed / ไม่มีแถว) | 4 | 6 | 4 |
+| ตอบด้วย compiler | 167 | 166 | 166 |
+
+คู่ ก่อน → หลัง: หลังถูก/ก่อนผิด 5, ก่อนถูก/หลังผิด 1 (McNemar p = 0.22) · รายรูป: filter 20 → 22/30, top5_desc 27 → 29/30, อื่นเท่าเดิม ·
+"EBT Margin ของสายงานบริหารองค์กร" และ "…สายงาน กรรมการผู้จัดการใหญ่…" (§D.4) ได้แถวจริงแล้ว (ก่อน: 0 แถว) · ข้อที่หลังผิด (M0527) และ 2 ข้อที่ยัง query_failed
+คือ margin ของหน่วยรายได้ 0 (oracle = NULL; compiler ได้แถว NULL → นับเป็นไม่มีข้อมูล → retry ล้ม) = กลุ่ม "oracle NULL" ของ §D.4 ไม่ใช่ invariant ·
+query_failed ข้อที่ 4 (M0196, free-SQL `shape:filter:group_0`) ก่อนหน้าเป็นผิดอย่างมั่นใจ — ล้มด้วยเหตุอื่น ไม่ใช่ fail closed ของ invariant
+
+**ตัวตรวจย้อนกับผลรันเก่าทุกชุด** (SQL ที่บันทึกในผลรัน): be89108 (ก่อน §D) จับคำตอบผิดได้ 7 · 3cd4e6c 1 · ทุกชุด **จับคำตอบที่ถูก 0** —
+ข้อเดียวที่ดูเหมือนจับผิด (0a32b92 M0646) คือ `SUM(amount_ytd) … BETWEEN 202501 AND 202512` ที่ละเมิดจริง แต่ "ถูก" เพราะ oracle เป็น NULL
+
+| ชุด portal (ถูกครบ) | revenue | sales | expense | ebt | real | รวม |
+|---|---|---|---|---|---|---|
+| ก่อน | 9/10 | 9/10 | 9/10 | 11/14 | 7/15 | 45/59 |
+| หลัง | 9/10 | 10/10 | 9/10 | 11/14 | 9/15 | **48/59** |
+
+guard ทำงานจริงบนชุด portal ของหลัง 5 ครั้ง (I1 `revenue_ytd`: "รายได้สะสมตั้งแต่ต้นปีถึงเดือนกันยายน 2569", "รายได้สะสมของกลุ่ม Mobile", …) —
+ทุกครั้ง retry ได้ SQL `year_month = <งวด>` และตอบได้; fail closed (attempt สุดท้ายยังละเมิด) **0 ครั้ง** · ชุด ebt 174 ข้อ guard ไม่ทำงานเลย (ไป compiler 95%)
+
+**เทียบกับเกณฑ์ "ผิดอย่างมั่นใจต้องเป็น 0":** ชั้นที่ตัวตรวจรับผิดชอบ (SUM/อ้าง YTD ข้ามงวด) = **0** ทั้งก่อนและหลังบนชุดนี้ (main ส่ง 95% ไป compiler อยู่แล้ว) ·
+ที่เหลือ 10 ข้อ **ไม่ใช่ความผิดเรื่องงวด** — pass 1 เลือกระดับผิด ("ส่วนไหน/กลุ่มไหน" → division, ตัวกรอง "กรรมการผู้จัดการใหญ่" ผิดระดับ),
+LIKE ชื่อหน่วยตรงหลายหน่วย, หรือ free-SQL ใช้แถว `3.1 กำไร (ขาดทุน) ของส่วนงาน` แทนสูตร EBT 4 ก้อน — invariant เรื่องงวดจับไม่ได้โดยนิยาม
+
+### B.4 ที่ยังเหลือ / ข้อจำกัด
+- free-SQL ของ context ที่มี metric ประกาศแต่ใช้แถว/สูตรอื่น (`group_1 = '3.1 กำไร…'`, `group_1` เป็นมิติ) → ผิดอย่างมั่นใจ 4 ข้อ: invariant ถัดไปที่เป็นไปได้ = "context มี metric นี้แต่ SQL ไม่อ้าง term ของมัน" (ยังไม่ออกแบบ)
+- ตัวตรวจรู้จักงวดจาก `scope_columns` เท่านั้น: `WHERE year = 2026 AND month = 9` (งวดเดียวผ่าน year + month) และ JOIN กับ CTE งวด ถูกนับว่าไม่ปักงวด →
+  retry (regex เดิมก็ทำแบบเดียวกัน); บนชุด portal retry ได้ `year_month = …` ทุกครั้ง · ponytail: ตาราง fact ที่ JOIN กับ CTE ที่ปักงวดถือว่าปักงวด
+- margin ของหน่วยรายได้ 0: compiler ได้แถว NULL → hybrid ถือว่าไม่มีข้อมูล → retry ด้วย LLM → `query_failed` (3 ข้อ) — ควรตอบ "ไม่มีรายได้ คำนวณ margin ไม่ได้" ตรง ๆ
+- `metric_path` ยังเป็น `compiled:` เมื่อคำตอบของ compiler ถูกทิ้งแล้ว retry (ข้อสังเกตเดิมของ §D.4)
+- **ยังไม่ขึ้นของจริง:** ขึ้น = ff main → `ai/delegate-20261025-0951` (`1d004bc..233daa1`, ไม่มี migration, ไม่แตะ config.db) · ถอยกลับ: `git revert` 5 commit ·
+  ถัดไปหลังขึ้น: ดู log `Hybrid Mode: I1/I2` และ audit `error = query_failed` ของ feed_revenue/feed_expense บน portal จริง
 
 ---
 

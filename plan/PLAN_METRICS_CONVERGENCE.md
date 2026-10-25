@@ -114,7 +114,13 @@ Acceptance: ACC-T, ACC-L · **วัดจริง (ไม่ใช่ slice �
 
 ## 5. Phase B — ตัวตรวจ SQL ของ pass 2 ตาม invariant ของ contract (M-2)
 
-### B-01 — รู้ว่าคอลัมน์ไหน point-in-time ตอน request
+### B-01 — รู้ว่าคอลัมน์ไหน point-in-time ตอน request — **ข้าม (2026-10-25)**
+> ข้อมูลนี้มีอยู่แล้ว: `sync_schema_metadata` เขียน `schema_metadata.is_summable` จาก `columns[].agg` / `control_totals.measures[].agg`
+> ของ contract (double + `is_summable = 0` = point-in-time) และ `hybrid_flow._cumulative_columns` อ่านแถว active อยู่แล้ว —
+> `schema_contexts.measure_agg` จะเป็นที่เก็บ agg ชุดที่สอง + migration ของ config.db จริงโดยไม่ได้อะไรเพิ่ม ·
+> B-02/B-03 อ่านจาก schema_metadata ผ่าน helper เดิม (`_double_columns` → `_cumulative_columns` / `_summable_columns`) ·
+> ข้อจำกัดที่ยอมรับ: admin แก้ `is_summable` ได้ (แถวเป็น `manual`) = การตัดสินของคน · ด้านล่างคือแผนเดิม (ไม่ได้ทำ)
+
 ALLOWED: `app/models/schema_models.py`, `app/services/datafeed_knowledge.py`, `scripts/migrate_schema_contexts_measures.py` (new, idempotent), `tests/unit/knowledge_db.py`, `tests/unit/test_schema_metrics_sync.py` หรือไฟล์ test sync ที่มีอยู่
 - `schema_contexts.measure_agg` (JSON `{column: "sum"|"point_in_time"}`) sync จาก `control_totals.measures[].agg` + `columns[].agg` ของ contract ทุก dataset (`datafeed_knowledge.py` บรรทัด ~153 มีการอ่านอยู่แล้ว — ใช้ที่เดียวกัน)
 - server เริ่มได้แม้ยังไม่มีคอลัมน์; sync no-op + warning
@@ -136,6 +142,7 @@ ALLOWED: `app/services/ai/hybrid_flow.py`, `app/core/outbound.py` (เฉพา�
 - หลัง pass 2 ได้ SQL และก่อน execute: ตรวจ invariant เมื่อ context มี `measure_agg`; violation → นับเป็นความล้มเหลวของ attempt นั้น, ข้อความ retry บอกรหัส + คอลัมน์ (ภายใน prompt เท่านั้น) → ใช้ loop retry เดิม (`exec_a0/a1`)
 - ครบ retry แล้วยังละเมิด → `error = query_failed` ข้อความตายตัวเดิม (M-2 ก); `trace.stages["invariant"] = "<code>"`; audit `error` คอลัมน์เดิม; **ไม่มี SQL/รหัสออกนอก process**
 - เส้นทาง compile ไม่ผ่านตัวตรวจซ้ำ (compiler คือผู้รับรอง) — แต่ test ยืนยันว่าถ้าผ่านก็ไม่มี violation
+  (ที่ทำจริง 2026-10-25: guard เดิม `cumulative_sum_error` ตรวจ SQL ของ compiler อยู่แล้วและ test เดิมตรึงไว้ — คงไว้ เพราะ SQL ของ compiler ทุกรูปผ่านตัวตรวจ)
 - Tests: mock pass 2 คืน SQL 407 → retry ด้วยข้อความที่มีรหัส → คืน SQL ดี = ตอบได้; คืน SQL เสียทุกครั้ง = `query_failed`; context ไม่มี `measure_agg` = ไม่ตรวจ
 Acceptance: ACC-T, ACC-L · วัด: รัน Phase D ซ้ำ — จำนวน case ที่ "ผิดอย่างมั่นใจ" ต้องเป็น 0 (กลายเป็น pass หรือ `query_failed`)
 
