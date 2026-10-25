@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, call
 
 import pytest
+from sqlalchemy import create_engine, text
 
 from app.core import outbound
 from app.services.ai import hybrid_flow, retry_loop
@@ -16,6 +17,28 @@ AUDIT_407 = ("SELECT cost_center, SUM(COALESCE(ebt, 0)) FROM t "
 SINGLE_PERIOD = "SELECT cost_center, SUM(COALESCE(ebt, 0)) FROM t WHERE time_key = 202609 GROUP BY cost_center"
 NO_PERIOD = "SELECT cost_center, ebt FROM t WHERE cost_center = '1'"
 ROWS = [{"cost_center": "1", "ebt": 59}]
+
+
+def test_double_columns_use_active_schema_metadata(tmp_path, monkeypatch):
+    engine = create_engine(f"sqlite:///{tmp_path/'c.db'}")
+    with engine.begin() as conn:
+        conn.execute(text(
+            "CREATE TABLE schema_metadata (table_name TEXT, column_name TEXT, data_type TEXT, "
+            "is_summable INTEGER, status TEXT)"
+        ))
+        conn.execute(text(
+            "INSERT INTO schema_metadata VALUES "
+            "('t', 'amount_ytd', 'double', 0, 'active'), "
+            "('t', 'amount', 'double', 1, 'active'), "
+            "('t', 'old_ytd', 'double', 0, 'rejected'), "
+            "('t', 'name', 'string', 0, 'active')"
+        ))
+    monkeypatch.setattr(hybrid_flow, "_context_tables", lambda *a: {})
+    try:
+        assert hybrid_flow._cumulative_columns("t", engine) == ["amount_ytd"]
+        assert hybrid_flow._summable_columns("t", engine) == ["amount"]
+    finally:
+        engine.dispose()
 
 
 @pytest.fixture

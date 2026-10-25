@@ -75,9 +75,10 @@ def _context_tables(context_table: str, config_engine=None) -> Dict[str, List[st
         return {}
 
 
-def _cumulative_columns(context_table: str, config_engine=None) -> List[str]:
-    """Point-in-time measures of a context's tables: a double its contract says not to sum
-    (datafeed_knowledge.sync_schema_metadata) — revenue_ytd, ebt's ebt / expense / sales_base_revenue.
+def _double_columns(context_table: str, summable: bool, config_engine=None) -> List[str]:
+    """Double measures of a context's tables, classified by contract agg
+    (datafeed_knowledge.sync_schema_metadata): summable or point-in-time (e.g. revenue_ytd,
+    ebt's ebt / expense / sales_base_revenue) that must not be summed across periods.
     Active rows only (Plan 8.1). Empty = none, or config unreachable."""
     tables = list(_context_tables(context_table, config_engine)) or [context_table]
     try:
@@ -88,27 +89,18 @@ def _cumulative_columns(context_table: str, config_engine=None) -> List[str]:
         with config_engine.connect() as conn:
             return [row[0] for row in conn.execute(text(
                 "SELECT DISTINCT column_name FROM schema_metadata WHERE table_name IN :tables AND status = 'active' "
-                "AND data_type = 'double' AND is_summable = 0 ORDER BY column_name"
-            ).bindparams(bindparam("tables", expanding=True)), {"tables": tables})]
+                "AND data_type = 'double' AND is_summable = :summable ORDER BY column_name"
+            ).bindparams(bindparam("tables", expanding=True)), {"tables": tables, "summable": 1 if summable else 0})]
     except Exception:
         return []
+
+
+def _cumulative_columns(context_table: str, config_engine=None) -> List[str]:
+    return _double_columns(context_table, False, config_engine)
 
 
 def _summable_columns(context_table: str, config_engine=None) -> List[str]:
-    """Double measures the contract says to add up; active rows only, [] if unreachable."""
-    tables = list(_context_tables(context_table, config_engine)) or [context_table]
-    try:
-        from sqlalchemy import bindparam, text
-
-        if config_engine is None:
-            from app.db.session import config_engine
-        with config_engine.connect() as conn:
-            return [row[0] for row in conn.execute(text(
-                "SELECT DISTINCT column_name FROM schema_metadata WHERE table_name IN :tables AND status = 'active' "
-                "AND data_type = 'double' AND is_summable = 1 ORDER BY column_name"
-            ).bindparams(bindparam("tables", expanding=True)), {"tables": tables})]
-    except Exception:
-        return []
+    return _double_columns(context_table, True, config_engine)
 
 
 def _period_columns(context_table: str, config_engine=None) -> List[str]:
