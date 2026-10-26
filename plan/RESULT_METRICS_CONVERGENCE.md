@@ -9,7 +9,7 @@
 | **E** คำอธิบายคอลัมน์ feed อัตโนมัติ | ✅ **ขึ้นของจริงแล้ว** (main `092f33f`, reload 23:47; ยังไม่ push) — วัดบนสำเนา: คำอธิบายว่าง 49.3% → 23.8% | 2026-10-24 | `3340f31`, `fc19128`, `fca9163`, `6826f75`, `cc0dfce` |
 | **B** ตัวตรวจ SQL ของ pass 2 | ✅ **ขึ้นของจริงแล้ว** (main ff `1d004bc..0cd5e0b`, reload 14:37 2026-10-25; ยังไม่ push) — B-01 ข้าม; วัดบน server ซ้อม: 156 → 160/174, ผิดอย่างมั่นใจ 14 → 10 (ชั้น invariant 0 → 0) | 2026-10-25 | `aee811c`, `9ef7cf0`, `d8ce4e6`, `553566b`, `233daa1` |
 | C-0b คำศัพท์ระดับหน่วยงานทุกโดเมน | ⬜ ยังไม่ทำ (ระหว่างนี้ feed_ebt + feed_expense เป็นแถว `manual` — §A.6) | | |
-| **C-00** ส่วนขยาย compiler สำหรับ revenue (`datasets`, term ว่าง, M-5) + `period.parts` + ตัวกรองตัวเลข | ✅ เสร็จบน branch `ai/delegate-metrics` — **ยังไม่ ff main, ยังไม่ push, ยังไม่ migrate config.db จริง**; server ซ้อม: revenue compiled 3/6 → 4/6, 5/6 หลัง `period.parts` → **5/6** หลังตัวกรองตัวเลข (ข้อที่เหลือ = `shape:dimension_set` ตามข้อตัดสิน) ตัวเลขตรง parquet ทุกข้อที่ compile | 2026-10-26 | `5f3d62a`, `86e85b5`, `3a30c85`, `fdb9b72` |
+| **C-00** ส่วนขยาย compiler สำหรับ revenue (`datasets`, term ว่าง, M-5) + `period.parts` + ตัวกรองตัวเลข + มิติงวดในคำถามงวดเดียว | ✅ เสร็จบน branch `ai/delegate-metrics` — **ยังไม่ ff main, ยังไม่ push, ยังไม่ migrate config.db จริง**; server ซ้อม: revenue compiled 3/6 → 4/6, 5/6 หลัง `period.parts` → 5/6 หลังตัวกรองตัวเลข → 4/6 ใน r5 (pass 1 เปลี่ยนเป็น `month <= 9` — งานถัดไป) ตัวเลขตรง parquet ทุกข้อที่ compile | 2026-10-26 | `5f3d62a`, `86e85b5`, `3a30c85`, `fdb9b72`, `22819bf` |
 | C-01 contract revenue (NT-Report) | ⬜ ยังไม่ทำ (sales ขึ้นแล้วทาง §SALES) | | |
 | C-0c ratio จัดอันดับอย่างมีความหมาย | ✅ ทำก่อนแผนนี้ (`941cd0a`, ebt 1.6.0) | 2026-10-24 | |
 | **CMP** เทียบสองงวดบนเส้นทาง compile (`plan/PLAN_METRICS_COMPARISON.md`) | ✅ **ขึ้นของจริงแล้ว** (main `862915c` = merge กับ Phase E, reload 07:32 2026-10-25) + push — วัดบน server ซ้อม: ชุดเทียบปีก่อน 3 → 20/27 | 2026-10-25 | `a54f76a`, `0a32b92` |
@@ -473,7 +473,27 @@ mapping "เดือน" (1), เลือก `unit_short_name` แทน `unit
 - server ซ้อม r4 (restart, สำเนา c00, key id 6): ชุด 6 ข้อ **5/6 compiled** — Q5 รอบนี้ pass 1 เขียน `bu_seq = 8` อีกครั้งและ **compile ได้** (bu, 2,103.05 ล้าน) ·
   ebt 570.85 ล้าน / ยอดขาย 5 ฝ่าย ยัง compiled · คำถามเสริม "รายได้สะสมของกลุ่มธุรกิจลำดับที่ 1 และ 4" → `compiled:revenue` `"bu_seq" IN (1, 4)` = 6,198.22 / 13,024.48 ล้าน ✓
 - **พบใหม่:** "รายได้สะสมของกลุ่มธุรกิจลำดับที่ 8 (bu_seq 8)" → pass 1 ใส่ `year_month` เป็น**มิติ**ของคำถามยอดเดียว (aggregation ไม่ใช่ comparison) → `shape:dimension:year_month` → free SQL (ตัวเลขถูก 2,103.05) —
-  ตัดคอลัมน์งวดออกจากมิติตอนนี้ทำเฉพาะการเทียบ; ถ้าจะรับ ต้องตัดสินว่ามิติงวดในคำถามงวดเดียว = งวดเดียว (ไม่ใช่ trend) — งานถัดไป
+  ตัดคอลัมน์งวดออกจากมิติตอนนี้ทำเฉพาะการเทียบ; ถ้าจะรับ ต้องตัดสินว่ามิติงวดในคำถามงวดเดียว = งวดเดียว (ไม่ใช่ trend) — งานถัดไป → **แก้แล้ว §C.4d**
+
+### C.4d คอลัมน์งวดเป็นมิติในคำถามงวดเดียว (2026-10-26, `/delegate` run `20261026-1218`)
+- `22819bf`: `plan()` ตัดคอลัมน์งวด (และ `period.parts`) ออกจาก `dimensions` เมื่อครบทุกข้อ: ไม่ใช่การเทียบ · งวดถูกตรึงที่เดือนเดียว (`time_range.month` หรือ filter `=` บนงวด รวมตัวที่แปลงจาก parts) ·
+  ไม่มี filter ช่วงงวด (IN / BETWEEN / >= / <=) · คำถามไม่มีคำใน `TREND_WORDS` (รายเดือน, แต่ละเดือน, ทุกเดือน, เดือนละ, ตามเดือน, เดือนไหน, เดือนใด, แนวโน้ม, รายปี, แต่ละปี, ปีไหน, ไตรมาส, trend, monthly)
+  — ข้อใดไม่ครบ = ปฏิเสธ `shape:dimension:<คอลัมน์>` เหมือนเดิม (`BETWEEN y01..yMM` + มิติงวด ยังปฏิเสธ เพราะกำกวมกับ "รายเดือน ม.ค.–ก.ย.") · ใช้กับทุก metric (ebt `time_key` ด้วย)
+- Codex 1 รอบ PASS · test ใหม่ `tests/unit/test_metric_period_dimension.py` (57; replay intent จริงของ r4) · ACC-T 2081 → **2138 passed, 3 skipped** · ACC-L exit 0
+- server ซ้อม r5 + r6 (restart ทุกรอบ, สำเนา c00, key id 6):
+
+| คำถาม | r4 (ก่อน) | r5 | r6 |
+|---|---|---|---|
+| ชุด 6 ข้อ (revenue compiled) | 5/6 | 4/6 (Q5: `period_filter:operator`) | — |
+| รายได้สะสมของกลุ่มธุรกิจลำดับที่ 8 (bu_seq 8) | `shape:dimension:year_month` | compiled (pass 1 ไม่ใส่มิติงวดรอบนี้) | `period_filter:operator` |
+| รายได้สะสมของกลุ่มธุรกิจลำดับที่ 1 และ 4 | compiled | compiled | compiled |
+| รายได้รายเดือนปีนี้ (ตัวกันไม่ให้ตัด trend) | — | `shape:dimension:month` (คงไว้ ✓) | `shape:dimension:year_month` (คงไว้ ✓) |
+
+  ebt / ยอดขาย ยัง compiled · ข้อที่ไป free SQL ได้ตัวเลขถูกทุกข้อ (Q5 2,103.05 ล้าน; รายเดือนได้ 9 แถว)
+- **ผลที่ต้องอ่านให้ถูก:** กฎใหม่พิสูจน์ด้วย unit test ที่ replay intent จริงของ r4 และตัวกันคำถาม trend ทำงานบน server ทั้งสองรอบ — แต่รูปเดียวกับ r4 (มิติงวด + ตัวกรองไม่มีช่วง) **ยังไม่เกิดซ้ำบน server**:
+  r5 pass 1 ไม่ใส่มิติงวด, r6 ใส่มิติงวด**พร้อม** `month <= 9` ซึ่งถูกปฏิเสธก่อนถึงกฎนี้
+- **พบใหม่ (r5 Q5, r6):** pass 1 เขียนยอดสะสมเป็น `year = 2026` + **`month <= 9`** — `period.parts` รับเดือนแค่ `=` / `IN` / `BETWEEN` (`<=` อยู่นอกขอบเขตของ §C.4b) → `period_filter:operator`;
+  ทางแก้: เดือน `<= M` (ปีเดียว) = เดือน 1..M = ยอดสะสม ณ M (กฎเดียวกับคอลัมน์งวด `<=` ที่มี `time_range.cumulative`) — งานถัดไป
 
 ### C.5 ขึ้นของจริง — ยังไม่ทำ (หยุดตามสั่ง: ไม่ ff main, ไม่ push, ไม่ migrate config.db จริง)
 ลำดับเมื่อจะขึ้น: backup config.db → `scripts/migrate_schema_metrics.py` บน config.db จริง (**ก่อน** ff — ไม่งั้น re-sync contract ของทุก feed context ล้มและค้าง knowledge เดิม;
