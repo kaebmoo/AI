@@ -170,3 +170,44 @@ async def test_the_synced_level_reaches_pass_one(tmp_path, engine, contract, hie
         domain_words=["รายได้", "revenue", "income"])
     assert provider.prompts, "pass 1 was not asked"
     assert "ระดับชั้นที่คำถามพูดถึง: กลุ่ม → คอลัมน์ `sub_division_name`**" in provider.prompts[0]
+
+
+EXPENSE_LEVELS = [  # as expense 1.3.0 declares them: the org columns live in dim_org_snapshot, the fact has cost_center
+    {"label_th": "สายงาน", "label_en": "Division", "columns": ["division"], "keywords": ["สายงาน", "รายสายงาน"]},
+    {"label_th": "กลุ่ม", "label_en": "Sub-division", "columns": ["sub_division_fname", "sub_division_sname"],
+     "keywords": ["กลุ่มขายและปฏิบัติการ", "กลุ่มขาย", "ระดับกลุ่ม"]},
+    {"label_th": "ฝ่าย", "label_en": "Unit", "columns": ["unit_fname", "unit_sname"], "keywords": ["ฝ่าย", "รายฝ่าย"]},
+    {"label_th": "ส่วน", "label_en": "Sub-unit", "columns": ["sub_unit_fname", "sub_unit_sname"],
+     "keywords": ["ส่วนงาน", "รายส่วน", "ส่วนขาย", "ส่วนบริการ", "ระดับส่วน"]},
+    {"label_th": "ศูนย์ต้นทุน", "label_en": "Cost center", "columns": ["cost_center"],
+     "keywords": ["ศูนย์ต้นทุน", "cost center", "cost_center", "รายศูนย์"]},
+]
+
+
+def test_a_dim_backs_the_levels_of_a_context_without_another_chain(tmp_path):
+    """feed_expense (and feed_ebt) held these levels as manual rows 0–4; from the contract they are 10–14 and the
+    only chain — the note and STEP 1.5 read them the same way."""
+    from app.services.schema_service import SchemaService
+    engine = knowledge_db.make(tmp_path / "config.db")
+    dim = ["effective_month", "cost_center", "division", "sub_division_fname", "sub_division_sname", "unit_fname",
+           "unit_sname", "sub_unit_fname", "sub_unit_sname"]
+    contract = {"domain": "expense", "schema_version": "1.3.0", "primary_dataset": "fact_expense",
+                "period_key": "time_key", "org_levels": EXPENSE_LEVELS, "datasets": [
+                    {"name": "fact_expense", "columns": [{"name": c, "dtype": "string"}
+                                                          for c in ("time_key", "cost_center", "expense_group_name")]},
+                    {"name": "dim_org_snapshot", "columns": [{"name": c, "dtype": "string"} for c in dim]}]}
+    with engine.begin() as conn:
+        dk.sync_knowledge(conn, "expense", contract)
+    with engine.connect() as conn:
+        stored = {r[0]: json.loads(r[1]) for r in conn.execute(text(
+            "SELECT level, level_columns FROM master_hierarchy WHERE context_name = 'feed_expense' AND source = 'declared'"))}
+    assert stored == {10 + i: level["columns"] for i, level in enumerate(EXPENSE_LEVELS)}
+    levels = [{"level": 10 + i, "label_th": level["label_th"], "label_en": level["label_en"],
+               "columns": level["columns"], "detection_keywords": level["keywords"]}
+              for i, level in enumerate(EXPENSE_LEVELS)]
+    note = hierarchy_context.format_level_note(levels, hierarchy_context.named_levels("ฝ่ายไหนค่าใช้จ่ายสูงสุด", levels))
+    assert "ฝ่าย → คอลัมน์ `unit_fname`**" in note and "(ลำดับชั้น: สายงาน (`division`) > กลุ่ม" in note
+    assert hierarchy_context.named_levels("ค่าใช้จ่ายรายกลุ่มค่าใช้จ่าย", levels) == []
+    rule = SchemaService(config_engine=engine, business_engine=engine).build_hierarchy_rule_text("feed_expense")
+    assert "ข้อมูลมีลำดับชั้น: สายงาน > กลุ่ม > ฝ่าย > ส่วน > ศูนย์ต้นทุน\n" in rule
+    engine.dispose()
