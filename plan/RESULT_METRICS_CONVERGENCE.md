@@ -9,7 +9,7 @@
 | **E** คำอธิบายคอลัมน์ feed อัตโนมัติ | ✅ **ขึ้นของจริงแล้ว** (main `092f33f`, reload 23:47; ยังไม่ push) — วัดบนสำเนา: คำอธิบายว่าง 49.3% → 23.8% | 2026-10-24 | `3340f31`, `fc19128`, `fca9163`, `6826f75`, `cc0dfce` |
 | **B** ตัวตรวจ SQL ของ pass 2 | ✅ **ขึ้นของจริงแล้ว** (main ff `1d004bc..0cd5e0b`, reload 14:37 2026-10-25; ยังไม่ push) — B-01 ข้าม; วัดบน server ซ้อม: 156 → 160/174, ผิดอย่างมั่นใจ 14 → 10 (ชั้น invariant 0 → 0) | 2026-10-25 | `aee811c`, `9ef7cf0`, `d8ce4e6`, `553566b`, `233daa1` |
 | C-0b คำศัพท์ระดับหน่วยงานทุกโดเมน | ⬜ ยังไม่ทำ (ระหว่างนี้ feed_ebt + feed_expense เป็นแถว `manual` — §A.6) | | |
-| **C-00** ส่วนขยาย compiler สำหรับ revenue (`datasets`, term ว่าง, M-5) | ✅ เสร็จบน branch `ai/delegate-metrics` — **ยังไม่ ff main, ยังไม่ push, ยังไม่ migrate config.db จริง**; server ซ้อม: revenue compiled 4/6 ตัวเลขตรง parquet ทุกข้อที่ compile | 2026-10-26 | `5f3d62a`, `86e85b5` |
+| **C-00** ส่วนขยาย compiler สำหรับ revenue (`datasets`, term ว่าง, M-5) + `period.parts` | ✅ เสร็จบน branch `ai/delegate-metrics` — **ยังไม่ ff main, ยังไม่ push, ยังไม่ migrate config.db จริง**; server ซ้อม: revenue compiled 3/6 → **4/6 และ 5/6** หลัง `period.parts` (ข้อที่เหลือ = `shape:dimension_set` ตามข้อตัดสิน) ตัวเลขตรง parquet ทุกข้อที่ compile | 2026-10-26 | `5f3d62a`, `86e85b5`, `3a30c85` |
 | C-01 contract revenue (NT-Report) | ⬜ ยังไม่ทำ (sales ขึ้นแล้วทาง §SALES) | | |
 | C-0c ratio จัดอันดับอย่างมีความหมาย | ✅ ทำก่อนแผนนี้ (`941cd0a`, ebt 1.6.0) | 2026-10-24 | |
 | **CMP** เทียบสองงวดบนเส้นทาง compile (`plan/PLAN_METRICS_COMPARISON.md`) | ✅ **ขึ้นของจริงแล้ว** (main `862915c` = merge กับ Phase E, reload 07:32 2026-10-25) + push — วัดบน server ซ้อม: ชุดเทียบปีก่อน 3 → 20/27 | 2026-10-25 | `a54f76a`, `0a32b92` |
@@ -435,12 +435,36 @@ mapping "เดือน" (1), เลือก `unit_short_name` แทน `unit
 - **pass 1 ใส่งวดเป็น `year = 2026` + `month = 9`** ในตัวกรอง (ตาราง revenue มีคอลัมน์ `year`, `month` แยกจาก `year_month`) → `shape:filter:year` 2/6 ข้อ —
   ชั้นเดียวกับ "ใส่งวดลง filters" ที่ `plan()` รับแล้วสำหรับคอลัมน์งวด; ทางแก้ที่ต้องตัดสิน: `plan()` ถือตัวกรองบนคอลัมน์ปี/เดือนที่ตรงกับ `time_range` เป็นงวด
   (ต้องรู้ว่าคอลัมน์ไหนคือปี/เดือน — ประกาศใน `period` ของ contract เช่น `parts: {year: year, month: month}`) หรือเอาออกจาก prompt ของ pass 1
+  → **แก้แล้ว** ด้วย `period.parts` (§C.4b) · ตัวเลขรอบแรกคือ revenue compiled **3/6** (เดิมเขียนผิดเป็น 4/6 ที่ตารางสถานะ)
 - **กลุ่มธุรกิจ × ฝ่าย** ไม่มีตารางใดใน 3 grain ที่ประกาศ → `shape:dimension_set` ตามข้อตัดสิน; C-01 ประกาศ `fact_org_product_monthly` (มี `bu` + มิติองค์กร) ใน `datasets` ก็จะ compile ได้
   (free SQL ที่ล้มคือพฤติกรรมเดิมของทางนั้น ไม่ใช่การถดถอย)
 - `scripts/eval/metric_eval_lib.generate()` ยังอ่าน `metric.dataset` ตัวเดียว — ต้องขยายรับ `datasets` ก่อน `gen` ของ revenue ใน C-02
 - `revenue_achievement` (รายได้เทียบเป้า) อยู่คนละตาราง (`fact_*_target_monthly`) — SELECT เดียวทำไม่ได้ด้วย C-00; ต้องออกแบบ (join ตาม grain หรือ metric ต่อ grain)
 
+### C.4b `period.parts` — ปีและเดือนที่ประกาศเป็นงวด (2026-10-26, `/delegate` run `20261026-0947`)
+- `3a30c85`: contract ประกาศ `period: {column: year_month, parts: {year: year, month: month}, value: …}` ได้ (sync ตรวจ: mapping ไม่ว่างของ year/month → คอลัมน์ที่มีในทุกตาราง,
+  ไม่ซ้ำกัน, ไม่ใช่ `period.column`) · `plan()` แปลงตัวกรองบนคอลัมน์ที่ประกาศ (year `=`/`IN`, month `=`/`IN`/`BETWEEN`) เป็น**ตัวกรองเดียวบนคอลัมน์งวด** (`= 202609` / `IN […]`)
+  แล้วให้กฎงวดเดิมตัดสิน (YTD จาก 01, เทียบสองงวด, เหตุผลปฏิเสธเดิม) — ไม่มีตรรกะงวดชุดที่สอง; ปีอย่างเดียว = เติม `time_range.year`; ตัดคอลัมน์ปี/เดือนออกจากมิติของการเทียบเหมือนคอลัมน์งวด ·
+  metric ที่ไม่ประกาศ `parts` ทำงานเหมือนเดิม (`year` ยังเป็น `shape:filter:year`) · `parts` อยู่ใน JSON `period` เดิม — **ไม่ต้อง migrate**
+- Codex 2 รอบ (รอบแรก BLOCKED: Codex ต่อ OpenAI ไม่ได้ ไม่ได้แก้อะไร; รอบสอง PASS) · test ใหม่ `tests/unit/test_metric_period_parts.py` (65) · ACC-T 1962 → **2027 passed, 3 skipped** · ACC-L exit 0 ·
+  contract จริง (ebt/sales) ยัง sync active ครบ
+- วัดซ้ำบน server ซ้อม 127.0.0.1:8002 (สำเนา c00, contract ร่างเพิ่ม `parts`, key id 6), restart ก่อนแต่ละรอบ:
+
+| คำถาม | รอบแรก (C-00) | r2 | r3 |
+|---|---|---|---|
+| รายได้สะสมปีนี้ทั้งบริษัท | compiled | compiled | compiled |
+| รายได้สะสมปีนี้แยกตามกลุ่มธุรกิจ | compiled | compiled | compiled |
+| ฝ่ายไหนมีรายได้สะสมสูงสุด 5 อันดับแรก | `shape:filter:year` | **compiled** (org, `= 202609`) | **compiled** |
+| รายได้เดือนกันยายน 2569 ทั้งบริษัท | `shape:filter:year` | **compiled** (`revenue` 3,353.09 ล้าน) | **compiled** |
+| รายได้อื่น (กลุ่มธุรกิจ 8) สะสมปีนี้เท่าไร | compiled | `shape:filter:=` → free SQL (2,103.05 ถูก) | compiled |
+| รายได้สะสมของแต่ละกลุ่มธุรกิจ แยกตามฝ่าย | `shape:dimension_set` | `shape:dimension_set` | `shape:dimension_set` |
+| **revenue compiled** | **3/6** | **4/6** | **5/6** |
+
+  ทั้ง r2 และ r3 pass 1 ยังเขียน `year = 2026` + `month = 9` ใน Q3/Q4 — ตอนนี้ compile ทั้งหมด · ebt 570.85 ล้าน / ยอดขาย 5 ฝ่าย ยัง compiled ทุกรอบ · ตัวเลขที่ compile ตรง parquet ทุกข้อ
+- **พบใหม่ (r2):** pass 1 เลือก `bu_seq = 8` (ค่าตัวเลข) แทน `bu LIKE '%8.รายได้อื่น%'` → `shape:filter:=` เพราะไวยากรณ์ตัวกรองของ metric รับ `=`/`IN` เฉพาะค่า string —
+  มิติที่เป็นตัวเลข (`bu_seq`) ต้องรับค่า int และ render เป็นตัวเลข; งานถัดไป (ไม่ได้ทำในรอบนี้) — r3 pass 1 กลับไปใช้ `bu` จึง compile
+
 ### C.5 ขึ้นของจริง — ยังไม่ทำ (หยุดตามสั่ง: ไม่ ff main, ไม่ push, ไม่ migrate config.db จริง)
 ลำดับเมื่อจะขึ้น: backup config.db → `scripts/migrate_schema_metrics.py` บน config.db จริง (**ก่อน** ff — ไม่งั้น re-sync contract ของทุก feed context ล้มและค้าง knowledge เดิม;
-`load_metrics` ยังอ่านได้) → ff main (server `--reload`) → ไม่มีอะไรเปลี่ยนจน NT-Report ประกาศ metric ที่มี `datasets` (C-01) · ตรวจ: `PRAGMA table_info(schema_metrics)` มี `datasets`,
+`load_metrics` ยังอ่านได้) → ff main (server `--reload`) → ไม่มีอะไรเปลี่ยนจน NT-Report ประกาศ metric ที่มี `datasets` + `period.parts` (C-01) · ตรวจ: `PRAGMA table_info(schema_metrics)` มี `datasets`,
 ถาม EBT/ยอดขายเทียบเป้า 1 ข้อแต่ละโดเมนว่ายัง `compiled:*`
