@@ -9,7 +9,8 @@
 | **E** คำอธิบายคอลัมน์ feed อัตโนมัติ | ✅ **ขึ้นของจริงแล้ว** (main `092f33f`, reload 23:47; ยังไม่ push) — วัดบนสำเนา: คำอธิบายว่าง 49.3% → 23.8% | 2026-10-24 | `3340f31`, `fc19128`, `fca9163`, `6826f75`, `cc0dfce` |
 | **B** ตัวตรวจ SQL ของ pass 2 | ✅ **ขึ้นของจริงแล้ว** (main ff `1d004bc..0cd5e0b`, reload 14:37 2026-10-25; ยังไม่ push) — B-01 ข้าม; วัดบน server ซ้อม: 156 → 160/174, ผิดอย่างมั่นใจ 14 → 10 (ชั้น invariant 0 → 0) | 2026-10-25 | `aee811c`, `9ef7cf0`, `d8ce4e6`, `553566b`, `233daa1` |
 | C-0b คำศัพท์ระดับหน่วยงานทุกโดเมน | ⬜ ยังไม่ทำ (ระหว่างนี้ feed_ebt + feed_expense เป็นแถว `manual` — §A.6) | | |
-| C-00/C-01 metrics ของ revenue / sales | ⬜ ยังไม่ทำ | | |
+| **C-00** ส่วนขยาย compiler สำหรับ revenue (`datasets`, term ว่าง, M-5) | ✅ เสร็จบน branch `ai/delegate-metrics` — **ยังไม่ ff main, ยังไม่ push, ยังไม่ migrate config.db จริง**; server ซ้อม: revenue compiled 4/6 ตัวเลขตรง parquet ทุกข้อที่ compile | 2026-10-26 | `5f3d62a`, `86e85b5` |
+| C-01 contract revenue (NT-Report) | ⬜ ยังไม่ทำ (sales ขึ้นแล้วทาง §SALES) | | |
 | C-0c ratio จัดอันดับอย่างมีความหมาย | ✅ ทำก่อนแผนนี้ (`941cd0a`, ebt 1.6.0) | 2026-10-24 | |
 | **CMP** เทียบสองงวดบนเส้นทาง compile (`plan/PLAN_METRICS_COMPARISON.md`) | ✅ **ขึ้นของจริงแล้ว** (main `862915c` = merge กับ Phase E, reload 07:32 2026-10-25) + push — วัดบน server ซ้อม: ชุดเทียบปีก่อน 3 → 20/27 | 2026-10-25 | `a54f76a`, `0a32b92` |
 
@@ -385,3 +386,61 @@ mapping "เดือน" (1), เลือก `unit_short_name` แทน `unit
   จะได้ EBT แทนการตกไป free SQL (ไม่เห็นในชุดวัด 1,485 ข้อ; ถ้าเกิด ให้ประกาศ selector ใน contract แทนการเดาจาก term)
 - ช่วงที่ไม่เริ่ม ม.ค. ("ก.ค.-ก.ย.") ยังอ่านตาม pass 1 (มักเป็นเดือนสุดท้าย) — compiler ยังไม่มีรูปผลรวมหลายเดือนกลางปี
 - ยอดขายเฉย ๆ (ไม่เทียบเป้า) ยังเป็น free SQL ตามกฎ `sales_total_scope` (full disclosure รวม BG 8) — ไม่ได้ประกาศ metric `sales`
+
+---
+
+## C. ขยาย `metrics:` ไป revenue — C-00 ส่วนขยาย compiler (2026-10-26)
+
+**วิธีทำ:** `/delegate` run `20261026-0720` ใน worktree `_worktrees/AI-metrics` (branch `ai/delegate-metrics`, base `beed1f3` = main) —
+2 slice, Codex 3 รอบ (slice 02 รอบ 2 แก้ข้อความ §5 ของ docs ที่ยังบอกผลของการไม่ migrate แบบเดิม + ย้าย import) · ข้อตัดสิน **M-4 = ก**, **M-5 = ก**, **M-7 = ก** (รอบนี้ revenue; sales ขึ้นแล้วทาง §SALES)
+
+### C.1 ที่สร้าง
+- `5f3d62a` (slice 01, การเก็บ + sync): คอลัมน์ `schema_metrics.datasets` (`scripts/migrate_schema_metrics.py` idempotent, model, `DECLARED_FIELDS`) ·
+  `Metric.datasets` + `__post_init__` (มิติของ metric = union ของมิติทุก dataset ตามลำดับที่พบ) · `resolve`/sync ให้ลูก `extends` รับ `datasets` ·
+  `load_metrics` อ่าน `SELECT *` (config.db ที่ยังไม่ migrate ยังโหลด metric เดิมได้) · `_validate_metric`: `dataset` XOR `datasets`; item = `{name, dimensions}`;
+  ห้ามประกาศ `dimensions` ระดับ metric คู่กับ `datasets`; คอลัมน์ period / term / `ranking.scope` / `official_scope` ต้องมีใน**ทุก**ตารางที่ระบุ;
+  term ต้องเป็น mapping และ `where` ไม่มี / null / ว่าง = ทุกแถว; **M-5**: period ไม่มี `cumulative` แต่คอลัมน์ `month` เป็น `agg: point_in_time` (ลำดับ: column → control_totals → sum) → ไม่รับ
+- `86e85b5` (slice 02, compiler): `_dataset_for` เลือกตารางที่มีมิติ+คอลัมน์ตัวกรองครบและมีมิติน้อยสุด (เท่ากัน = ลำดับประกาศ) · ไม่มีตารางไหนครบ → `compile()` ValueError,
+  `plan_with_reason()` → `shape:dimension_set` (เฉพาะ metric ที่มี `datasets`) · term ว่าง render เป็น `CASE WHEN (1 = 1)` (ยังต่อเงื่อนไขงวดของการเทียบสองงวดได้) ·
+  `dimension_labels` อ่านคำอธิบายมิติจากตารางของแต่ละ grain · M-5 ใช้เส้นทาง `summed` เดิม (BETWEEN y01..yMM) ไม่มีชุดที่สอง · `docs/DECLARED_METRICS.md` §3 (ไวยากรณ์ + ตัวอย่าง revenue) และ §5
+- test ใหม่: `tests/unit/test_metric_datasets_sync.py` (43), `tests/unit/test_metric_revenue.py` (33, DuckDB + SQLite ผลเท่ากัน; fixture `tests/fixtures/revenue_metrics_draft.yaml`):
+  3 grain total/bu/org, BG 8 ytd 202609 = 210 ≠ ผลรวมรายเดือน 270 → by bu ได้ 210 (`= 202609`, ไม่มี BETWEEN, `sql_invariants` ไม่มี violation); ตัวกรอง `bu` อย่างเดียวเลือกตาราง bu;
+  `unit_name` → org; bu × unit → `shape:dimension_set`; เทียบ 202608/202609 บนตาราง bu; period ไม่มี cumulative → BETWEEN 202601 AND 202609 = 270
+- test ของ ebt/sales เดิม**ไม่ได้แก้** (แก้เฉพาะ helper `tests/unit/knowledge_db.py` ให้ DDL มีคอลัมน์ `datasets` เหมือน config.db หลัง migrate)
+
+### C.2 ผลทดสอบ
+- ACC-T: baseline 1886 → **1962 passed, 3 skipped** (exit 0) · ACC-L exit 0
+- sync contract จริงของ NT-Report main (ebt 1.6.1, sales 1.4.0, revenue 2.3.3, expense 1.2.6) ลง DB ชั่วคราวด้วยโค้ดใหม่: ebt 3/3, sales 1/1 metric ยัง active, ไม่มีคำเตือน skip
+
+### C.3 วัดบนข้อมูลจริง
+**ออฟไลน์ (parquet จริง `NT-Report/DataFeed/dist/revenue/latest`, อ่านอย่างเดียว):** SQL ที่ compile จาก metric ร่าง — รวม ytd 202609 = **29,389.41 ล้าน**
+(official และผ่าน term ได้เท่ากัน = ผลรวมแถว bu = ผลรวม org) · เดือน ก.ย. 3,353.09 ล้าน (= `control_totals` `__ALL__` revenue) ·
+**BG 8 = 2,103.05 ล้าน** (ytd ณ งวด — ผลรวมรายเดือน ม.ค.–ก.ย. = 2,711.64 ล้าน) · ฝ่ายสูงสุด: ธุรกิจลูกค้าภาครัฐ 6,613.89 ล้าน · `sql_invariants` ไม่มี violation ทุกรูป
+
+**server ซ้อม 127.0.0.1:8002** (โค้ด branch นี้, สำเนา `.ai/db/c00` จาก `.ai/db/sales`, migrate สำเนา 2 ครั้ง — ครั้งที่สองไม่เปลี่ยนอะไร, contract revenue ร่าง =
+2.3.3 จริง + metric `revenue` (`datasets` total/bu/org ครบ 9 มิติองค์กร) ที่ `.ai/db/c00/contracts/revenue.yaml`, key ซ้อม id 6) — sync ได้ `revenue` declared/active:
+
+| คำถาม | `metric_path` (audit สำเนา) | ผล |
+|---|---|---|
+| EBT สะสมปีนี้ทั้งบริษัท | `compiled:ebt` | 570.85 ล้าน (เท่าของจริง audit 467) |
+| หน่วยงานที่ยอดขายมากกว่าเป้ามีหน่วยไหนบ้าง | `compiled:sales_vs_target` | 5 ฝ่าย ตรงรายงาน |
+| รายได้สะสมปีนี้ทั้งบริษัท | `compiled:revenue` (total) | 29,389.41 ล้าน ✓ |
+| รายได้สะสมปีนี้แยกตามกลุ่มธุรกิจ | `compiled:revenue` (bu) | 8 BG, BG 8 = 2,103.05 ล้าน ✓ |
+| รายได้อื่น (กลุ่มธุรกิจ 8) สะสมปีนี้เท่าไร | `compiled:revenue` (bu, ตัวกรอง LIKE) | 2,103.05 ล้าน ✓ |
+| ฝ่ายไหนมีรายได้สะสมสูงสุด 5 อันดับแรก | `declined:shape:filter:year` → free SQL | ตัวเลขถูก (SQL ของ LLM อ่าน ytd งวดเดียว) |
+| รายได้เดือนกันยายน 2569 ทั้งบริษัท | `declined:shape:filter:year` → free SQL | 3,353.09 ล้าน ถูก |
+| รายได้สะสมของแต่ละกลุ่มธุรกิจ แยกตามฝ่าย | `declined:shape:dimension_set` → free SQL | `query_failed` (LLM ใช้ `bu` บนตาราง org ที่ไม่มีคอลัมน์นี้) |
+
+### C.4 พบระหว่างวัด → งาน C-01 / C-02
+- **pass 1 ใส่งวดเป็น `year = 2026` + `month = 9`** ในตัวกรอง (ตาราง revenue มีคอลัมน์ `year`, `month` แยกจาก `year_month`) → `shape:filter:year` 2/6 ข้อ —
+  ชั้นเดียวกับ "ใส่งวดลง filters" ที่ `plan()` รับแล้วสำหรับคอลัมน์งวด; ทางแก้ที่ต้องตัดสิน: `plan()` ถือตัวกรองบนคอลัมน์ปี/เดือนที่ตรงกับ `time_range` เป็นงวด
+  (ต้องรู้ว่าคอลัมน์ไหนคือปี/เดือน — ประกาศใน `period` ของ contract เช่น `parts: {year: year, month: month}`) หรือเอาออกจาก prompt ของ pass 1
+- **กลุ่มธุรกิจ × ฝ่าย** ไม่มีตารางใดใน 3 grain ที่ประกาศ → `shape:dimension_set` ตามข้อตัดสิน; C-01 ประกาศ `fact_org_product_monthly` (มี `bu` + มิติองค์กร) ใน `datasets` ก็จะ compile ได้
+  (free SQL ที่ล้มคือพฤติกรรมเดิมของทางนั้น ไม่ใช่การถดถอย)
+- `scripts/eval/metric_eval_lib.generate()` ยังอ่าน `metric.dataset` ตัวเดียว — ต้องขยายรับ `datasets` ก่อน `gen` ของ revenue ใน C-02
+- `revenue_achievement` (รายได้เทียบเป้า) อยู่คนละตาราง (`fact_*_target_monthly`) — SELECT เดียวทำไม่ได้ด้วย C-00; ต้องออกแบบ (join ตาม grain หรือ metric ต่อ grain)
+
+### C.5 ขึ้นของจริง — ยังไม่ทำ (หยุดตามสั่ง: ไม่ ff main, ไม่ push, ไม่ migrate config.db จริง)
+ลำดับเมื่อจะขึ้น: backup config.db → `scripts/migrate_schema_metrics.py` บน config.db จริง (**ก่อน** ff — ไม่งั้น re-sync contract ของทุก feed context ล้มและค้าง knowledge เดิม;
+`load_metrics` ยังอ่านได้) → ff main (server `--reload`) → ไม่มีอะไรเปลี่ยนจน NT-Report ประกาศ metric ที่มี `datasets` (C-01) · ตรวจ: `PRAGMA table_info(schema_metrics)` มี `datasets`,
+ถาม EBT/ยอดขายเทียบเป้า 1 ข้อแต่ละโดเมนว่ายัง `compiled:*`
