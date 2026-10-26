@@ -9,7 +9,7 @@
 | **E** คำอธิบายคอลัมน์ feed อัตโนมัติ | ✅ **ขึ้นของจริงแล้ว** (main `092f33f`, reload 23:47; ยังไม่ push) — วัดบนสำเนา: คำอธิบายว่าง 49.3% → 23.8% | 2026-10-24 | `3340f31`, `fc19128`, `fca9163`, `6826f75`, `cc0dfce` |
 | **B** ตัวตรวจ SQL ของ pass 2 | ✅ **ขึ้นของจริงแล้ว** (main ff `1d004bc..0cd5e0b`, reload 14:37 2026-10-25; ยังไม่ push) — B-01 ข้าม; วัดบน server ซ้อม: 156 → 160/174, ผิดอย่างมั่นใจ 14 → 10 (ชั้น invariant 0 → 0) | 2026-10-25 | `aee811c`, `9ef7cf0`, `d8ce4e6`, `553566b`, `233daa1` |
 | C-0b คำศัพท์ระดับหน่วยงานทุกโดเมน | ⬜ ยังไม่ทำ (ระหว่างนี้ feed_ebt + feed_expense เป็นแถว `manual` — §A.6) | | |
-| **C-00** ส่วนขยาย compiler สำหรับ revenue (`datasets`, term ว่าง, M-5) + `period.parts` | ✅ เสร็จบน branch `ai/delegate-metrics` — **ยังไม่ ff main, ยังไม่ push, ยังไม่ migrate config.db จริง**; server ซ้อม: revenue compiled 3/6 → **4/6 และ 5/6** หลัง `period.parts` (ข้อที่เหลือ = `shape:dimension_set` ตามข้อตัดสิน) ตัวเลขตรง parquet ทุกข้อที่ compile | 2026-10-26 | `5f3d62a`, `86e85b5`, `3a30c85` |
+| **C-00** ส่วนขยาย compiler สำหรับ revenue (`datasets`, term ว่าง, M-5) + `period.parts` + ตัวกรองตัวเลข | ✅ เสร็จบน branch `ai/delegate-metrics` — **ยังไม่ ff main, ยังไม่ push, ยังไม่ migrate config.db จริง**; server ซ้อม: revenue compiled 3/6 → 4/6, 5/6 หลัง `period.parts` → **5/6** หลังตัวกรองตัวเลข (ข้อที่เหลือ = `shape:dimension_set` ตามข้อตัดสิน) ตัวเลขตรง parquet ทุกข้อที่ compile | 2026-10-26 | `5f3d62a`, `86e85b5`, `3a30c85`, `fdb9b72` |
 | C-01 contract revenue (NT-Report) | ⬜ ยังไม่ทำ (sales ขึ้นแล้วทาง §SALES) | | |
 | C-0c ratio จัดอันดับอย่างมีความหมาย | ✅ ทำก่อนแผนนี้ (`941cd0a`, ebt 1.6.0) | 2026-10-24 | |
 | **CMP** เทียบสองงวดบนเส้นทาง compile (`plan/PLAN_METRICS_COMPARISON.md`) | ✅ **ขึ้นของจริงแล้ว** (main `862915c` = merge กับ Phase E, reload 07:32 2026-10-25) + push — วัดบน server ซ้อม: ชุดเทียบปีก่อน 3 → 20/27 | 2026-10-25 | `a54f76a`, `0a32b92` |
@@ -462,7 +462,18 @@ mapping "เดือน" (1), เลือก `unit_short_name` แทน `unit
 
   ทั้ง r2 และ r3 pass 1 ยังเขียน `year = 2026` + `month = 9` ใน Q3/Q4 — ตอนนี้ compile ทั้งหมด · ebt 570.85 ล้าน / ยอดขาย 5 ฝ่าย ยัง compiled ทุกรอบ · ตัวเลขที่ compile ตรง parquet ทุกข้อ
 - **พบใหม่ (r2):** pass 1 เลือก `bu_seq = 8` (ค่าตัวเลข) แทน `bu LIKE '%8.รายได้อื่น%'` → `shape:filter:=` เพราะไวยากรณ์ตัวกรองของ metric รับ `=`/`IN` เฉพาะค่า string —
-  มิติที่เป็นตัวเลข (`bu_seq`) ต้องรับค่า int และ render เป็นตัวเลข; งานถัดไป (ไม่ได้ทำในรอบนี้) — r3 pass 1 กลับไปใช้ `bu` จึง compile
+  มิติที่เป็นตัวเลข (`bu_seq`) ต้องรับค่า int และ render เป็นตัวเลข; งานถัดไป (ไม่ได้ทำในรอบนี้) — r3 pass 1 กลับไปใช้ `bu` จึง compile → **แก้แล้ว §C.4c**
+
+### C.4c ตัวกรองค่าตัวเลขบนมิติที่เป็นตัวเลข (2026-10-26, `/delegate` run `20261026-1146`)
+- `fdb9b72`: `numeric_dimensions(metrics)` อ่าน `schema_metadata.data_type` ของทุกตารางที่ metric ประกาศมิตินั้น (ตัวเลขในทุกตาราง = ใช้ได้; อ่านไม่ได้ = ไม่รับตัวเลขเลย) →
+  `hybrid_flow` ส่งเข้า `plan_with_reason(…, numeric=…)` · `=` / `IN` ที่ค่าเป็นตัวเลข (int หรือ float จำกัด ไม่ใช่ bool; `IN` ต้องเป็นตัวเลขทั้งรายการ) ผ่านเฉพาะบนมิติในชุดนั้น
+  และ render เป็นตัวเลข (`"bu_seq" = 8`, `IN (1, 4)`) — ตัวเลขบนคอลัมน์ข้อความยัง `shape:filter:=` เพราะ DuckDB เทียบ VARCHAR กับตัวเลขไม่ได้ · SQL ของ ebt/sales/revenue เดิมเหมือนเดิมทุกไบต์
+- Codex 2 รอบ (รอบแรก FAIL: เงื่อนไข "เป็นตัวเลข" เขียนซ้ำ 4 ที่ + บรรทัด docs เป็นภาษาอังกฤษ; รอบสอง PASS) · test ใหม่ `tests/unit/test_metric_numeric_filters.py` (54, DuckDB + SQLite) ·
+  ACC-T 2027 → **2081 passed, 3 skipped** · ACC-L exit 0
+- server ซ้อม r4 (restart, สำเนา c00, key id 6): ชุด 6 ข้อ **5/6 compiled** — Q5 รอบนี้ pass 1 เขียน `bu_seq = 8` อีกครั้งและ **compile ได้** (bu, 2,103.05 ล้าน) ·
+  ebt 570.85 ล้าน / ยอดขาย 5 ฝ่าย ยัง compiled · คำถามเสริม "รายได้สะสมของกลุ่มธุรกิจลำดับที่ 1 และ 4" → `compiled:revenue` `"bu_seq" IN (1, 4)` = 6,198.22 / 13,024.48 ล้าน ✓
+- **พบใหม่:** "รายได้สะสมของกลุ่มธุรกิจลำดับที่ 8 (bu_seq 8)" → pass 1 ใส่ `year_month` เป็น**มิติ**ของคำถามยอดเดียว (aggregation ไม่ใช่ comparison) → `shape:dimension:year_month` → free SQL (ตัวเลขถูก 2,103.05) —
+  ตัดคอลัมน์งวดออกจากมิติตอนนี้ทำเฉพาะการเทียบ; ถ้าจะรับ ต้องตัดสินว่ามิติงวดในคำถามงวดเดียว = งวดเดียว (ไม่ใช่ trend) — งานถัดไป
 
 ### C.5 ขึ้นของจริง — ยังไม่ทำ (หยุดตามสั่ง: ไม่ ff main, ไม่ push, ไม่ migrate config.db จริง)
 ลำดับเมื่อจะขึ้น: backup config.db → `scripts/migrate_schema_metrics.py` บน config.db จริง (**ก่อน** ff — ไม่งั้น re-sync contract ของทุก feed context ล้มและค้าง knowledge เดิม;
