@@ -208,6 +208,9 @@ CHANGE_WORDS = {
     "up": ("ดีกว่า", "ดีขึ้น", "เพิ่มขึ้น", "สูงขึ้น", "สูงกว่า", "มากขึ้น", "มากกว่า", "เติบโต", "โตขึ้น"),
     "down": ("แย่กว่า", "แย่ลง", "ลดลง", "ต่ำลง", "ต่ำกว่า", "น้อยลง", "น้อยกว่า", "ถดถอย"),
 }
+# ponytail: short list grown from the eval / audit; add words when a trend is missed
+TREND_WORDS = ("รายเดือน", "แต่ละเดือน", "ทุกเดือน", "เดือนละ", "ตามเดือน", "เดือนไหน", "เดือนใด", "แนวโน้ม",
+               "รายปี", "แต่ละปี", "ปีไหน", "ไตรมาส", "trend", "monthly")
 # words that name an org unit without naming a level: the owner chose to ask back (CMP-3 ค)
 GENERIC_UNIT_WORDS = ("หน่วยงาน", "จังหวัด")
 _MONTH_NAMES = "|".join(re.escape(m) for m in (*_MONTHS, *_MONTHS_SHORT))
@@ -680,6 +683,13 @@ def plan_with_reason(
         # "EBT ปีนี้เทียบปีก่อน" with dimensions ["time_key"]: the comparison already puts the periods side by side
         intent["dimensions"] = [d for d in intent["dimensions"]
                                 if not (isinstance(d, str) and d.casefold() in period_columns)]
+    time_range = intent.get("time_range")
+    if (not comparison and isinstance(intent.get("dimensions"), (list, tuple))
+            and (period_hint is not None or (isinstance(time_range, dict) and type(time_range.get("month")) is int))
+            and not (lows or highs) and not any(word in question.casefold() for word in TREND_WORDS)):
+        # practice server r4: dimensions ['year_month'] on a single-period question
+        intent = {**intent, "dimensions": [d for d in intent["dimensions"]
+                                          if not (isinstance(d, str) and d.casefold() in period_columns)]}
     checked = intent
     if comparison:
         # a comparison ranks by the change, which pass 1 names freely (diff_ebt, ebt_change): keep the direction
