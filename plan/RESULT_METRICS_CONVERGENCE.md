@@ -9,7 +9,7 @@
 | **E** คำอธิบายคอลัมน์ feed อัตโนมัติ | ✅ **ขึ้นของจริงแล้ว** (main `092f33f`, reload 23:47; ยังไม่ push) — วัดบนสำเนา: คำอธิบายว่าง 49.3% → 23.8% | 2026-10-24 | `3340f31`, `fc19128`, `fca9163`, `6826f75`, `cc0dfce` |
 | **B** ตัวตรวจ SQL ของ pass 2 | ✅ **ขึ้นของจริงแล้ว** (main ff `1d004bc..0cd5e0b`, reload 14:37 2026-10-25; ยังไม่ push) — B-01 ข้าม; วัดบน server ซ้อม: 156 → 160/174, ผิดอย่างมั่นใจ 14 → 10 (ชั้น invariant 0 → 0) | 2026-10-25 | `aee811c`, `9ef7cf0`, `d8ce4e6`, `553566b`, `233daa1` |
 | C-0b คำศัพท์ระดับหน่วยงานทุกโดเมน | ⬜ ยังไม่ทำ (ระหว่างนี้ feed_ebt + feed_expense เป็นแถว `manual` — §A.6) | | |
-| **C-00** ส่วนขยาย compiler สำหรับ revenue (`datasets`, term ว่าง, M-5) + `period.parts` + ตัวกรองตัวเลข + มิติงวดในคำถามงวดเดียว | ✅ เสร็จบน branch `ai/delegate-metrics` — **ยังไม่ ff main, ยังไม่ push, ยังไม่ migrate config.db จริง**; server ซ้อม: revenue compiled 3/6 → 4/6, 5/6 หลัง `period.parts` → 5/6 หลังตัวกรองตัวเลข → 4/6 ใน r5 (pass 1 เปลี่ยนเป็น `month <= 9`) → **5/6 ใน r7** หลังรับ `month <= M` (เหลือ `shape:dimension_set` ตามข้อตัดสิน) ตัวเลขตรง parquet ทุกข้อที่ compile | 2026-10-26 | `5f3d62a`, `86e85b5`, `3a30c85`, `fdb9b72`, `22819bf`, `a9116b6` |
+| **C-00** ส่วนขยาย compiler สำหรับ revenue (`datasets`, term ว่าง, M-5) + `period.parts` + ตัวกรองตัวเลข + มิติงวดในคำถามงวดเดียว | ✅ เสร็จบน branch `ai/delegate-metrics` — **ยังไม่ ff main, ยังไม่ push, ยังไม่ migrate config.db จริง**; server ซ้อม: revenue compiled 3/6 → 4/6, 5/6 หลัง `period.parts` → 5/6 หลังตัวกรองตัวเลข → 4/6 ใน r5 (pass 1 เปลี่ยนเป็น `month <= 9`) → **5/6 ใน r7 และ r9** หลังรับ `month <= M` + ผ่อน R3 (เหลือ `shape:dimension_set` ตามข้อตัดสิน) ตัวเลขตรง parquet ทุกข้อที่ compile | 2026-10-26 | `5f3d62a`, `86e85b5`, `3a30c85`, `fdb9b72`, `22819bf`, `a9116b6`, `48a8875` |
 | C-01 contract revenue (NT-Report) | ⬜ ยังไม่ทำ (sales ขึ้นแล้วทาง §SALES) | | |
 | C-0c ratio จัดอันดับอย่างมีความหมาย | ✅ ทำก่อนแผนนี้ (`941cd0a`, ebt 1.6.0) | 2026-10-24 | |
 | **CMP** เทียบสองงวดบนเส้นทาง compile (`plan/PLAN_METRICS_COMPARISON.md`) | ✅ **ขึ้นของจริงแล้ว** (main `862915c` = merge กับ Phase E, reload 07:32 2026-10-25) + push — วัดบน server ซ้อม: ชุดเทียบปีก่อน 3 → 20/27 | 2026-10-25 | `a54f76a`, `0a32b92` |
@@ -514,6 +514,18 @@ mapping "เดือน" (1), เลือก `unit_short_name` แทน `unit
   ebt / ยอดขาย ยัง compiled · ตัวเลขที่ compile ตรง parquet ทุกข้อ
 - **ผลที่ต้องอ่านให้ถูก:** r7/r8 pass 1 **ไม่ได้เขียน `month <= 9` อีกเลย** — ทางใหม่ของรอบนี้พิสูจน์ด้วย unit test ที่ replay intent จริงของ r5 เท่านั้น ยังไม่เห็นบน server ·
   r7 คำถาม "รายได้รายเดือนปีนี้" ไป free SQL แล้วได้ **แถวเดียว (ยอดสะสม ก.ย.) แทน 9 เดือน** — ทาง pass 2 ที่ไม่ได้แก้ในรอบนี้ (r5/r6 ได้ 9 แถวถูก); `plan()` ปฏิเสธถูกตามกฎ
+
+### C.4f ผ่อน R3: ช่วงยอดสะสมไม่ขวางการตัดมิติงวดเมื่อคำถามบอก "สะสม" (2026-10-26, `/delegate` run `20261026-1303`)
+- ข้อตัดสินเจ้าของ: คำถามมีคำว่า "สะสม" **และ** `time_range.cumulative` = true → ช่วง y01..yMM ถือเป็นงวดเดียว yMM จึงตัดมิติงวดได้ (R1, R2, R4/`TREND_WORDS` เหมือนเดิม —
+  "รายได้รายเดือนสะสม" ยังไม่ตัด) · `48a8875`: เปลี่ยนเงื่อนไขเดียวใน `plan_with_reason` ·
+  test ที่ตรึงกติกาเดิม 2 ตัวแก้ตามที่เจ้าของอนุญาต: `test_period_ranges_keep_dimension` → `…_strip_only_for_explicit_cumulative_question` (ช่วง 4 รูป × มี/ไม่มี "สะสม" / cumulative false / คำแนวโน้ม)
+  และ `test_practice_r6_keeps_period_dimension_decline` → `test_practice_r6_cumulative_question_compiles` (รูป r6 compile ได้; ไม่มี "สะสม" ยังปฏิเสธ)
+- Codex 1 รอบ PASS · ACC-T 2161 → **2185 passed, 3 skipped** · ACC-L exit 0
+- server ซ้อม r9 (restart, สำเนา c00, key id 6): ชุด 6 ข้อ **5/6** (เหลือ `shape:dimension_set` ตามข้อตัดสิน — free SQL รอบนี้ตอบได้ ไม่ได้ตรวจตัวเลข) · bu_seq 8 compiled
+  (pass 1 ส่ง `["year_month"]` + `bu_seq = 8` ไม่มีช่วง = กฎ §C.4d) · BG 1 และ 4 compiled · "รายได้รายเดือนปีนี้" ยังปฏิเสธ ✓ (free SQL ได้ 9 เดือนถูก) · ebt / ยอดขาย compiled
+- **ทาง `month <= M` (§C.4e) เห็นบน server ครั้งแรก:** "รายได้สะสมตั้งแต่มกราคมถึงกันยายนของกลุ่มธุรกิจลำดับที่ 8" → `bu_seq = 8, month <= 9, year = 2026` → compiled 2,103.05 ล้าน ·
+  "ยอดรายได้สะสม ม.ค.-ก.ย. 2569 ของแต่ละกลุ่มธุรกิจ" → `year = 2026, month <= 9` + มิติ `bu` → compiled 8 แถวตรง parquet
+- **ยังไม่เห็นบน server:** รูปที่กฎผ่อน R3 ของรอบนี้ใช้ (มิติงวด **พร้อม** ช่วงยอดสะสม + "สะสม") ไม่เกิดใน r9 — พิสูจน์ด้วย unit test ที่ replay intent r6 เท่านั้น
 
 ### C.5 ขึ้นของจริง — ยังไม่ทำ (หยุดตามสั่ง: ไม่ ff main, ไม่ push, ไม่ migrate config.db จริง)
 ลำดับเมื่อจะขึ้น: backup config.db → `scripts/migrate_schema_metrics.py` บน config.db จริง (**ก่อน** ff — ไม่งั้น re-sync contract ของทุก feed context ล้มและค้าง knowledge เดิม;
