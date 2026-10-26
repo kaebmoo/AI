@@ -434,9 +434,9 @@ def _rewrite_period_parts(intent: dict, period: dict, reference: int | None) -> 
         if part in found:
             return None, "period_filter:value"
         operator, value = item.get("operator"), item.get("value")
-        if operator not in (("=", "IN", "BETWEEN") if part == "month" else ("=", "IN")):
+        if operator not in (("=", "IN", "BETWEEN", "<=") if part == "month" else ("=", "IN")):
             return None, "period_filter:operator"
-        values = [value] if operator == "=" else value
+        values = [value] if operator in ("=", "<=") else value
         if (not isinstance(values, list) or not values
                 or (operator == "BETWEEN" and len(values) != 2)):
             return None, "period_filter:value"
@@ -454,6 +454,9 @@ def _rewrite_period_parts(intent: dict, period: dict, reference: int | None) -> 
             if numbers[0] > numbers[1]:
                 return None, "period_filter:value"
             numbers = list(range(numbers[0], numbers[1] + 1))
+        elif operator == "<=":
+            # practice server r5/r6: pass 1 wrote month <= 9 for the year to date.
+            numbers = list(range(1, numbers[0] + 1))
         found[part] = sorted(set(numbers))
     if not found:
         return intent, None
