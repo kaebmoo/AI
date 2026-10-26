@@ -8,7 +8,7 @@
 | **D** eval ที่สร้างเองจากคำประกาศ | ✅ **ขึ้นของจริงแล้ว** (main `011cef3`, reload 22:35) + push (CI เขียว run 40107701402) — วัดบน server ซ้อม: 96 → 157/174 หลังแก้ `plan()` | 2026-10-24 | `4cb8c62`, `ecdcc84`, แก้ `plan()` `3cd4e6c` |
 | **E** คำอธิบายคอลัมน์ feed อัตโนมัติ | ✅ **ขึ้นของจริงแล้ว** (main `092f33f`, reload 23:47; ยังไม่ push) — วัดบนสำเนา: คำอธิบายว่าง 49.3% → 23.8% | 2026-10-24 | `3340f31`, `fc19128`, `fca9163`, `6826f75`, `cc0dfce` |
 | **B** ตัวตรวจ SQL ของ pass 2 | ✅ **ขึ้นของจริงแล้ว** (main ff `1d004bc..0cd5e0b`, reload 14:37 2026-10-25; ยังไม่ push) — B-01 ข้าม; วัดบน server ซ้อม: 156 → 160/174, ผิดอย่างมั่นใจ 14 → 10 (ชั้น invariant 0 → 0) | 2026-10-25 | `aee811c`, `9ef7cf0`, `d8ce4e6`, `553566b`, `233daa1` |
-| C-0b คำศัพท์ระดับหน่วยงานทุกโดเมน | ⬜ ยังไม่ทำ (ระหว่างนี้ feed_ebt + feed_expense เป็นแถว `manual` — §A.6) | | |
+| **C-0b** คำศัพท์ระดับหน่วยงาน — feed_revenue | 🟡 **โค้ด + วัดบนสำเนาแล้ว ยังไม่ขึ้นของจริง** (revenue 174/200, ผิดอย่างมั่นใจ 18 → 2 — §C0b); feed_ebt + feed_expense ยังเป็นแถว `manual` (§A.6) | 2026-10-26 | `631cc7e`, `c9499aa` (branch `claude/c0b-revenue-levels-2876c5`); NT-Report `52811cc` |
 | **C-00** ส่วนขยาย compiler สำหรับ revenue (`datasets`, term ว่าง, M-5) + `period.parts` + ตัวกรองตัวเลข + มิติงวดในคำถามงวดเดียว | ✅ **ขึ้นของจริงแล้ว** (migrate config.db 14:11, ff AI main `beed1f3..c63da29`, reload 14:12 2026-10-26; ยังไม่ push); server ซ้อม: revenue compiled 3/6 → 4/6, 5/6 หลัง `period.parts` → 5/6 หลังตัวกรองตัวเลข → 4/6 ใน r5 (pass 1 เปลี่ยนเป็น `month <= 9`) → **5/6 ใน r7 และ r9** หลังรับ `month <= M` + ผ่อน R3 (เหลือ `shape:dimension_set` ตามข้อตัดสิน) ตัวเลขตรง parquet ทุกข้อที่ compile | 2026-10-26 | `5f3d62a`, `86e85b5`, `3a30c85`, `fdb9b72`, `22819bf`, `a9116b6`, `48a8875` |
 | **C-01** contract revenue (NT-Report) | ✅ **ขึ้นของจริงแล้ว** (ff NT-Report main `b08aa3c..738ea8b` 2026-10-26, revenue **2.4.0**; ยังไม่ push) — ของจริง audit 481–484 ผ่าน; server ซ้อม r11: revenue **6/6** compiled, คำถามเทียบเป้า 3/3 ไปทางเดิมด้วย `excluded_word` | 2026-10-26 | NT-Report `738ea8b`; AI `0e63227` (`excluded_words`) |
 | C-0c ratio จัดอันดับอย่างมีความหมาย | ✅ ทำก่อนแผนนี้ (`941cd0a`, ebt 1.6.0) | 2026-10-24 | |
@@ -597,3 +597,62 @@ mapping "เดือน" (1), เลือก `unit_short_name` แทน `unit
 - งานถัดไปตามน้ำหนัก: (1) **C-0b สำหรับ revenue** — ระดับองค์กร 4 ระดับลง `master_hierarchy` + แยก "กลุ่ม" (ระดับ 2) ออกจาก "กลุ่มธุรกิจ" = ปิดผิดอย่างมั่นใจ 15/18 ·
   (2) mapping กลางของคำย่อ/ชื่อหน่วยไม่ควรบล็อก metric เมื่อค่าเป็นมิติที่ประกาศ (หรือ scope mapping ตามคอลัมน์) · (3) คำอธิบายคอลัมน์ revenue (Phase E) ·
   ยังไม่ได้รันครบ 792 ข้อ (ผลข้างบนคือ 1 ต่อชั้น)
+
+---
+
+## C0b. Phase C-0b — ระดับหน่วยงานของ feed_revenue ถึง pass 1 (2026-10-26 ค่ำ, session แยกจาก §C.6)
+
+ที่มา §C.6: compile แล้วผิด 18 ข้อ = pass 1 เลือกระดับผิด ("กลุ่ม" → `bu` 12, "ส่วน" → `unit_name` 2, ชื่อย่อระดับ 2/4 → ระดับบน 3) เพราะ `master_hierarchy`
+ของ feed_revenue มีแต่สายผลิตภัณฑ์ (แถว `manual` 0–2) — ไม่มีระดับองค์กร
+
+### C0b.1 ข้อตัดสินของเจ้าของ (2026-10-26)
+- **หลาย hierarchy ต่อ context = (ข)**: ระดับองค์กรอยู่ที่ level **10+i** (หนึ่งสายต่อหลักสิบ) ใต้ `UNIQUE(context_name, level)` เดิม — ไม่มี migration
+- **"กลุ่ม" โดด ๆ ไม่ชี้ระดับ**: ใช้เฉพาะรูปที่ชัด "กลุ่มไหน / รายกลุ่ม / แต่ละกลุ่ม / ตามกลุ่ม / ทุกกลุ่ม / ระดับกลุ่ม / กลุ่มงาน / กลุ่มขาย" → กลุ่มองค์กร (`sub_division_name`);
+  "กลุ่ม Fixed Line" (ที่ระบบเดิมหมายถึงกลุ่มบริการ) ไม่ได้ note — ค่าที่ค้นเจอตัดสินเหมือนเดิม · "ส่วน" ทำแบบเดียวกัน (ห้ามโดด: สัดส่วน / ส่วนลด)
+
+### C0b.2 ที่สร้าง
+- **NT-Report `52811cc`** (worktree `_worktrees/NT-Report-metrics`, branch `ai/delegate-metrics`): revenue **2.5.0** — `org_levels:` ใน `DOMAINS["revenue"]`
+  (สายงาน > กลุ่ม > ฝ่าย > ส่วน > ศูนย์ต้นทุน; `columns` ชื่อเต็มก่อน ชื่อย่อตาม + `keywords`) → `gen_contract` ส่งผ่าน (diff ของ contract = key ใหม่ + เวอร์ชันเท่านั้น);
+  `test_metrics_contract`: คอลัมน์ของทุกระดับมีใน fact และไม่มีคำโดด; SPEC §5.4b, CHANGELOG · `pytest tools/feed` **42 passed** · ไม่ต้อง rebuild dist
+- **AI `631cc7e`**: `datafeed_knowledge.sync_hierarchy` — `org_levels` → `master_hierarchy` ของ `feed_<domain>` level 10+i แบบ `declared` ด้วย `_declare` เดิม
+  (แถวที่คนแก้ชนะ ฉบับ contract รอใน `knowledge_proposals`; ระดับที่ contract เลิกประกาศหรือคอลัมน์ไม่มีจริง = ถอนเฉพาะแถวของ contract; config DB ที่ไม่มีตาราง = ข้าม);
+  ล้าง cache ของ hierarchy (TTL 1 ชม.) หลัง re-sync · `named_levels`: keyword ที่ถูก keyword ยาวกว่าล้ำทับ ("ตามกลุ่ม" ใน "ตามกลุ่มธุรกิจ", "แต่ละกลุ่ม" ใน "แต่ละกลุ่มบริการ") ไม่นับ ·
+  `format_level_note`: "ลำดับชั้น:" แสดงเฉพาะสายของระดับที่ถูกพูดถึง · docs `DATAFEED_INTEGRATION.md`
+- **AI `c9499aa`** (นอก ALLOWED ของ §6b แต่จำเป็นกับ (ข)): ตัวอ่าน `master_hierarchy` อีกสามที่รวมทุกระดับเป็นสายเดียว → แยกตาม `level // 10`:
+  STEP 1.5 ของ system prompt (`schema/service.py` — ก่อนแก้ pass 1 ของทุกคำถาม feed_revenue เห็น "กลุ่มธุรกิจ > กลุ่มบริการ > บริการ/ผลิตภัณฑ์ > สายงาน > กลุ่ม > …"),
+  ตัวอย่าง hierarchy ของ explain (`hybrid_flow`), ร่างคำอธิบายคอลัมน์ของ Phase E (`column_drafts` — จะเขียน "ระดับ 12 ของโครงสร้าง")
+- tests `tests/unit/test_hierarchy_org_levels.py` 13 ข้อ: sync/idempotent/คนชนะ/ถอน · คำถาม 8 แบบ → ระดับที่ถูก (รวม "ตามกลุ่มธุรกิจ", "สัดส่วน…", "กลุ่ม Fixed Line") ·
+  note แสดงสายเดียว · STEP 1.5 แยกสาย · **contract → sync → master_hierarchy → prompt ของ pass 1 มี "กลุ่ม → คอลัมน์ `sub_division_name`"** (ชั้นที่ eval คำถามเดี่ยวมองไม่เห็น)
+- ACC-T **2223 passed, 3 skipped** (2210 + 13) · ACC-L เขียว
+
+### C0b.3 วัด (server ซ้อม 127.0.0.1:8003 บนสำเนา c00 → `.ai/db/c0b/`, contract 2.5.0 จาก worktree NT-Report, key id 6, คำถามชุดเดียวกับ §C.6 1 ต่อชั้น)
+re-sync ครั้งแรกเขียน 5 ระดับ `declared` (10–14) ข้างแถว `manual` 0–2 ของสายผลิตภัณฑ์ — log `Synced 1 metrics, 5 org levels for feed_revenue`
+
+| | ฐาน §C.6 | รอบ 1 (`631cc7e`) | **สุดท้าย (`c9499aa`)** |
+|---|---|---|---|
+| ถูกรวม | 153/200 | 174/200 | **174/200 (87%)** |
+| compiled ถูก / ทั้งหมด | 135/153 | 162/167 | **162/164** |
+| **ผิดอย่างมั่นใจ** (compiled แต่ผิด) | **18** | 5 | **2** |
+| free SQL ถูก | 18/47 | 12/33 | 12/36 |
+
+- **ชั้น "กลุ่ม → bu" ปิดครบ 12/12** (by / top5 / top10 / compare_up × เดือน/สะสม ของ `sub_division_name` → GROUP BY `sub_division_name` บน `fact_org_monthly`) ·
+  "ส่วน → ฝ่าย" 2/2 · ชื่อย่อระดับ 4 (`sub_unit_sname`) 2/2 · บวก: ชื่อย่อฝ่าย (`unit_sname`) 8 ข้อที่เคยถูกปฏิเสธด้วย `shape:dimension:department_abbr` ตอนนี้ compile ถูก,
+  `sub_unit_name` top10, `division_sname` by
+- เทียบรายข้อกับฐาน (รอบสุดท้าย): ถูกขึ้น 26, ผิดลง 5 (153 + 26 − 5 = 174) — ไม่มีข้อไหนผิดเพราะเลือกระดับ: `M0418` (ชื่อเรียก "business group (8 = รายได้อื่น)" จาก desc ทำให้ pass 1 ใส่ตัวกรอง BG 8),
+  `M0619` (free SQL ใช้ `division_abbr` ของ `dim_org`), `M0403` / `M0601` / `M0703` (free SQL หลัง `mapping_triggered` — ใช้ revenue แทน revenue_ytd หรือคืนหลายแถว)
+- ข้อที่ผิดลงในรอบ 1 (6 ข้อ) ถามซ้ำหลังล้าง cache (restart) ถูก 3 = ความแกว่งของโมเดล; `M0082` / `M0304` ที่ยังผิดซ้ำ ถูกในรอบสุดท้ายหลังแก้ STEP 1.5
+- **ผิดอย่างมั่นใจที่เหลือ 2:** `M0418` (ข้างบน — ชื่อเรียกที่มาจาก desc ของ `bu`, Phase E ของ revenue) · `M0700` compare_up รายฝ่ายสะสม ได้ 10 จาก 20 แถว (pass 1 ใส่ `limit 10` กับ comparison — เป็นตั้งแต่ฐาน §C.6)
+- ไฟล์ผล: `eval_results/metric_eval_feed_revenue_202609_20261026_2117.json` (รอบ 1), `…_2201.json` (สุดท้าย) ใน worktree นี้ (gitignored)
+
+### C0b.4 ขึ้นของจริง (ยังไม่ทำ — รอเจ้าของสั่ง)
+ลำดับตาม CHANGELOG ("ผู้อ่านรองรับก่อน แล้วจึงวาง contract"): (1) ff AI main ด้วย `631cc7e` + `c9499aa` (ไม่มี migration — ตาราง `master_hierarchy` เดิม) →
+(2) ff NT-Report main ด้วย `52811cc` (revenue 2.5.0) → request แรกของ feed_revenue re-sync เอง เขียน level 10–14 `declared` (สำรอง config.db ก่อน) →
+(3) ตรวจ `SELECT level, level_label_th, source FROM master_hierarchy WHERE context_name='feed_revenue'` = 0–2 manual + 10–14 declared →
+(4) ถามจริงผ่าน portal key "กลุ่มไหนมีรายได้สะสมสูงสุด 5 อันดับ" → audit GROUP BY `sub_division_name`
+
+### C0b.5 ที่ยังไม่ทำ / ข้อควรรู้
+- **feed_ebt / feed_expense** ยังพึ่งแถว `manual` 0–4 (§A.6) — ถ้าจะให้ contract เป็นเจ้าของ: ประกาศ `org_levels` ใน contract ของสองโดเมน **และ** ปิด/ลบแถว manual 0–4 ตอนวาง
+  (ไม่งั้นสองสายมีคำเดียวกัน "ฝ่าย" → note สองระดับ) · feed_sales ไม่ต้อง
+- free SQL ผิด 24 ข้อของ revenue ยังเป็นเรื่อง mapping กลาง (`กกง.` 18 ครั้ง, `กรรมการผู้จัดการใหญ่` 7) บล็อก metric — งานถัดไปข้อ (2) ของ §C.6
+- คำ "ชื่อย่อของกลุ่ม (เช่น กกง., อป.2)" ในคำถาม eval มาจาก desc ของ contract — ไม่มีรูปที่ชัดของ "กลุ่ม" จึงไม่มี note (`M0280` sub_division_sname ยังไปผิด/ไม่ compile) — ผู้ใช้จริงพิมพ์ "กลุ่มไหน" มากกว่า
+- server ซ้อม 8003 หยุดแล้ว (`./.ai/db/c0b/serve.sh <tag>` เปิดใหม่ได้)
