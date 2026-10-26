@@ -570,3 +570,30 @@ mapping "เดือน" (1), เลือก `unit_short_name` แทน `unit
 ของทุก feed context ล้มและค้าง knowledge เดิม; `load_metrics` ยังอ่านได้) → ff AI main (server `--reload`) → ตรวจ EBT/ยอดขายเทียบเป้า 1 ข้อแต่ละโดเมนว่ายัง `compiled:*`
 → ff NT-Report main `b08aa3c..738ea8b` (server อ่าน `NT-Report/DataFeed/contracts/revenue.yaml` ของ main checkout และ re-sync ใน request ถัดไป) → ตรวจ `schema_metrics` ของ `feed_revenue`
 มี `revenue` declared/active → ถามจริงผ่าน portal key และ nt-ai: รายได้สะสมรวม (29,389.41 ล้าน), รายกลุ่มธุรกิจ (BG 8 = 2,103.05), เทียบเป้า (ต้องเป็น `declined:excluded_word:เป้า`)
+
+### C.6 C-02 — eval ที่สร้างเองของ revenue 202609 (2026-10-26 ค่ำ, `/delegate` run `20261026-1901`)
+- `c2c88e3`: `scripts/eval/metric_eval_lib.py` รองรับ metric ที่ประกาศ `datasets` — `contract_metrics()` แปลง `datasets`/`excluded_words` แบบเดียวกับแถวที่ sync;
+  `generate()` ตรวจ parquet ทุกตาราง และถาม compiler (`_dataset_for`) ว่ามิติไหนอยู่ตารางไหน → ค่าตัวอย่าง, ชื่อเรียก และคำตอบที่ถูกมาจากตารางเดียวกัน · metric ตารางเดียวได้ผลเท่าเดิมทุกไบต์ ·
+  test ใหม่ 13 · ACC-T 2197 → **2210 passed, 3 skipped** · Codex 1 รอบ PASS
+- gen จาก contract จริง 2.4.0 + dist จริง (`--compare`): **792 คำถาม / 200 ชั้น** (16 มิติ; ข้าม `bu_seq` = ตัวเลข, 28 ชั้น "แยกตาม" ที่เกิน 50 แถว) → `.ai/eval/metric_revenue_202609.json`
+- run บน server ซ้อม c00 (127.0.0.1:8002, โค้ด = main ที่ขึ้นแล้ว + eval, contract 2.4.0, key id 6) แบบ **1 คำถามต่อชั้น (200 ข้อ)** — ผล `eval_results/metric_eval_feed_revenue_202609_20261026_1942.json`
+
+| | ถูก | หมายเหตุ |
+|---|---|---|
+| **รวม** | **153/200 (76.5%)** | |
+| compiled | **135/153** ถูก | compile 153/200 = 76.5% ของคำตอบ; **ผิดอย่างมั่นใจ 18** |
+| free SQL | 18/47 ถูก | |
+| total / compare_total | 2/2, 2/2 | |
+| by / filter | 11/16, 24/32 | filter ส่วนใหญ่ไป free SQL (mapping / ชื่อย่อ) |
+| top5 / top10 (desc+asc) | 51/64, 50/64 | |
+
+- **ผิดอย่างมั่นใจ (compiled แต่ผิด) 18 ข้อ = pass 1 เลือกระดับผิด ไม่ใช่ compiler:** "กลุ่ม" (`sub_division_name`) → pass 1 เลือก `bu` (**กลุ่ม**ธุรกิจ) 12 ข้อ ·
+  "ส่วน" → `unit_name` 2 · ชื่อย่อระดับ 2/4 → ชื่อย่อระดับบน 3 · compare_up รายฝ่าย 10 จาก 20 แถว 1 → ชั้นเดียวกับ C-0b (คำศัพท์ระดับหน่วยงานยังไม่ถึง pass 1 ของ feed_revenue —
+  revenue มี hierarchy ผลิตภัณฑ์ แต่ไม่มีระดับองค์กรใน `master_hierarchy`)
+- **free SQL ผิด 29 ข้อ:** มิติชื่อย่อ (`*_sname`) → pass 1 ใช้ `department_abbr` ของ `dim_org` (`shape:dimension:department_abbr` 16) แล้ว SQL อิสระว่าง/ผิด ·
+  mapping กลางของคำย่อ (`กกง.`, `อป.2`) และ "กรรมการผู้จัดการใหญ่" ถูกกระตุ้น (`mapping_triggered` 21 ครั้งรวม) → SQL อิสระล้ม (`query_failed`) ·
+  mapping "1.Hard Infrastructure" ทำให้ SQL AND กับ BG 8
+- ชื่อเรียกบางมิติในคำถามมาจาก contract ที่ยังไม่มีคำอธิบาย ("business group (8 = รายได้อื่น)", `service_group_seq`) — Phase E ของ revenue ช่วยได้
+- งานถัดไปตามน้ำหนัก: (1) **C-0b สำหรับ revenue** — ระดับองค์กร 4 ระดับลง `master_hierarchy` + แยก "กลุ่ม" (ระดับ 2) ออกจาก "กลุ่มธุรกิจ" = ปิดผิดอย่างมั่นใจ 15/18 ·
+  (2) mapping กลางของคำย่อ/ชื่อหน่วยไม่ควรบล็อก metric เมื่อค่าเป็นมิติที่ประกาศ (หรือ scope mapping ตามคอลัมน์) · (3) คำอธิบายคอลัมน์ revenue (Phase E) ·
+  ยังไม่ได้รันครบ 792 ข้อ (ผลข้างบนคือ 1 ต่อชั้น)
