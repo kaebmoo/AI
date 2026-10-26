@@ -9,8 +9,8 @@
 | **E** คำอธิบายคอลัมน์ feed อัตโนมัติ | ✅ **ขึ้นของจริงแล้ว** (main `092f33f`, reload 23:47; ยังไม่ push) — วัดบนสำเนา: คำอธิบายว่าง 49.3% → 23.8% | 2026-10-24 | `3340f31`, `fc19128`, `fca9163`, `6826f75`, `cc0dfce` |
 | **B** ตัวตรวจ SQL ของ pass 2 | ✅ **ขึ้นของจริงแล้ว** (main ff `1d004bc..0cd5e0b`, reload 14:37 2026-10-25; ยังไม่ push) — B-01 ข้าม; วัดบน server ซ้อม: 156 → 160/174, ผิดอย่างมั่นใจ 14 → 10 (ชั้น invariant 0 → 0) | 2026-10-25 | `aee811c`, `9ef7cf0`, `d8ce4e6`, `553566b`, `233daa1` |
 | C-0b คำศัพท์ระดับหน่วยงานทุกโดเมน | ⬜ ยังไม่ทำ (ระหว่างนี้ feed_ebt + feed_expense เป็นแถว `manual` — §A.6) | | |
-| **C-00** ส่วนขยาย compiler สำหรับ revenue (`datasets`, term ว่าง, M-5) + `period.parts` + ตัวกรองตัวเลข + มิติงวดในคำถามงวดเดียว | ✅ เสร็จบน branch `ai/delegate-metrics` — **ยังไม่ ff main, ยังไม่ push, ยังไม่ migrate config.db จริง**; server ซ้อม: revenue compiled 3/6 → 4/6, 5/6 หลัง `period.parts` → 5/6 หลังตัวกรองตัวเลข → 4/6 ใน r5 (pass 1 เปลี่ยนเป็น `month <= 9`) → **5/6 ใน r7 และ r9** หลังรับ `month <= M` + ผ่อน R3 (เหลือ `shape:dimension_set` ตามข้อตัดสิน) ตัวเลขตรง parquet ทุกข้อที่ compile | 2026-10-26 | `5f3d62a`, `86e85b5`, `3a30c85`, `fdb9b72`, `22819bf`, `a9116b6`, `48a8875` |
-| **C-01** contract revenue (NT-Report) | ✅ เสร็จบน worktree `NT-Report-metrics` (branch `ai/delegate-metrics`, revenue **2.4.0**) — **ยังไม่ ff NT-Report main, ยังไม่ push**; server ซ้อม r11: revenue **6/6** compiled, คำถามเทียบเป้า 3/3 ไปทางเดิมด้วย `excluded_word` | 2026-10-26 | NT-Report `738ea8b`; AI `0e63227` (`excluded_words`) |
+| **C-00** ส่วนขยาย compiler สำหรับ revenue (`datasets`, term ว่าง, M-5) + `period.parts` + ตัวกรองตัวเลข + มิติงวดในคำถามงวดเดียว | ✅ **ขึ้นของจริงแล้ว** (migrate config.db 14:11, ff AI main `beed1f3..c63da29`, reload 14:12 2026-10-26; ยังไม่ push); server ซ้อม: revenue compiled 3/6 → 4/6, 5/6 หลัง `period.parts` → 5/6 หลังตัวกรองตัวเลข → 4/6 ใน r5 (pass 1 เปลี่ยนเป็น `month <= 9`) → **5/6 ใน r7 และ r9** หลังรับ `month <= M` + ผ่อน R3 (เหลือ `shape:dimension_set` ตามข้อตัดสิน) ตัวเลขตรง parquet ทุกข้อที่ compile | 2026-10-26 | `5f3d62a`, `86e85b5`, `3a30c85`, `fdb9b72`, `22819bf`, `a9116b6`, `48a8875` |
+| **C-01** contract revenue (NT-Report) | ✅ **ขึ้นของจริงแล้ว** (ff NT-Report main `b08aa3c..738ea8b` 2026-10-26, revenue **2.4.0**; ยังไม่ push) — ของจริง audit 481–484 ผ่าน; server ซ้อม r11: revenue **6/6** compiled, คำถามเทียบเป้า 3/3 ไปทางเดิมด้วย `excluded_word` | 2026-10-26 | NT-Report `738ea8b`; AI `0e63227` (`excluded_words`) |
 | C-0c ratio จัดอันดับอย่างมีความหมาย | ✅ ทำก่อนแผนนี้ (`941cd0a`, ebt 1.6.0) | 2026-10-24 | |
 | **CMP** เทียบสองงวดบนเส้นทาง compile (`plan/PLAN_METRICS_COMPARISON.md`) | ✅ **ขึ้นของจริงแล้ว** (main `862915c` = merge กับ Phase E, reload 07:32 2026-10-25) + push — วัดบน server ซ้อม: ชุดเทียบปีก่อน 3 → 20/27 | 2026-10-25 | `a54f76a`, `0a32b92` |
 
@@ -555,8 +555,18 @@ mapping "เดือน" (1), เลือก `unit_short_name` แทน `unit
 - ข้อจำกัด: ยังไม่ได้ทำ Phase D `gen` ของ revenue (C-02 — `metric_eval_lib.generate()` ยังอ่าน `metric.dataset` ตัวเดียว); `revenue_target` / `revenue_achievement` ยังไม่ประกาศ
   (ข้ามตาราง — SELECT เดียวทำไม่ได้); คำถามเทียบเป้าจึงยังเป็น free SQL
 
-### C.5 ขึ้นของจริง — ยังไม่ทำ (หยุดตามสั่ง: ไม่ ff main, ไม่ push, ไม่ migrate config.db จริง)
-ลำดับเมื่อจะขึ้น (ผู้อ่านก่อน): backup config.db → `scripts/migrate_schema_metrics.py` บน config.db จริง (เพิ่ม `datasets`, `excluded_words`; **ก่อน** ff — ไม่งั้น re-sync contract
+### C.5 ขึ้นของจริง (2026-10-26 บ่าย, เจ้าของสั่ง)
+- 14:11 backup `~/nt-ai-backups/revenue-metric-golive-20261026-141129/` (config.db quick_check ok, app.db, `revenue-2.3.3.yaml`)
+  → `scripts/migrate_schema_metrics.py` (ของ branch) บน config.db จริง: เพิ่ม `datasets`, `excluded_words`; quick_check ok; metric เดิม 4 ตัวยัง active
+- ff AI main `beed1f3..c63da29` (15 commit; โค้ด 6 ไฟล์) → `uvicorn --reload` ได้ worker ใหม่ 14:12:02
+  → nt-ai: audit **479** `compiled:ebt` 570.85 ล้าน, **480** `compiled:sales_vs_target` 5 ฝ่ายตรงรายงาน
+- ff NT-Report main `b08aa3c..738ea8b` (revenue 2.4.0) → request ถัดไป re-sync: `schema_metrics.feed_revenue.revenue` declared/active, `excluded_words` = [เป้า, target]
+  → nt-ai: **481** รายได้สะสมทั้งบริษัท `compiled:revenue` **29,389.41 ล้าน** · **482** รายกลุ่มธุรกิจ `compiled:revenue` (BG 8 = **2,103.05**) ·
+  **483** ทั้งบริษัทเทียบเป้า `declined:excluded_word:เป้า` → free SQL **92.28%** (27,286.36 / 29,569.06 ล้าน, ฐาน BG 1–7) ·
+  **484** แบบ portal (scope year_month 202501…202609) กลุ่มธุรกิจ × ฝ่าย `compiled:revenue` (org_product, 215 แถว)
+- ยังไม่ push ทั้งสอง repo · ย้อนกลับ: `git -C AI reset` ไป `beed1f3` + `NT-Report` ไป `b08aa3c` (contract 2.3.3 ใน backup) — คอลัมน์ใหม่ใน config.db ไม่ต้องถอด (โค้ดเก่าไม่อ่าน)
+
+ลำดับที่ใช้ (ผู้อ่านก่อน): backup config.db → `scripts/migrate_schema_metrics.py` บน config.db จริง (เพิ่ม `datasets`, `excluded_words`; **ก่อน** ff — ไม่งั้น re-sync contract
 ของทุก feed context ล้มและค้าง knowledge เดิม; `load_metrics` ยังอ่านได้) → ff AI main (server `--reload`) → ตรวจ EBT/ยอดขายเทียบเป้า 1 ข้อแต่ละโดเมนว่ายัง `compiled:*`
 → ff NT-Report main `b08aa3c..738ea8b` (server อ่าน `NT-Report/DataFeed/contracts/revenue.yaml` ของ main checkout และ re-sync ใน request ถัดไป) → ตรวจ `schema_metrics` ของ `feed_revenue`
 มี `revenue` declared/active → ถามจริงผ่าน portal key และ nt-ai: รายได้สะสมรวม (29,389.41 ล้าน), รายกลุ่มธุรกิจ (BG 8 = 2,103.05), เทียบเป้า (ต้องเป็น `declined:excluded_word:เป้า`)
