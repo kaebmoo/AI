@@ -848,3 +848,44 @@ shape: top5/top10 ทั้งสองทาง 128/128, compare_up 19/20, by 1
 - expense / sales / ebt ยังมีคำอธิบายชื่อย่อ "(เช่น กกง., อป.2)" แบบเดียวกัน (`domains.py` expense 3 คอลัมน์, sales 1, ebt 1) — ทำแบบ COLDESC ได้
 - eval: oracle ของ `sub_product_key` (และมิติที่ไม่ใช่คีย์เดี่ยวอื่น) ไม่มีความหมาย · free SQL หลัง mapping กลาง (`กรรมการผู้จัดการใหญ่` 8, `1.1`, `1.hard infrastructure`) ยังเป็นงาน (2) ของ §C.6
 - ยังไม่ได้รันครบ 792 ข้อ (1 ต่อชั้นเท่านั้น) · server ซ้อม 8006 (`./.ai/db/cmeta/serve.sh <tag>`) หยุดหลังวัด
+
+---
+
+## MAP. mapping ที่ pass 1 ใส่เป็นตัวกรองของมิติที่ประกาศแล้ว ไม่บล็อก metric (2026-10-26 ดึก, `/delegate` run `20261026-2252`)
+
+ที่มา §C.6 ข้อ (2) + §C0b.3: free SQL ของ revenue ผิด 24/36 — 23 ข้อถูกปฏิเสธด้วย `mapping_triggered` (`กกง.`, `กรรมการผู้จัดการใหญ่`,
+`1.Hard Infrastructure`, `1.1.…`) ทั้งที่ pass 1 ใส่ค่าของ mapping เป็นตัวกรองบนมิติที่ metric ประกาศอยู่แล้ว
+(เช่น mapping `department_abbr = 'กกง.'` + filter `unit_sname = 'กกง.'`; mapping ที่ pass 1 แต่งเอง `bu LIKE '%1.Hard Infrastructure%'` + filter เดียวกัน)
+
+### MAP.1 ที่สร้าง
+- **`cb68147`** (branch `ai/delegate-20261026-2252`, ต่อจาก main `8d8aeec`; Codex 1 รอบ PASS): `metric_compiler.plan_with_reason` —
+  mapping "ถูกพาไปแล้ว" (ไม่บล็อก) เมื่อ `sql_condition` เป็นเฉพาะ `col = 'x'` / `col LIKE 'x'` / `col IN (…)` ต่อด้วย AND และ**ทุก** literal
+  (ตัด `%`, casefold) เท่ากับค่าของ filter บนมิติที่ประกาศ — OR / ฟังก์ชัน / ตัวเลข / ไม่มี sql_condition / ค่าที่ไม่มี filter พา = บล็อกเหมือนเดิม
+  (`มือถือ` → `bu = '3.Mobile'` ยังบล็อก; `mapping_triggered:น่าน` เดิมยังผ่าน) · metric แบบ `datasets` (revenue) ใช้มิติรวมของทุก dataset —
+  `level_words` เดิมอ่านแค่ `metric.dimensions` จึงไม่เคยทำงานกับ revenue
+- tests `tests/unit/test_metric_mapping_carried.py` 60 ข้อ · ACC-T **2283 passed, 3 skipped** (2223 + 60) · ACC-L เขียว
+
+### MAP.2 วัด (server ซ้อม 8003, contract revenue **ตรึงที่สำเนา 2.5.0** `.ai/db/c0b/contracts/revenue-2.5.0.yaml`, 1 ต่อชั้น 200 ข้อ)
+
+| | §C0b สุดท้าย (`…_2201`) | **MAP (`…_2357`)** |
+|---|---|---|
+| ถูกรวม | 174/200 | **177/200** |
+| compiled ถูก / ทั้งหมด | 162/164 | 171/179 |
+| ผิดอย่างมั่นใจ | 2 | **8** |
+| free SQL ถูก | 12/36 | 6/21 |
+| ปฏิเสธด้วย `mapping_triggered` | 23 | 17 |
+
+- ถูกขึ้น 7 (M0331 M0601 M0619 M0628 M0700 M0703 M0748), ผิดลง 4 (M0028 M0304 M0424 M0727)
+- **ผิดอย่างมั่นใจใหม่ 6:** 4 ข้อเป็นคำถามกรองที่ถ้อยคำมีข้อความจาก desc ของ contract ("ชื่อย่อของกลุ่ม **(เช่น กกง., อป.2)** กง.",
+  "business group **(8 = รายได้อื่น)** 1.Hard Infrastructure") — pass 1 คัดลอก "กกง." / BG 8 จากตัวอย่างลงตัวกรอง (หรือใส่ชื่อย่อบนระดับผิด) ก่อนนี้ไป
+  free SQL แล้วผิดเหมือนกัน ตอนนี้ compile แล้วผิด · 2 ข้อเป็น compare_up ของ `bu` ที่ compile ในฐานด้วย (แกว่ง) · ผู้ใช้จริงไม่พิมพ์ข้อความตัวอย่างของ desc —
+  Phase E ของ revenue (session แยก) เปลี่ยน desc เหล่านี้อยู่ จึงควรวัดใหม่หลังคำอธิบายใหม่ด้วยคำถามที่ gen ใหม่
+- **รอบที่ใช้ไม่ได้** `…_2329.json` (169/200): worktree NT-Report ที่ใช้ร่วมกันขยับเป็น revenue **2.5.1** (Phase E, `37e7246`) กลางรอบ —
+  คำอธิบายใหม่ของ `bu` "กลุ่มธุรกิจ (BG) — ระดับ 1 ของสายผลิตภัณฑ์…" ดึง "กลุ่ม" กลับไป `bu` 3 จาก 12 ชั้น (audit 2837 2839 2943 บนสำเนา) —
+  แจ้ง session Phase E แล้ว; ต่อจากนี้ server ซ้อมตรึง contract เป็นสำเนา ไม่ชี้ worktree ที่ใช้ร่วม
+- ความเสี่ยงที่เห็น: ตัวกรองที่ pass 1 ใส่ผิดระดับ (ชื่อเดียวกันหลายระดับ เช่น "ของส่วน กรรมการผู้จัดการใหญ่" → `division_name`) compile อย่างมั่นใจแทนไป free SQL —
+  เกิดในรอบที่ใช้ไม่ได้ 2 ข้อ ไม่เกิดซ้ำในรอบตรึง
+
+### MAP.3 สถานะ
+ยังไม่ขึ้นของจริง ยังไม่ push · ข้อเสนอ: วัดรวมกับคำอธิบาย Phase E ฉบับแก้ (gen คำถามใหม่จาก contract ใหม่) ก่อนตัดสินขึ้น
+
