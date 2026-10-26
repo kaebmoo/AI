@@ -70,9 +70,12 @@ def contract_metrics(contract: dict) -> list[Metric]:
         values["metric_id"] = declaration["id"]
         values["synonyms"] = tuple(values["synonyms"] or ())
         values["dimensions"] = tuple(values["dimensions"]) if values["dimensions"] is not None else None
+        values["excluded_words"] = tuple(values["excluded_words"]) if values["excluded_words"] is not None else None
         values["terms"] = values["terms"] or {}
         if values["dataset"] is not None:
             values["dataset"] = prefix + values["dataset"]
+        if values["datasets"] is not None:
+            values["datasets"] = tuple({**item, "name": prefix + item["name"]} for item in values["datasets"])
         if values["official_total"] is not None:
             total = values["official_total"]
             values["official_total"] = {**total, "dataset": prefix + total["dataset"]}
@@ -142,9 +145,11 @@ def generate(contract: dict, dist_dir: Path, period: int, *, phrasings: int = 3,
     prefix = f"feed_{domain}_"
     resolved = metric_compiler.resolve(contract_metrics(contract))
     for metric in resolved.values():
-        path = dist_dir / f"{metric.dataset.removeprefix(prefix)}.parquet"
-        if not path.is_file():
-            raise ValueError(f"Missing metric dataset parquet: {path}")
+        tables = [item["name"] for item in metric.datasets] if metric.datasets is not None else [metric.dataset]
+        for table in tables:
+            path = dist_dir / f"{table.removeprefix(prefix)}.parquet"
+            if not path.is_file():
+                raise ValueError(f"Missing metric dataset parquet: {path}")
     manifest_path = dist_dir / "manifest.json"
     result = {
         "about": "สร้างคำถามจาก metrics ของสัญญาข้อมูล; คำตอบคาดหวัง = compiler บน parquet; ตัวรัน: scripts/eval/run_metric_eval.py",
@@ -164,10 +169,16 @@ def generate(contract: dict, dist_dir: Path, period: int, *, phrasings: int = 3,
     conn = open_dist(dist_dir, domain)
     try:
         for metric in resolved.values():
-            columns = {row[0]: row[1] for row in conn.execute(f"DESCRIBE {_identifier(metric.dataset)}").fetchall()}
             kept, excluded = [], []
+            tables, labels = {}, {}
             for dim in metric.dimensions or ():
-                if dim not in columns:
+                # Ask the compiler so the oracle and the question use the same table.
+                table = metric_compiler._dataset_for(metric, [dim])
+                columns = {row[0]: row[1] for row in conn.execute(
+                    f"DESCRIBE {_identifier(table)}").fetchall()} if table is not None else {}
+                if table is None:
+                    reason = "no_dataset"
+                elif dim not in columns:
                     reason = "missing_column"
                 elif columns[dim].upper().split("(")[0] not in ("VARCHAR", "CHAR", "BPCHAR", "TEXT", "STRING"):
                     reason = "not_string"
@@ -176,16 +187,17 @@ def generate(contract: dict, dist_dir: Path, period: int, *, phrasings: int = 3,
                     reason = "name_column"
                 else:
                     kept.append(dim)
+                    tables[dim] = table
+                    labels[dim] = descriptions.get(table.removeprefix(prefix), {}).get(dim)
                     continue
                 excluded.append((dim, reason))
-            labels = descriptions.get(metric.dataset.removeprefix(prefix), {})
             official_ok = bool(metric.official_total and (
                 dist_dir / f"{metric.official_total['dataset'].removeprefix(prefix)}.parquet"
             ).is_file())
             values = {}
             for dim in kept:
                 column = _identifier(dim)
-                sql = (f"SELECT DISTINCT {column} FROM {_identifier(metric.dataset)} "
+                sql = (f"SELECT DISTINCT {column} FROM {_identifier(tables[dim])} "
                        f"WHERE CAST({_identifier(metric.period['column'])} AS INTEGER) = {period} "
                        f"AND {column} IS NOT NULL AND TRIM({column}) <> '' ORDER BY {column}")
                 items = [row[0] for row in conn.execute(sql).fetchall()]
