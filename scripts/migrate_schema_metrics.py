@@ -31,6 +31,7 @@ def migrate(config_engine=None):
             note_th TEXT,
             ranking TEXT,
             extra_columns TEXT,
+            datasets TEXT,
             source TEXT,
             status TEXT NOT NULL DEFAULT 'active',
             confidence REAL,
@@ -51,6 +52,10 @@ def migrate(config_engine=None):
         if "extra_columns" not in present:
             conn.execute(text("ALTER TABLE schema_metrics ADD COLUMN extra_columns TEXT"))
             print("Added schema_metrics.extra_columns.")
+        # 2026-10-26: `datasets` ([{name, dimensions}] — one table per grain)
+        if "datasets" not in present:
+            conn.execute(text("ALTER TABLE schema_metrics ADD COLUMN datasets TEXT"))
+            print("Added schema_metrics.datasets.")
     print("Ensured schema_metrics and its context/metric unique index and context index exist.")
     print("Migration complete (idempotent).")
 

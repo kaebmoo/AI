@@ -234,12 +234,39 @@ def sync_documentation(conn, domain: str, contract: dict, context_name: str) -> 
     return len(docs)
 
 
-def _validate_metric(metric: dict, datasets: dict, earlier_ids: set) -> None:
+def _validate_metric(metric: dict, datasets: dict, earlier_ids: set, column_aggs: dict | None = None) -> None:
     """Check column and expression references on a structurally resolved metric."""
     dataset = metric.get("dataset")
-    if dataset not in datasets:
-        raise ValueError(f"unknown dataset {dataset!r}")
-    columns = datasets[dataset]
+    declared = metric.get("datasets")
+    if (dataset is None) == (declared is None):
+        raise ValueError("exactly one of dataset / datasets is required")
+    if declared is not None:
+        if not isinstance(declared, list) or not declared:
+            raise ValueError("datasets must be a non-empty list")
+        if metric.get("dimensions") is not None:
+            raise ValueError("dimensions come from datasets")
+        names = []
+        for item in declared:
+            if not isinstance(item, dict) or set(item) != {"name", "dimensions"}:
+                raise ValueError("each datasets item is {name, dimensions}")
+            name, dimensions = item["name"], item["dimensions"]
+            if not isinstance(name, str) or name not in datasets:
+                raise ValueError(f"unknown dataset {name!r}")
+            if name in names:
+                raise ValueError(f"duplicate dataset {name!r}")
+            if not isinstance(dimensions, list) or not all(isinstance(d, str) for d in dimensions):
+                raise ValueError("datasets dimensions must be a list of strings")
+            unknown = set(dimensions) - datasets[name]
+            if unknown:
+                raise ValueError(f"unknown dimensions {sorted(unknown)} in {name}")
+            names.append(name)
+        columns = set.intersection(*(datasets[name] for name in names))
+        dataset = ", ".join(names)
+    else:
+        if dataset not in datasets:
+            raise ValueError(f"unknown dataset {dataset!r}")
+        names = [dataset]
+        columns = datasets[dataset]
     period = metric.get("period") or {}
     # no `cumulative` = the year to date is the sum of the months (sales holds monthly amounts only)
     cumulative = (period.get("value") or {}).get("cumulative")
@@ -247,17 +274,34 @@ def _validate_metric(metric: dict, datasets: dict, earlier_ids: set) -> None:
                    *(() if cumulative is None else (cumulative,))):
         if column not in columns:
             raise ValueError(f"unknown period column {column!r} in {dataset}")
+    if cumulative is None:
+        month = (period.get("value") or {}).get("month")
+        if any((column_aggs or {}).get(name, {}).get(month) == "point_in_time" for name in names):
+            raise ValueError(f"{month} is point_in_time: a year to date cannot sum it across months")
     if cumulative is None and metric.get("official_total") is not None:
         raise ValueError("official_total needs a cumulative period column")
     unknown = set(metric.get("dimensions") or []) - columns
     if unknown:
         raise ValueError(f"unknown dimensions {sorted(unknown)} in {dataset}")
     for name, term in (metric.get("terms") or {}).items():
+        if not isinstance(term, Mapping):
+            raise ValueError(f"term {name} must be a mapping")
+        predicate = term.get("where")
+        if predicate is not None and not isinstance(predicate, str):
+            raise ValueError(f"term {name}: where must be a string or null")
         # Literals can contain text that looks like a column predicate, including escaped quotes.
-        where = re.sub(r"'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"", "", term.get("where") or "")
+        where = re.sub(r"'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"", "", predicate or "")
         used = set(re.findall(r"\b([a-z_][a-z0-9_]*)\s*(?:=|<>|!=|\bIN\b|\bLIKE\b|>|<)", where, re.I))
         if used - columns:
             raise ValueError(f"term {name}: unknown columns {sorted(used - columns)} in {dataset}")
+    scope = metric.get("official_scope")
+    if scope is not None:
+        if not isinstance(scope, str) or not scope.strip():
+            raise ValueError("official_scope must be a non-empty predicate")
+        where = re.sub(r"'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"", "", scope)
+        used = set(re.findall(r"\b([a-z_][a-z0-9_]*)\s*(?:=|<>|!=|\bIN\b|\bLIKE\b|>|<)", where, re.I))
+        if used - columns:
+            raise ValueError(f"official_scope: unknown columns {sorted(used - columns)} in {dataset}")
     expr = metric["expr"]
     if not isinstance(expr, str) or not expr.strip():
         raise ValueError("expr must be a non-empty string")
@@ -335,6 +379,10 @@ def sync_metrics(conn, domain: str, contract: dict, context_name: str) -> int:
     existing = {r["metric_id"]: r for r in conn.execute(text(
         "SELECT * FROM schema_metrics WHERE context_name = :context"), {"context": context_name}).mappings()}
     datasets = {d["name"]: {c["name"] for c in d["columns"]} for d in contract["datasets"]}
+    agg = {m["name"]: m.get("agg") for m in (contract.get("control_totals") or {}).get("measures", [])
+           if m.get("name")}
+    column_aggs = {d["name"]: {c["name"]: c.get("agg") or agg.get(c["name"], "sum") for c in d["columns"]}
+                   for d in contract["datasets"]}
     resolved, earlier_ids = {}, set()
     count = 0
     for metric in metrics:
@@ -345,20 +393,22 @@ def sync_metrics(conn, domain: str, contract: dict, context_name: str) -> int:
                 raise ValueError(f"extends {parent_id!r} is not an earlier metric id")
             parent = resolved[parent_id] if parent_id is not None else {}
             effective = dict(metric)
-            for field in ("dataset", "period", "dimensions", "official_scope"):
+            for field in ("dataset", "datasets", "period", "dimensions", "official_scope"):
                 if effective.get(field) is None:
                     effective[field] = parent.get(field)
             effective["terms"] = {**(parent.get("terms") or {}), **(metric.get("terms") or {})}
             resolved[metric_id] = effective
-            _validate_metric(effective, datasets, earlier_ids)
+            _validate_metric(effective, datasets, earlier_ids, column_aggs)
             values = {field: metric.get(field) for field in sorted(DECLARED_FIELDS["schema_metrics"])}
             if values["dataset"] is not None:
                 values["dataset"] = f"feed_{domain}_{values['dataset']}"
+            if values["datasets"] is not None:
+                values["datasets"] = [{**item, "name": f"feed_{domain}_{item['name']}"} for item in values["datasets"]]
             if values["official_total"] is not None:
                 total = values["official_total"]
                 values["official_total"] = {**total, "dataset": f"feed_{domain}_{total['dataset']}"}
             for field in ("synonyms", "period", "dimensions", "terms", "official_total", "reference", "ranking",
-                          "extra_columns"):
+                          "extra_columns", "datasets"):
                 if values[field] is not None:
                     values[field] = json.dumps(values[field], ensure_ascii=False, sort_keys=True)
         except (KeyError, TypeError, ValueError, AttributeError) as exc:

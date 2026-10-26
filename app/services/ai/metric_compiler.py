@@ -37,6 +37,12 @@ class Metric:
     ranking: dict | None = None
     # [{expr, name_th}]: values shown before the metric's own column (sales: ยอดขาย and เป้า beside the %)
     extra_columns: list | None = None
+    datasets: tuple | None = None
+
+    def __post_init__(self):
+        if self.datasets is not None and self.dimensions is None:
+            object.__setattr__(self, "dimensions", tuple(dict.fromkeys(
+                dimension for item in self.datasets for dimension in item["dimensions"])))
 
 
 def load_metrics(context_name: str, config_engine=None) -> list[Metric]:
@@ -44,22 +50,23 @@ def load_metrics(context_name: str, config_engine=None) -> list[Metric]:
     try:
         if config_engine is None:
             from app.db.session import config_engine
-        columns = ", ".join(f.name for f in fields(Metric))
         with config_engine.connect() as conn:
             rows = conn.execute(text(
-                f"SELECT {columns} FROM schema_metrics WHERE context_name = :c "
+                "SELECT * FROM schema_metrics WHERE context_name = :c "
                 "AND status = 'active' AND is_active = 1 ORDER BY id"
             ), {"c": context_name}).mappings()
             metrics = []
             for row in rows:
-                values = dict(row)
+                values = {f.name: row.get(f.name) for f in fields(Metric)}
                 for key in ("synonyms", "period", "dimensions", "terms", "official_total", "reference", "ranking",
-                            "extra_columns"):
+                            "extra_columns", "datasets"):
                     if isinstance(values[key], str):
                         values[key] = json.loads(values[key])
                 values["synonyms"] = tuple(values["synonyms"] or ())
                 if values["dimensions"] is not None:
                     values["dimensions"] = tuple(values["dimensions"])
+                if values["datasets"] is not None:
+                    values["datasets"] = tuple(values["datasets"])
                 values["terms"] = values["terms"] or {}
                 metrics.append(Metric(**values))
             return metrics
@@ -78,7 +85,7 @@ def resolve(metrics: list[Metric]) -> dict[str, Metric]:
                 continue
             inherited = {
                 key: getattr(parent, key) if getattr(metric, key) is None else getattr(metric, key)
-                for key in ("dataset", "period", "dimensions", "official_scope")
+                for key in ("dataset", "datasets", "period", "dimensions", "official_scope")
             }
             metric = replace(metric, **inherited, terms=parent.terms | metric.terms)
         resolved[metric.metric_id] = metric

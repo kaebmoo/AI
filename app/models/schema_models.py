@@ -96,6 +96,7 @@ class SchemaMetric(ProvenanceMixin, ConfigBase):
     note_th = Column(Text, nullable=True)
     ranking = Column(JSON, nullable=True)  # {scope, base, base_name_th, positive, threshold} for breakdowns/rankings (2026-10-24)
     extra_columns = Column(JSON, nullable=True)  # [{expr, name_th}] shown before the metric's value (2026-10-25)
+    datasets = Column(JSON, nullable=True)  # [{name, dimensions}] one table per grain; the compiler picks the smallest (2026-10-26)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
