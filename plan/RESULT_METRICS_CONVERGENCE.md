@@ -822,14 +822,27 @@ shape: top5/top10 ทั้งสองทาง 128/128, compare_up 19/20, by 1
 - ไฟล์ผล (gitignored, worktree `vigilant-engelbart-bec7f0`): `eval_results/metric_eval_feed_revenue_202609_20261026_2337.json` (2.5.1), `…_20261026_2346.json` (probe),
   `…_20261027_0005.json` (2.5.2); คำถาม `.ai/eval/metric_revenue_202609_{250,251,v2}.json`
 
-### COLDESC.4 ขึ้นของจริง — ยังไม่ทำ (รอเจ้าของสั่ง)
-- **AI ไม่มี code เปลี่ยน** — ขึ้น = contract อย่างเดียว · NT-Report branch `ai/delegate-metrics` มี `05f989b` (ebt 1.7.0 / expense 1.3.0 `org_levels` ของ session อื่น — ต้องให้ผู้อ่านรองรับและปิดแถว manual 0–4 ก่อน)
-  อยู่ใต้ `37e7246` + `3d948e6` จึง ff NT-Report main ทั้ง branch ไม่ได้จนกว่างานนั้นพร้อม — ถ้าจะวางเฉพาะ revenue: cherry-pick `37e7246` + `3d948e6` ลง main (CHANGELOG ชนบรรทัดหัว ต้องแก้มือ)
-- ลำดับ: (1) สำรอง config.db (2) ff/cherry-pick NT-Report main → request แรกของ feed_revenue re-sync 2.5.2 เอง (แถว `declared` 174 แถวได้ข้อความใหม่)
+### COLDESC.4 ลำดับขึ้นของจริงที่วางไว้
+- **AI ไม่มี code เปลี่ยน** — ขึ้น = contract อย่างเดียว · `05f989b` (ebt 1.7.0 / expense 1.3.0 ของ §C0b2) ขึ้น NT-Report main ไปก่อนแล้ว (§C0b2.5) จึง ff ได้ตรง ๆ
+- ลำดับ: (1) สำรอง config.db (2) ff NT-Report main → request แรกของ feed_revenue re-sync 2.5.2 เอง (แถว `declared` 174 แถวได้ข้อความใหม่)
   (3) **แถว `manual` 2 แถวของ `feed_revenue_dim_bu` บนของจริงชนะ contract**: `bu` = ข้อความสองชุดต่อกัน (ร่างระดับ 1 + "business group (8 = รายได้อื่น)"),
   `bu_seq` = "ลำดับของกลุ่มธุรกิจ" — แก้ผ่าน admin (PUT ข้อความ 2.5.2) ไม่ใช่ SQL ตรง; proposal `declared` #31/#32 ที่เปิดค้างเป็นข้อความเก่า ปฏิเสธได้
   (4) ตรวจ `SELECT source, count(*) FROM schema_metadata WHERE table_name LIKE 'feed_revenue_%' GROUP BY 1` และถาม "กลุ่มไหนมีรายได้สะสมสูงสุด 5 อันดับ" → GROUP BY `sub_division_name`
 - contract ใน worktree ที่ใช้ร่วมกันขยับใต้ server ซ้อมทุกตัวที่ชี้มัน (server 8003 ของ §C0b re-sync 2.5.1 กลางรอบ) — server ซ้อมควรชี้สำเนา contract ของตัวเอง
+
+### COLDESC.4b ขึ้นของจริง (2026-10-27 00:58–01:1x, เจ้าของสั่ง)
+- 00:58 backup `~/nt-ai-backups/coldesc-golive-20261027-005821/config.db` (integrity_check ok; ก่อนขึ้น `knowledge_sha` `82ee8c6d…:2.3.2`, `declared` 174 + `manual` 2)
+- 00:59 ff NT-Report main `05f989b..3d948e6` (revenue **2.5.2**) — request แรกของ feed_revenue (audit 490) re-sync: `knowledge_sha` `2dd1c6ff…:2.3.2`, แถว `declared` 174 แถวได้ข้อความใหม่
+- แก้แถว `manual` ของ `feed_revenue_dim_bu` (`bu`, `bu_seq`) เป็นข้อความ 2.5.2 ผ่านหน้า Schema ของ admin (Browser pane, เจ้าของ login) → PUT `/admin/schema/columns/{id}` ·
+  ตรวจใน config.db (อ่านอย่างเดียว) ทั้งสองแถว `manual`/active ข้อความตรง; proposal `declared` #31/#32 ถูก re-sync รวมเป็นข้อความ 2.5.2 แล้ว (เท่ากับแถว manual — ไม่ต้องทำอะไร) ·
+  `export_col_meta` บน config.db จริงได้ `bu` / `bu_seq` ตรงกับ contract
+- ถามจริงผ่าน nt-ai (key id 5 — ช่องทางเดียวกับ §C.5/§C0b.4):
+  **490** "กลุ่มไหนมีรายได้สะสมสูงสุด 5 อันดับ" `compiled:revenue` GROUP BY `sub_division_name` (กลุ่มธุรกิจลูกค้าองค์กร 10,461 ล้าน = audit 485) ·
+  **491** คำถามเดียวกันแบบ portal (scope `year_month` 202501…202609 ชุดเดียวกับ 486) → ผลเดียวกัน ·
+  **492** "รายได้สะสมปีนี้แยกตามกลุ่มธุรกิจ" GROUP BY `bu` 8 แถว ไม่กรอง BG 8 (8.รายได้อื่น 2,103.05 ล้าน = audit 482/487) ·
+  **493** "รายได้เดือนกันยายน 2569 แยกตามกลุ่มบริการ" GROUP BY `service_group_nt` 27 แถว (ตรงจำนวนใน parquet; ยอดรวม 3,353.09 ล้าน = `fact_total_monthly` 202609)
+- AI: ff main `82634ee` → commit เอกสารนี้ (ไม่มี code — server ไม่ต้อง restart) · ยังไม่ push ทั้งสอง repo ·
+  ย้อนกลับ: `git -C NT-Report reset --hard 05f989b` → re-sync คืนข้อความเดิมของแถว `declared` (แถว `dim_bu` ที่แก้ผ่าน admin คงอยู่) — หรือคืน config.db จาก backup
 
 ### COLDESC.5 ที่ยังไม่ทำ / ข้อควรรู้
 - expense / sales / ebt ยังมีคำอธิบายชื่อย่อ "(เช่น กกง., อป.2)" แบบเดียวกัน (`domains.py` expense 3 คอลัมน์, sales 1, ebt 1) — ทำแบบ COLDESC ได้
