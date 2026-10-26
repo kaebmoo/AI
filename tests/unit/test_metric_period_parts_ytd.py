@@ -106,10 +106,20 @@ def test_comparison_pairs_year_to_date_ends(resolved, intent):
     assert (req.period, req.base_period, req.mode, req.filters) == (202609, 202509, "cumulative", ())
 
 
-def test_practice_r6_keeps_period_dimension_decline(resolved, intent):
+def test_practice_r6_cumulative_question_compiles(resolved, intent):
     intent["dimensions"] = ["year_month"]
-    assert plan_with_reason(intent, "รายได้อื่น (กลุ่มธุรกิจ 8) สะสมปีนี้เท่าไร", resolved, [],
+    original = deepcopy(intent)
+    req, reason = plan_with_reason(intent, "รายได้อื่น (กลุ่มธุรกิจ 8) สะสมปีนี้เท่าไร", resolved, [],
+                                   202609, set(), numeric={"bu_seq"})
+    assert reason is None
+    assert (req.period, req.mode, req.dimensions, req.filters) == (
+        202609, "cumulative", (), ({"column": "bu_seq", "operator": "=", "value": 8},))
+    compiled = compile(req, resolved)
+    assert compiled.table == "feed_revenue_fact_bu_monthly"
+    assert "= 202609" in compiled.sql and "BETWEEN" not in compiled.sql
+    assert plan_with_reason(intent, "รายได้อื่น (กลุ่มธุรกิจ 8) ปีนี้เท่าไร", resolved, [],
                             202609, set(), numeric={"bu_seq"}) == (None, "shape:dimension:year_month")
+    assert intent == original
 
 
 def test_without_cumulative_column_sums_months(metric, intent):

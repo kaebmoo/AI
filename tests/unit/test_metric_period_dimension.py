@@ -100,10 +100,24 @@ def test_unpinned_period_dimension_still_declines(resolved, intent, time_range):
      {"column": "year_month", "operator": "<=", "value": 202609}],
     [{"column": "year_month", "operator": "<=", "value": 202609}],
 ])
-def test_period_ranges_keep_dimension(resolved, intent, period_filters):
+@pytest.mark.parametrize("question,cumulative,strips", [
+    ("รายได้สะสม", True, True),
+    ("รายได้", True, False),
+    ("รายได้สะสม", False, False),
+    ("รายได้รายเดือนสะสม", True, False),
+])
+def test_period_ranges_strip_only_for_explicit_cumulative_question(
+        resolved, intent, period_filters, question, cumulative, strips):
     intent["filters"] = period_filters
-    assert plan_with_reason(intent, "รายได้สะสม", resolved, [], 202609, set()) == (
-        None, "shape:dimension:year_month")
+    intent["time_range"]["cumulative"] = cumulative
+    req, reason = plan_with_reason(intent, question, resolved, [], 202609, set())
+    if strips:
+        assert reason is None
+        assert (req.period, req.mode, req.dimensions) == (202609, "cumulative", ())
+    else:
+        expected = "period_filter:range" if not cumulative and len(period_filters) == 1 \
+            and period_filters[0]["operator"] == "<=" else "shape:dimension:year_month"
+        assert (req, reason) == (None, expected)
 
 
 @pytest.mark.parametrize("word", [

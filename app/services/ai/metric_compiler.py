@@ -689,8 +689,10 @@ def plan_with_reason(
     time_range = intent.get("time_range")
     if (not comparison and isinstance(intent.get("dimensions"), (list, tuple))
             and (period_hint is not None or (isinstance(time_range, dict) and type(time_range.get("month")) is int))
-            and not (lows or highs) and not any(word in question.casefold() for word in TREND_WORDS)):
-        # practice server r4: dimensions ['year_month'] on a single-period question
+            and (not (lows or highs) or (range_cumulative and "สะสม" in question
+                                        and isinstance(time_range, dict) and time_range.get("cumulative") is True))
+            and not any(word in question.casefold() for word in TREND_WORDS)):
+        # practice server r4: single-period dimensions; a YTD range only with สะสม and time_range.cumulative (owner 2026-10-26)
         intent = {**intent, "dimensions": [d for d in intent["dimensions"]
                                           if not (isinstance(d, str) and d.casefold() in period_columns)]}
     checked = intent
