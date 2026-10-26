@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, fields, replace
 import json
 import logging
+import math
 import re
 
 from sqlalchemy import text
@@ -142,6 +143,33 @@ def dimension_labels(metrics: list[Metric], config_engine=None) -> dict[str, str
         return None
 
 
+def numeric_dimensions(metrics: list[Metric], config_engine=None) -> set[str] | None:
+    """Dimensions numeric in every table that declares them; None means metadata is unavailable."""
+    try:
+        wanted = {(m.dataset, d) for m in metrics if m.dataset for d in (m.dimensions or ())}
+        wanted.update((item["name"], d) for m in metrics for item in m.datasets or () for d in item["dimensions"])
+        if not wanted:
+            return set()
+        if config_engine is None:
+            from app.db.session import config_engine
+        numeric = set()
+        types = {"integer", "int", "int64", "bigint", "smallint", "tinyint", "double", "float", "real",
+                 "decimal", "numeric"}
+        with config_engine.connect() as conn:
+            for table in {t for t, _ in wanted}:
+                rows = conn.execute(text(
+                    "SELECT column_name, data_type FROM schema_metadata WHERE table_name = :t "
+                    "AND COALESCE(status, 'active') = 'active'"), {"t": table}).all()
+                for column, data_type in rows:
+                    if ((table, column) in wanted and isinstance(data_type, str)
+                            and data_type.casefold().split("(")[0].strip() in types):
+                        numeric.add((table, column))
+        return {d for _, d in wanted} - {d for _, d in wanted - numeric}
+    except Exception:
+        logger.debug("Numeric dimensions unavailable", exc_info=True)
+        return None
+
+
 def metric_catalog(metrics: list[Metric], labels: dict[str, str] | None = None) -> str:
     lines = []
     for m in metrics:
@@ -208,6 +236,11 @@ class Compiled:
     compare: str | None = None       # what a comparison compared, for the explanation
 
 
+def _is_number(value) -> bool:
+    return (isinstance(value, int) and not isinstance(value, bool)
+            or isinstance(value, float) and math.isfinite(value))
+
+
 def _validate_shape(dimensions, filters, metric: Metric) -> None:
     declared = metric.dimensions or ()
     if not isinstance(dimensions, (list, tuple)) or any(d not in declared for d in dimensions):
@@ -221,6 +254,11 @@ def _validate_shape(dimensions, filters, metric: Metric) -> None:
         if operator in ("=", "LIKE") and isinstance(value, str):
             continue
         if operator == "IN" and isinstance(value, list) and value and all(isinstance(v, str) for v in value):
+            continue
+        if operator == "=" and _is_number(value):
+            continue
+        if operator == "IN" and isinstance(value, list) and value and all(
+                _is_number(v) for v in value):
             continue
         raise ValueError("Unsupported filter operator or value")
 
@@ -246,7 +284,8 @@ def _reason_detail(value) -> str:
     return (" ".join(value.split())[:64] or "invalid") if isinstance(value, str) else "invalid"
 
 
-def _support_reason(intent: dict, metric: Metric, extra_names: frozenset[str] = frozenset()) -> str | None:
+def _support_reason(intent: dict, metric: Metric, extra_names: frozenset[str] = frozenset(),
+                    numeric: frozenset[str] = frozenset()) -> str | None:
     try:
         if intent.get("intent_type") not in ("aggregation", "ranking"):
             return "shape:intent_type:" + _reason_detail(intent.get("intent_type"))
@@ -270,6 +309,13 @@ def _support_reason(intent: dict, metric: Metric, extra_names: frozenset[str] = 
                 continue
             if operator == "IN" and isinstance(value, list) and value and all(isinstance(v, str) for v in value):
                 continue
+            # practice server 20261026-0947: pass 1 wrote bu_seq = 8; only numeric dimensions accept numbers.
+            if item["column"] in numeric:
+                if operator == "=" and _is_number(value):
+                    continue
+                if operator == "IN" and isinstance(value, list) and value and all(
+                        _is_number(v) for v in value):
+                    continue
             return "shape:filter:" + _reason_detail(operator)
         ordering = intent.get("ordering")
         if ordering is not None:
@@ -446,9 +492,10 @@ def plan(
     tables,
     labels: dict[str, str] | None = None,
     scope: dict | None = None,
+    numeric: set | frozenset | None = None,
 ) -> CompileRequest | None:
     """Choose a declared metric and a supported single-period compile request."""
-    return plan_with_reason(intent, question, resolved, matched, reference, tables, labels, scope)[0]
+    return plan_with_reason(intent, question, resolved, matched, reference, tables, labels, scope, numeric)[0]
 
 
 def plan_with_reason(
@@ -460,6 +507,7 @@ def plan_with_reason(
     tables,
     labels: dict[str, str] | None = None,
     scope: dict | None = None,
+    numeric: set | frozenset | None = None,
 ) -> tuple[CompileRequest | None, str | None]:
     """Choose a compile request or give a short decline reason. `labels` = dimension_labels(); `scope` = the
     request's scope (the portal sends the months the asker may see)."""
@@ -638,7 +686,7 @@ def plan_with_reason(
         ordering = intent.get("ordering")
         checked = {**intent, "intent_type": "aggregation",
                    "ordering": {"direction": ordering.get("direction")} if isinstance(ordering, dict) else ordering}
-    reason = _support_reason(checked, metric, frozenset(ignore))
+    reason = _support_reason(checked, metric, frozenset(ignore), frozenset(numeric or ()))
     if reason is not None:
         return None, reason
     if metric.datasets is not None and _dataset_for(
@@ -716,8 +764,10 @@ def _quote(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
-def _literal(value: str) -> str:
-    if "\x00" in value:
+def _literal(value: str | int | float) -> str:
+    if _is_number(value):
+        return str(value) if isinstance(value, int) else repr(value)
+    if not isinstance(value, str) or "\x00" in value:
         raise ValueError("Invalid SQL literal")
     return "'" + value.replace("'", "''") + "'"
 

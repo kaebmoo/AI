@@ -877,6 +877,7 @@ async def build_first_attempt_prompt(
         resolved = metric_compiler.resolve(metrics)
         matched = metric_compiler.match_metrics(question, metrics)
         labels = metric_compiler.dimension_labels(metrics) if metrics else None
+        numeric = metric_compiler.numeric_dimensions(metrics) if metrics else None
         metric_block = ""
         if metrics:
             metric_block = (
@@ -923,6 +924,7 @@ async def build_first_attempt_prompt(
                 req, reason = metric_compiler.plan_with_reason(
                     intent_json, question, resolved, matched, reference_period(),
                     set(_context_tables(context_table)) | {context_table}, labels, request_scope.get(),
+                    numeric=numeric,
                 )
                 if req is not None:
                     try:
