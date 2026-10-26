@@ -583,11 +583,12 @@ def load_execution_metadata(temp_schema, context_table: str, context_name: str) 
 
         with temp_schema.engine.connect() as conn:
             rows = conn.execute(sa_text(
-                "SELECT level_label_th, level_columns FROM master_hierarchy "
+                "SELECT level_label_th, level_columns, level FROM master_hierarchy "
                 "WHERE context_name = :ctx AND is_active = 1 AND status = 'active' ORDER BY level"
             ), {"ctx": context_name}).fetchall()
-            if rows:
-                hierarchy_info = [{"level_label_th": row[0], "level_columns": row[1]} for row in rows]
+            if rows:  # the first chain only — one chain per tens (feed_revenue: product 0–2, org 10–14)
+                hierarchy_info = [{"level_label_th": row[0], "level_columns": row[1]} for row in rows
+                                  if row[2] // 10 == rows[0][2] // 10]
     except RECOVERABLE_FLOW_EXCEPTIONS:
         pass
 

@@ -52,7 +52,7 @@ def _dataset(conn, context, table):
 def _value_facts(inspector, conn, table, columns, levels=(), context=None):
     facts = {c.name: {} for c in columns}
     labels = {r["level_label_th"] for r in levels if r["level_label_th"]}
-    own_levels = {r["level_label_th"]: r["level"] + 1 for r in levels if r["context_name"] == context}
+    own_levels = {r["level_label_th"]: r["level"] % 10 + 1 for r in levels if r["context_name"] == context}  # per chain
     for col in columns:
         values = col.all_distinct
         if values is None:
@@ -159,8 +159,11 @@ def draft_columns(config_conn, table):
         "WHERE status = 'active' AND is_active = 1 ORDER BY context_name, level"
     )).mappings().all()
     levels = [r for r in all_levels if r["context_name"] == context]
-    chain = [r["level_label_th"] for r in levels]
-    level_facts = {c: {"number": r["level"] + 1, "label": r["level_label_th"], "chain": chain}
+    # one chain per tens (feed_revenue: product 0–2, the contract's org levels 10–14 — datafeed_knowledge.ORG_LEVEL_BASE)
+    chains = {}
+    for r in levels:
+        chains.setdefault(r["level"] // 10, []).append(r["level_label_th"])
+    level_facts = {c: {"number": r["level"] % 10 + 1, "label": r["level_label_th"], "chain": chains[r["level"] // 10]}
                    for r in levels for c in json.loads(r["level_columns"])}
     values_allowed = data_sources.policy_for_table(table, config_conn.engine) == "full"
     try:

@@ -248,7 +248,7 @@ class SchemaService:
         try:
             with self.engine.connect() as conn:
                 result = conn.execute(text("""
-                    SELECT level_label_th, level_columns
+                    SELECT level_label_th, level_columns, level
                     FROM master_hierarchy
                     WHERE context_name = :ctx AND is_active = 1 AND status = 'active'
                     ORDER BY level
@@ -258,10 +258,14 @@ class SchemaService:
             if not rows:
                 return ""
 
-            hierarchy_chain = " > ".join(r[0] for r in rows)
-            # Get first column from each level for the example
-            example_cols = []
+            # one chain per tens: feed_revenue holds its product chain (0–2) and the contract's org levels (10–14)
+            chains = {}
             for r in rows:
+                chains.setdefault(r[2] // 10, []).append(r)
+            hierarchy_chain = " · ".join(" > ".join(r[0] for r in chain) for chain in chains.values())
+            # Get first column from each level of the first chain for the example
+            example_cols = []
+            for r in next(iter(chains.values())):
                 try:
                     cols = json.loads(r[1])
                     if cols:

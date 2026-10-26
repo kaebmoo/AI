@@ -136,6 +136,16 @@ def test_the_note_shows_the_chain_of_the_named_level():
     assert "กลุ่มธุรกิจ (`bu`) > กลุ่มบริการ" in both and " · สายงาน (`division_name`) >" in both
 
 
+def test_the_system_prompt_rule_keeps_the_chains_apart(engine, contract):
+    """STEP 1.5 of the system prompt read every level as one chain: กลุ่มธุรกิจ > … > บริการ/ผลิตภัณฑ์ > สายงาน > …"""
+    from app.services.schema_service import SchemaService
+    sync(engine, contract)
+    rule = SchemaService(config_engine=engine, business_engine=engine).build_hierarchy_rule_text("feed_revenue")
+    assert ("ข้อมูลมีลำดับชั้น: กลุ่มธุรกิจ > กลุ่มบริการ > บริการ/ผลิตภัณฑ์ · "
+            "สายงาน > กลุ่ม > ฝ่าย > ส่วน > ศูนย์ต้นทุน") in rule
+    assert "WHERE bu LIKE '%x%' OR service_group_nt LIKE '%x%'" in rule
+
+
 @pytest.fixture
 def hierarchy_from(monkeypatch):
     """load_hierarchies_from_db on a given config DB, its cache empty before and after."""
