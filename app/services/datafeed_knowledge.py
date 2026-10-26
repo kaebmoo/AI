@@ -274,6 +274,16 @@ def _validate_metric(metric: dict, datasets: dict, earlier_ids: set, column_aggs
                    *(() if cumulative is None else (cumulative,))):
         if column not in columns:
             raise ValueError(f"unknown period column {column!r} in {dataset}")
+    if "parts" in period:
+        parts = period["parts"]
+        if (not isinstance(parts, dict) or not parts or not set(parts) <= {"year", "month"}
+                or not all(isinstance(c, str) and c.strip() for c in parts.values())):
+            raise ValueError("period.parts must map year / month to columns")
+        if len(set(parts.values())) != len(parts) or period.get("column") in parts.values():
+            raise ValueError("period.parts columns must be distinct from each other and period.column")
+        for column in parts.values():
+            if column not in columns:
+                raise ValueError(f"unknown period.parts column {column!r} in {dataset}")
     if cumulative is None:
         month = (period.get("value") or {}).get("month")
         if any((column_aggs or {}).get(name, {}).get(month) == "point_in_time" for name in names):

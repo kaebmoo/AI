@@ -372,6 +372,71 @@ def _month_key(value) -> int | None:
     return value if type(value) is int and 100001 <= value <= 999912 and 1 <= value % 100 <= 12 else None
 
 
+def _rewrite_period_parts(intent: dict, period: dict, reference: int | None) -> tuple[dict | None, str | None]:
+    # Practice server 20261026-0720 §C.4: pass 1 wrote revenue's period as year / month filters.
+    parts = {column.casefold(): part for part, column in period.get("parts", {}).items()}
+    found, remaining = {}, []
+    for item in intent.get("filters") or []:
+        column = item.get("column") if isinstance(item, dict) else None
+        part = parts.get(column.casefold()) if isinstance(column, str) else None
+        if part is None:
+            remaining.append(item)
+            continue
+        if part in found:
+            return None, "period_filter:value"
+        operator, value = item.get("operator"), item.get("value")
+        if operator not in (("=", "IN", "BETWEEN") if part == "month" else ("=", "IN")):
+            return None, "period_filter:operator"
+        values = [value] if operator == "=" else value
+        if (not isinstance(values, list) or not values
+                or (operator == "BETWEEN" and len(values) != 2)):
+            return None, "period_filter:value"
+        numbers = []
+        for value in values:
+            if isinstance(value, str) and value.isdecimal():
+                try:
+                    value = int(value)
+                except ValueError:
+                    return None, "period_filter:value"
+            if type(value) is not int or not 1 <= value <= (9999 if part == "year" else 12):
+                return None, "period_filter:value"
+            numbers.append(value)
+        if operator == "BETWEEN":
+            if numbers[0] > numbers[1]:
+                return None, "period_filter:value"
+            numbers = list(range(numbers[0], numbers[1] + 1))
+        found[part] = sorted(set(numbers))
+    if not found:
+        return intent, None
+    tr = intent.get("time_range") or {}
+    if not isinstance(tr, dict):
+        return None, "time_range_invalid"
+    years, months = found.get("year"), found.get("month")
+    if months is None and years is not None and len(years) == 1:
+        if tr.get("year") is None:
+            tr = {**tr, "year": years[0]}
+        return {**intent, "filters": remaining, "time_range": tr}, None
+    for part, values in (("year", years), ("month", months)):
+        if values is not None:
+            continue
+        value = tr.get(part)
+        if value is None:
+            if (type(reference) is not int or not 1 <= reference // 100 <= 9999
+                    or not 1 <= reference % 100 <= 12):
+                return None, "reference_missing"
+            value = reference // 100 if part == "year" else reference % 100
+        if type(value) is not int or not 1 <= value <= (9999 if part == "year" else 12):
+            return None, "time_range_invalid"
+        if part == "year":
+            years = [value]
+        else:
+            months = [value]
+    combos = sorted({y * 100 + m for y in years for m in months})
+    remaining.append({"column": period["column"], "operator": "=" if len(combos) == 1 else "IN",
+                      "value": combos[0] if len(combos) == 1 else combos})
+    return {**intent, "filters": remaining}, None
+
+
 def plan(
     intent: dict,
     question: str,
@@ -447,6 +512,8 @@ def plan_with_reason(
     if not isinstance(filters, (list, tuple)):
         return None, "shape:filter:invalid"
     period_column = (metric.period or {}).get("column")
+    parts = (metric.period or {}).get("parts", {})
+    period_columns = {c.casefold() for c in (period_column, *parts.values()) if isinstance(c, str)}
     comparison = intent.get("intent_type") == "comparison"
     line = (metric.ranking or {}).get("threshold") if isinstance(metric.ranking, dict) else None
     if intent.get("intent_type") in ("lookup", "detail") and isinstance(line, dict):
@@ -460,7 +527,7 @@ def plan_with_reason(
                   "ordering": {"direction": ordering.get("direction")} if isinstance(ordering, dict) else ordering,
                   # pass 1 adds the period as a dimension of a comparison; the target sits beside each unit instead
                   "dimensions": [d for d in dimensions if not (isinstance(d, str) and isinstance(period_column, str)
-                                                                and d.casefold() == period_column.casefold())]
+                                                                and d.casefold() in period_columns)]
                   if isinstance(dimensions, list) else dimensions}
         comparison = False
     ordering = intent.get("ordering")
@@ -469,6 +536,11 @@ def plan_with_reason(
         # a metric measured against its line ranks by its own value; pass 1 names that freely
         # ("achievement_diff", "amount - target_amt") — the actual and target travel beside it
         intent = {**intent, "ordering": {"direction": ordering.get("direction")}}
+    if parts:
+        intent, reason = _rewrite_period_parts(intent, metric.period, reference)
+        if reason is not None:
+            return None, reason
+        filters = intent.get("filters") or []
     remaining = []
     defining = _defining_values(metric)
     period_hint = None
@@ -559,7 +631,7 @@ def plan_with_reason(
     if comparison and isinstance(intent.get("dimensions"), (list, tuple)) and isinstance(period_column, str):
         # "EBT ปีนี้เทียบปีก่อน" with dimensions ["time_key"]: the comparison already puts the periods side by side
         intent["dimensions"] = [d for d in intent["dimensions"]
-                                if not (isinstance(d, str) and d.casefold() == period_column.casefold())]
+                                if not (isinstance(d, str) and d.casefold() in period_columns)]
     checked = intent
     if comparison:
         # a comparison ranks by the change, which pass 1 names freely (diff_ebt, ebt_change): keep the direction

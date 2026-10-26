@@ -90,7 +90,7 @@ metrics:
       - {name: fact_total_monthly, dimensions: []}
       - {name: fact_bu_monthly, dimensions: [bu_seq, bu]}
       - {name: fact_org_monthly, dimensions: [division_name, unit_name, cost_center]}
-    period: {column: year_month, value: {cumulative: revenue_ytd, month: revenue}}
+    period: {column: year_month, parts: {year: year, month: month}, value: {cumulative: revenue_ytd, month: revenue}}
     terms: {rev: {}}
     expr: rev
     official_total: {dataset: fact_total_monthly, column: revenue_ytd, month_column: revenue}
@@ -100,6 +100,7 @@ metrics:
 - ประกาศ `dataset` XOR `datasets` (เลือกอย่างใดอย่างหนึ่งเท่านั้น); `dataset` เดี่ยวทำงานเหมือนเดิม
 - เมื่อใช้ `datasets` ไม่ประกาศ `dimensions` ระดับ metric — code รวมมิติของทุก dataset ตามลำดับที่พบครั้งแรก
 - คอลัมน์ของ period / term / scope ต้องมีในทุกตารางที่ระบุใน `datasets` (ตรวจตอน sync)
+- `period.parts` (optional) เป็น mapping ไม่ว่าง เฉพาะ `year` / `month` → ชื่อคอลัมน์ไม่ว่างที่มีในทุกตาราง; แต่ละคอลัมน์ต้องไม่ซ้ำกันและไม่ใช่ `period.column` (ตรวจตอน sync)
 - เลือกตารางเล็กที่สุดที่มีครบทุกมิติและคอลัมน์ตัวกรองที่ถาม: นับจำนวนมิติที่ประกาศ; เท่ากันเลือกตามลำดับประกาศ
 - ไม่มีตารางที่มีครบ → `plan()` ไม่รับด้วยเหตุผล `shape:dimension_set` และส่งคำถามไป free SQL
 - term ที่ไม่มี `where` หรือเป็น null / ว่าง / ช่องว่างล้วน = ทุกแถวของตาราง
@@ -124,6 +125,7 @@ metrics:
 (2026-10-24 — ก่อนแก้ `supports()` ปฏิเสธ ทำให้ EBT รายศูนย์ต้นทุนตกไป pass 2 แล้วได้ SQL ที่นับแต่รายได้และ SUM `amount_ytd` ข้าม 9 เดือน: `query_audit` 407) — ก่อนโทษ compiler ให้อ่าน `Pass 1 complete … Intent:` ใน log ก่อน
 
 พฤติกรรมของ pass 1 ที่เจอกับ `sales_vs_target` บน server ซ้อม (2026-10-25, 7 รอบ × 11 คำถาม) และ `plan()` รับแล้ว — ใช้กับทุก metric ยกเว้นที่ระบุ:
+- server ซ้อม 20261026-0720 §C.4: `year = 2026` + `month = 9` → filter งวด `202609` เฉพาะเมื่อประกาศ `period.parts`; ใช้กฎงวด / YTD / comparison เดิม
 - ตัวกรองที่เป็น**นิยามของ metric เอง** (`metric = 'actual'`, `metric IN ('actual','target')`) = คอลัมน์ที่ไม่ใช่มิติ ที่ทุก term เลือกด้วยค่าคงที่ และค่าที่กรองอยู่ในค่าที่ term เลือก → ตัดทิ้ง
   (`metric = 'forecast'` ยังปฏิเสธ); mapping ที่ pass 1 แต่งขึ้นซึ่ง condition เป็นนิยามเดียวกัน (`ยอดขาย` → `metric = 'actual'`) ไม่บล็อก
 - mapping ที่ keyword **มีชื่อของ metric อยู่ข้างใน** ("ยอดขายเทียบเป้า" ⊃ "เทียบเป้า") หรือชื่อคอลัมน์ที่ metric แสดง ("ยอดขายบริการรวมทั้งบริษัท" ⊃ "ยอดขายบริการ" ของ `extra_columns`) ไม่บล็อก
