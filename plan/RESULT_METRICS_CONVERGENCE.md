@@ -8,7 +8,7 @@
 | **D** eval ที่สร้างเองจากคำประกาศ | ✅ **ขึ้นของจริงแล้ว** (main `011cef3`, reload 22:35) + push (CI เขียว run 40107701402) — วัดบน server ซ้อม: 96 → 157/174 หลังแก้ `plan()` | 2026-10-24 | `4cb8c62`, `ecdcc84`, แก้ `plan()` `3cd4e6c` |
 | **E** คำอธิบายคอลัมน์ feed อัตโนมัติ | ✅ **ขึ้นของจริงแล้ว** (main `092f33f`, reload 23:47; ยังไม่ push) — วัดบนสำเนา: คำอธิบายว่าง 49.3% → 23.8% | 2026-10-24 | `3340f31`, `fc19128`, `fca9163`, `6826f75`, `cc0dfce` |
 | **B** ตัวตรวจ SQL ของ pass 2 | ✅ **ขึ้นของจริงแล้ว** (main ff `1d004bc..0cd5e0b`, reload 14:37 2026-10-25; ยังไม่ push) — B-01 ข้าม; วัดบน server ซ้อม: 156 → 160/174, ผิดอย่างมั่นใจ 14 → 10 (ชั้น invariant 0 → 0) | 2026-10-25 | `aee811c`, `9ef7cf0`, `d8ce4e6`, `553566b`, `233daa1` |
-| **C-0b** คำศัพท์ระดับหน่วยงาน — feed_revenue | 🟡 **โค้ด + วัดบนสำเนาแล้ว ยังไม่ขึ้นของจริง** (revenue 174/200, ผิดอย่างมั่นใจ 18 → 2 — §C0b); feed_ebt + feed_expense ยังเป็นแถว `manual` (§A.6) | 2026-10-26 | `631cc7e`, `c9499aa` (branch `claude/c0b-revenue-levels-2876c5`); NT-Report `52811cc` |
+| **C-0b** คำศัพท์ระดับหน่วยงาน — feed_revenue | ✅ **ขึ้นของจริงแล้ว** 2026-10-26 22:05 (ff AI main `eea6250..491c579`, NT-Report main `5854e5a..514c6f0` มี `52811cc`; audit 485–487 — §C0b.4); eval 174/200, ผิดอย่างมั่นใจ 18 → 2; feed_ebt + feed_expense ยังเป็นแถว `manual` (§A.6) | 2026-10-26 | `631cc7e`, `c9499aa`; NT-Report `52811cc` |
 | **C-00** ส่วนขยาย compiler สำหรับ revenue (`datasets`, term ว่าง, M-5) + `period.parts` + ตัวกรองตัวเลข + มิติงวดในคำถามงวดเดียว | ✅ **ขึ้นของจริงแล้ว** (migrate config.db 14:11, ff AI main `beed1f3..c63da29`, reload 14:12 2026-10-26; ยังไม่ push); server ซ้อม: revenue compiled 3/6 → 4/6, 5/6 หลัง `period.parts` → 5/6 หลังตัวกรองตัวเลข → 4/6 ใน r5 (pass 1 เปลี่ยนเป็น `month <= 9`) → **5/6 ใน r7 และ r9** หลังรับ `month <= M` + ผ่อน R3 (เหลือ `shape:dimension_set` ตามข้อตัดสิน) ตัวเลขตรง parquet ทุกข้อที่ compile | 2026-10-26 | `5f3d62a`, `86e85b5`, `3a30c85`, `fdb9b72`, `22819bf`, `a9116b6`, `48a8875` |
 | **C-01** contract revenue (NT-Report) | ✅ **ขึ้นของจริงแล้ว** (ff NT-Report main `b08aa3c..738ea8b` 2026-10-26, revenue **2.4.0**; ยังไม่ push) — ของจริง audit 481–484 ผ่าน; server ซ้อม r11: revenue **6/6** compiled, คำถามเทียบเป้า 3/3 ไปทางเดิมด้วย `excluded_word` | 2026-10-26 | NT-Report `738ea8b`; AI `0e63227` (`excluded_words`) |
 | C-0c ratio จัดอันดับอย่างมีความหมาย | ✅ ทำก่อนแผนนี้ (`941cd0a`, ebt 1.6.0) | 2026-10-24 | |
@@ -644,7 +644,18 @@ re-sync ครั้งแรกเขียน 5 ระดับ `declared` (10
 - **ผิดอย่างมั่นใจที่เหลือ 2:** `M0418` (ข้างบน — ชื่อเรียกที่มาจาก desc ของ `bu`, Phase E ของ revenue) · `M0700` compare_up รายฝ่ายสะสม ได้ 10 จาก 20 แถว (pass 1 ใส่ `limit 10` กับ comparison — เป็นตั้งแต่ฐาน §C.6)
 - ไฟล์ผล: `eval_results/metric_eval_feed_revenue_202609_20261026_2117.json` (รอบ 1), `…_2201.json` (สุดท้าย) ใน worktree นี้ (gitignored)
 
-### C0b.4 ขึ้นของจริง (ยังไม่ทำ — รอเจ้าของสั่ง)
+### C0b.4 ขึ้นของจริง (2026-10-26 22:04–22:09, เจ้าของสั่ง)
+- 22:04 backup `~/nt-ai-backups/c0b-org-levels-golive-20261026-220452/config.db` (integrity_check ok) — ไม่มี migration
+- ff AI main `eea6250..491c579` (พา `c2c88e3` eval generator + `1cac6c0` docs ไปด้วย; โค้ด server 5 ไฟล์) → `uvicorn --reload` worker ใหม่ 22:05:12, `/` ตอบ 200
+- NT-Report main ไปไกลกว่า branch แล้ว (`5854e5a`, sggap 3 commit แตะเฉพาะ `SGGap/`) → merge main เข้า `ai/delegate-metrics` ใน worktree (`514c6f0`),
+  `pytest tools/feed` 42 passed → ff NT-Report main `5854e5a..514c6f0` (revenue **2.5.0**)
+- request แรกของ feed_revenue re-sync: `master_hierarchy` = 0–2 `manual` + **10–14 `declared`/active** (สายงาน/กลุ่ม/ฝ่าย/ส่วน/ศูนย์ต้นทุน), `knowledge_sha` `82ee8c6d…:2.3.2`, quick_check ok
+- ถามจริงผ่าน nt-ai (key id 5 — ช่องทางเดียวกับ §C.5; คำถามแบบ portal ส่ง `scope` ของ portal):
+  **485** "กลุ่มไหนมีรายได้สะสมสูงสุด 5 อันดับ" `compiled:revenue` GROUP BY `sub_division_name` (กลุ่มธุรกิจลูกค้าองค์กร 10,461 ล้าน) ·
+  **486** คำถามเดียวกันแบบ portal (scope `year_month` 202501…202609) → ผลเดียวกัน · **487** "รายได้สะสมปีนี้แยกตามกลุ่มธุรกิจ" ยัง GROUP BY `bu` (BG 8 = **2,103.05** เท่า audit 482)
+- ยังไม่ push ทั้งสอง repo · ย้อนกลับ: `git -C AI reset --hard eea6250` + NT-Report `reset --hard 5854e5a` → re-sync ถอนแถว 10–14 เอง (หรือคืน config.db จาก backup)
+
+ลำดับที่วางไว้ก่อนขึ้น:
 ลำดับตาม CHANGELOG ("ผู้อ่านรองรับก่อน แล้วจึงวาง contract"): (1) ff AI main ด้วย `631cc7e` + `c9499aa` (ไม่มี migration — ตาราง `master_hierarchy` เดิม) →
 (2) ff NT-Report main ด้วย `52811cc` (revenue 2.5.0) → request แรกของ feed_revenue re-sync เอง เขียน level 10–14 `declared` (สำรอง config.db ก่อน) →
 (3) ตรวจ `SELECT level, level_label_th, source FROM master_hierarchy WHERE context_name='feed_revenue'` = 0–2 manual + 10–14 declared →
@@ -656,3 +667,4 @@ re-sync ครั้งแรกเขียน 5 ระดับ `declared` (10
 - free SQL ผิด 24 ข้อของ revenue ยังเป็นเรื่อง mapping กลาง (`กกง.` 18 ครั้ง, `กรรมการผู้จัดการใหญ่` 7) บล็อก metric — งานถัดไปข้อ (2) ของ §C.6
 - คำ "ชื่อย่อของกลุ่ม (เช่น กกง., อป.2)" ในคำถาม eval มาจาก desc ของ contract — ไม่มีรูปที่ชัดของ "กลุ่ม" จึงไม่มี note (`M0280` sub_division_sname ยังไปผิด/ไม่ compile) — ผู้ใช้จริงพิมพ์ "กลุ่มไหน" มากกว่า
 - server ซ้อม 8003 หยุดแล้ว (`./.ai/db/c0b/serve.sh <tag>` เปิดใหม่ได้)
+- คำอธิบาย (explain) ของ 485 ยังเรียกผลว่า "แต่ละกลุ่มธุรกิจ" แม้ข้อมูลเป็นกลุ่มองค์กร — ตัวเลข/คอลัมน์ถูก แต่ถ้อยคำของ explain ไม่รู้ระดับ
