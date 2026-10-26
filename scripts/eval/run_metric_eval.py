@@ -116,7 +116,7 @@ def main():
         paths = {q["id"]: by_question.get(q["question"]) for q in questions}
     now = datetime.now()
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    output = RESULTS_DIR / f"metric_eval_{spec['context']}_{spec['oracle_build']['period']}_{now:%Y%m%d_%H%M}.json"
+    output = RESULTS_DIR / f"metric_eval_{spec['context']}_{spec['oracle_build']['period']}_{now:%Y%m%d_%H%M%S}.json"
     output.write_text(json.dumps({
         "base_url": args.base_url, "at": now.isoformat(timespec="seconds"), "questions": str(args.questions),
         "oracle_build": spec["oracle_build"],
