@@ -80,6 +80,31 @@ metrics:
 กติกา: `expr` ไม่ใช่ SQL เต็ม (ตรวจไวยากรณ์ได้; ชื่อนอก term/metric = ปฏิเสธ) · `where` อ้างได้เฉพาะคอลัมน์ของ dataset (ตรวจตอน sync ฝั่ง AI และ test ฝั่ง NT-Report) ·
 `name_th` / `synonyms` / `unit` / `note_th` / `official_total` / `reference` / `expr` **ไม่สืบทอด** · ตัวอย่างและ test: `tests/fixtures/ebt_metrics_1_5_0.yaml`, `tests/unit/test_metric_compiler.py`
 
+รายได้ที่แยกตารางตามมิติ (revenue, 2026-10-26):
+
+```yaml
+  - id: revenue
+    name_th: รายได้
+    synonyms: [รายได้, รายได้รวม, revenue]
+    datasets:
+      - {name: fact_total_monthly, dimensions: []}
+      - {name: fact_bu_monthly, dimensions: [bu_seq, bu]}
+      - {name: fact_org_monthly, dimensions: [division_name, unit_name, cost_center]}
+    period: {column: year_month, value: {cumulative: revenue_ytd, month: revenue}}
+    terms: {rev: {}}
+    expr: rev
+    official_total: {dataset: fact_total_monthly, column: revenue_ytd, month_column: revenue}
+    unit: บาท (THB)
+```
+
+- ประกาศ `dataset` XOR `datasets` (เลือกอย่างใดอย่างหนึ่งเท่านั้น); `dataset` เดี่ยวทำงานเหมือนเดิม
+- เมื่อใช้ `datasets` ไม่ประกาศ `dimensions` ระดับ metric — code รวมมิติของทุก dataset ตามลำดับที่พบครั้งแรก
+- คอลัมน์ของ period / term / scope ต้องมีในทุกตารางที่ระบุใน `datasets` (ตรวจตอน sync)
+- เลือกตารางเล็กที่สุดที่มีครบทุกมิติและคอลัมน์ตัวกรองที่ถาม: นับจำนวนมิติที่ประกาศ; เท่ากันเลือกตามลำดับประกาศ
+- ไม่มีตารางที่มีครบ → `plan()` ไม่รับด้วยเหตุผล `shape:dimension_set` และส่งคำถามไป free SQL
+- term ที่ไม่มี `where` หรือเป็น null / ว่าง / ช่องว่างล้วน = ทุกแถวของตาราง
+- period ที่ไม่มี `cumulative` ใช้ SUM คอลัมน์ month แบบ `BETWEEN y01 AND yMM`; sync ปฏิเสธเมื่อคอลัมน์นั้นเป็น `agg: point_in_time` (M-5)
+
 ## 4. เส้นทางของคำถาม (เมื่อ context มี metric)
 
 1. `metric_compiler.load_metrics(context)` (active เท่านั้น, อ่าน DB ตอน request — ไม่ผ่าน prompt cache 6 ชม.) · `match_metrics(question)` จับคำพ้องยาวสุดก่อน
@@ -110,8 +135,7 @@ metrics:
 ## 5. เพิ่ม/แก้ metric (ลำดับที่ต้องรักษา)
 
 1. NT-Report: แก้ `DOMAINS[<domain>]["metrics"]` ใน `tools/feed/domains.py` → bump `schema_version` (PATCH ถ้าแค่ metric/กฎ, MINOR ถ้าเพิ่มคอลัมน์อ้างอิง) → `gen_contract.py --domain <d>` → `pytest tools/feed` (`test_metrics_contract.py` ตรวจการอ้าง) → `build_feed.py --domain <d>`
-2. AI: ตาราง `schema_metrics` ต้องมีแล้ว (`scripts/migrate_schema_metrics.py`, idempotent — 2026-10-25 เพิ่มคอลัมน์ `extra_columns`:
-   **ต้องรันก่อน restart** ไม่งั้น `load_metrics` อ่านไม่ได้และปิด metric ทุกตัวของทุก context) — contract ที่เปลี่ยน re-sync เองใน request ถัดไป; ถ้าคอลัมน์ของ dataset เปลี่ยน → `register_file_source --domain <d>`
+2. AI: ตาราง `schema_metrics` ต้องมีแล้ว (`scripts/migrate_schema_metrics.py`, idempotent — เพิ่มคอลัมน์ `extra_columns` เมื่อ 2026-10-25 และ `datasets` เมื่อ 2026-10-26; **ต้องรันก่อน restart** ไม่งั้น contract re-sync ของทุก feed context จะล้มเหลวและเก็บ knowledge เดิมไว้ ทำให้ contract ที่เปลี่ยนหรือ metric `datasets` ใหม่ไม่ถึง `schema_metrics`; ตั้งแต่ 2026-10-26 `load_metrics` ยังอ่านแถวที่มีอยู่ได้) — contract ที่เปลี่ยน re-sync เองใน request ถัดไป; ถ้าคอลัมน์ของ dataset เปลี่ยน → `register_file_source --domain <d>`
 3. ตรวจ: `SELECT metric_id, source, status FROM schema_metrics WHERE context_name='feed_<d>'`; log `Metric compiled: <id>`
 4. metric ของ legacy context (ไม่มี contract) ยังไม่มีทางประกาศ (admin UI = งานถัดไป); ถ้าใส่ตรงลงตารางให้ `source='manual'`
 

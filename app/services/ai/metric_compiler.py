@@ -4,6 +4,7 @@ Only names and synonyms are exposed to intent extraction; owner-declared formula
 stay here. Loading fails open, while unsupported compilation fails closed.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass, fields, replace
 import json
 import logging
@@ -118,6 +119,7 @@ def dimension_labels(metrics: list[Metric], config_engine=None) -> dict[str, str
     (e.g. unit → "ฝ่าย"). The schema table of the system prompt shows only the context's main view, so without this
     pass 1 never learns which column a "ฝ่าย" or "ส่วน" is. None = unavailable (the catalog then lists names only)."""
     wanted = {(m.dataset, d) for m in metrics if m.dataset for d in (m.dimensions or ())}
+    wanted.update((item["name"], d) for m in metrics for item in m.datasets or () for d in item["dimensions"])
     if not wanted:
         return {}
     try:
@@ -567,6 +569,9 @@ def plan_with_reason(
     reason = _support_reason(checked, metric, frozenset(ignore))
     if reason is not None:
         return None, reason
+    if metric.datasets is not None and _dataset_for(
+            metric, [*(intent.get("dimensions") or ()), *(f["column"] for f in remaining)]) is None:
+        return None, "shape:dimension_set"
     if type(reference) is not int:
         return None, "reference_missing"
     ref_y, ref_m = divmod(reference, 100)
@@ -721,6 +726,15 @@ def _period_label(period: int, mode: str) -> str:
     return f"{'สะสม ' if mode == 'cumulative' else ''}{period % 100:02d}/{period // 100 + 543}"
 
 
+def _dataset_for(metric: Metric, columns) -> str | None:
+    if metric.datasets is None:
+        return metric.dataset
+    columns = set(columns)
+    item = min((item for item in metric.datasets if columns <= set(item["dimensions"])),
+               key=lambda item: len(item["dimensions"]), default=None)
+    return item["name"] if item is not None else None
+
+
 def compile(req: CompileRequest, resolved: dict[str, Metric]) -> Compiled:
     """Compile a single-period SELECT, or a two-period comparison when `base_period` is set; invalid or
     unsupported input raises ValueError."""
@@ -739,6 +753,12 @@ def compile(req: CompileRequest, resolved: dict[str, Metric]) -> Compiled:
             raise ValueError("Invalid comparison")
         if req.threshold not in (None, "above", "below"):
             raise ValueError("Invalid threshold side")
+        official = not req.dimensions and not req.filters
+        total = metric.official_total if official and req.official_total_ok else None
+        table = total["dataset"] if total is not None else _dataset_for(
+            metric, [*req.dimensions, *(f["column"] for f in req.filters)])
+        if table is None:
+            raise ValueError("No declared dataset holds the requested dimensions and filters")
         # no year-to-date column declared (sales holds monthly amounts): the year to date is the sum of the
         # months from 01 to the period
         summed = req.mode == "cumulative" and not metric.period["value"].get("cumulative")
@@ -748,9 +768,14 @@ def compile(req: CompileRequest, resolved: dict[str, Metric]) -> Compiled:
 
             def identifier(name: str) -> str:
                 if name in current.terms:
-                    where = current.terms[name]["where"]
-                    if not isinstance(where, str) or not where.strip():
-                        raise ValueError("Missing term predicate")
+                    term = current.terms[name]
+                    if not isinstance(term, Mapping):
+                        raise ValueError("Invalid metric term")
+                    where = term.get("where")
+                    if where is not None and not isinstance(where, str):
+                        raise ValueError("Invalid term predicate")
+                    if where is None or not where.strip():
+                        where = "1 = 1"
                     return f"(COALESCE(SUM(CASE WHEN ({where}){when} THEN {value} END), 0))"
                 if name in resolved:
                     return f"({expression(resolved[name], visiting | {current.metric_id}, when)})"
@@ -761,7 +786,8 @@ def compile(req: CompileRequest, resolved: dict[str, Metric]) -> Compiled:
         def expression(current: Metric, visiting: frozenset[str], when: str = "") -> str:
             if current.metric_id in visiting:
                 raise ValueError("Cyclic metric expression")
-            if current.dataset != metric.dataset or current.period != metric.period:
+            if (current.dataset != metric.dataset or current.datasets != metric.datasets
+                    or current.period != metric.period):
                 raise ValueError("Referenced metric must use the same dataset and period mapping")
             return render(current.expr, current, visiting, when)
 
@@ -769,9 +795,6 @@ def compile(req: CompileRequest, resolved: dict[str, Metric]) -> Compiled:
         ranking = metric.ranking if metric.ranking is not None else {}
         if not isinstance(ranking, dict):
             raise ValueError("Invalid ranking declaration")
-        official = not req.dimensions and not req.filters
-        total = metric.official_total if official and req.official_total_ok else None
-        table = total["dataset"] if total is not None else metric.dataset
         if total is not None and summed:
             raise ValueError("An official total needs a year-to-date column")
         period_key = f'CAST({_quote(metric.period["column"])} AS INTEGER)'

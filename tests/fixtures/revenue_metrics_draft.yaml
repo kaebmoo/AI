@@ -1,0 +1,15 @@
+domain: revenue
+schema_version: c00-draft
+metrics:
+  - id: revenue
+    name_th: รายได้
+    synonyms: [รายได้, รายได้รวม, revenue]
+    datasets:
+      - {name: fact_total_monthly, dimensions: []}
+      - {name: fact_bu_monthly, dimensions: [bu_seq, bu]}
+      - {name: fact_org_monthly, dimensions: [division_name, unit_name, cost_center]}
+    period: {column: year_month, value: {cumulative: revenue_ytd, month: revenue}}
+    terms: {rev: {}}
+    expr: rev
+    official_total: {dataset: fact_total_monthly, column: revenue_ytd, month_column: revenue}
+    unit: บาท (THB)
