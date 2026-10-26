@@ -9,6 +9,7 @@
 | **E** คำอธิบายคอลัมน์ feed อัตโนมัติ | ✅ **ขึ้นของจริงแล้ว** (main `092f33f`, reload 23:47; ยังไม่ push) — วัดบนสำเนา: คำอธิบายว่าง 49.3% → 23.8% | 2026-10-24 | `3340f31`, `fc19128`, `fca9163`, `6826f75`, `cc0dfce` |
 | **B** ตัวตรวจ SQL ของ pass 2 | ✅ **ขึ้นของจริงแล้ว** (main ff `1d004bc..0cd5e0b`, reload 14:37 2026-10-25; ยังไม่ push) — B-01 ข้าม; วัดบน server ซ้อม: 156 → 160/174, ผิดอย่างมั่นใจ 14 → 10 (ชั้น invariant 0 → 0) | 2026-10-25 | `aee811c`, `9ef7cf0`, `d8ce4e6`, `553566b`, `233daa1` |
 | **C-0b** คำศัพท์ระดับหน่วยงาน — feed_revenue | ✅ **ขึ้นของจริงแล้ว** 2026-10-26 22:05 (ff AI main `eea6250..491c579`, NT-Report main `5854e5a..514c6f0` มี `52811cc`; audit 485–487 — §C0b.4); eval 174/200, ผิดอย่างมั่นใจ 18 → 2; feed_ebt + feed_expense ยังเป็นแถว `manual` (§A.6) | 2026-10-26 | `631cc7e`, `c9499aa`; NT-Report `52811cc` |
+| **C-0b** — feed_ebt / feed_expense จาก contract | ⏸ **พร้อมขึ้น รอเจ้าของ** — NT-Report `05f989b` (ebt 1.7.0, expense 1.3.0 `org_levels`), AI ไม่แก้ code; วัด: declared = manual (ebt 85/90 vs 82/90, expense 14/30 vs 15/30 — ระดับต่างเฉพาะข้อที่ไม่มี keyword); ขั้นขึ้น = ปิด manual 0–4 **ก่อน** แล้ววาง contract (§C0b2) | 2026-10-26 | `d9149ad` (test) |
 | **C-00** ส่วนขยาย compiler สำหรับ revenue (`datasets`, term ว่าง, M-5) + `period.parts` + ตัวกรองตัวเลข + มิติงวดในคำถามงวดเดียว | ✅ **ขึ้นของจริงแล้ว** (migrate config.db 14:11, ff AI main `beed1f3..c63da29`, reload 14:12 2026-10-26; ยังไม่ push); server ซ้อม: revenue compiled 3/6 → 4/6, 5/6 หลัง `period.parts` → 5/6 หลังตัวกรองตัวเลข → 4/6 ใน r5 (pass 1 เปลี่ยนเป็น `month <= 9`) → **5/6 ใน r7 และ r9** หลังรับ `month <= M` + ผ่อน R3 (เหลือ `shape:dimension_set` ตามข้อตัดสิน) ตัวเลขตรง parquet ทุกข้อที่ compile | 2026-10-26 | `5f3d62a`, `86e85b5`, `3a30c85`, `fdb9b72`, `22819bf`, `a9116b6`, `48a8875` |
 | **C-01** contract revenue (NT-Report) | ✅ **ขึ้นของจริงแล้ว** (ff NT-Report main `b08aa3c..738ea8b` 2026-10-26, revenue **2.4.0**; ยังไม่ push) — ของจริง audit 481–484 ผ่าน; server ซ้อม r11: revenue **6/6** compiled, คำถามเทียบเป้า 3/3 ไปทางเดิมด้วย `excluded_word` | 2026-10-26 | NT-Report `738ea8b`; AI `0e63227` (`excluded_words`) |
 | C-0c ratio จัดอันดับอย่างมีความหมาย | ✅ ทำก่อนแผนนี้ (`941cd0a`, ebt 1.6.0) | 2026-10-24 | |
@@ -668,3 +669,87 @@ re-sync ครั้งแรกเขียน 5 ระดับ `declared` (10
 - คำ "ชื่อย่อของกลุ่ม (เช่น กกง., อป.2)" ในคำถาม eval มาจาก desc ของ contract — ไม่มีรูปที่ชัดของ "กลุ่ม" จึงไม่มี note (`M0280` sub_division_sname ยังไปผิด/ไม่ compile) — ผู้ใช้จริงพิมพ์ "กลุ่มไหน" มากกว่า
 - server ซ้อม 8003 หยุดแล้ว (`./.ai/db/c0b/serve.sh <tag>` เปิดใหม่ได้)
 - คำอธิบาย (explain) ของ 485 ยังเรียกผลว่า "แต่ละกลุ่มธุรกิจ" แม้ข้อมูลเป็นกลุ่มองค์กร — ตัวเลข/คอลัมน์ถูก แต่ถ้อยคำของ explain ไม่รู้ระดับ
+
+## C0b2. ระดับหน่วยงานของ feed_ebt / feed_expense จาก contract (2026-10-26 ดึก, session แยกจาก §C0b)
+
+ที่มา §C0b.5: feed_ebt (ids 29–33) / feed_expense (ids 34–38) ตอบรายฝ่ายถูกเพราะแถว `manual` 0–4 ที่เขียนมือใน config.db (§A.6) — ไม่อยู่ใน git, ไม่ตามข้อมูล
+
+### C0b2.1 ที่สร้าง
+- **NT-Report `05f989b`** (worktree `_worktrees/NT-Report-metrics`, branch `ai/delegate-metrics`): ebt **1.7.0** / expense **1.3.0** — `org_levels:` คำและคอลัมน์เดียวกับแถว manual
+  (อ่านจากสำเนา config.db 22:51): ebt บน `fact_ebt` (`division` / `sub_division` / `unit` + `unit_short_name` / `sub_unit` / `cost_center`);
+  expense บน `dim_org_snapshot` (`division` / `sub_division_fname` / `unit_fname` / `sub_unit_fname` + ชื่อย่อ / `cost_center`) ไม่มี "รายกลุ่ม" ·
+  `test_metrics_contract`: ระดับอ้างคอลัมน์ของ fact **หรือของ dim ที่ JOIN fact ด้วย `scope_columns.org_code`** + ตรึงคอลัมน์แรกของสามโดเมน + expense ไม่มี "รายกลุ่ม" ·
+  `test_functional_deps` เคยตรึง expense `1.2.x` → รับ MINOR หลัง 1.2 · SPEC §5.4b, CHANGELOG · diff ของ contract = key ใหม่ + เวอร์ชัน ·
+  `pytest tools/feed` **42 passed** (รอบแรก `test_atomic_publish` ล้ม 1 ครั้ง — test จังหวะ concurrency, รันซ้ำ 3 รอบผ่าน) ·
+  หลัง commit นี้ branch มี `37e7246` (revenue 2.5.1 ของอีก session) ต่อท้าย — ไม่แตะ ebt/expense
+- **AI ไม่ต้องแก้ code**: `sync_hierarchy` รวมคอลัมน์ของทุก dataset (dim ด้วย) · ตัวอ่านทุกตัวแยกสายด้วย `level // 10` อยู่แล้ว (มีแต่ 10–14 = สายเดียว) ·
+  ใน request `source_resolver.for_context` (re-sync + ล้าง cache) มาก่อน pass 1 — คำถามแรกหลังวางเห็นระดับใหม่ ·
+  pass 1 JOIN `cost_center` + `effective_month` เองเมื่อ note ชี้คอลัมน์ของ dim (เห็นใน SQL ของ expense สายงาน/ฝ่าย/ส่วน ทั้งแบบ manual และ declared)
+- **AI `d9149ad`** test: contract แบบ expense (คอลัมน์อยู่ใน dim) → sync → 10–14 `declared` → note "ฝ่าย → `unit_fname`" + STEP 1.5 สายเดียว + "รายกลุ่มค่าใช้จ่าย" ไม่ชี้ระดับ ·
+  docs `DATAFEED_INTEGRATION.md` · ACC-T **2224 passed, 3 skipped** (2223 + 1) · ACC-L เขียว
+
+### C0b2.2 วัด (server ซ้อม 127.0.0.1:8004 บนสำเนา config.db/app.db/Chroma ของจริง 22:51 → `.ai/db/c0b2/`, code ของ worktree นี้, key ซ้อม id 6)
+- **ebt**: generator (`gen_metric_questions`, contract 1.7.0 + dist 202609) ชั้น `top5_desc` ทั้งหมด **90 ข้อ** = 3 metric × เดือน/สะสม × 5 ระดับ × 3 สำนวน
+  (สำนวนแรก = รูป §6b "<ระดับ>ไหนมี … สูงสุด 5 อันดับ", ที่เหลือ "ขอ 5 อันดับ<ระดับ>ที่มี…" / "… แยกตาม<ระดับ>")
+- **expense** ไม่มี metric → **30 ข้อ** รูปเดียวกัน (`.ai/eval/gen_expense_levels.py`), oracle บน parquet: `fact_expense` JOIN `dim_org_snapshot` ON `cost_center` + `effective_month = time_key` (กฎของ contract)
+- ให้คะแนนสองชั้น: **ตัวเลข** ตรง oracle (`score_case` เดิม) · **ระดับ** = คอลัมน์ระดับที่ละเอียดที่สุดใน GROUP BY ของ SQL (`.ai/eval/levels.py`)
+- **A** = แถว manual 0–4 (ของจริงวันนี้) · **B** = contract 1.7.0 / 1.3.0 + ปิด manual 0–4 (re-sync แรก log `Synced 3 metrics, 5 org levels for feed_ebt` → 10–14 `declared`/active) ·
+  **C** = B + รูปที่ชัดเพิ่ม (ไม่ commit): กลุ่ม + "กลุ่มไหน" "กลุ่มงาน"; ส่วน = รายการของ revenue 2.5.0 ("ส่วนไหน / แต่ละส่วน / ตามส่วน / ทุกส่วน" + เดิม) — วัดเฉพาะชั้นกลุ่ม/ส่วน
+
+| ebt (ตัวเลข · ระดับ) | A manual | B declared | C |
+|---|---|---|---|
+| สายงาน (18) | 18 · 18 | 18 · 18 | — |
+| กลุ่ม (18) | 16 · 16 | 16 · 16 | **17 · 17** |
+| ฝ่าย (18) | 18 · 18 | 18 · 18 | — |
+| ส่วน (18) | 13 · 15 | 15 · 17 | **16 · 18** |
+| ศูนย์ต้นทุน (18) | 17 · 18 | 18 · 18 | — |
+| **รวม 90** | **82 · 85** | **85 · 87** | (87 · 89) |
+
+| expense (ตัวเลข · ระดับ) | A manual | B declared | C |
+|---|---|---|---|
+| สายงาน (6) | 3 · 6 | 2 · 6 | — |
+| กลุ่ม (6) | 0 · 0 | 0 · 0 | 0 · 0 |
+| ฝ่าย (6) | 6 · 6 | 6 · 6 | — |
+| ส่วน (6) | 0 · 0 | 0 · 0 | **4 · 4** |
+| ศูนย์ต้นทุน (6) | 6 · 6 | 6 · 6 | — |
+| **รวม 30** | **15 · 18** | **14 · 18** | (18 · 22) |
+
+- **declared = manual**: ข้อที่**ระดับ**ของ A กับ B ต่างกันทุกข้อเป็นข้อที่ไม่มี keyword ในคำถาม (ไม่มี note ทั้งสองแบบ) = ความแกว่งของโมเดล;
+  ข้อที่มี keyword ต่างกันเฉพาะตัวเลข ระดับถูกทั้งคู่ (M0340 A `declined:mapping_triggered`, X001 A ปี พ.ศ., X017 B `LIKE '%สายงาน%'`) ·
+  ระดับที่คำถามมี keyword (สายงาน / ฝ่าย / ศูนย์ต้นทุน) ถูกระดับ **54/54** (ebt) และ **18/18** (expense) ทั้ง A และ B
+- **ช่องที่แถว manual มีอยู่แล้ว**: รูป §6b "กลุ่มไหน" / "ส่วนไหน" และ "แยกตามส่วน" / "ขอ 5 อันดับกลุ่มที่…" ไม่มี keyword → ไม่มี note:
+  ebt ไปสายงาน (M0040 / M0085 / M0202 / M0509 / M0553 ได้ 2 แถว) หรือ `group_0` / `group_1` (บรรทัดของรายงาน → `declined:shape`); expense "ส่วน" → `cat_l2_th` 12/12
+- **C ปิดช่องของ ebt**: ชั้นกลุ่ม/ส่วน ระดับถูก **35/36** (A 31, B 33) — เหลือ M0393 "แยกตามกลุ่ม" → `group_1` ("ตามกลุ่ม" ไม่ได้ใส่ — ข้อถัดไป);
+  expense "ส่วนไหน" / "แยกตามส่วน" → `sub_unit_fname` 4/6 (เหลือ "ขอ 5 อันดับส่วนที่…" ที่ไม่มี keyword)
+- **expense "กลุ่ม" = กลุ่มค่าใช้จ่าย**: แม้ C ส่ง note "กลุ่ม → `sub_division_fname`" (log `Hierarchy: level 11` ครบ 2 ข้อ) โมเดลยังตอบ `expense_group_name` ทุกข้อ —
+  metadata ของ expense เรียกคอลัมน์นั้นว่า "กลุ่มค่าใช้จ่าย"; ในโดเมนค่าใช้จ่ายการอ่านนี้มีเหตุผล → ไม่แนะนำ "กลุ่มไหน" ใน expense
+- ไม่ใส่ "ตามกลุ่ม / แต่ละกลุ่ม / ทุกกลุ่ม" ใน ebt/expense: ล้ำเข้า "ตามกลุ่มค่าใช้จ่าย" (ทั้งสองโดเมนมีกลุ่มค่าใช้จ่าย; `named_levels` ตัดเฉพาะเมื่อมี keyword ที่ยาวกว่า) ·
+  ตรวจ offline กับคำของ C: "ค่าใช้จ่ายแยกตามกลุ่มค่าใช้จ่าย", "สัดส่วนค่าใช้จ่ายตามกลุ่มค่าใช้จ่าย", "กลุ่มค่าใช้จ่ายไหนสูงสุด" ไม่ชี้ระดับ; "แต่ละส่วนลด…" ชี้ส่วน (ความเสี่ยงเดียวกับ revenue ที่เจ้าของรับแล้ว)
+- expense สายงานผิดเฉพาะตัวเลข (ระดับถูก): free SQL ใส่ `division LIKE '%สายงาน%'` เอง ตัด "กรรมการผู้จัดการใหญ่ บมจ.เอ็นที" (แถวที่ 5 ของ oracle) ออก; X001 ของ A ใส่ `time_key = 256909` (ปี พ.ศ.) ได้ 0 แถว
+- ไฟล์ผล (gitignored, worktree นี้): `eval_results/metric_eval_feed_{ebt,expense}_202609_20261026_{2312,2317}` (A) · `_{2330,2334}` (B) · `_{2340,2342}` (C); คำถามและตัวให้คะแนนใน `.ai/eval/`
+
+### C0b2.3 ขั้นขึ้นของจริง (รอเจ้าของสั่ง — ยังไม่ได้ทำ)
+ผู้อ่านไม่เปลี่ยน code → ไม่ต้อง ff AI main ก่อน (commit ของ AI ใน branch นี้ = test + docs)
+0. ตรวจ: NT-Report main = `514c6f0` สะอาด (ตรวจแล้ว 23:45) · `05f989b` ต่อจาก `514c6f0` ตรง ๆ
+1. backup: `sqlite3 -readonly /Users/seal/Documents/GitHub/AI/config.db ".backup ~/nt-ai-backups/c0b2-ebt-expense-golive-<ts>/config.db"` + `integrity_check`
+2. **ปิดแถว manual ก่อน แล้ววาง contract — คำสั่งเดียว** (ซ้อมบนสำเนาด้วย venv 3.10 แล้ว: ปิด 10 แถว, feed_revenue ไม่ถูกแตะ):
+   ```
+   cd /Users/seal/Documents/GitHub/AI && venv/bin/python -c "
+   from app.services.hierarchy_service import HierarchyService
+   s = HierarchyService()
+   for ctx in ('feed_ebt', 'feed_expense'):
+       for level in range(5):
+           s.delete_level(ctx, level)" && git -C /Users/seal/Documents/GitHub/NT-Report merge --ff-only 05f989b
+   ```
+   ลำดับนี้เพราะการปิดจากโปรเซสอื่นไม่ล้าง cache ของ server: ถ้าวาง contract ก่อน request ในช่วงนั้น re-sync แล้วโหลด**ทั้งสองสาย**เข้า cache
+   ("ฝ่าย" → ระดับ 2 และ 12) ค้างได้ถึง 1 ชม.; ลำดับนี้ช่วงระหว่างสองคำสั่ง server ยังใช้ cache เดิม (manual) จน re-sync ซึ่งเกิดก่อน pass 1 ของ request แรกของแต่ละ context ·
+   `05f989b` = commit นี้อย่างเดียว — `37e7246` (revenue 2.5.1) บน branch เดียวกันเป็นงานของอีก session เจ้าของตัดสินแยก
+3. ถามหนึ่งข้อต่อ context → `SELECT context_name, level, source, is_active FROM master_hierarchy WHERE context_name IN ('feed_ebt','feed_expense')`
+   = 0–4 manual / is_active 0 + 10–14 declared / 1
+4. "ฝ่ายไหนมี ebt สูงสุด 5 อันดับ" → audit `compiled:ebt` GROUP BY `unit` · "ฝ่ายไหนมีค่าใช้จ่ายสะสมปี 2569 สูงสุด 5 อันดับ" → GROUP BY `unit_fname` (ฝ่ายเสาโทรคมนาคม 3,072.72 ล้าน)
+- ย้อนกลับ: `git -C NT-Report reset --hard 514c6f0` (re-sync ถอนแถว 10–14 เอง) + `UPDATE master_hierarchy SET is_active = 1 WHERE id BETWEEN 29 AND 38` — หรือคืน config.db จาก backup
+
+### C0b2.4 รอเจ้าของตัดสิน
+- ขึ้นด้วยคำเดิม (= แถว manual, ที่ commit ไว้) หรือเพิ่มรูปที่ชัดตาม C ก่อน (PATCH ebt 1.7.1 / expense 1.3.1): ebt กลุ่ม + "กลุ่มไหน" "กลุ่มงาน", ส่วน = รายการของ revenue;
+  expense ส่วน = รายการของ revenue (ไม่ใส่ "กลุ่มไหน") — ผล C: ebt ชั้นกลุ่ม/ส่วน ระดับถูก 33 → 35/36, expense ชั้นส่วน 0 → 4/6
+- server ซ้อม 8004 หยุดแล้ว (`./.ai/db/c0b2/serve.sh <tag>` เปิดใหม่ได้; สำเนาตอนนี้อยู่ในสภาพ C — `config.pristine.db` = สำเนาก่อนแตะ)

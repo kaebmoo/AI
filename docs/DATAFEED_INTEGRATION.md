@@ -151,7 +151,10 @@ logic อยู่ที่ `app/services/datafeed_knowledge.py` (`gen_docs_from
   `format_level_note` แสดงเฉพาะสายของระดับที่คำถามพูดถึง (เจ้าของตัดสิน (ข) 2026-10-26) · ระดับที่คอลัมน์ไม่มีใน contract ไม่ถูกเขียน · แถวที่คนแก้ชนะ (ฉบับ contract รอใน `knowledge_proposals`) ·
   level note คือสิ่งที่ pass 1 ใช้เลือกมิติ (eval revenue 202609: "กลุ่มไหน" เคยได้ `bu` 12 ข้อ — `plan/RESULT_METRICS_CONVERGENCE.md` §C.6/§C0b) ·
   keyword ที่ล้ำเข้าไปใน keyword ที่ยาวกว่า ("ตามกลุ่ม" ใน "ตามกลุ่มธุรกิจ") ไม่นับ · cache ของ hierarchy ถูกล้างหลัง re-sync ·
-  **feed_ebt / feed_expense** ยังใช้แถว `manual` 0–4 (§A.6) — ถ้า contract ของสองโดเมนนี้ประกาศ `org_levels` ต้องปิดแถว manual ก่อน ไม่งั้นมีสองสายที่คำเดียวกัน
+  คอลัมน์ของระดับมาจาก dataset ใดก็ได้ของ contract (expense: `dim_org_snapshot` — fact มีแค่ `cost_center`) ·
+  **feed_ebt / feed_expense** เดิมใช้แถว `manual` 0–4 (§A.6); ebt 1.7.0 / expense 1.3.0 ประกาศ `org_levels` คำเดียวกัน — ตอนวาง **ปิดแถว manual 0–4 ก่อน**
+  (`HierarchyService.delete_level`) **แล้วจึงวาง contract**: ถ้าวาง contract ก่อน request ในช่วงนั้น re-sync แล้ว cache ทั้งสองสาย ("ฝ่าย" ชี้ระดับ 2 และ 12)
+  ได้นานถึง 1 ชม. เพราะการปิดจากโปรเซสอื่นไม่ล้าง cache ของ server (`plan/RESULT_METRICS_CONVERGENCE.md` §C0b2)
 
 **ย้อนกลับไปใช้ข้อมูลที่ import ไว้ (fallback):**
 `python -m scripts.datafeed.register_file_source --domain revenue --legacy` แล้วรัน
