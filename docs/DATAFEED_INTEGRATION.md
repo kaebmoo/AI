@@ -146,6 +146,12 @@ logic อยู่ที่ `app/services/datafeed_knowledge.py` (`gen_docs_from
 - **`metrics:` ใน contract (2026-10-24, ebt 1.5.0)** → `sync_metrics` → ตาราง `schema_metrics` (`declared`; ต้องมีตารางก่อน: `scripts/migrate_schema_metrics.py` — ไม่มี = ข้ามพร้อม warning,
   server ยังเริ่มได้) — ตรวจกับ datasets ของ contract ตอน sync (dataset/คอลัมน์งวด/มิติ/คอลัมน์ใน `where`/ชื่อใน `expr`/`official_total`/`extends` ต้องมีจริง; metric ที่ผิดถูกข้าม ตัวอื่นเข้า);
   `dataset` และ `official_total.dataset` เก็บเป็นชื่อเต็ม `feed_<domain>_<dataset>`; metric ที่ contract เลิกประกาศถูกถอน (เฉพาะแถว `declared`); ผู้ใช้คือ `app/services/ai/metric_compiler.py` — ดู `docs/DECLARED_METRICS.md`
+- **`org_levels:` ใน contract (2026-10-26, revenue 2.5.0, Phase C-0b)** = ระดับหน่วยงานบนลงล่าง `[{label_th, label_en, columns[], keywords[]}]` → `sync_hierarchy` →
+  `master_hierarchy` ของ `feed_<domain>` ที่ **level 10+i** (`declared`) — หนึ่งสายต่อหลักสิบ: สายผลิตภัณฑ์ของคน (0–2) อยู่คู่กันได้ใต้ `UNIQUE(context_name, level)`,
+  `format_level_note` แสดงเฉพาะสายของระดับที่คำถามพูดถึง (เจ้าของตัดสิน (ข) 2026-10-26) · ระดับที่คอลัมน์ไม่มีใน contract ไม่ถูกเขียน · แถวที่คนแก้ชนะ (ฉบับ contract รอใน `knowledge_proposals`) ·
+  level note คือสิ่งที่ pass 1 ใช้เลือกมิติ (eval revenue 202609: "กลุ่มไหน" เคยได้ `bu` 12 ข้อ — `plan/RESULT_METRICS_CONVERGENCE.md` §C.6/§C0b) ·
+  keyword ที่ล้ำเข้าไปใน keyword ที่ยาวกว่า ("ตามกลุ่ม" ใน "ตามกลุ่มธุรกิจ") ไม่นับ · cache ของ hierarchy ถูกล้างหลัง re-sync ·
+  **feed_ebt / feed_expense** ยังใช้แถว `manual` 0–4 (§A.6) — ถ้า contract ของสองโดเมนนี้ประกาศ `org_levels` ต้องปิดแถว manual ก่อน ไม่งั้นมีสองสายที่คำเดียวกัน
 
 **ย้อนกลับไปใช้ข้อมูลที่ import ไว้ (fallback):**
 `python -m scripts.datafeed.register_file_source --domain revenue --legacy` แล้วรัน

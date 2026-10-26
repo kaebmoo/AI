@@ -25,6 +25,7 @@ from typing import Any, Dict, Mapping, Optional, Tuple
 
 import yaml
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 
 from app.services.provenance import DECLARED, DECLARED_FIELDS, REJECTED, may_replace, propose, replaceable
 
@@ -43,6 +44,9 @@ DOMAIN_KEYWORDS = {
     "ebt": ["ebt", "กำไร", "ขาดทุน", "profit", "ผลดำเนินงาน"],
 }
 FEED_PRIORITY = 1
+# One hierarchy chain per tens in master_hierarchy (UNIQUE(context_name, level)): a person's product chain at 0–2,
+# the contract's org_levels from 10 — format_level_note reads level // 10 as the chain (owner 2026-10-26, §6b ข)
+ORG_LEVEL_BASE = 10
 WAITS = "คนแก้ส่วนที่ contract ประกาศไว้ — ฉบับใหม่ของ contract รอคนตัดสิน (D-C)"
 # What the contract may withdraw: its own declaration — never a person's row, never one a person rejected
 OWN = "source = 'declared' AND COALESCE(status, 'active') != 'rejected'"
@@ -440,13 +444,50 @@ def sync_metrics(conn, domain: str, contract: dict, context_name: str) -> int:
     return count
 
 
+def sync_hierarchy(conn, contract: dict, context_name: str) -> int:
+    """`org_levels` (top down) → master_hierarchy rows of the context at level ORG_LEVEL_BASE + i — declared, by the
+    one rule. The level a question names is what pass 1 groups by (PLAN_METRICS_CONVERGENCE §6b): feed_revenue had
+    only its product chain, so "กลุ่มไหน" was answered per business group (RESULT §C.6). A level whose columns the
+    contract does not have is not written (and its earlier declaration goes)."""
+    columns = {c["name"] for d in contract["datasets"] for c in d["columns"]}
+    try:
+        existing = {r["level"]: r for r in conn.execute(text(
+            "SELECT level, source, status, level_label_th, level_label_en, level_columns, detection_keywords "
+            "FROM master_hierarchy WHERE context_name = :c"), {"c": context_name}).mappings()}
+    except OperationalError:  # a config DB without the hierarchy table has nothing to withdraw
+        if contract.get("org_levels"):
+            raise
+        return 0
+    declared = set()
+    for i, level in enumerate(contract.get("org_levels") or []):
+        number = ORG_LEVEL_BASE + i
+        cols, words = level.get("columns"), level.get("keywords")
+        if (not level.get("label_th") or not isinstance(cols, list) or not cols or not set(cols) <= columns
+                or not isinstance(words, list) or not words or not all(isinstance(w, str) and w.strip() for w in words)):
+            logger.warning("Skipping org level %s of %s: needs label_th, its contract's columns and keywords",
+                           level.get("label_th"), context_name)
+            continue
+        values = {"level_label_th": level["label_th"], "level_label_en": level.get("label_en") or level["label_th"],
+                  "level_columns": json.dumps(cols, ensure_ascii=False),
+                  "detection_keywords": json.dumps(words, ensure_ascii=False)}
+        _declare(conn, "master_hierarchy", {"context_name": context_name, "level": number}, values,
+                 existing.get(number), insert={"is_active": 1, "status": "active"}, stamp=True)
+        declared.add(number)
+    for number, row in existing.items():
+        if number not in declared and row["source"] == DECLARED and row["status"] != REJECTED:
+            conn.execute(text(f"DELETE FROM master_hierarchy WHERE context_name = :c AND level = :l AND {OWN}"),
+                         {"c": context_name, "l": number})
+    return len(declared)
+
+
 def sync_knowledge(conn, domain: str, contract: dict) -> Tuple[str, int, int]:
-    """Context + metadata + docs + metrics for one domain, on the caller's transaction."""
+    """Context + metadata + docs + metrics + org levels for one domain, on the caller's transaction."""
     context_name = register_context(conn, domain, contract)
     n_meta = sync_schema_metadata(conn, domain, contract)
     n_docs = sync_documentation(conn, domain, contract, context_name)
     n_metrics = sync_metrics(conn, domain, contract, context_name)
-    logger.info("Synced %s metrics for %s", n_metrics, context_name)
+    n_levels = sync_hierarchy(conn, contract, context_name)
+    logger.info("Synced %s metrics, %s org levels for %s", n_metrics, n_levels, context_name)
     return context_name, n_meta, n_docs
 
 
@@ -490,6 +531,8 @@ def sync_from_contract(config_engine, source_name: str, contract_path: str, sche
         context_name, n_meta, n_docs = sync_knowledge(conn, domain, contract)
     logger.info(f"Knowledge of {context_name} re-synced from {contract_path} "
                 f"(schema {contract.get('schema_version')}, key {key}): {n_meta} metadata, {n_docs} docs")
+    from app.services.ai.hierarchy_context import get_hierarchy_cache
+    get_hierarchy_cache().clear()  # the levels are read through a 1-hour cache — the new ones count from now
     mark_brain_dirty()
     return True
 

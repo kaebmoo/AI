@@ -294,6 +294,8 @@ def named_levels(question: str, hierarchy: Optional[List[Dict]], ignore: frozens
     """Every level the question's own words name, parent first. A keyword that is part of something longer
     names nothing of its own:
       - a longer keyword: "กลุ่มบริการ" is the service group level, not also "บริการ"
+      - a keyword that runs on past its end: "ตามกลุ่มธุรกิจ" is per business group, not also the org level
+        "ตามกลุ่ม" (its last word is the head of the next one — two chains share a context, §6b)
       - a compound it closes: "รายหมวดบัญชี" is per account group, not also per account (the first word
         is the head)
       - a name another level holds (`names`: values + aliases): "กลุ่มธุรกิจ 7.กลุ่มบริการอื่นไม่ใช่โทรคมนาคม"
@@ -314,7 +316,8 @@ def named_levels(question: str, hierarchy: Optional[List[Dict]], ignore: frozens
              for hit in spans((k.lower() for k in info["detection_keywords"] if k.lower() not in ignore), info)]
     names = [hit for info in hierarchy for hit in spans((n.lower() for n in info.get("names", ())), info)]
     words = [(start, end, info) for start, end, info in found
-             if not any(s <= start and end <= e and e - s > end - start for s, e, _ in found)]
+             if not any(s <= start and end <= e and e - s > end - start for s, e, _ in found)
+             and not any(start < s < end < e for s, e, _ in found)]
     levels = {info["level"]: info for start, end, info in words
               if not any(e == start for _, e, _ in words)
               and not any(s <= start and end <= e and e - s > end - start and other["level"] != info["level"]
@@ -329,11 +332,14 @@ def format_level_note(hierarchy: Optional[List[Dict]], levels: List[Dict]) -> st
     One level: rank / break down / filter in it. Several ("บริการ 10 อันดับแรกในกลุ่มธุรกิจ Digital"): the one
     given a name is the filter, the one to rank the grouping — naming only the parent there made the model
     rank business groups. Columns and labels come from master_hierarchy; no level named = "" (the prompt
-    as before)."""
+    as before). A context with two chains (feed_revenue: product 0–2, org 10–14) holds one per tens; the note
+    shows the chains of the named levels only."""
     if not hierarchy or not levels:
         return ""
-    chain = " > ".join(f"{level['label_th']} (`{level['columns'][0]}`)"
-                       for level in sorted(hierarchy, key=lambda level: level["level"]))
+    chains = sorted({level["level"] // 10 for level in levels})
+    chain = " · ".join(" > ".join(f"{level['label_th']} (`{level['columns'][0]}`)"
+                                  for level in sorted(hierarchy, key=lambda level: level["level"])
+                                  if level["level"] // 10 == number) for number in chains)
 
     def columns(level: Dict) -> tuple:
         primary, *others = level["columns"]
