@@ -105,6 +105,8 @@ metrics:
 - ไม่มีตารางที่มีครบ → `plan()` ไม่รับด้วยเหตุผล `shape:dimension_set` และส่งคำถามไป free SQL
 - term ที่ไม่มี `where` หรือเป็น null / ว่าง / ช่องว่างล้วน = ทุกแถวของตาราง
 - period ที่ไม่มี `cumulative` ใช้ SUM คอลัมน์ month แบบ `BETWEEN y01 AND yMM`; sync ปฏิเสธเมื่อคอลัมน์นั้นเป็น `agg: point_in_time` (M-5)
+- `excluded_words: [เป้า, target]` (ไม่สืบทอด) = คำของคำถามที่ metric นี้ตอบไม่ได้ → `plan()` ไม่รับด้วย `excluded_word:<คำ>` และคำถามไป free SQL เหมือนก่อนมี metric
+  (server ซ้อม r10: "รายได้เทียบเป้า" ถูก compile เป็นรายได้เทียบปีก่อน เพราะ metric `revenue` ไม่มีเป้า — เป้าอยู่ใน `fact_*_target_monthly`)
 
 ## 4. เส้นทางของคำถาม (เมื่อ context มี metric)
 

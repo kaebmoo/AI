@@ -372,6 +372,10 @@ def _validate_metric(metric: dict, datasets: dict, earlier_ids: set, column_aggs
         name = ranking.get("base_name_th")
         if name is not None and (not isinstance(name, str) or not name.strip()):
             raise ValueError("ranking.base_name_th must be a non-empty string")
+    excluded = metric.get("excluded_words")
+    if excluded is not None and (not isinstance(excluded, list) or not excluded
+                                 or not all(isinstance(w, str) and w.strip() for w in excluded)):
+        raise ValueError("excluded_words must be a non-empty list of words")
 
 
 def sync_metrics(conn, domain: str, contract: dict, context_name: str) -> int:
@@ -418,7 +422,7 @@ def sync_metrics(conn, domain: str, contract: dict, context_name: str) -> int:
                 total = values["official_total"]
                 values["official_total"] = {**total, "dataset": f"feed_{domain}_{total['dataset']}"}
             for field in ("synonyms", "period", "dimensions", "terms", "official_total", "reference", "ranking",
-                          "extra_columns", "datasets"):
+                          "extra_columns", "datasets", "excluded_words"):
                 if values[field] is not None:
                     values[field] = json.dumps(values[field], ensure_ascii=False, sort_keys=True)
         except (KeyError, TypeError, ValueError, AttributeError) as exc:

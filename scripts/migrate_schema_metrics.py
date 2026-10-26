@@ -32,6 +32,7 @@ def migrate(config_engine=None):
             ranking TEXT,
             extra_columns TEXT,
             datasets TEXT,
+            excluded_words TEXT,
             source TEXT,
             status TEXT NOT NULL DEFAULT 'active',
             confidence REAL,
@@ -56,6 +57,10 @@ def migrate(config_engine=None):
         if "datasets" not in present:
             conn.execute(text("ALTER TABLE schema_metrics ADD COLUMN datasets TEXT"))
             print("Added schema_metrics.datasets.")
+        # 2026-10-26: `excluded_words` ([word] — questions the metric must not answer, revenue: เป้า)
+        if "excluded_words" not in present:
+            conn.execute(text("ALTER TABLE schema_metrics ADD COLUMN excluded_words TEXT"))
+            print("Added schema_metrics.excluded_words.")
     print("Ensured schema_metrics and its context/metric unique index and context index exist.")
     print("Migration complete (idempotent).")
 

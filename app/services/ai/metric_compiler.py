@@ -40,6 +40,8 @@ class Metric:
     # [{expr, name_th}]: values shown before the metric's own column (sales: ยอดขาย and เป้า beside the %)
     extra_columns: list | None = None
     datasets: tuple | None = None
+    # words of questions this metric must not answer (revenue: "เป้า" — the target sits in other tables); not inherited
+    excluded_words: tuple | None = None
 
     def __post_init__(self):
         if self.datasets is not None and self.dimensions is None:
@@ -61,14 +63,13 @@ def load_metrics(context_name: str, config_engine=None) -> list[Metric]:
             for row in rows:
                 values = {f.name: row.get(f.name) for f in fields(Metric)}
                 for key in ("synonyms", "period", "dimensions", "terms", "official_total", "reference", "ranking",
-                            "extra_columns", "datasets"):
+                            "extra_columns", "datasets", "excluded_words"):
                     if isinstance(values[key], str):
                         values[key] = json.loads(values[key])
                 values["synonyms"] = tuple(values["synonyms"] or ())
-                if values["dimensions"] is not None:
-                    values["dimensions"] = tuple(values["dimensions"])
-                if values["datasets"] is not None:
-                    values["datasets"] = tuple(values["datasets"])
+                for key in ("dimensions", "datasets", "excluded_words"):
+                    if values[key] is not None:
+                        values[key] = tuple(values[key])
                 values["terms"] = values["terms"] or {}
                 metrics.append(Metric(**values))
             return metrics
@@ -542,6 +543,12 @@ def plan_with_reason(
     if metric_id is None:
         return None, "no_metric"
     metric = resolved[metric_id]
+    # practice server r10: "รายได้เทียบเป้า" compiled as revenue against last year — the contract names the words of
+    # questions the metric cannot answer, and those go to free SQL as before the metric existed
+    excluded = next((word for word in metric.excluded_words or ()
+                     if isinstance(word, str) and word.strip() and word.casefold() in question.casefold()), None)
+    if excluded is not None:
+        return None, "excluded_word:" + _reason_detail(excluded.casefold())
     ignore = set()
     ancestor = metric
     visited = set()
