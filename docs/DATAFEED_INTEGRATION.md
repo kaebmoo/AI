@@ -153,7 +153,7 @@ logic อยู่ที่ `app/services/datafeed_knowledge.py` (`gen_docs_from
   keyword ที่ล้ำเข้าไปใน keyword ที่ยาวกว่า ("ตามกลุ่ม" ใน "ตามกลุ่มธุรกิจ") ไม่นับ · cache ของ hierarchy ถูกล้างหลัง re-sync ·
   คอลัมน์ของระดับมาจาก dataset ใดก็ได้ของ contract (expense: `dim_org_snapshot` — fact มีแค่ `cost_center`) ·
   **feed_ebt / feed_expense** เดิมใช้แถว `manual` 0–4 (§A.6); ebt 1.7.0 / expense 1.3.0 ประกาศ `org_levels` คำเดียวกัน — ตอนวาง **ปิดแถว manual 0–4 ก่อน**
-  (`HierarchyService.delete_level`) **แล้วจึงวาง contract**: ถ้าวาง contract ก่อน request ในช่วงนั้น re-sync แล้ว cache ทั้งสองสาย ("ฝ่าย" ชี้ระดับ 2 และ 12)
+  (`HierarchyService.delete_level`) **แล้วจึงวาง contract** (ขึ้นของจริงแล้ว 2026-10-27 00:22): ถ้าวาง contract ก่อน request ในช่วงนั้น re-sync แล้ว cache ทั้งสองสาย ("ฝ่าย" ชี้ระดับ 2 และ 12)
   ได้นานถึง 1 ชม. เพราะการปิดจากโปรเซสอื่นไม่ล้าง cache ของ server (`plan/RESULT_METRICS_CONVERGENCE.md` §C0b2)
 
 **ย้อนกลับไปใช้ข้อมูลที่ import ไว้ (fallback):**

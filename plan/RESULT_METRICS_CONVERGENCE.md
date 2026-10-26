@@ -9,7 +9,7 @@
 | **E** คำอธิบายคอลัมน์ feed อัตโนมัติ | ✅ **ขึ้นของจริงแล้ว** (main `092f33f`, reload 23:47; ยังไม่ push) — วัดบนสำเนา: คำอธิบายว่าง 49.3% → 23.8% | 2026-10-24 | `3340f31`, `fc19128`, `fca9163`, `6826f75`, `cc0dfce` |
 | **B** ตัวตรวจ SQL ของ pass 2 | ✅ **ขึ้นของจริงแล้ว** (main ff `1d004bc..0cd5e0b`, reload 14:37 2026-10-25; ยังไม่ push) — B-01 ข้าม; วัดบน server ซ้อม: 156 → 160/174, ผิดอย่างมั่นใจ 14 → 10 (ชั้น invariant 0 → 0) | 2026-10-25 | `aee811c`, `9ef7cf0`, `d8ce4e6`, `553566b`, `233daa1` |
 | **C-0b** คำศัพท์ระดับหน่วยงาน — feed_revenue | ✅ **ขึ้นของจริงแล้ว** 2026-10-26 22:05 (ff AI main `eea6250..491c579`, NT-Report main `5854e5a..514c6f0` มี `52811cc`; audit 485–487 — §C0b.4); eval 174/200, ผิดอย่างมั่นใจ 18 → 2; feed_ebt + feed_expense ยังเป็นแถว `manual` (§A.6) | 2026-10-26 | `631cc7e`, `c9499aa`; NT-Report `52811cc` |
-| **C-0b** — feed_ebt / feed_expense จาก contract | ⏸ **พร้อมขึ้น รอเจ้าของ** — NT-Report `05f989b` (ebt 1.7.0, expense 1.3.0 `org_levels`), AI ไม่แก้ code; วัด: declared = manual (ebt 85/90 vs 82/90, expense 14/30 vs 15/30 — ระดับต่างเฉพาะข้อที่ไม่มี keyword); ขั้นขึ้น = ปิด manual 0–4 **ก่อน** แล้ววาง contract (§C0b2) | 2026-10-26 | `d9149ad` (test) |
+| **C-0b** — feed_ebt / feed_expense จาก contract | ✅ **ขึ้นของจริงแล้ว** 2026-10-27 00:22 (ปิด manual 29–38 → ff NT-Report main `514c6f0..05f989b`; audit 488–489 — §C0b2.5) — ebt 1.7.0, expense 1.3.0 `org_levels`, AI ไม่แก้ code; วัด: declared = manual (ebt 85/90 vs 82/90, expense 14/30 vs 15/30 — ระดับต่างเฉพาะข้อที่ไม่มี keyword); ขั้นขึ้น = ปิด manual 0–4 **ก่อน** แล้ววาง contract (§C0b2) | 2026-10-26 | `d9149ad` (test) |
 | **C-00** ส่วนขยาย compiler สำหรับ revenue (`datasets`, term ว่าง, M-5) + `period.parts` + ตัวกรองตัวเลข + มิติงวดในคำถามงวดเดียว | ✅ **ขึ้นของจริงแล้ว** (migrate config.db 14:11, ff AI main `beed1f3..c63da29`, reload 14:12 2026-10-26; ยังไม่ push); server ซ้อม: revenue compiled 3/6 → 4/6, 5/6 หลัง `period.parts` → 5/6 หลังตัวกรองตัวเลข → 4/6 ใน r5 (pass 1 เปลี่ยนเป็น `month <= 9`) → **5/6 ใน r7 และ r9** หลังรับ `month <= M` + ผ่อน R3 (เหลือ `shape:dimension_set` ตามข้อตัดสิน) ตัวเลขตรง parquet ทุกข้อที่ compile | 2026-10-26 | `5f3d62a`, `86e85b5`, `3a30c85`, `fdb9b72`, `22819bf`, `a9116b6`, `48a8875` |
 | **C-01** contract revenue (NT-Report) | ✅ **ขึ้นของจริงแล้ว** (ff NT-Report main `b08aa3c..738ea8b` 2026-10-26, revenue **2.4.0**; ยังไม่ push) — ของจริง audit 481–484 ผ่าน; server ซ้อม r11: revenue **6/6** compiled, คำถามเทียบเป้า 3/3 ไปทางเดิมด้วย `excluded_word` | 2026-10-26 | NT-Report `738ea8b`; AI `0e63227` (`excluded_words`) |
 | C-0c ratio จัดอันดับอย่างมีความหมาย | ✅ ทำก่อนแผนนี้ (`941cd0a`, ebt 1.6.0) | 2026-10-24 | |
@@ -728,7 +728,7 @@ re-sync ครั้งแรกเขียน 5 ระดับ `declared` (10
 - expense สายงานผิดเฉพาะตัวเลข (ระดับถูก): free SQL ใส่ `division LIKE '%สายงาน%'` เอง ตัด "กรรมการผู้จัดการใหญ่ บมจ.เอ็นที" (แถวที่ 5 ของ oracle) ออก; X001 ของ A ใส่ `time_key = 256909` (ปี พ.ศ.) ได้ 0 แถว
 - ไฟล์ผล (gitignored, worktree นี้): `eval_results/metric_eval_feed_{ebt,expense}_202609_20261026_{2312,2317}` (A) · `_{2330,2334}` (B) · `_{2340,2342}` (C); คำถามและตัวให้คะแนนใน `.ai/eval/`
 
-### C0b2.3 ขั้นขึ้นของจริง (รอเจ้าของสั่ง — ยังไม่ได้ทำ)
+### C0b2.3 ขั้นขึ้นของจริง (ที่วางไว้ — ทำแล้วตาม §C0b2.5)
 ผู้อ่านไม่เปลี่ยน code → ไม่ต้อง ff AI main ก่อน (commit ของ AI ใน branch นี้ = test + docs)
 0. ตรวจ: NT-Report main = `514c6f0` สะอาด (ตรวจแล้ว 23:45) · `05f989b` ต่อจาก `514c6f0` ตรง ๆ
 1. backup: `sqlite3 -readonly /Users/seal/Documents/GitHub/AI/config.db ".backup ~/nt-ai-backups/c0b2-ebt-expense-golive-<ts>/config.db"` + `integrity_check`
@@ -749,7 +749,20 @@ re-sync ครั้งแรกเขียน 5 ระดับ `declared` (10
 4. "ฝ่ายไหนมี ebt สูงสุด 5 อันดับ" → audit `compiled:ebt` GROUP BY `unit` · "ฝ่ายไหนมีค่าใช้จ่ายสะสมปี 2569 สูงสุด 5 อันดับ" → GROUP BY `unit_fname` (ฝ่ายเสาโทรคมนาคม 3,072.72 ล้าน)
 - ย้อนกลับ: `git -C NT-Report reset --hard 514c6f0` (re-sync ถอนแถว 10–14 เอง) + `UPDATE master_hierarchy SET is_active = 1 WHERE id BETWEEN 29 AND 38` — หรือคืน config.db จาก backup
 
-### C0b2.4 รอเจ้าของตัดสิน
-- ขึ้นด้วยคำเดิม (= แถว manual, ที่ commit ไว้) หรือเพิ่มรูปที่ชัดตาม C ก่อน (PATCH ebt 1.7.1 / expense 1.3.1): ebt กลุ่ม + "กลุ่มไหน" "กลุ่มงาน", ส่วน = รายการของ revenue;
+### C0b2.4 ข้อตัดสินของเจ้าของ
+- **ขึ้นด้วยคำเดิม** (เจ้าของสั่ง 2026-10-27) — ไม่ได้ทำทางเลือกเพิ่มรูปที่ชัดตาม C ก่อน (PATCH ebt 1.7.1 / expense 1.3.1): ebt กลุ่ม + "กลุ่มไหน" "กลุ่มงาน", ส่วน = รายการของ revenue;
   expense ส่วน = รายการของ revenue (ไม่ใส่ "กลุ่มไหน") — ผล C: ebt ชั้นกลุ่ม/ส่วน ระดับถูก 33 → 35/36, expense ชั้นส่วน 0 → 4/6
 - server ซ้อม 8004 หยุดแล้ว (`./.ai/db/c0b2/serve.sh <tag>` เปิดใหม่ได้; สำเนาตอนนี้อยู่ในสภาพ C — `config.pristine.db` = สำเนาก่อนแตะ)
+
+### C0b2.5 ขึ้นของจริง (2026-10-27 00:22, เจ้าของสั่ง "ขึ้นของจริงตาม §C0b2.3 ด้วยคำเดิม (05f989b)")
+- ก่อน: server live pid 75437 (`--reload`, port 8000) ตอบ 200 · NT-Report main `514c6f0` สะอาด · แถว 29–38 `manual`/active
+- 00:22:02 backup `~/nt-ai-backups/c0b2-ebt-expense-golive-20261027-002202/config.db` (integrity_check ok) — ไม่มี migration, ไม่ ff AI main (ผู้อ่านไม่เปลี่ยน code)
+- 00:22:33 `HierarchyService.delete_level` × 10 → แถว 29–38 `is_active = 0` · 00:22:35 ff NT-Report main `514c6f0..05f989b` (ebt **1.7.0**, expense **1.3.0**; ไม่รวม `37e7246`)
+- request แรกของแต่ละ context re-sync: `master_hierarchy` = 0–4 `manual`/0 + **10–14 `declared`/1** ทั้ง feed_ebt และ feed_expense ·
+  `knowledge_sha` ebt `8fc79f1e…:1.6.0`, expense `cc892d87…:1.2.3` · quick_check ok
+- ถามจริงผ่าน nt-ai (key id 5, ช่องทางเดียวกับ §C0b.4):
+  **488** "ฝ่ายไหนมี EBT สะสมปี 2569 สูงสุด 5 อันดับ" `compiled:ebt` GROUP BY `unit_short_name` (ระดับฝ่าย) — 5 แถวตรง oracle ตามลำดับ (อป.2 462,782,754.61 … ตน.1 245,136,409.28) ·
+  **489** "ฝ่ายไหนมีค่าใช้จ่ายสะสมปี 2569 สูงสุด 5 อันดับ" free SQL JOIN `dim_org_snapshot` ON `cost_center` + `effective_month` GROUP BY `unit_fname` (ฝ่ายเสาโทรคมนาคม 3,072,723,731.19 ตรง oracle)
+- ข้อสังเกต: ebt เลือก `unit` หรือ `unit_short_name` (สองคอลัมน์ของระดับฝ่าย) ปนกันตั้งแต่ก่อนย้าย — server ซ้อม A 14/4, B 13/5 — ไม่ใช่ผลของการย้าย
+- ยังไม่ push ทั้งสอง repo · commit ของ AI (`d9149ad` test, `6748dac` + ฉบับนี้ docs) อยู่บน branch `claude/angry-wright-bf7dca` ยังไม่เข้า main ·
+  ย้อนกลับ: `git -C NT-Report reset --hard 514c6f0` (re-sync ถอนแถว 10–14 เอง) + `UPDATE master_hierarchy SET is_active = 1 WHERE id BETWEEN 29 AND 38` — หรือคืน config.db จาก backup
