@@ -766,3 +766,72 @@ re-sync ครั้งแรกเขียน 5 ระดับ `declared` (10
 - ข้อสังเกต: ebt เลือก `unit` หรือ `unit_short_name` (สองคอลัมน์ของระดับฝ่าย) ปนกันตั้งแต่ก่อนย้าย — server ซ้อม A 14/4, B 13/5 — ไม่ใช่ผลของการย้าย
 - ยังไม่ push ทั้งสอง repo · commit ของ AI (`d9149ad` test, `6748dac` + ฉบับนี้ docs) อยู่บน branch `claude/angry-wright-bf7dca` ยังไม่เข้า main ·
   ย้อนกลับ: `git -C NT-Report reset --hard 514c6f0` (re-sync ถอนแถว 10–14 เอง) + `UPDATE master_hierarchy SET is_active = 1 WHERE id BETWEEN 29 AND 38` — หรือคืน config.db จาก backup
+
+---
+
+## COLDESC. คำอธิบายคอลัมน์ไทยของ feed_revenue ผ่าน Phase E round-trip — revenue 2.5.1 → 2.5.2 (2026-10-26/27, session แยกจาก §C0b)
+
+ที่มา §C0b.3: ผิดอย่างมั่นใจ `M0418` มาจากคำอธิบาย `bu` = "business group (8 = รายได้อื่น)" (pass 1 ใส่ตัวกรอง BG 8) · ชื่อย่อทั้ง 4 ระดับยกตัวอย่าง "กกง., อป.2"
+ซึ่งเป็นชื่อย่อของ**ฝ่าย**ทั้งคู่ (ป้ายนี้เข้าไปในคำถาม eval แล้วกระตุ้น mapping กลาง `กกง.` 18 ครั้ง) · คอลัมน์ของ revenue ว่าง 34 ชื่อ
+
+### COLDESC.1 ทำอะไร
+- สำเนา `.ai/db/cmeta/` (จาก `.ai/db/c0b/` ของ worktree `c0b-revenue-levels-2876c5` หลังรอบสุดท้ายของ §C0b — contract 2.5.0, org levels 10–14) ·
+  ร่าง Phase E (`draft_columns` ตัวเดียวกับ `POST /admin/schema/columns/draft`) ทั้ง 17 ตาราง `feed_revenue_*` → 71 ร่าง `inferred`
+- เขียนใหม่ทีละคอลัมน์จากข้อเท็จจริงที่วัดใน parquet ของ dist (คู่ 1:1, จำนวนค่า, ค่าจริงต่อระดับ, ยอดรวม 8 BG = ยอดองค์กร), `Revenue/pipeline/01_etl.py`
+  (ชื่อย่อใน `fact_org_*` มาจาก NT_BU = `dim_org`; คอลัมน์ "2.0" = โครงสร้างปัจจุบันที่ใช้ remap org) และ `tools/feed/feed.py` COLUMN_OVERRIDES (ชื่อต้นทาง) ·
+  ร่างอัตโนมัติผิด 2 ที่ — `dim_org.business_group` เขียนว่า "ระดับ 'กลุ่ม'" (จริง = กลุ่มของสายงาน 6 ค่า ต้นทางคอลัมน์ 'กลุ่มธุรกิจ' ของ NT_BU),
+  `bu_seq` เขียนว่า "กลุ่มธุรกิจ — ระดับ 1" — แทนด้วยข้อความที่เขียนเอง · ข้อเสนอเต็ม: notes `revenue-col-desc-proposal.md` ของ session กลุ่มนี้
+- เจ้าของอนุมัติ 34 คอลัมน์ → รับบนสำเนาผ่าน endpoint ของ admin (TestClient + override `require_admin`: accept ร่าง 71 แถว, PUT 44 แถว → `manual` 115) →
+  `export_col_meta --context feed_revenue` (34 รายการ ไม่มีขัดกัน) → `col_meta` ใน NT-Report → **revenue 2.5.1** (`37e7246`, PATCH: contract ต่างจาก 2.5.0 เฉพาะ `description` + เวอร์ชัน)
+- วัด 2.5.1 แล้วพบชั้นใหม่ (COLDESC.2) → แก้ชื่อเรียก 3 คอลัมน์ ทดสอบบนสำเนา เจ้าของอนุมัติ → **revenue 2.5.2** (`3d948e6`) ·
+  `pytest tools/feed` **42 passed** ทั้งสองครั้ง (`/Library/Frameworks/Python.framework/Versions/3.10/bin/python3` — venv ของ AI ไม่มี pyarrow, `.venv` ของ NT-Report ไม่มี duckdb) ·
+  ตรวจ round-trip: `col_meta` = ข้อความที่อนุมัติ = export จากสำเนา = contract ที่ทดสอบ; คำถามที่สร้างจาก contract 2.5.2 ตรงกับไฟล์ที่วัดทุกข้อ
+
+### COLDESC.2 ชื่อเรียก (ส่วนก่อน " — ") คือป้ายมิติของ pass 1
+`metric_compiler.dimension_labels` ใส่ส่วนแรกของคำอธิบาย (ก่อน " — " / ";", ≤ 60 ตัว) เป็นป้ายของแต่ละมิติใน catalog ของ pass 1 และ eval ใช้ส่วนเดียวกันเป็นป้ายในคำถาม —
+ข้อความหลัง " — " ไม่ถึง pass 1 (schema ใน prompt = main view `fact_total_monthly` เท่านั้น)
+- 2.5.1 `bu` = "กลุ่มธุรกิจ (BG) — …": คำถาม "กลุ่มไหน… / แยกตามกลุ่ม / แยกตามชื่อย่อของกลุ่ม" ไป GROUP BY `bu` ทั้งที่ level note บอก "กลุ่ม → `sub_division_name`"
+  (audit 2838, 2840, 2844, 2845, 2945 — คลาส `sub_division_name` 13 → 9/14; server ซ้อม 8003 ของ §C0b เห็นแบบเดียวกันหลัง re-sync 2.5.1 กลางรอบ: audit 2837/2839/2943 ใน `.ai/db/c0b`)
+- 2.5.1 `sub_product_key` = "รหัสบริการย่อย 2 หลัก ('00'–'99') — …": pass 1 ใส่ `sub_product_key BETWEEN '00' AND '99'` → `declined:shape:filter:BETWEEN` 6 (14 → 10)
+- 2.5.2: `bu` = "business group (BG) — กลุ่มธุรกิจ …", `bu_seq` = "business group number — เลขกลุ่มธุรกิจ …", `sub_product_key` = "รหัสบริการย่อย — 2 หลัก ('00'–'99') …"
+  (ข้อความไทยหลัง " — " เท่าเดิม; คำถาม "กลุ่มธุรกิจ" ถึง `bu` ผ่าน `master_hierarchy` level 0 อยู่แล้ว) · probe 56 คลาส: `bu` 14/14, `sub_division_name` 14/14, `sub_product_key` 12/14
+- กติกาสำหรับคำอธิบายครั้งต่อไป: ชื่อเรียกสั้น ไม่มีค่า/ช่วงค่า/ตัวอย่าง และไม่ใช้คำที่ซ้อนกับคำของระดับอื่นใน `master_hierarchy` (เช่น "กลุ่ม…" ของมิติที่ไม่ใช่กลุ่มองค์กร)
+
+### COLDESC.3 วัด (server ซ้อม 127.0.0.1:8006 บน `.ai/db/cmeta/`, โค้ด = main `8d8aeec`, key id 6, Redis db 6; คำถาม 792 ข้อ / 200 ชั้น สร้างใหม่จาก contract แต่ละรุ่น, 1 ต่อชั้น)
+id / ชั้น / คำตอบที่ถูกของคำถามเหมือนฐานทุกข้อ — ต่างกันแค่ป้าย (126 จาก 200 ข้อที่ถูกเลือกเปลี่ยนข้อความ) จึงเทียบรายชั้น
+
+| | ฐาน §C0b (2.5.0) | 2.5.1 | **2.5.2** |
+|---|---|---|---|
+| ถูกรวม | 174/200 | 179/200 | **187/200 (93.5%)** |
+| compiled ถูก / ทั้งหมด | 162/164 | 160/167 | **170/174** |
+| ผิดอย่างมั่นใจ (compiled แต่ผิด) | 2 | 7 | **4** |
+| free SQL ถูก | 12/36 | 19/33 | 17/26 |
+| ชั้นที่ป้ายเปลี่ยน (126) / ไม่เปลี่ยน (74) | 104 / 70 | 113 / 66 | **115 / 72** |
+| `mapping_triggered:กกง.` | 18 | 4 | 4 (= ค่าจริงในคำถามกรอง `unit_sname`) |
+
+รายมิติ (ฐาน → 2.5.2, จำนวนชั้น): `bu` 11 → **14**/14 · `sub_division_name` 13 → **14**/14 · `sub_division_sname` 0 → **12**/14 · `division_sname` 12 → 14/14 ·
+`unit_name` 10 → 11/12 · `sub_product_key` 14 → 12/14 · `service_group_seq` 14 → 12/14 · `service_group_nt` 14 → 13/14 · `product_name` 10 → 9/10 · มิติอื่นเท่าเดิม ·
+shape: top5/top10 ทั้งสองทาง 128/128, compare_up 19/20, by 12/16, filter 24/32
+
+- **ส่วนที่ได้มาจากป้ายในคำถามเอง (ไม่ใช่ผู้ใช้จริง):** `sub_division_sname` 0 → 12 และ `M0418` — คำถามเดิมมี "(เช่น กกง., อป.2)" / "(8 = รายได้อื่น)" อยู่ในตัว;
+  ป้ายใหม่ "ชื่อย่อของกลุ่มไหน…" ยังมีคำ "กลุ่มไหน" ที่ level note จับได้ · ที่เป็นผลของคำอธิบายต่อ pass 1 จริง: ชั้น "กลุ่ม" คงที่ 14/14 และ `bu` 14/14 ภายใต้ป้ายไทยของมิติอื่น
+- **ผิดอย่างมั่นใจที่เหลือ 4:** `M0256` / `M0652` "แยกตามชื่อย่อของกลุ่ม" (ไม่มีรูปที่ชัดของ "กลุ่ม" → ไม่มี level note → `division_sname` / `bu`; ฐาน 0/14 อยู่แล้ว) ·
+  `M0127` / `M0523` "แยกตามรหัสบริการย่อย": โมเดล GROUP BY `sub_product_key, sub_product_name` (411 แถว) ตามคำอธิบาย "ใช้คู่กับ product_key เสมอ" แต่ oracle
+  GROUP BY รหัส 2 หลักอย่างเดียว (28 แถว — รวมบริการย่อยต่างผลิตภัณฑ์ที่เลขซ้ำกัน) — oracle ของมิติที่ไม่ใช่คีย์เดี่ยวควรตัดออกจาก eval
+- ผิดลงที่เหลือ (free SQL หลัง mapping กลาง เป็นตั้งแต่ฐาน): `M0034` / `M0430` (`1.1`), `M0502` (`calling card`), `M0727` (`กรรมการผู้จัดการใหญ่`), `M0478` (`shape:filter:revenue_ytd`)
+- ไฟล์ผล (gitignored, worktree `vigilant-engelbart-bec7f0`): `eval_results/metric_eval_feed_revenue_202609_20261026_2337.json` (2.5.1), `…_20261026_2346.json` (probe),
+  `…_20261027_0005.json` (2.5.2); คำถาม `.ai/eval/metric_revenue_202609_{250,251,v2}.json`
+
+### COLDESC.4 ขึ้นของจริง — ยังไม่ทำ (รอเจ้าของสั่ง)
+- **AI ไม่มี code เปลี่ยน** — ขึ้น = contract อย่างเดียว · NT-Report branch `ai/delegate-metrics` มี `05f989b` (ebt 1.7.0 / expense 1.3.0 `org_levels` ของ session อื่น — ต้องให้ผู้อ่านรองรับและปิดแถว manual 0–4 ก่อน)
+  อยู่ใต้ `37e7246` + `3d948e6` จึง ff NT-Report main ทั้ง branch ไม่ได้จนกว่างานนั้นพร้อม — ถ้าจะวางเฉพาะ revenue: cherry-pick `37e7246` + `3d948e6` ลง main (CHANGELOG ชนบรรทัดหัว ต้องแก้มือ)
+- ลำดับ: (1) สำรอง config.db (2) ff/cherry-pick NT-Report main → request แรกของ feed_revenue re-sync 2.5.2 เอง (แถว `declared` 174 แถวได้ข้อความใหม่)
+  (3) **แถว `manual` 2 แถวของ `feed_revenue_dim_bu` บนของจริงชนะ contract**: `bu` = ข้อความสองชุดต่อกัน (ร่างระดับ 1 + "business group (8 = รายได้อื่น)"),
+  `bu_seq` = "ลำดับของกลุ่มธุรกิจ" — แก้ผ่าน admin (PUT ข้อความ 2.5.2) ไม่ใช่ SQL ตรง; proposal `declared` #31/#32 ที่เปิดค้างเป็นข้อความเก่า ปฏิเสธได้
+  (4) ตรวจ `SELECT source, count(*) FROM schema_metadata WHERE table_name LIKE 'feed_revenue_%' GROUP BY 1` และถาม "กลุ่มไหนมีรายได้สะสมสูงสุด 5 อันดับ" → GROUP BY `sub_division_name`
+- contract ใน worktree ที่ใช้ร่วมกันขยับใต้ server ซ้อมทุกตัวที่ชี้มัน (server 8003 ของ §C0b re-sync 2.5.1 กลางรอบ) — server ซ้อมควรชี้สำเนา contract ของตัวเอง
+
+### COLDESC.5 ที่ยังไม่ทำ / ข้อควรรู้
+- expense / sales / ebt ยังมีคำอธิบายชื่อย่อ "(เช่น กกง., อป.2)" แบบเดียวกัน (`domains.py` expense 3 คอลัมน์, sales 1, ebt 1) — ทำแบบ COLDESC ได้
+- eval: oracle ของ `sub_product_key` (และมิติที่ไม่ใช่คีย์เดี่ยวอื่น) ไม่มีความหมาย · free SQL หลัง mapping กลาง (`กรรมการผู้จัดการใหญ่` 8, `1.1`, `1.hard infrastructure`) ยังเป็นงาน (2) ของ §C.6
+- ยังไม่ได้รันครบ 792 ข้อ (1 ต่อชั้นเท่านั้น) · server ซ้อม 8006 (`./.ai/db/cmeta/serve.sh <tag>`) หยุดหลังวัด
