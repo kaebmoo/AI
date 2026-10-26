@@ -366,6 +366,16 @@ class ที่ผลเกิน 50 แถวข้าม), 1 คำถาม�
 mapping "เดือน" (1), เลือก `unit_short_name` แทน `unit` (1), "กลุ่ม" → `division` (2, C-0b) · ชุดเทียบของ §CMP (27 ข้อ): 20 → **20** (2/2; ข้อที่แย่ลงคือ "เดือนกันยายน" ที่ pass 1 ไม่ให้ `time_range`
 → สะสม = CMP.3 เดิม) · ผล: `eval_results/metric_eval_feed_ebt_202609_20261025_1635.json`, `…_1810.json`
 
+### SALES.2b ขึ้นของจริง (2026-10-26)
+- 06:48 backup `~/nt-ai-backups/sales-metric-golive-20261026-064809/` → `migrate_schema_metrics.py` (ของ branch) บน config.db จริง (`extra_columns` เพิ่ม, quick_check ok)
+  → ff AI main `51b8dc7..aed320d` (merge main เข้า branch ก่อน: `38fd3a8`) → worker ใหม่ 06:49:05; audit 467 `compiled:ebt` 570.85 ล้าน
+  → ff NT-Report main `61f390c..b08aa3c` (sales 1.4.0) → `schema_metrics.sales_vs_target` declared/active
+- คำถามแรก (MCP): 468 ห้าฝ่ายตรงรายงาน · 469 รวม 92.38% · 470 ยอดขายเฉย ๆ `no_metric` 30,197.03 ล้าน · 471 "ยังไม่ถึงเป้า" ได้ LIMIT 10 ที่ pass 1 แต่งเอง
+  → `5c13e03` (threshold list ตัด limit เมื่อคำถามไม่มีตัวเลข) → 472 ครบ 24 ฝ่าย
+- portal (473, เจ้าของทดสอบ): `declined:period_filter:range` → free SQL 91 หน่วย เป้า 0 ทุกแถว — portal ส่ง scope year_month 202501…202609 และ pass 1 ลอก
+  scope เป็น `BETWEEN 202501 AND 202609`; MCP ไม่มี scope จึงไม่เห็น → `plan()` ไม่นับตัวกรองงวดที่เท่ากับ scope ของ request ทั้งก้อน (`_restates_scope`) ·
+  server ซ้อมด้วย scope แบบ portal: 11/11 (compiled 9/9) · portal_questions_ebt 10/14 (ข้อผิด = P05 cost_ratio, P06/P14 LIMIT 1, P09 ฐาน — ค้างเดิม)
+
 ### SALES.3 ที่ยังไม่ทำ / ข้อควรรู้
 - **ยังไม่ขึ้นของจริง** — ลำดับ: AI ก่อน (merge → `scripts/migrate_schema_metrics.py` บน config.db จริง **ก่อน restart** — ไม่งั้น `load_metrics` อ่านคอลัมน์ `extra_columns` ไม่ได้
   และปิด metric ทุก context) → NT-Report merge (server จริงอ่าน `NT-Report/DataFeed/contracts/sales.yaml` ของ main checkout และ re-sync เองใน request ถัดไป);

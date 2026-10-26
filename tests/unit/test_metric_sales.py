@@ -287,3 +287,23 @@ def test_a_threshold_list_keeps_a_limit_only_when_the_question_gives_a_number(re
               "ordering": {"column": "amount", "direction": "ASC"}, "limit": 10 if limit is None else limit}
     req, reason = plan_with_reason(intent, question, resolved, [], 202609, set())
     assert reason is None and req.limit == limit
+
+
+PORTAL_SCOPE = {"year_month": [*range(202501, 202513), *range(202601, 202610)]}
+
+
+@pytest.mark.parametrize("period_filter,expected", [
+    ({"column": "year_month", "operator": "BETWEEN", "value": [202501, 202609]}, ((202609, "cumulative"), None)),
+    ({"column": "year_month", "operator": "IN", "value": PORTAL_SCOPE["year_month"]}, ((202609, "cumulative"), None)),
+    ({"column": "year_month", "operator": "BETWEEN", "value": [202503, 202609]}, (None, "period_filter:range")),
+])
+def test_a_period_filter_that_restates_the_portal_scope_is_not_the_question_period(resolved, period_filter, expected):
+    """Live audit 473 (portal): pass 1 wrote the scope 202501…202609 as BETWEEN beside time_range {2026, 9, cumulative}."""
+    intent = {"intent_type": "ranking", "metric_id": "sales_vs_target", "dimensions": ["unit_fname"],
+              "filters": [{"column": "metric", "operator": "=", "value": "actual"}, period_filter],
+              "time_range": {"year": 2026, "month": 9, "cumulative": True},
+              "ordering": {"column": "amount", "direction": "DESC"}}
+    req, reason = plan_with_reason(intent, QUESTION, resolved, [], 202609, set(), None, PORTAL_SCOPE)
+    assert ((req.period, req.mode) if req else None, reason) == expected
+    # without the scope the same span is a multi-year sum the metric cannot express
+    assert plan_with_reason(intent, QUESTION, resolved, [], 202609, set())[1] == "period_filter:range"

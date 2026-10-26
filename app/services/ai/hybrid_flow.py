@@ -919,9 +919,10 @@ async def build_first_attempt_prompt(
                     f'คำว่า "{word}" ใช้ได้หลายระดับ — ต้องการแยกตามระดับไหน: {names}? '
                     f'กรุณาถามใหม่โดยใส่ชื่อระดับแทนคำว่า "{word}"')
             if metrics:
+                from app.services.data_sources import request_scope
                 req, reason = metric_compiler.plan_with_reason(
                     intent_json, question, resolved, matched, reference_period(),
-                    set(_context_tables(context_table)) | {context_table}, labels,
+                    set(_context_tables(context_table)) | {context_table}, labels, request_scope.get(),
                 )
                 if req is not None:
                     try:

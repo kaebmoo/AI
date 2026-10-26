@@ -341,6 +341,21 @@ def _restates_definition(condition, defining: dict[str, set[str]]) -> bool:
     return bool(found) and not re.sub(r"\b(?:AND|OR)\b|[()\s]", "", _TERM_LITERAL.sub(" ", condition), flags=re.I)
 
 
+def _restates_scope(operator, value, scope: dict | None) -> bool:
+    """A period filter that is the request scope itself: BETWEEN its first and last month, or IN all its months.
+    Live audit 473 (portal, 2026-10-26): scope year_month 202501…202609 arrived as a filter beside
+    time_range {2026, 9, cumulative} and sent "ยอดขายมากกว่าเป้า" to free SQL (91 units, every target 0)."""
+    months = sorted({k for values in (scope or {}).values() if isinstance(values, (list, tuple))
+                     for k in map(_month_key, values) if k is not None})
+    if len(months) < 2 or not isinstance(value, (list, tuple)):
+        return False
+    keys = [_month_key(v) for v in value]
+    if None in keys:
+        return False
+    return ((operator == "BETWEEN" and len(keys) == 2 and sorted(keys) == [months[0], months[-1]])
+            or (operator == "IN" and sorted(set(keys)) == months))
+
+
 def _month_key(value) -> int | None:
     """A YYYYMM bound of a period range (int or decimal string with a real month), else None."""
     if isinstance(value, str) and value.isdecimal():
@@ -356,9 +371,10 @@ def plan(
     reference: int | None,
     tables,
     labels: dict[str, str] | None = None,
+    scope: dict | None = None,
 ) -> CompileRequest | None:
     """Choose a declared metric and a supported single-period compile request."""
-    return plan_with_reason(intent, question, resolved, matched, reference, tables, labels)[0]
+    return plan_with_reason(intent, question, resolved, matched, reference, tables, labels, scope)[0]
 
 
 def plan_with_reason(
@@ -369,8 +385,10 @@ def plan_with_reason(
     reference: int | None,
     tables,
     labels: dict[str, str] | None = None,
+    scope: dict | None = None,
 ) -> tuple[CompileRequest | None, str | None]:
-    """Choose a compile request or give a short decline reason. `labels` = dimension_labels()."""
+    """Choose a compile request or give a short decline reason. `labels` = dimension_labels(); `scope` = the
+    request's scope (the portal sends the months the asker may see)."""
     metric_id = intent.get("metric_id")
     if isinstance(metric_id, str) and metric_id not in resolved:
         column_matches = [key for key, metric in resolved.items()
@@ -451,6 +469,8 @@ def plan_with_reason(
         if (isinstance(item, dict) and isinstance(item.get("column"), str)
                 and isinstance(period_column, str) and item["column"].casefold() == period_column.casefold()):
             operator, value = item.get("operator"), item.get("value")
+            if _restates_scope(operator, value, scope):
+                continue  # pass 1 copied the portal's scope (BETWEEN 202501 AND 202609), not the question's period
             if comparison:
                 if operator not in ("=", "IN", "BETWEEN"):
                     return None, "period_filter:operator"
