@@ -914,3 +914,51 @@ shape: top5/top10 ทั้งสองทาง 128/128, compare_up 19/20, by 1
 เข้า main เฉพาะบันทึกนี้ + `run_metric_eval` ตั้งชื่อไฟล์ผลถึงวินาที (สองรอบที่จบนาทีเดียวกันเคยทับกัน, §MAP.3) ·
 ถ้าจะทำต่อ: กันชื่อที่ซ้ำหลายระดับองค์กร ("กรรมการผู้จัดการใหญ่") ไม่ให้ compile เมื่อตัวกรองอยู่คนละระดับกับคำในคำถาม
 
+---
+
+## RVT. รายได้เทียบเป้า `revenue_vs_target` (revenue 2.6.0) — 2026-10-27 (เจ้าของสั่ง, Claude เขียนเอง)
+
+ที่มา: portal จริง audit **494** (06:33) "มีกลุ่มบริการอะไรบ้างที่ไม่ผ่านเป้า" → "ไม่พบข้อมูล" — "เป้า" อยู่ใน `excluded_words` ของ `revenue`
+จึงไป SQL อิสระ ซึ่ง join ตารางเป้าด้วย `year_month = 202609` (เป้าเดือนเดียว) แล้วเทียบกับ `revenue_ytd` (สะสม 9 เดือน) — ไม่มีกลุ่มไหน "ต่ำกว่า";
+ที่ถูก (parquet): **13 กลุ่มบริการ** ไม่ถึงเป้าสะสม ณ 202609 จาก 23 ที่มีเป้า · กฎ `revenue_target_basis` เขียนวิธีที่ถูกไว้แล้วแต่โมเดลไม่ทำตาม (แบบเดียวกับยอดขายเทียบเป้า §SALES)
+
+### RVT.1 ที่สร้าง (NT-Report `ai/delegate-metrics`: `dbaa20b`, `bac925c`)
+- `derive_revenue_vs_target` → `fact_bu_vs_target_monthly` (BG × เดือน × metric) และ `fact_service_group_vs_target_monthly` (SG × เดือน × metric):
+  long format แบบ `fact_sales` — `metric` actual/target, `amount` (เดือน, sum), `amount_ytd` (สะสม ณ เดือน, point-in-time: actual = `revenue_ytd` ของ DW,
+  target = ผลรวมเป้า ม.ค.–เดือน) เฉพาะปีที่มีเป้า (2026) · ตรวจ: SG ต่ำกว่าเป้า 13, BG 1–7 = 27,286.36 / 29,569.06 ล้าน = **92.28%**, BG 8 = 84.87%
+- metric `revenue_vs_target`: `datasets` สองระดับ, terms `metric = 'actual' / 'target'`, `expr` actual / nullif(target, 0) × 100, `extra_columns` รายได้/เป้า,
+  `ranking.positive: target`, `ranking.threshold` 100 + คำ ผ่าน/ไม่ผ่าน/ต่ำกว่า/ถึงเป้า, `official_scope: bu_seq IN (1..7)` (ฐานรายงานเมื่อไม่ระบุหน่วย; BG 8 เมื่อถามชื่อ)
+- revenue **2.6.0** (MINOR, dataset ใหม่ → rebuild dist + ผู้อ่านต้อง `register_file_source --domain revenue`) · `pytest tools/feed` **45 passed** · build: reconcile PASS
+- **ไม่ใช้**ประโยค "เทียบยอดจริงกับเป้า: fact_*_vs_target_monthly …" ในกฎ `revenue_target_tables` (`bac925c`): บน server ซ้อมทำให้ pass 1 ของคำถามรายได้
+  ทั่วไปเลือก `bu_seq` / `bu` แทน `service_group_seq` / `sub_division_name` — 6 ชั้นเดียวกัน ณ เวลาเดียวกัน: 2.5.2 = 6/6, 2.6.0 มีประโยค = 1/6, ปิด metric ก็ 0/6,
+  instruction ของ 2.5.2 = 5/6, ตารางใหม่ + กฎเดิม = 5/6 → ต้นเหตุคือประโยคในกฎ (ไม่ใช่ catalog ของ metric ที่สอง)
+- AI: ไม่แก้ code — compiler รองรับ `datasets` + `ranking.threshold/positive` + `extra_columns` + `official_scope` ร่วมกันอยู่แล้ว
+
+### RVT.2 วัด (server ซ้อม 127.0.0.1:8005, สำเนา `.ai/db/rvt/` จาก c0b, contract **และ dist ตรึงสำเนา** `rvt/DataFeed/`, โค้ด = main `886c4fc`, key id 6)
+- **regression** (คำถาม gen จาก 2.5.2 ชุดเดียวกับ §MAP.3, 1 ต่อชั้น 200): **182/200** เทียบ A (main + 2.5.2) 183/200 — ถูกขึ้น 7 ผิดลง 8 (compare_up / free SQL แกว่ง),
+  ผิดอย่างมั่นใจ 8 vs 6, ไม่มีคำถามรายได้ทั่วไปข้อไหนไป `revenue_vs_target` · รอบแรก (มีประโยคในกฎ) 176/200 — เหตุผลข้างบน
+- คำถามเทียบเป้า (เทียบ oracle จาก parquet ของ dist ที่ตรึง) บน contract ที่แก้แล้ว:
+
+| คำถาม | ผล | oracle |
+|---|---|---|
+| กลุ่มธุรกิจไหนไม่ถึงเป้า สะสมปี 2569 | compiled 5 แถว ✓ | Mobile, ICT, BG7, Fixed, Hard Infra |
+| รายได้สะสมปี 2569 แยกตามกลุ่มธุรกิจเทียบเป้า / แบบ portal | compiled 7 แถว ✓ (BG 1–7) | |
+| รายได้เดือนกันยายน 2569 เทียบเป้า แยกตามกลุ่มธุรกิจ | compiled 7 แถว ✓ (ยอดเดือน) | Digital 124.4% … Mobile 56.9% |
+| กลุ่มบริการที่ต่ำกว่าเป้ามากที่สุด 5 อันดับ สะสมปี 2569 | compiled ✓ | 45.43, 55.35, 72.77, 75.42, 86.32% |
+| รายได้กลุ่มบริการ Internet Retail สะสมปี 2569 เทียบเป้า | compiled 93.61% ✓ | 93.61% |
+| รายได้ 8.รายได้อื่น สะสมปี 2569 เทียบเป้า | compiled 84.87% ✓ | 84.87% |
+| รายได้ทั้งบริษัทสะสมปี 2569 เทียบเป้า | compiled 92.28% ✓ | 92.28% |
+| กลุ่มบริการไหนผ่านเป้า (portal) | รอบ 2 compiled 10 ✓ · รอบ 1 ยอดเดือน 12 ✗ | 10 (สะสม) |
+| **มีกลุ่มบริการอะไรบ้างที่ไม่ผ่านเป้า (portal — audit 494)** | รอบ 1 compiled **13 ✓** · รอบ 2 ✗ `declined:shape:filter:amount` → SQL อิสระ 11 | 13 |
+| มีกลุ่มบริการอะไรบ้างที่ไม่ผ่านเป้า (ไม่มี scope) | compiled ยอดเดือน 11 ทั้งสองรอบ ✗ | 13 (สะสม — นโยบาย YTD 2026-09-25) |
+
+- **ที่ยังผิด = นิสัยของ pass 1 กับคำถามที่ไม่มีคำบอกเวลา (ไม่ใช่ metric/compiler):** (1) ใส่ตัวกรองบนคอลัมน์ค่าเพื่อบอก "ไม่ผ่าน" (`amount < 'revenue_target'`) →
+  compiler ปฏิเสธ; (2) เลือกยอดเดือน (`cumulative: false` + year/month) ทั้งที่นโยบายของเจ้าของ = ไม่บอกเวลา → สะสม; ใน run ก่อนแก้กฎยังเห็น (3) mapping ที่
+  pass 1 แต่งบนคำระดับ "กลุ่มธุรกิจ" → `mapping_triggered:กลุ่มธุรกิจ` (ป้ายของ `bu` เป็น "business group (BG)" หลัง Phase E จึงไม่นับเป็นคำระดับ)
+
+### RVT.3 สถานะ
+ยังไม่ขึ้นของจริง ยังไม่ push · ขึ้นจริงต้อง: (ก) ff NT-Report main + **rebuild dist ของจริง** (`build_feed --domain revenue`) (ข) `register_file_source --domain revenue
+--source NT-Report/DataFeed/dist` บน config.db จริง (สำรองก่อน) เพื่อให้มี view ของตารางใหม่ (ค) ถามตรวจผ่าน nt-ai ทั้งแบบมี/ไม่มี scope ·
+งานที่เสนอก่อนขึ้น: tolerance ใน `plan()` ของ metric ที่มี `ranking.threshold` — ทิ้งตัวกรองบนคอลัมน์ค่า (period.value) ที่ pass 1 ใส่แทน "ผ่าน/ไม่ผ่าน";
+คำถามไม่มีคำบอกเวลา → สะสมในโค้ด (นโยบาย 2026-09-25 ที่ตอนนี้อยู่แค่ใน note ของ pass 1)
+
