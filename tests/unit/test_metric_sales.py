@@ -17,7 +17,7 @@ from app.services.datafeed_knowledge import _validate_metric
 
 
 LIVE_CONTRACT = Path("/Users/seal/Documents/GitHub/_worktrees/NT-Report-metrics/DataFeed/contracts/sales.yaml")
-CONTRACT = Path(__file__).parent.parent / "fixtures" / "sales_metrics_1_4_0.yaml"
+CONTRACT = Path(__file__).parent.parent / "fixtures" / "sales_metrics_1_4_1.yaml"
 TABLE = "feed_sales_fact_sales"
 QUESTION = "หน่วยงานที่ยอดขายมากกว่าเป้ามีหน่วยไหนบ้าง"
 
@@ -125,6 +125,7 @@ def test_an_official_total_needs_a_year_to_date_column(resolved):
 @pytest.mark.parametrize("question,side", [
     (QUESTION, "above"), ("ฝ่ายไหนยอดขายเกินเป้าบ้าง", "above"), ("ฝ่ายที่ทำได้ถึงเป้า", "above"),
     ("ฝ่ายไหนยังไม่ถึงเป้า", "below"), ("หน่วยงานที่ต่ำกว่าเป้า", "below"),
+    ("มีฝ่ายไหนบ้างที่ไม่ผ่านเป้า", "below"), ("ฝ่ายไหนผ่านเป้า", "above"),  # sales 1.4.1 (live audit 502)
     ("ยอดขายเทียบเป้ารายฝ่าย", None), ("ฝ่ายที่เกินเป้าและฝ่ายที่ไม่ถึงเป้า", None),
 ])
 def test_threshold_side_from_the_contract_words(resolved, question, side):
@@ -307,3 +308,19 @@ def test_a_period_filter_that_restates_the_portal_scope_is_not_the_question_peri
     assert ((req.period, req.mode) if req else None, reason) == expected
     # without the scope the same span is a multi-year sum the metric cannot express
     assert plan_with_reason(intent, QUESTION, resolved, [], 202609, set())[1] == "period_filter:range"
+
+
+@pytest.mark.parametrize("value_filter", [None, {"column": "amount", "operator": "<", "value": "target"}])
+def test_not_passing_the_target_keeps_the_units_below_the_line(resolved, value_filter):
+    """Live audit 502 (portal, sales 1.4.0): "มีฝ่ายไหนบ้างที่ไม่ผ่านเป้า" compiled without a side and listed all 29 units
+    with a target (24 below). A value filter that spells the side is dropped like revenue_vs_target's."""
+    intent = {"intent_type": "ranking", "metric_id": "sales_vs_target", "dimensions": ["unit_fname"],
+              "filters": [{"column": "metric", "operator": "=", "value": "actual"},
+                          {"column": "year_month", "operator": "BETWEEN", "value": [202601, 202609]},
+                          *([value_filter] if value_filter else [])],
+              "time_range": {"year": 2026, "month": 9, "cumulative": True},
+              "ordering": {"column": "amount", "direction": "ASC"}, "limit": 10}
+    req, reason = plan_with_reason(intent, "มีฝ่ายไหนบ้างที่ไม่ผ่านเป้า", resolved, [], 202609, set(), None, PORTAL_SCOPE)
+    assert reason is None
+    assert (req.period, req.mode, req.filters, req.threshold, req.order_desc, req.limit) == (
+        202609, "cumulative", (), "below", False, None)

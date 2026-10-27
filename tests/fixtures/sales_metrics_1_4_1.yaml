@@ -1,7 +1,7 @@
-# metrics: of NT-Report DataFeed/contracts/sales.yaml 1.4.0 (sales_vs_target) — kept equal by
+# metrics: of NT-Report DataFeed/contracts/sales.yaml 1.4.1 (sales_vs_target) — kept equal by
 # tests/unit/test_metric_sales.py when the NT-Report worktree is present
 domain: sales
-schema_version: 1.4.0
+schema_version: 1.4.1
 metrics:
 - id: sales_vs_target
   name_th: ยอดขายเทียบเป้า (% Achievement)
@@ -14,12 +14,14 @@ metrics:
   - '% achievement'
   - achievement
   - ผลสำเร็จเทียบเป้า
+  - ผ่านเป้า
   - มากกว่าเป้า
   - สูงกว่าเป้า
   - เกินเป้า
   - ทะลุเป้า
   - ถึงเป้า
   - บรรลุเป้า
+  - ไม่ผ่านเป้า
   - ต่ำกว่าเป้า
   - น้อยกว่าเป้า
   - ไม่ถึงเป้า
@@ -65,6 +67,7 @@ metrics:
     threshold:
       value: 100
       above:
+      - ผ่านเป้า
       - มากกว่าเป้า
       - สูงกว่าเป้า
       - เกินเป้า
@@ -72,6 +75,7 @@ metrics:
       - ถึงเป้า
       - บรรลุเป้า
       below:
+      - ไม่ผ่านเป้า
       - ต่ำกว่าเป้า
       - น้อยกว่าเป้า
       - ไม่ถึงเป้า
