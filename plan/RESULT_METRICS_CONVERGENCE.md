@@ -14,6 +14,7 @@
 | **C-01** contract revenue (NT-Report) | ✅ **ขึ้นของจริงแล้ว** (ff NT-Report main `b08aa3c..738ea8b` 2026-10-26, revenue **2.4.0**; ยังไม่ push) — ของจริง audit 481–484 ผ่าน; server ซ้อม r11: revenue **6/6** compiled, คำถามเทียบเป้า 3/3 ไปทางเดิมด้วย `excluded_word` | 2026-10-26 | NT-Report `738ea8b`; AI `0e63227` (`excluded_words`) |
 | C-0c ratio จัดอันดับอย่างมีความหมาย | ✅ ทำก่อนแผนนี้ (`941cd0a`, ebt 1.6.0) | 2026-10-24 | |
 | **CMP** เทียบสองงวดบนเส้นทาง compile (`plan/PLAN_METRICS_COMPARISON.md`) | ✅ **ขึ้นของจริงแล้ว** (main `862915c` = merge กับ Phase E, reload 07:32 2026-10-25) + push — วัดบน server ซ้อม: ชุดเทียบปีก่อน 3 → 20/27 | 2026-10-25 | `a54f76a`, `0a32b92` |
+| **RVT** รายได้เทียบเป้า `revenue_vs_target` + tolerance ใน `plan()` | ✅ **ขึ้นของจริงแล้ว** 2026-10-27 10:58 (ff NT-Report main `3d948e6..bac925c` revenue **2.6.0** + rebuild dist `20261027T035724Z` + register; ff AI main `886c4fc..3b99b4d`; audit 495–501 — §RVT.5; ยังไม่ push) | 2026-10-27 | `9548079`; NT-Report `dbaa20b`, `bac925c` |
 
 ---
 
@@ -992,3 +993,20 @@ shape: top5/top10 ทั้งสองทาง 128/128, compare_up 19/20, by 1
 - **ที่เหลือ:** `mapping_triggered:กลุ่มธุรกิจ` (mapping ที่ pass 1 แต่งบนคำระดับ — ป้ายของ `bu` หลัง Phase E คือ "business group (BG)" จึงไม่นับเป็นคำระดับ;
   แก้ได้ที่ป้าย/keyword ของ org level หรือให้ `level_words` รวมคำไทยของมิติ) · "รายได้เทียบเป้า" ไม่บอกหน่วย → pass 1 เลือกแยกราย BG
 - **สถานะ:** ยังไม่ขึ้นของจริง ยังไม่ push — ขั้นขึ้นตาม RVT.3 บวก ff AI main ด้วย `bb26ba0` + `9548079` (+ commit นี้)
+
+### RVT.5 ขึ้นของจริง (2026-10-27 10:57–10:59, เจ้าของสั่ง)
+- 10:57 backup `~/nt-ai-backups/rvt-golive-20261027-105706/config.db` (integrity_check ok) — ไม่มี migration
+- 10:57:18 ff NT-Report main `3d948e6..bac925c` → `build_feed --domain revenue --period 202609` 14.6 วินาที (failed=0, revenue_ytd 29,389.4 ล้าน,
+  build `20261027T035724Z`, `latest` ชี้ build ใหม่) → 10:57:42 `register_file_source --domain revenue` บน config.db จริง (19 views, control totals ok,
+  knowledge `97259b5f…:2.6.0`, `schema_metrics` = `revenue` + `revenue_vs_target` declared/active) — ช่วงที่ contract ใหม่อยู่โดยยังไม่มี view = 24 วินาที
+- 10:58:00 ff AI main `886c4fc..3b99b4d` → `uvicorn --reload` worker ใหม่ 10:58:05, `/` ตอบ 200
+- ถามจริง (nt-ai key id 5 เหมือน §C0b.4; แบบ portal ส่ง scope `year_month` 202501…202609):
+  **495** "มีกลุ่มบริการอะไรบ้างที่ไม่ผ่านเป้า" (scope) `compiled:revenue_vs_target` 13 แถว สะสม · **496** ไม่มี scope → 13 แถว เหมือนกัน ·
+  **497** portal จริง (key 4) ถามคำถามเดียวกัน → 13 แถว compiled (cache ของ 495) · **498** ทั้งบริษัทสะสม 92.28% · **499** "กลุ่มธุรกิจไหนไม่ผ่านเป้า" (scope)
+  5 แถว ✓ · **501** "รายได้รวม" (scope, ไม่มีคำบอกเวลา) `compiled:revenue` 29,389.41 ล้าน (สะสม) ·
+  **500** "รายได้เดือนกันยายน 2569 เทียบเป้า แยกตามกลุ่มธุรกิจ" ✗ `declined:mapping_triggered:กลุ่มธุรกิจ` → SQL อิสระ: ยอดเดือนถูกแต่มี BG 8 และไม่มี %
+- **พบระหว่างตรวจ (ไม่ได้เกิดจากรอบนี้):** portal จริง **502** "มีฝ่ายไหนบ้างที่ไม่ผ่านเป้า" (feed_sales) `compiled:sales_vs_target` ได้ **29 แถว = ทุกฝ่ายที่มีเป้า**
+  (ไม่ผ่านเป้าจริง 24, ผ่าน 5 — นับจาก parquet ของ dist) เพราะคำ threshold ของ sales 1.4.0 มี "ไม่ถึงเป้า/ต่ำกว่าเป้า…" แต่ไม่มี "ผ่านเป้า"/"ไม่ผ่านเป้า"
+  → ไม่มีเงื่อนไข < 100 · แก้ได้ที่ contract sales (PATCH: เพิ่มสองคำ) + fixture `sales_metrics_1_4_0.yaml`
+- ยังไม่ push ทั้งสอง repo · ย้อนกลับ: `git -C AI reset --hard 886c4fc` + NT-Report `reset --hard 3d948e6` + `latest` กลับไป build `20261022T031524Z`
+  แล้ว `register_file_source --domain revenue` (หรือคืน config.db จาก backup)
