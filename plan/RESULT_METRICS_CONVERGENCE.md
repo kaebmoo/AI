@@ -14,7 +14,7 @@
 | **C-01** contract revenue (NT-Report) | ✅ **ขึ้นของจริงแล้ว** (ff NT-Report main `b08aa3c..738ea8b` 2026-10-26, revenue **2.4.0**; ยังไม่ push) — ของจริง audit 481–484 ผ่าน; server ซ้อม r11: revenue **6/6** compiled, คำถามเทียบเป้า 3/3 ไปทางเดิมด้วย `excluded_word` | 2026-10-26 | NT-Report `738ea8b`; AI `0e63227` (`excluded_words`) |
 | C-0c ratio จัดอันดับอย่างมีความหมาย | ✅ ทำก่อนแผนนี้ (`941cd0a`, ebt 1.6.0) | 2026-10-24 | |
 | **CMP** เทียบสองงวดบนเส้นทาง compile (`plan/PLAN_METRICS_COMPARISON.md`) | ✅ **ขึ้นของจริงแล้ว** (main `862915c` = merge กับ Phase E, reload 07:32 2026-10-25) + push — วัดบน server ซ้อม: ชุดเทียบปีก่อน 3 → 20/27 | 2026-10-25 | `a54f76a`, `0a32b92` |
-| **RVT** รายได้เทียบเป้า `revenue_vs_target` + tolerance ใน `plan()` | ✅ **ขึ้นของจริงแล้ว** 2026-10-27 10:58 (ff NT-Report main `3d948e6..bac925c` revenue **2.6.0** + rebuild dist `20261027T035724Z` + register; ff AI main `886c4fc..3b99b4d`; audit 495–501 — §RVT.5) + sales **1.4.1** ผ่าน/ไม่ผ่านเป้า 12:05 (ff NT-Report `..421093c`, AI `..1cf3adb`; audit 504–505 — §RVT.6); ยังไม่ push | 2026-10-27 | `9548079`, `018e92f`; NT-Report `dbaa20b`, `bac925c`, `421093c` |
+| **RVT** รายได้เทียบเป้า `revenue_vs_target` + tolerance ใน `plan()` | ✅ **ขึ้นของจริงแล้ว** 2026-10-27 10:58 (ff NT-Report main `3d948e6..bac925c` revenue **2.6.0** + rebuild dist `20261027T035724Z` + register; ff AI main `886c4fc..3b99b4d`; audit 495–501 — §RVT.5) + sales **1.4.1** ผ่าน/ไม่ผ่านเป้า 12:05 (ff NT-Report `..421093c`, AI `..1cf3adb`; audit 504–505 — §RVT.6) + คำระดับไม่บล็อก metric 14:48 (AI `..24892a1`; audit 511–514 — §RVT.7); ยังไม่ push | 2026-10-27 | `9548079`, `018e92f`; NT-Report `dbaa20b`, `bac925c`, `421093c` |
 
 ---
 
@@ -1073,4 +1073,9 @@ revenue **500** และ server ซ้อม: `mapping_triggered:กลุ่�
 - **ที่เหลือ:** "กลุ่มบริการไหนของ<ฝ่าย>…" — pass 1 เลือก `business_group` เป็นมิติ: feed_sales ไม่มี `master_hierarchy` สายผลิตภัณฑ์ (ไม่มี level note) และ value
   note ยังบอก "กลุ่มบริการ" → `business_group = '7.กลุ่มบริการอื่น…'` · "ยอดขายรวมทั้งบริษัทเทียบเป้า" แบบ scope บางครั้ง `shape:filter:metric` ·
   "ไม่ผ่านเป้ามากที่สุด N อันดับ" ยังเรียงตามทิศของ pass 1 (RVT.6)
-- **สถานะ:** ยังไม่ขึ้นของจริง — ขึ้น = ff AI main ด้วย `b2ee9f5`..`bb020f8` + commit นี้ (โค้ด server: `metric_compiler.py`, `hybrid_flow.py`; ไม่มี migration, ไม่แตะ contract)
+- **ขึ้นของจริงแล้ว 2026-10-27 14:48** (เจ้าของสั่ง): backup `~/nt-ai-backups/levelwords-golive-20261027-144805/config.db` (integrity ok) →
+  ff AI main `aae9456..24892a1` → `uvicorn --reload` worker ใหม่ 14:48:06 (ตัวหลักถูก restart เมื่อ 12:36 โดยไม่ใช่รอบนี้), `/` ตอบ 200 ·
+  nt-ai: **511** 503 แบบ portal scope `compiled:sales_vs_target` **11** ✓ (ต่ำสุด DATA InterChange 1.83%) · **512** ไม่มี scope 11 ✓ ·
+  **513** 500 แบบ scope `compiled:revenue_vs_target` 7 แถวยอดเดือน ✓ · **514** ไม่มี scope 7 ✓
+- portal จริงระหว่างรอบ (ก่อนขึ้น): **507** 503 ซ้ำ → 0 (โค้ดเดิม) · **508** "มีกลุ่มบริการไหนบ้างที่ไม่ผ่านเป้า" (sales) compiled **14** ✓ (parquet: 14 จาก 24) ·
+  509/510 ยอดขายเดือนต่อเดือนของกลุ่มบริการ 3.2 ภาคเหนือ `declined:no_metric` (ไม่มี metric ของยอดขายเปล่า — ไม่ได้ตรวจ)
