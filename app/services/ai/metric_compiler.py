@@ -380,6 +380,7 @@ def _triggered_mappings(intent: dict, question: str, ignore: frozenset[str] = fr
     return triggered
 
 
+_CONDITION = re.compile(r"""\s*"?([a-z_][a-z0-9_]*)"?\s*(?:=|\bLIKE\b)\s*'((?:''|[^'])*)'\s*""", re.I)
 _TERM_LITERAL = re.compile(r"\b([a-z_][a-z0-9_]*)\s*(?:=|\bIN\b)\s*(\((?:\s*'(?:''|[^'])*'\s*,?)+\)|'(?:''|[^'])*')", re.I)
 
 
@@ -596,11 +597,17 @@ def plan_with_reason(
     # a contract that names same-level columns otherwise gets no move
     order = list(metric.dimensions or ())
     held: dict[str, list[str]] = {}
-    for match in sorted((m for m in value_matches or () if isinstance(m, dict) and m.get("column_name") in declared
-                         and isinstance(m.get("column_value"), str)), key=lambda m: order.index(m["column_name"])):
-        columns = held.setdefault(match["column_value"].casefold().strip(), [])
-        if match["column_name"] not in columns:
-            columns.append(match["column_name"])
+    seen_in: dict[str, set[str]] = {}  # undeclared main-table columns the lookup found each value in
+    for match in sorted((m for m in value_matches or () if isinstance(m, dict) and isinstance(m.get("column_name"), str)
+                         and isinstance(m.get("column_value"), str)),
+                        key=lambda m: order.index(m["column_name"]) if m["column_name"] in declared else len(order)):
+        value = match["column_value"].casefold().strip()
+        if match["column_name"] in declared:
+            columns = held.setdefault(value, [])
+            if match["column_name"] not in columns:
+                columns.append(match["column_name"])
+        elif not match.get("other_table"):
+            seen_in.setdefault(value, set()).add(match["column_name"].casefold())
     holders = {value: columns[0] for value, columns in held.items()
                if len({re.sub(r"_current.*$", "", column) for column in columns}) == 1}
     # values the lookup found only through a level word ("กลุ่มบริการ" → '7.กลุ่มบริการอื่นไม่ใช่โทรคมนาคม'): pass 1 filtered
@@ -611,16 +618,22 @@ def plan_with_reason(
             found_by.setdefault(match["column_value"].casefold().strip(), set()).add(
                 match["keyword"].casefold().strip() in level_words)
     level_only = {value for value, by_level in found_by.items() if by_level == {True}}
-    # a mapping pass 1 made of a value it already filters on, which the lookup found in a declared column ("<ฝ่าย>" →
-    # unit_fname LIKE '%<ฝ่าย>%' beside the filter itself): restates the filter, adds no selection
-    filtered = {item["value"].strip("%").casefold().strip() for item in intent.get("filters") or []
-                if isinstance(item, dict) and isinstance(item.get("value"), str)} if isinstance(
-        intent.get("filters"), (list, tuple)) else set()
+    # a mapping whose condition is one of the intent's own filters ("<ฝ่าย>" → unit_fname LIKE '%<ฝ่าย>%' beside that filter,
+    # practice server lw1): restates the filter, adds no selection — the filter itself still meets the shape rules
+    own = {(item["column"].casefold(), item["value"].strip("%").casefold().strip())
+           for item in intent.get("filters") or [] if isinstance(item, dict) and isinstance(item.get("column"), str)
+           and isinstance(item.get("value"), str)} if isinstance(intent.get("filters"), (list, tuple)) else set()
+    restated = set()
+    for mapping in intent.get("matched_mappings") or []:
+        condition = _CONDITION.fullmatch(mapping.get("sql_condition") or "") if isinstance(mapping, dict) and isinstance(
+            mapping.get("sql_condition"), str) and isinstance(mapping.get("keyword"), str) else None
+        if condition and (condition[1].casefold(), condition[2].strip("%").casefold().strip()) in own:
+            restated.add(mapping["keyword"].casefold().strip())
     # the metric's own names: id / name / synonyms, and what its extra columns show ("ยอดขายบริการ (บาท)" → ยอดขายบริการ)
     names = ignore | {re.sub(r"\s*\([^)]*\)\s*$", "", extra["name_th"]).casefold().strip()
                       for extra in metric.extra_columns or ()
                       if isinstance(extra, dict) and isinstance(extra.get("name_th"), str)}
-    triggered = _triggered_mappings(intent, question, frozenset(ignore | level_words | (holders.keys() & filtered)),
+    triggered = _triggered_mappings(intent, question, frozenset(ignore | level_words | restated),
                                     frozenset(names), _defining_values(metric))
     if triggered:
         return None, "mapping_triggered:" + _reason_detail(triggered[0]["keyword"].casefold().strip())
@@ -722,8 +735,9 @@ def plan_with_reason(
                     text_value in level_words or text_value in level_only):
                 continue  # the level word itself, or a value only the level word found
             holder = holders.get(text_value) if text_value is not None else None
+            # eval 134850: pass 1's `department` (a dim_org column) moved to division_name — the column must hold it too
             if (holder is not None and isinstance(item.get("column"), str) and item["column"] not in declared
-                    and item.get("operator") in ("=", "LIKE")):
+                    and item["column"].casefold() in seen_in.get(text_value, ()) and item.get("operator") in ("=", "LIKE")):
                 item = {**item, "column": holder}
             remaining.append(item)
     range_cumulative = False

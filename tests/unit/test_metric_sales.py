@@ -413,3 +413,20 @@ def test_a_value_held_at_several_levels_is_not_moved(resolved):
                                                                     "value": f"%{UNIT}%"}]}
     assert plan_with_reason(observed, f"{UNIT} มีกลุ่มบริการไหนบ้างที่ไม่ผ่านเป้า", resolved, [], 202609, set(), LABELS,
                             PORTAL_SCOPE, value_matches=lookup) == (None, "shape:filter:department")
+
+
+def test_a_filter_moves_only_from_a_column_that_holds_the_value(resolved):
+    """Eval 134850 (revenue M0628): pass 1's `department` lives in dim_org, not the fact — no move, the old decline."""
+    lookup = [{"keyword": UNIT, "column_name": "department", "column_value": UNIT, "other_table": "feed_sales_dim_org"},
+              {"keyword": UNIT, "column_name": "unit_fname", "column_value": UNIT}]
+    observed = {**AUDIT_503, "matched_mappings": [], "filters": [{"column": "department", "operator": "LIKE",
+                                                                    "value": f"%{UNIT}%"}]}
+    assert plan_with_reason(observed, f"{UNIT} มีกลุ่มบริการไหนบ้างที่ไม่ผ่านเป้า", resolved, [], 202609, set(), LABELS,
+                            PORTAL_SCOPE, value_matches=lookup) == (None, "shape:filter:department")
+
+
+def test_a_mapping_on_another_column_than_the_filter_still_blocks(resolved):
+    observed = {**AUDIT_503, "filters": [{"column": "unit_fname", "operator": "LIKE", "value": f"%{UNIT}%"}],
+                "matched_mappings": [{"keyword": UNIT, "sql_condition": f"sales_dept LIKE '%{UNIT}%'"}]}
+    assert plan_with_reason(observed, f"{UNIT} ยอดขายเทียบเป้าแยกตามกลุ่มบริการ", resolved, [], 202609, set(), LABELS,
+                            PORTAL_SCOPE, value_matches=LOOKUP)[1] == "mapping_triggered:" + UNIT.casefold()
