@@ -403,3 +403,13 @@ def test_a_mapping_that_restates_a_filtered_value_does_not_block(resolved):
     bare = {**observed, "filters": []}
     assert plan_with_reason(bare, question, resolved, [], 202609, set(), LABELS, PORTAL_SCOPE,
                             value_matches=LOOKUP)[1] == "mapping_triggered:" + UNIT.casefold()
+
+
+def test_a_value_held_at_several_levels_is_not_moved(resolved):
+    """Eval 131741 (revenue): 'กรรมการผู้จัดการใหญ่' is a สายงาน, กลุ่ม, ฝ่าย and ส่วน name; moving pass 1's made-up column to
+    the first of them compiled "ของกลุ่ม กรรมการผู้จัดการใหญ่" as the สายงาน. Several levels → no move, the old decline."""
+    lookup = [{"keyword": UNIT, "column_name": column, "column_value": UNIT} for column in ("sales_dept", "unit_fname")]
+    observed = {**AUDIT_503, "matched_mappings": [], "filters": [{"column": "department", "operator": "LIKE",
+                                                                    "value": f"%{UNIT}%"}]}
+    assert plan_with_reason(observed, f"{UNIT} มีกลุ่มบริการไหนบ้างที่ไม่ผ่านเป้า", resolved, [], 202609, set(), LABELS,
+                            PORTAL_SCOPE, value_matches=lookup) == (None, "shape:filter:department")

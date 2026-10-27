@@ -590,11 +590,19 @@ def plan_with_reason(
     level_words.discard("")
     # portal audit 503: the ฝ่าย name went on sub_unit_fname (the unit's own cost center, undeclared) though the value
     # lookup found it in unit_fname too — a filter on an undeclared column moves to the declared one holding its value
+    # Only when every declared column holding it is one level: eval 131741 moved 'กรรมการผู้จัดการใหญ่' (สายงาน, กลุ่ม, ฝ่าย and
+    # ส่วน all hold it) to division_name for "ของกลุ่ม กรรมการผู้จัดการใหญ่" — compiled and wrong.
+    # ponytail: "one level" = one column apart from the feeds' `_current…` suffix (unit_fname / unit_fname_current);
+    # a contract that names same-level columns otherwise gets no move
     order = list(metric.dimensions or ())
-    holders: dict[str, str] = {}
+    held: dict[str, list[str]] = {}
     for match in sorted((m for m in value_matches or () if isinstance(m, dict) and m.get("column_name") in declared
                          and isinstance(m.get("column_value"), str)), key=lambda m: order.index(m["column_name"])):
-        holders.setdefault(match["column_value"].casefold().strip(), match["column_name"])
+        columns = held.setdefault(match["column_value"].casefold().strip(), [])
+        if match["column_name"] not in columns:
+            columns.append(match["column_name"])
+    holders = {value: columns[0] for value, columns in held.items()
+               if len({re.sub(r"_current.*$", "", column) for column in columns}) == 1}
     # values the lookup found only through a level word ("กลุ่มบริการ" → '7.กลุ่มบริการอื่นไม่ใช่โทรคมนาคม'): pass 1 filtered
     # on that value, which the question never asked for (practice server lw1: compiled, 0 rows)
     found_by = {}
