@@ -1,0 +1,84 @@
+# revenue_vs_target of NT-Report DataFeed/contracts/revenue.yaml 2.6.0 — kept equal by
+# tests/unit/test_metric_revenue_vs_target.py when the NT-Report worktree has it
+domain: revenue
+schema_version: 2.6.0
+metrics:
+- id: revenue_vs_target
+  name_th: รายได้เทียบเป้า (% เทียบเป้า)
+  synonyms:
+  - เทียบเป้า
+  - เทียบกับเป้า
+  - เทียบเป้าหมาย
+  - เทียบกับเป้าหมาย
+  - '% เทียบเป้า'
+  - '% achievement'
+  - achievement
+  - ผ่านเป้า
+  - ไม่ผ่านเป้า
+  - มากกว่าเป้า
+  - สูงกว่าเป้า
+  - เกินเป้า
+  - ถึงเป้า
+  - บรรลุเป้า
+  - ต่ำกว่าเป้า
+  - น้อยกว่าเป้า
+  - ไม่ถึงเป้า
+  - ไม่บรรลุเป้า
+  - พลาดเป้า
+  - ขาดเป้า
+  datasets:
+  - name: fact_bu_vs_target_monthly
+    dimensions:
+    - bu_seq
+    - bu
+  - name: fact_service_group_vs_target_monthly
+    dimensions:
+    - bu_seq
+    - bu
+    - service_group_seq
+    - service_group_nt
+  period:
+    column: year_month
+    parts:
+      year: year
+      month: month
+    value:
+      cumulative: amount_ytd
+      month: amount
+  terms:
+    actual:
+      where: metric = 'actual'
+    target:
+      where: metric = 'target'
+  expr: actual / nullif(target, 0) * 100
+  official_scope: bu_seq IN (1, 2, 3, 4, 5, 6, 7)
+  extra_columns:
+  - expr: actual
+    name_th: รายได้ (บาท)
+  - expr: target
+    name_th: เป้ารายได้ (บาท)
+  ranking:
+    positive: target
+    threshold:
+      value: 100
+      above:
+      - ผ่านเป้า
+      - มากกว่าเป้า
+      - สูงกว่าเป้า
+      - เกินเป้า
+      - ถึงเป้า
+      - บรรลุเป้า
+      below:
+      - ไม่ผ่านเป้า
+      - ต่ำกว่าเป้า
+      - น้อยกว่าเป้า
+      - ไม่ถึงเป้า
+      - ไม่บรรลุเป้า
+      - พลาดเป้า
+      - ขาดเป้า
+  unit: percent
+  note_th: '% = รายได้ / เป้า × 100 ณ งวดเดียวกัน: สะสม = revenue_ytd เทียบผลรวมเป้า
+    ม.ค.–งวด, รายเดือน = รายได้เดือนนั้นเทียบเป้าเดือนนั้น; ไม่ระบุหน่วย = ฐานกลุ่มธุรกิจ
+    1–7 เหมือนรายงาน (''8.รายได้อื่น'' แสดงเมื่อถามชื่อ); แยกรายหน่วยเฉพาะหน่วยที่มีเป้า
+    > 0 (BG 7, 8 ไม่มีเป้าระดับกลุ่มบริการ); ผ่านเป้า = % ≥ 100; มีเป้าเฉพาะปีแผน
+    (2026)'

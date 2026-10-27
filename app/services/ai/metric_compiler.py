@@ -219,6 +219,16 @@ _MONTH_NAMES = "|".join(re.escape(m) for m in (*_MONTHS, *_MONTHS_SHORT))
 _YEAR_TO_DATE_SPAN = re.compile(rf"(?:ม\.ค\.|มกราคม)\s*(?:-|–|ถึง(?:เดือน)?)\s*({_MONTH_NAMES})")
 
 
+# ponytail: short list grown from the eval / audit — a question with none of these words is about the year to date
+# (owner 2026-09-25), whatever month pass 1 wrote
+_TIME_WORDS = re.compile(rf"เดือน|ปี|ไตรมาส|งวด|สะสม|ล่าสุด|ytd|mtd|month|year|quarter|(?<![a-z])q[1-4](?!\d)|"
+                         rf"(?<!\d)(?:25|20)\d\d(?!\d)|\d{{1,2}}/\d{{2,4}}|{_MONTH_NAMES}", re.I)
+
+
+def _names_time(question: str) -> bool:
+    return bool(_TIME_WORDS.search(question)) or any(word in question.casefold() for word in TREND_WORDS)
+
+
 def _year_to_date_end(question: str) -> int | None:
     found = _YEAR_TO_DATE_SPAN.search(question)
     if found is None:
@@ -604,6 +614,12 @@ def plan_with_reason(
         filters = intent.get("filters") or []
     remaining = []
     defining = _defining_values(metric)
+    # practice server rvt r6: "มีกลุ่มบริการอะไรบ้างที่ไม่ผ่านเป้า" arrived with amount < 'revenue_target' — pass 1's
+    # spelling of the side of the line, which the threshold below carries; with a number in the question the
+    # filter may be a real condition ("รายได้เกิน 100 ล้าน") and still declines
+    side_named = (isinstance(line, dict) and not re.search(r"\d", question)
+                  and _threshold_side(question, line) is not None)
+    value_columns = {c.casefold() for c in ((metric.period or {}).get("value") or {}).values() if isinstance(c, str)}
     period_hint = None
     lows, highs = [], []
     compared = set()  # a comparison's periods as pass 1 wrote them: IN [202608, 202609], BETWEEN [202509, 202609]
@@ -651,6 +667,9 @@ def plan_with_reason(
               and set(item["value"] if isinstance(item.get("value"), list) else [item.get("value")])
               <= defining[item["column"].casefold()]):
             continue  # metric = 'actual': the terms already choose it
+        elif (side_named and isinstance(item, dict) and isinstance(item.get("column"), str)
+              and item["column"].casefold() in value_columns):
+            continue
         else:
             remaining.append(item)
     range_cumulative = False
@@ -733,8 +752,9 @@ def plan_with_reason(
         month = span_end
     if year == ref_y:
         month = min(month, ref_m)
+    # practice server rvt r6: a question without time words still came back as {month: 9, cumulative: false}
     mode = ("month" if tr.get("month") is not None and not tr.get("cumulative") and not range_cumulative
-            and span_end is None else "cumulative")
+            and span_end is None and _names_time(question) else "cumulative")
     period = year * 100 + month
     limit = intent.get("limit")
     order_desc = (intent.get("ordering") or {}).get("direction") != "ASC" \

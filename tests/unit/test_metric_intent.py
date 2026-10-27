@@ -13,6 +13,8 @@ from app.services.ai import hybrid_flow, metric_compiler as compiler
 
 
 QUESTION = "ebt ของน่าน ถ้าไม่รวมค่าใช้จ่ายบุคลากร"
+# a question without time words is the year to date whatever time_range says; month mode needs one
+MONTH_QUESTION = QUESTION + " ของเดือนนั้น"
 FILTER = {"column": "sub_unit", "operator": "=", "value": "ส่วนขายและบริการลูกค้า น่าน"}
 OLD_RULES = """**กฎสำคัญ:**
 1. ตรวจสอบ semantic mappings ใน system prompt ก่อน -- ถ้ามี keyword ที่ตรง ให้ใส่ใน matched_mappings พร้อม sql_condition ที่คัดลอกมาจาก mapping
@@ -223,7 +225,8 @@ def test_plan_prefers_the_matching_child(metrics, intent, metric_id):
     ({"year": 2025}, 202509, "cumulative"),
 ])
 def test_plan_period_selection(metrics, intent, time_range, period, mode):
-    req = compiler.plan(intent | {"time_range": time_range}, QUESTION, compiler.resolve(metrics), [], 202609, set())
+    question = MONTH_QUESTION if mode == "month" else QUESTION
+    req = compiler.plan(intent | {"time_range": time_range}, question, compiler.resolve(metrics), [], 202609, set())
     assert (req.period, req.mode) == (period, mode)
 
 
@@ -258,7 +261,8 @@ def test_plan_rejects_unsupported_period_filters(metrics, intent, operator, valu
 def test_plan_period_hint_precedence_and_mode(metrics, intent, time_range, hint, period, mode):
     selection = intent | {"time_range": time_range,
                           "filters": [{"column": "time_key", "operator": "=", "value": hint}]}
-    req = compiler.plan(selection, QUESTION, compiler.resolve(metrics), [], 202609, set())
+    question = MONTH_QUESTION if mode == "month" else QUESTION
+    req = compiler.plan(selection, question, compiler.resolve(metrics), [], 202609, set())
     if period is None:
         assert req is None
     else:
@@ -291,7 +295,7 @@ def test_plan_resolves_official_total_column_names(metrics, intent, metric_id, e
 def test_plan_month_column_name_uses_time_range_mode(metrics, intent):
     selection = intent | {"metric_id": "ebt_ex_personnel_month",
                           "time_range": {"year": 2026, "month": 9, "cumulative": False}}
-    req = compiler.plan(selection, QUESTION, compiler.resolve(metrics), [], 202609, set())
+    req = compiler.plan(selection, MONTH_QUESTION, compiler.resolve(metrics), [], 202609, set())
     assert (req.metric_id, req.mode) == ("ebt_excluding_personnel", "month")
 
 
@@ -589,8 +593,8 @@ def test_plan_with_reason_preserves_period_hint_precedence(metrics, intent, time
     selection = intent | {"time_range": time_range,
                           "filters": [{"column": "time_key", "operator": "=", "value": 202513}]}
     resolved = compiler.resolve(metrics)
-    request = compiler.plan(selection, QUESTION, resolved, [], 202609, set())
-    assert compiler.plan_with_reason(selection, QUESTION, resolved, [], 202609, set()) == (request, reason)
+    request = compiler.plan(selection, MONTH_QUESTION, resolved, [], 202609, set())
+    assert compiler.plan_with_reason(selection, MONTH_QUESTION, resolved, [], 202609, set()) == (request, reason)
     assert not compiler.supports(selection, resolved[intent["metric_id"]])
     if reason is None:
         assert request == compiler.CompileRequest(intent["metric_id"], 202609, "month", official_total_ok=False)
@@ -649,7 +653,8 @@ MONTH = {"year": 2026, "month": 9, "cumulative": False}
 ])
 def test_plan_reads_a_year_to_date_range_as_cumulative(metrics, intent, period_filters, time_range, period, mode):
     selection = intent | {"time_range": time_range, "filters": [dict(FILTER), *period_filters]}
-    req, reason = compiler.plan_with_reason(selection, QUESTION, compiler.resolve(metrics), [], 202609, set())
+    question = MONTH_QUESTION if mode == "month" else QUESTION
+    req, reason = compiler.plan_with_reason(selection, question, compiler.resolve(metrics), [], 202609, set())
     assert reason is None
     assert (req.period, req.mode, req.filters) == (period, mode, (FILTER,))
 

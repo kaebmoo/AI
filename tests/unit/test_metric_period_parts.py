@@ -61,7 +61,7 @@ def test_practice_ranking_compiles_one_period(resolved, live_intent):
 def test_monthly_aggregation(resolved, live_intent):
     live_intent.update(intent_type="aggregation", dimensions=[],
                        time_range={"year": 2026, "month": 9, "cumulative": False})
-    req, reason = plan_with_reason(live_intent, "รายได้", resolved, [], 202609, set())
+    req, reason = plan_with_reason(live_intent, "รายได้เดือนกันยายน", resolved, [], 202609, set())
     assert reason is None
     assert (req.period, req.mode, req.dimensions, req.filters) == (202609, "month", (), ())
 
