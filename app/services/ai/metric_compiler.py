@@ -588,12 +588,32 @@ def plan_with_reason(
             level_words.update(word.casefold().strip() for word in (level.get("label_th"), *(
                 level.get("detection_keywords") or ())) if isinstance(word, str) and word.strip())
     level_words.discard("")
+    # portal audit 503: the ฝ่าย name went on sub_unit_fname (the unit's own cost center, undeclared) though the value
+    # lookup found it in unit_fname too — a filter on an undeclared column moves to the declared one holding its value
+    order = list(metric.dimensions or ())
+    holders: dict[str, str] = {}
+    for match in sorted((m for m in value_matches or () if isinstance(m, dict) and m.get("column_name") in declared
+                         and isinstance(m.get("column_value"), str)), key=lambda m: order.index(m["column_name"])):
+        holders.setdefault(match["column_value"].casefold().strip(), match["column_name"])
+    # values the lookup found only through a level word ("กลุ่มบริการ" → '7.กลุ่มบริการอื่นไม่ใช่โทรคมนาคม'): pass 1 filtered
+    # on that value, which the question never asked for (practice server lw1: compiled, 0 rows)
+    found_by = {}
+    for match in value_matches or ():
+        if isinstance(match, dict) and isinstance(match.get("column_value"), str) and isinstance(match.get("keyword"), str):
+            found_by.setdefault(match["column_value"].casefold().strip(), set()).add(
+                match["keyword"].casefold().strip() in level_words)
+    level_only = {value for value, by_level in found_by.items() if by_level == {True}}
+    # a mapping pass 1 made of a value it already filters on, which the lookup found in a declared column ("<ฝ่าย>" →
+    # unit_fname LIKE '%<ฝ่าย>%' beside the filter itself): restates the filter, adds no selection
+    filtered = {item["value"].strip("%").casefold().strip() for item in intent.get("filters") or []
+                if isinstance(item, dict) and isinstance(item.get("value"), str)} if isinstance(
+        intent.get("filters"), (list, tuple)) else set()
     # the metric's own names: id / name / synonyms, and what its extra columns show ("ยอดขายบริการ (บาท)" → ยอดขายบริการ)
     names = ignore | {re.sub(r"\s*\([^)]*\)\s*$", "", extra["name_th"]).casefold().strip()
                       for extra in metric.extra_columns or ()
                       if isinstance(extra, dict) and isinstance(extra.get("name_th"), str)}
-    triggered = _triggered_mappings(intent, question, frozenset(ignore | level_words), frozenset(names),
-                                    _defining_values(metric))
+    triggered = _triggered_mappings(intent, question, frozenset(ignore | level_words | (holders.keys() & filtered)),
+                                    frozenset(names), _defining_values(metric))
     if triggered:
         return None, "mapping_triggered:" + _reason_detail(triggered[0]["keyword"].casefold().strip())
     filters = intent.get("filters") or []
@@ -637,13 +657,6 @@ def plan_with_reason(
     side_named = (isinstance(line, dict) and not re.search(r"\d", question)
                   and _threshold_side(question, line) is not None)
     value_columns = {c.casefold() for c in ((metric.period or {}).get("value") or {}).values() if isinstance(c, str)}
-    # portal audit 503: the ฝ่าย name went on sub_unit_fname (the unit's own cost center, undeclared) though the value
-    # lookup found it in unit_fname too — a filter on an undeclared column moves to the declared one holding its value
-    order = list(metric.dimensions or ())
-    holders: dict[str, str] = {}
-    for match in sorted((m for m in value_matches or () if isinstance(m, dict) and m.get("column_name") in declared
-                         and isinstance(m.get("column_value"), str)), key=lambda m: order.index(m["column_name"])):
-        holders.setdefault(match["column_value"].casefold().strip(), match["column_name"])
     period_hint = None
     lows, highs = [], []
     compared = set()  # a comparison's periods as pass 1 wrote them: IN [202608, 202609], BETWEEN [202509, 202609]
@@ -696,7 +709,11 @@ def plan_with_reason(
             continue
         else:
             value = item.get("value") if isinstance(item, dict) else None
-            holder = holders.get(value.strip("%").casefold().strip()) if isinstance(value, str) else None
+            text_value = value.strip("%").casefold().strip() if isinstance(value, str) else None
+            if text_value is not None and item.get("operator") in ("=", "LIKE") and (
+                    text_value in level_words or text_value in level_only):
+                continue  # the level word itself, or a value only the level word found
+            holder = holders.get(text_value) if text_value is not None else None
             if (holder is not None and isinstance(item.get("column"), str) and item["column"] not in declared
                     and item.get("operator") in ("=", "LIKE")):
                 item = {**item, "column": holder}

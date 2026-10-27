@@ -361,3 +361,45 @@ def test_without_the_level_label_or_the_lookup_the_old_declines_stay(resolved):
     outside = [item for item in LOOKUP if item["column_name"] == "sub_unit_fname"]
     assert plan_with_reason(AUDIT_503, question, resolved, [], 202609, set(), LABELS, PORTAL_SCOPE,
                             value_matches=outside)[1] == "shape:filter:sub_unit_fname"
+
+
+BG7 = "7.กลุ่มบริการอื่นไม่ใช่โทรคมนาคม"
+LEVEL_LOOKUP = LOOKUP + [{"keyword": "กลุ่มบริการ", "column_name": "business_group", "column_value": BG7},
+                         {"keyword": "กลุ่มบริการ", "column_name": "service_group", "column_value": "4.3.กลุ่มบริการวงจรเช่า (Datacom)"}]
+
+
+@pytest.mark.parametrize("value_filter", [
+    {"column": "business_group", "operator": "=", "value": BG7},
+    {"column": "business_group", "operator": "LIKE", "value": "%กลุ่มบริการ%"},
+])
+def test_a_filter_only_the_level_word_found_is_dropped(resolved, value_filter):
+    """Practice server lw1: with the กลุ่มบริการ mapping no longer blocking, pass 1's business_group = '7.กลุ่มบริการอื่น…'
+    (the lookup found it through the level word alone) compiled to 0 rows."""
+    observed = {**AUDIT_503, "filters": [{"column": "sub_unit_fname", "operator": "LIKE", "value": f"%{UNIT}%"},
+                                         value_filter]}
+    req, reason = plan_with_reason(observed, f"กลุ่มบริการไหนของ{UNIT} ที่ยอดขายไม่ถึงเป้า", resolved, [], 202609,
+                                   set(), LABELS, PORTAL_SCOPE, value_matches=LEVEL_LOOKUP)
+    assert reason is None
+    assert req.filters == ({"column": "unit_fname", "operator": "LIKE", "value": f"%{UNIT}%"},)
+
+
+def test_a_business_group_the_question_names_is_kept(resolved):
+    lookup = LEVEL_LOOKUP + [{"keyword": "อื่นไม่ใช่โทรคมนาคม", "column_name": "business_group", "column_value": BG7}]
+    observed = {**AUDIT_503, "matched_mappings": [], "filters": [{"column": "business_group", "operator": "=", "value": BG7}]}
+    req, reason = plan_with_reason(observed, "กลุ่มบริการอื่นไม่ใช่โทรคมนาคม มีกลุ่มบริการไหนไม่ผ่านเป้า", resolved, [],
+                                   202609, set(), LABELS, PORTAL_SCOPE, value_matches=lookup)
+    assert reason is None and req.filters == ({"column": "business_group", "operator": "=", "value": BG7},)
+
+
+def test_a_mapping_that_restates_a_filtered_value_does_not_block(resolved):
+    """Practice server lw1: pass 1 made "<ฝ่าย>" → unit_fname LIKE '%<ฝ่าย>%' a mapping beside the same filter."""
+    observed = {**AUDIT_503, "filters": [{"column": "unit_fname", "operator": "LIKE", "value": f"%{UNIT}%"}],
+                "matched_mappings": [{"keyword": UNIT, "sql_condition": f"unit_fname LIKE '%{UNIT}%'"}]}
+    question = f"{UNIT} ยอดขายเทียบเป้าแยกตามกลุ่มบริการ"
+    req, reason = plan_with_reason(observed, question, resolved, [], 202609, set(), LABELS, PORTAL_SCOPE,
+                                   value_matches=LOOKUP)
+    assert reason is None and req.filters == ({"column": "unit_fname", "operator": "LIKE", "value": f"%{UNIT}%"},)
+    # without the filter the mapping is a selection the intent lacks: it still blocks
+    bare = {**observed, "filters": []}
+    assert plan_with_reason(bare, question, resolved, [], 202609, set(), LABELS, PORTAL_SCOPE,
+                            value_matches=LOOKUP)[1] == "mapping_triggered:" + UNIT.casefold()
