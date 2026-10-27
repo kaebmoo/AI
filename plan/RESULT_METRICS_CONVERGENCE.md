@@ -14,7 +14,7 @@
 | **C-01** contract revenue (NT-Report) | ✅ **ขึ้นของจริงแล้ว** (ff NT-Report main `b08aa3c..738ea8b` 2026-10-26, revenue **2.4.0**; ยังไม่ push) — ของจริง audit 481–484 ผ่าน; server ซ้อม r11: revenue **6/6** compiled, คำถามเทียบเป้า 3/3 ไปทางเดิมด้วย `excluded_word` | 2026-10-26 | NT-Report `738ea8b`; AI `0e63227` (`excluded_words`) |
 | C-0c ratio จัดอันดับอย่างมีความหมาย | ✅ ทำก่อนแผนนี้ (`941cd0a`, ebt 1.6.0) | 2026-10-24 | |
 | **CMP** เทียบสองงวดบนเส้นทาง compile (`plan/PLAN_METRICS_COMPARISON.md`) | ✅ **ขึ้นของจริงแล้ว** (main `862915c` = merge กับ Phase E, reload 07:32 2026-10-25) + push — วัดบน server ซ้อม: ชุดเทียบปีก่อน 3 → 20/27 | 2026-10-25 | `a54f76a`, `0a32b92` |
-| **RVT** รายได้เทียบเป้า `revenue_vs_target` + tolerance ใน `plan()` | ✅ **ขึ้นของจริงแล้ว** 2026-10-27 10:58 (ff NT-Report main `3d948e6..bac925c` revenue **2.6.0** + rebuild dist `20261027T035724Z` + register; ff AI main `886c4fc..3b99b4d`; audit 495–501 — §RVT.5; ยังไม่ push) | 2026-10-27 | `9548079`; NT-Report `dbaa20b`, `bac925c` |
+| **RVT** รายได้เทียบเป้า `revenue_vs_target` + tolerance ใน `plan()` | ✅ **ขึ้นของจริงแล้ว** 2026-10-27 10:58 (ff NT-Report main `3d948e6..bac925c` revenue **2.6.0** + rebuild dist `20261027T035724Z` + register; ff AI main `886c4fc..3b99b4d`; audit 495–501 — §RVT.5) + sales **1.4.1** ผ่าน/ไม่ผ่านเป้า 12:05 (ff NT-Report `..421093c`, AI `..1cf3adb`; audit 504–505 — §RVT.6); ยังไม่ push | 2026-10-27 | `9548079`, `018e92f`; NT-Report `dbaa20b`, `bac925c`, `421093c` |
 
 ---
 
@@ -1032,5 +1032,10 @@ shape: top5/top10 ทั้งสองทาง 128/128, compare_up 19/20, by 1
 
 - **ที่เหลือ:** "ไม่ผ่านเป้ามากที่สุด N อันดับ" — pass 1 เขียน `ordering {achievement_gap, DESC}` (ช่องว่างมากสุดก่อน = % ต่ำสุดก่อน) แต่ compiler แทนชื่อคอลัมน์
   ที่แต่งด้วยค่า metric และคงทิศ DESC → ได้ฝ่ายที่ใกล้เป้าที่สุด; แก้ได้ใน `plan()`: ฝั่ง below + จัดอันดับ → ASC (ต่ำสุดก่อน) — ข้อ "เกินเป้ามากที่สุด" (above + DESC) ไม่กระทบ
-- **สถานะ:** ยังไม่ขึ้นของจริง — ขึ้น: ff NT-Report main ด้วย `421093c` (request แรกของ feed_sales re-sync เอง) + ff AI main ด้วย `018e92f` (test/fixture อย่างเดียว)
-  แล้วถาม "มีฝ่ายไหนบ้างที่ไม่ผ่านเป้า" แบบ portal → 24
+- **ขึ้นของจริงแล้ว 2026-10-27 12:05** (เจ้าของสั่ง): backup `~/nt-ai-backups/sales141-golive-20261027-120542/config.db` (integrity ok) → ff NT-Report main
+  `bac925c..421093c` (sales 1.4.1) → ff AI main `a484335..1cf3adb` (test/fixture/docs — ไม่มีโค้ด server) · request แรกของ feed_sales re-sync เอง
+  (`schema_metrics.ranking` มี "ไม่ผ่านเป้า") · nt-ai: **504** "มีฝ่ายไหนบ้างที่ไม่ผ่านเป้า" (scope portal) `compiled:sales_vs_target` **24** ✓ ·
+  **505** ไม่มี scope → 24 ✓ (เรียงต่ำสุดก่อน, ไม่มี limit)
+- **พบระหว่างตรวจ:** portal จริง **503** (11:00, ก่อนขึ้น 1.4.1) "ฝ่ายขายและปฏิบัติการลูกค้า ภาคกลางตอนล่าง มีกลุ่มบริการไหนบ้างที่ไม่ผ่านเป้า" → 0 แถว;
+  ถามซ้ำหลังขึ้น (**506**) ยังเป็น `declined:mapping_triggered:กลุ่มบริการ` → SQL อิสระ `business_group LIKE '%กลุ่มบริการ%'` + `sub_unit_fname` → 0 แถว
+  (ที่ถูก: กลุ่มบริการที่มีเป้า 15, ไม่ผ่าน **11**) — mapping ที่ pass 1 แต่งบนคำระดับของมิติที่ประกาศ (`service_group`) แบบเดียวกับ `กลุ่มธุรกิจ` ของ revenue (RVT.4/5)
