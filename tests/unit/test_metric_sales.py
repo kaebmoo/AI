@@ -324,3 +324,40 @@ def test_not_passing_the_target_keeps_the_units_below_the_line(resolved, value_f
     assert reason is None
     assert (req.period, req.mode, req.filters, req.threshold, req.order_desc, req.limit) == (
         202609, "cumulative", (), "below", False, None)
+
+
+UNIT = "ฝ่ายขายและปฏิบัติการลูกค้า ภาคกลางตอนล่าง"
+AUDIT_503 = {  # practice server s141, the portal question of live audit 503 / 506
+    "intent_type": "aggregation", "metrics": ["sales_vs_target"], "metric_id": "sales_vs_target",
+    "dimensions": ["service_group"], "filters": [{"column": "sub_unit_fname", "operator": "=", "value": UNIT}],
+    "time_range": {"year": 2026, "month": 9, "cumulative": True},
+    "ordering": {"column": "sales_vs_target", "direction": "ASC"}, "limit": None,
+    "matched_mappings": [{"keyword": "กลุ่มบริการ", "sql_condition": "business_group = '7.กลุ่มบริการอื่นไม่ใช่โทรคมนาคม'"}]}
+LABELS = {"service_group": "กลุ่มบริการ (รูปแบบ 'N.M.ชื่อ' เช่น 4.3.กลุ่มบริการวงจรเช่า (Datacom))", "unit_fname": "ฝ่าย"}
+LOOKUP = [{"keyword": UNIT, "column_name": column, "column_value": UNIT}
+          for column in ("sub_unit_fname", "unit_fname_current", "unit_fname")]
+
+
+def test_a_unit_filter_on_its_cost_center_moves_to_the_declared_unit_column(resolved):
+    """Live audit 503 (portal): "<ฝ่าย> มีกลุ่มบริการไหนบ้างที่ไม่ผ่านเป้า" → 0 rows. The mapping pass 1 made up on the level
+    word "กลุ่มบริการ" no longer blocks, and the ฝ่าย name it put on sub_unit_fname (undeclared — targets sit at ฝ่าย level)
+    goes to unit_fname, the first declared column the value lookup found it in."""
+    question = f"{UNIT} มีกลุ่มบริการไหนบ้างที่ไม่ผ่านเป้า"
+    req, reason = plan_with_reason(AUDIT_503, question, resolved, [], 202609, set(), LABELS, PORTAL_SCOPE,
+                                   value_matches=LOOKUP)
+    assert reason is None
+    assert (req.period, req.mode, req.dimensions, req.filters, req.threshold, req.order_desc) == (
+        202609, "cumulative", ("service_group",), ({"column": "unit_fname", "operator": "=", "value": UNIT},),
+        "below", False)
+
+
+def test_without_the_level_label_or_the_lookup_the_old_declines_stay(resolved):
+    question = f"{UNIT} มีกลุ่มบริการไหนบ้างที่ไม่ผ่านเป้า"
+    assert plan_with_reason(AUDIT_503, question, resolved, [], 202609, set(), None, PORTAL_SCOPE,
+                            value_matches=LOOKUP) == (None, "mapping_triggered:กลุ่มบริการ")
+    assert plan_with_reason(AUDIT_503, question, resolved, [], 202609, set(), LABELS, PORTAL_SCOPE) == (
+        None, "shape:filter:sub_unit_fname")
+    # a value the lookup found only outside the declared columns still declines
+    outside = [item for item in LOOKUP if item["column_name"] == "sub_unit_fname"]
+    assert plan_with_reason(AUDIT_503, question, resolved, [], 202609, set(), LABELS, PORTAL_SCOPE,
+                            value_matches=outside)[1] == "shape:filter:sub_unit_fname"

@@ -510,9 +510,12 @@ def plan(
     labels: dict[str, str] | None = None,
     scope: dict | None = None,
     numeric: set | frozenset | None = None,
+    hierarchy: list | None = None,
+    value_matches: list | None = None,
 ) -> CompileRequest | None:
     """Choose a declared metric and a supported single-period compile request."""
-    return plan_with_reason(intent, question, resolved, matched, reference, tables, labels, scope, numeric)[0]
+    return plan_with_reason(intent, question, resolved, matched, reference, tables, labels, scope, numeric,
+                            hierarchy, value_matches)[0]
 
 
 def plan_with_reason(
@@ -525,9 +528,12 @@ def plan_with_reason(
     labels: dict[str, str] | None = None,
     scope: dict | None = None,
     numeric: set | frozenset | None = None,
+    hierarchy: list | None = None,
+    value_matches: list | None = None,
 ) -> tuple[CompileRequest | None, str | None]:
     """Choose a compile request or give a short decline reason. `labels` = dimension_labels(); `scope` = the
-    request's scope (the portal sends the months the asker may see)."""
+    request's scope (the portal sends the months the asker may see); `hierarchy` = the context's master_hierarchy
+    levels; `value_matches` = the value lookup of the question ({column_name, column_value})."""
     metric_id = intent.get("metric_id")
     if isinstance(metric_id, str) and metric_id not in resolved:
         column_matches = [key for key, metric in resolved.items()
@@ -569,8 +575,19 @@ def plan_with_reason(
         ancestor = resolved.get(ancestor.extends)
     # "ฝ่ายไหน…" names a declared dimension: a mapping on that word (the global 'สายงาน', or one pass 1
     # invents for ส่วน / กลุ่ม) must not send the question to free SQL — the dimension already carries it
-    level_words = {label.casefold().strip() for dim, label in (labels or {}).items()
-                   if dim in (metric.dimensions or ()) and isinstance(label, str) and label.strip()}
+    declared = set(metric.dimensions or ())
+    level_words = set()
+    for dim, label in (labels or {}).items():
+        if dim in declared and isinstance(label, str) and label.strip():
+            # "กลุ่มบริการ (รูปแบบ 'N.M.ชื่อ' …)" names its level without the parentheses (portal audit 503)
+            level_words |= {label.casefold().strip(), re.sub(r"\s*\(.*$", "", label).casefold().strip()}
+    for level in hierarchy or ():
+        # the hierarchy names a level the metric declares — revenue bu is labelled "business group (BG)" and its
+        # Thai word "กลุ่มธุรกิจ" lives only here (practice server rvt: mapping_triggered:กลุ่มธุรกิจ)
+        if isinstance(level, dict) and declared & set(level.get("columns") or ()):
+            level_words.update(word.casefold().strip() for word in (level.get("label_th"), *(
+                level.get("detection_keywords") or ())) if isinstance(word, str) and word.strip())
+    level_words.discard("")
     # the metric's own names: id / name / synonyms, and what its extra columns show ("ยอดขายบริการ (บาท)" → ยอดขายบริการ)
     names = ignore | {re.sub(r"\s*\([^)]*\)\s*$", "", extra["name_th"]).casefold().strip()
                       for extra in metric.extra_columns or ()
@@ -620,6 +637,13 @@ def plan_with_reason(
     side_named = (isinstance(line, dict) and not re.search(r"\d", question)
                   and _threshold_side(question, line) is not None)
     value_columns = {c.casefold() for c in ((metric.period or {}).get("value") or {}).values() if isinstance(c, str)}
+    # portal audit 503: the ฝ่าย name went on sub_unit_fname (the unit's own cost center, undeclared) though the value
+    # lookup found it in unit_fname too — a filter on an undeclared column moves to the declared one holding its value
+    order = list(metric.dimensions or ())
+    holders: dict[str, str] = {}
+    for match in sorted((m for m in value_matches or () if isinstance(m, dict) and m.get("column_name") in declared
+                         and isinstance(m.get("column_value"), str)), key=lambda m: order.index(m["column_name"])):
+        holders.setdefault(match["column_value"].casefold().strip(), match["column_name"])
     period_hint = None
     lows, highs = [], []
     compared = set()  # a comparison's periods as pass 1 wrote them: IN [202608, 202609], BETWEEN [202509, 202609]
@@ -671,6 +695,11 @@ def plan_with_reason(
               and item["column"].casefold() in value_columns):
             continue
         else:
+            value = item.get("value") if isinstance(item, dict) else None
+            holder = holders.get(value.strip("%").casefold().strip()) if isinstance(value, str) else None
+            if (holder is not None and isinstance(item.get("column"), str) and item["column"] not in declared
+                    and item.get("operator") in ("=", "LIKE")):
+                item = {**item, "column": holder}
             remaining.append(item)
     range_cumulative = False
     if lows or highs:

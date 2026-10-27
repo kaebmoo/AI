@@ -82,3 +82,25 @@ def test_a_question_without_time_words_is_the_year_to_date(resolved, question, m
 ])
 def test_time_words(question, named):
     assert _names_time(question) is named
+
+
+HIERARCHY = [{"level": 0, "columns": ["bu", "bu_seq"], "label_th": "กลุ่มธุรกิจ",
+              "detection_keywords": ["กลุ่มธุรกิจ", "ธุรกิจ", "business group", "business"]},
+             {"level": 12, "columns": ["unit_name", "unit_sname"], "label_th": "ฝ่าย", "detection_keywords": ["ฝ่าย"]}]
+
+
+def test_a_mapping_on_a_level_word_of_the_hierarchy_does_not_block(resolved):
+    """Practice server rvt: "รายได้แต่ละกลุ่มธุรกิจเทียบเป้า" came with bu LIKE '%กลุ่มธุรกิจ%' as a mapping; bu's label is
+    "business group (BG)" so the Thai level word only reaches plan() through master_hierarchy."""
+    observed = {**intent([], {"year": 2026, "month": 9, "cumulative": True}), "intent_type": "comparison",
+                "dimensions": ["bu"], "ordering": None,
+                "matched_mappings": [{"keyword": "กลุ่มธุรกิจ", "sql_condition": "bu LIKE '%กลุ่มธุรกิจ%'"}]}
+    question, labels = "รายได้แต่ละกลุ่มธุรกิจเทียบเป้า", {"bu": "business group (BG)"}
+    assert plan_with_reason(observed, question, resolved, [], 202609, set(), labels) == (
+        None, "mapping_triggered:กลุ่มธุรกิจ")
+    req, reason = plan_with_reason(observed, question, resolved, [], 202609, set(), labels, hierarchy=HIERARCHY)
+    assert reason is None and (req.dimensions, req.mode, req.base_period) == (("bu",), "cumulative", None)
+    # a level the metric does not declare (ฝ่าย: no unit_name in revenue_vs_target) lends no words
+    unit = {**observed, "matched_mappings": [{"keyword": "ฝ่าย", "sql_condition": "unit_name LIKE '%ฝ่าย%'"}]}
+    assert plan_with_reason(unit, "รายได้แต่ละกลุ่มธุรกิจของฝ่ายเทียบเป้า", resolved, [], 202609, set(), labels,
+                            hierarchy=HIERARCHY)[1] == "mapping_triggered:ฝ่าย"

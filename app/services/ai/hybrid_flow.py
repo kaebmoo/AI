@@ -925,7 +925,7 @@ async def build_first_attempt_prompt(
                 req, reason = metric_compiler.plan_with_reason(
                     intent_json, question, resolved, matched, reference_period(),
                     set(_context_tables(context_table)) | {context_table}, labels, request_scope.get(),
-                    numeric=numeric,
+                    numeric=numeric, hierarchy=hierarchy, value_matches=value_matches,
                 )
                 if req is not None:
                     try:
