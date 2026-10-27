@@ -1010,3 +1010,27 @@ shape: top5/top10 ทั้งสองทาง 128/128, compare_up 19/20, by 1
   → ไม่มีเงื่อนไข < 100 · แก้ได้ที่ contract sales (PATCH: เพิ่มสองคำ) + fixture `sales_metrics_1_4_0.yaml`
 - ยังไม่ push ทั้งสอง repo · ย้อนกลับ: `git -C AI reset --hard 886c4fc` + NT-Report `reset --hard 3d948e6` + `latest` กลับไป build `20261022T031524Z`
   แล้ว `register_file_source --domain revenue` (หรือคืน config.db จาก backup)
+
+### RVT.6 sales 1.4.1 — คำ "ผ่านเป้า" / "ไม่ผ่านเป้า" ใน `sales_vs_target` (2026-10-27, เจ้าของสั่ง)
+ที่มา: RVT.5 audit **502** (portal จริง) "มีฝ่ายไหนบ้างที่ไม่ผ่านเป้า" → 29 ฝ่าย = ทุกฝ่ายที่มีเป้า (ไม่ผ่านจริง 24, ผ่าน 5)
+- NT-Report `421093c` (branch `ai/delegate-metrics`): sales **1.4.1** PATCH — `ranking.threshold.above` + "ผ่านเป้า", `below` + "ไม่ผ่านเป้า", `synonyms` + ทั้งสอง
+  (ชุดเดียวกับ `revenue_vs_target`) · `pytest tools/feed` 45 passed · schema + ข้อมูลเท่าเดิม — ไม่ต้อง rebuild dist ไม่ต้อง register
+- AI `018e92f` (branch `claude/sales-pass-words` จาก main `a484335`): fixture `sales_metrics_1_4_1.yaml` (เทียบ contract เมื่อมี worktree) + test คำฝั่ง
+  + test plan ของ intent แบบ 502 (มี/ไม่มีตัวกรอง `amount < 'target'`) → below, ไม่มี limit · ไม่แก้โค้ด · ACC-T **2243 passed**, ACC-L ผ่าน
+- วัดบน server ซ้อม 8005 (สำเนา rvt; contract sales ตรึงสำเนา `rvt/DataFeed/contracts/sales.yaml`, dist sales ของจริงอ่านอย่างเดียว) — server เดียวกัน
+  สลับ contract แล้ว restart, 7 คำถาม × มี/ไม่มี scope portal:
+
+| คำถาม | 1.4.0 | 1.4.1 | oracle (parquet) |
+|---|---|---|---|
+| มีฝ่ายไหนบ้างที่ไม่ผ่านเป้า | 29 ✗ ×2 | **24 ✓ ×2** | 24 |
+| ฝ่ายไหนบ้างที่ยอดขายไม่ผ่านเป้า | 29 ✗ ×2 | **24 ✓ ×2** | 24 |
+| ฝ่ายไหนผ่านเป้า | 29 ✗ ×2 | **5 ✓ ×2** | 5 |
+| หน่วยงานที่ยอดขายมากกว่าเป้ามีหน่วยไหนบ้าง | 5 ✓ ×2 | 5 ✓ ×2 | 5 |
+| ฝ่ายไหนยอดขายยังไม่ถึงเป้า | 24 ✓ ×2 | 24 ✓ ×2 | 24 |
+| ยอดขายรวมทั้งบริษัทเทียบเป้า | 92.38 ✓ / scope ✗ `declined:shape:filter:metric` | 92.38 ✓ ×2 | 92.38 |
+| ฝ่ายที่ไม่ผ่านเป้ามากที่สุด 5 อันดับ | 5 แถว ไม่มีเส้น (ASC ✓ / DESC = สูงสุด ✗) | 5 แถวใต้เส้น แต่เรียง **DESC** (99.16% ก่อน) ✗ ×2 | 5 ต่ำสุด |
+
+- **ที่เหลือ:** "ไม่ผ่านเป้ามากที่สุด N อันดับ" — pass 1 เขียน `ordering {achievement_gap, DESC}` (ช่องว่างมากสุดก่อน = % ต่ำสุดก่อน) แต่ compiler แทนชื่อคอลัมน์
+  ที่แต่งด้วยค่า metric และคงทิศ DESC → ได้ฝ่ายที่ใกล้เป้าที่สุด; แก้ได้ใน `plan()`: ฝั่ง below + จัดอันดับ → ASC (ต่ำสุดก่อน) — ข้อ "เกินเป้ามากที่สุด" (above + DESC) ไม่กระทบ
+- **สถานะ:** ยังไม่ขึ้นของจริง — ขึ้น: ff NT-Report main ด้วย `421093c` (request แรกของ feed_sales re-sync เอง) + ff AI main ด้วย `018e92f` (test/fixture อย่างเดียว)
+  แล้วถาม "มีฝ่ายไหนบ้างที่ไม่ผ่านเป้า" แบบ portal → 24
