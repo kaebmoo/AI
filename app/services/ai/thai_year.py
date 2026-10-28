@@ -31,6 +31,7 @@ BE_OFFSET = 543
 _MONTHS = ("มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
            "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม")
 _MONTHS_SHORT = ("ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค.")
+MONTHS, MONTHS_SHORT = _MONTHS, _MONTHS_SHORT  # hybrid_flow.unasked_year_error reads the same names
 # what says the number after it is a year — a month abbreviation with or without its dots
 _MARK = "|".join([r"ปี(?:งบประมาณ|งบ)?", r"พ\.\s*ศ\.?", "งวด", "เดือน", "ไตรมาส", *_MONTHS,
                   *(re.escape(m).replace(r"\.", r"\.?") for m in _MONTHS_SHORT), r"(?<!\d)\d{1,2}\s*/"])

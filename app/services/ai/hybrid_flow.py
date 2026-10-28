@@ -195,9 +195,39 @@ def cumulative_sum_error(sql_query: str, context_table: str, config_engine=None)
     return None
 
 
+_ASKED_YEAR = re.compile(r"(?<!\d)(?:25|20)\d\d(?!\d)|(?:ปี|พ\.\s*ศ\.?)\s*\d\d(?!\d)")  # 2569 / 2026 / "ปี 69"
+_OTHER_YEAR = re.compile(r"ปีก่อน|ปีที่แล้ว|yoy|เทียบปี", re.I)  # ปีก่อนหน้า included
+_SQL_PERIOD = re.compile(r"(?<!\d)(20\d\d(?:0[1-9]|1[0-2]))(?!\d)")
+
+
+def unasked_year_error(question: str, sql_query: str) -> Optional[str]:
+    """I5: a month named without a year ("เดือน กันยายน") is its latest occurrence up to the reference
+    period (portal: the scope's end; chat: the source's data period) — audit 518 answered the Sep 2569
+    report from 202509. Wrong = the SQL's period literals hold that month but never the right one; holding
+    both (the same month a year before beside it) passes. No reference period / a year asked = no check."""
+    from app.services.ai.thai_year import MONTHS, MONTHS_SHORT
+
+    ref = reference_period()
+    if not isinstance(ref, int) or ref < 100001 or not 1 <= ref % 100 <= 12:
+        return None
+    if _ASKED_YEAR.search(question) or _OTHER_YEAR.search(question):
+        return None
+    literals = {int(p) for p in _SQL_PERIOD.findall(sql_query)}
+    for number, (name, short) in enumerate(zip(MONTHS, MONTHS_SHORT), 1):
+        if name not in question and short.rstrip(".") not in question:  # "ก.ย." or "ก.ย"
+            continue
+        right = (ref // 100 - (number > ref % 100)) * 100 + number
+        named = {p for p in literals if p % 100 == number}
+        if named and right not in named:
+            return (f"I5 month_outside_reference_year: เดือน{name}ที่ไม่ระบุปี = {right} (งวดอ้างอิง {ref}) "
+                    f"— ใช้ {right} และช่วงก่อนหน้าของปีเดียวกัน")
+    return None
+
+
 def invariant_code(error: str) -> Optional[str]:
     """Recognize our blocking retry messages, never SQL or arbitrary validation errors."""
-    for code, name in (("I1", "ytd_summed_across_periods"), ("I2", "ytd_without_period"), ("I4", "avg_over_fact_rows")):
+    for code, name in (("I1", "ytd_summed_across_periods"), ("I2", "ytd_without_period"), ("I4", "avg_over_fact_rows"),
+                       ("I5", "month_outside_reference_year")):
         if error.startswith(f"{code} {name}: "):
             return code
     return None
@@ -1107,7 +1137,7 @@ async def run_hybrid_attempt(
         retry_history.append({"sql": sql_query, "error": dropped_error})
         return None, total_tokens, sql_query
 
-    cumulative_error = cumulative_sum_error(sql_query, context_table)
+    cumulative_error = cumulative_sum_error(sql_query, context_table) or unasked_year_error(question, sql_query)
     if cumulative_error:
         logger.warning("Hybrid Mode: %s", cumulative_error)
         retry_history.append({"sql": sql_query, "error": cumulative_error})
