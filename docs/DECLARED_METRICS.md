@@ -147,6 +147,10 @@ metrics:
 4. metric ของ legacy context (ไม่มี contract) ยังไม่มีทางประกาศ (admin UI = งานถัดไป); ถ้าใส่ตรงลงตารางให้ `source='manual'`
 
 ## 6. ที่ยังไม่ทำ / ข้อควรรู้
+- SQL ทาง LLM ผ่าน invariant ของ parse tree (`sql_invariants.check` ← `hybrid_flow.cumulative_sum_error`, retry แล้วรอบสุดท้ายยังผิด = `query_failed`):
+  I1/I2 คอลัมน์ YTD ข้ามงวด / ไม่มีงวด · I3 (log อย่างเดียว) · **I4 `avg_over_fact_rows`** (2026-10-28, audit 518) — `AVG`/`MEDIAN`/`STDDEV*`/`VAR*` หรือ `SUM(x)/COUNT(*)`
+  ของคอลัมน์ summable บนแถวดิบของตารางที่รู้ grain และเหลือ key ที่ไม่ถูกตรึง (GROUP BY / PARTITION BY / `= ค่าเดียว`) มากกว่าหนึ่ง = ค่าเฉลี่ยต่อรายการ ไม่ใช่ต่อเดือน;
+  grain = `datasets[].keys` ของ contract (อ่านเมื่อไฟล์เปลี่ยน ไม่ต้อง migrate) · FROM ที่มี CTE/subquery ไม่ตรวจ · ตารางที่ไม่รู้ grain (legacy) ไม่ตรวจ · ตรวจทุก context แม้ไม่มีคอลัมน์ YTD
 - รูปที่ไม่ compile (trend หลายงวด, detail, เทียบสองงวด) ยังไปทาง LLM — ขั้น 2 ของ RESEARCH §4: ส่ง expression ให้ pass 2 + guard, compile ×2 สำหรับ ratio/YoY
 - "สายงานไหน … สูงกว่า" ให้ LIMIT 1 ทั้งสองทาง แต่เฉลยอยากเห็นทุกค่า · `cost_ratio` ยังไม่ประกาศ · mapping id 57 "สายงาน" ยังรบกวนทางเดิม
 - REST `/api/v1/query` ยังไม่ส่ง `metric` ออกไปใน response (มีใน `QueryResult` ภายใน) — เพิ่มได้ผ่าน `app/core/outbound.py` เมื่อ portal ต้องการป้าย "ยอดทางการ"

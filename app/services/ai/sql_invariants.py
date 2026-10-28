@@ -13,11 +13,15 @@ class Violation:
     name: str
     columns: tuple[str, ...]
     blocking: bool
+    tables: tuple[str, ...] = ()
 
 
 _parser_lock = threading.Lock()
 _parser_conn = None
 _QUERY_NODES = ("SELECT_NODE", "SET_OPERATION_NODE", "RECURSIVE_CTE_NODE")
+# I4: statistics that depend on how many rows there are, not on what the rows add up to
+_AVERAGES = ("avg", "mean", "median", "stddev", "stddev_samp", "stddev_pop", "variance", "var_samp", "var_pop")
+_AGGREGATES = _AVERAGES + ("sum", "count", "count_star", "min", "max")
 
 
 def _nodes(value):
@@ -46,13 +50,21 @@ def _conjuncts(expr):
             yield expr
 
 
-def check(sql: str, point_in_time, summable, period_columns) -> list[Violation]:
-    """Catch inflated YTD aggregates while preserving single-period compiler SQL."""
+def _calls(nodes, names):
+    return [node for node in nodes
+            if node.get("class") in ("FUNCTION", "WINDOW") and node.get("function_name", "").lower() in names]
+
+
+def check(sql: str, point_in_time, summable, period_columns, grain=None) -> list[Violation]:
+    """Catch inflated YTD aggregates while preserving single-period compiler SQL; given `grain`
+    ({table: its key columns}) also catch averages taken over a table's raw rows (I4)."""
     pit = {name.lower() for name in point_in_time}
     periods = {name.lower() for name in period_columns}
-    if not pit or not periods:
-        return []
     monthly = {name.lower() for name in summable}
+    grain = {table.lower(): {key.lower() for key in keys} for table, keys in (grain or {}).items()}
+    ytd = bool(pit and periods)
+    if not ytd and not (grain and monthly):
+        return []
     global _parser_conn
     with _parser_lock:
         if _parser_conn is None:
@@ -67,22 +79,32 @@ def check(sql: str, point_in_time, summable, period_columns) -> list[Violation]:
     if tree.get("error") or len(tree.get("statements", [])) != 1:
         return []
 
-    def period_ref(expr):
+    def column_of(expr):
         while isinstance(expr, dict) and expr.get("class") == "CAST":
             expr = expr.get("child")
-        return isinstance(expr, dict) and expr.get("type") == "COLUMN_REF" and bool(_columns(expr) & periods)
+        return _columns(expr) if isinstance(expr, dict) and expr.get("type") == "COLUMN_REF" else set()
 
-    def single_period(expr):
+    def fixed(expr):
+        """Columns a predicate pins to one value: col = <constant | scalar subquery>, col IN (<one constant>)."""
         if expr.get("type") == "COMPARE_EQUAL":
             left, right = expr.get("left") or {}, expr.get("right") or {}
-            return any(period_ref(ref) and (value.get("class") == "CONSTANT"
-                       or (value.get("class") == "SUBQUERY" and value.get("subquery_type") == "SCALAR"))
-                       for ref, value in ((left, right), (right, left)))
+            return {name for ref, value in ((left, right), (right, left))
+                    if value.get("class") == "CONSTANT"
+                    or (value.get("class") == "SUBQUERY" and value.get("subquery_type") == "SCALAR")
+                    for name in column_of(ref)}
         children = expr.get("children", [])
-        return (expr.get("type") == "COMPARE_IN" and len(children) == 2
-                and period_ref(children[0]) and children[1].get("class") == "CONSTANT")
+        if expr.get("type") == "COMPARE_IN" and len(children) == 2 and children[1].get("class") == "CONSTANT":
+            return column_of(children[0])
+        return set()
 
-    found = {"I1": set(), "I2": set(), "I3": set()}
+    def period_ref(expr):
+        return bool(column_of(expr) & periods)
+
+    def single_period(expr):
+        return bool(fixed(expr) & periods)
+
+    found = {"I1": set(), "I2": set(), "I3": set(), "I4": set()}
+    raw_tables = set()  # I4: the tables whose raw rows were averaged
     facts = {}
 
     def analyze(node, visible):
@@ -121,14 +143,21 @@ def check(sql: str, point_in_time, summable, period_columns) -> list[Violation]:
 
         sources = []
         conditions = [node.get("where_clause")]
+        tables, derived = [], False  # I4 reads real tables only: no lineage through a CTE / subquery
         for ref in _nodes(node.get("from_table")):
             if ref.get("type") == "JOIN":
                 conditions.append(ref.get("condition"))
             elif ref.get("type") == "SUBQUERY" and "class" not in ref:
                 sources.append(facts[id(ref["subquery"]["node"])])
+                derived = True
             elif (ref.get("type") == "BASE_TABLE" and not ref.get("schema_name")
                   and not ref.get("catalog_name") and ref.get("table_name", "").lower() in visible):
                 sources.append(visible[ref["table_name"].lower()])
+                derived = True
+            elif ref.get("type") == "BASE_TABLE":
+                tables.append(ref.get("table_name", "").lower())
+            elif ref.get("type") in ("TABLE_FUNCTION", "EXPRESSION_LIST"):
+                derived = True
         # ponytail: a base fact table joined to a pinned CTE is taken as pinned; no column lineage.
         pinned = (any(single_period(c) for expr in conditions for c in _conjuncts(expr))
                   or bool(sources) and all(p for p, _ in sources))
@@ -137,7 +166,7 @@ def check(sql: str, point_in_time, summable, period_columns) -> list[Violation]:
                       or grouped or any(h for _, h in sources))
         own = list(_nodes(contents))
         excluded = set()
-        for agg in own:
+        for agg in own if ytd else ():
             if agg.get("class") not in ("FUNCTION", "WINDOW") or agg.get("function_name", "").lower() not in ("sum", "avg"):
                 continue
             args = agg.get("children", [])
@@ -151,14 +180,57 @@ def check(sql: str, point_in_time, summable, period_columns) -> list[Violation]:
                 found["I1"].update(columns & pit)
                 excluded.update(id(expr) for expr in _nodes(agg))
             found["I3"].update(columns & monthly)
-        if not has_period:
+        if ytd and not has_period:
             found["I2"].update(expr["column_names"][-1].lower() for expr in own
                                if id(expr) not in excluded and expr.get("type") == "COLUMN_REF"
                                and expr.get("column_names") and expr["column_names"][-1].lower() in pit)
+        keyed = [table for table in tables if table in grain] if not derived else []
+        if keyed and monthly:
+            raw_average(node, own, conditions, keyed)
         facts[id(node)] = (pinned, has_period)
         return facts[id(node)]
 
+    def raw_average(node, own, conditions, keyed):
+        """I4: an average of a summable measure over a table's raw rows — per row (org × product × ...),
+        not per month or per unit — unless every key but one is pinned (GROUP BY / PARTITION BY / = value)."""
+        select = node.get("select_list", [])
+        groups = node.get("group_expressions", [])
+        group_all = node.get("aggregate_handling") == "FORCE_AGGREGATES"
+        pins = {name for expr in conditions for c in _conjuncts(expr) for name in fixed(c)}
+        group_pins = set()
+        for expr in groups:
+            position = (expr.get("value") or {}).get("value") if expr.get("class") == "CONSTANT" else None
+            if isinstance(position, int) and 0 < position <= len(select):  # GROUP BY 1
+                expr = select[position - 1]
+            names = _columns(expr)
+            group_pins |= names | {c for item in select if str(item.get("alias", "")).lower() in names
+                                   for c in _columns(item)}
+        if group_all:
+            group_pins |= {c for item in select if not _calls(_nodes(item), _AGGREGATES) for c in _columns(item)}
+        candidates = []  # (measure columns, pinned keys)
+        for agg in _calls(own, _AVERAGES):
+            args = agg.get("children", [])
+            if agg.get("class") != "WINDOW":
+                candidates.append((_columns(args), pins | group_pins))
+            elif not (groups or group_all or _calls(_nodes(args), _AGGREGATES)):  # a window over groups is not raw
+                candidates.append((_columns(args), pins | _columns(agg.get("partitions", []))))
+        for div in own:  # SUM(x) / COUNT(*): an average by hand; COUNT(DISTINCT <period>) divides per period
+            children = div.get("children", [])
+            if div.get("class") != "FUNCTION" or div.get("function_name") != "/" or len(children) != 2:
+                continue
+            counts = _calls(_nodes(children[1]), ("count", "count_star"))
+            if counts and not any(c.get("distinct") for c in counts):
+                sums = _calls(_nodes(children[0]), ("sum",))
+                candidates.append((_columns([s.get("children", []) for s in sums]), pins | group_pins))
+        for columns, pinned_keys in candidates:
+            rows = [table for table in keyed if len(grain[table] - pinned_keys) > 1]
+            if columns & monthly and rows:
+                found["I4"].update(columns & monthly)
+                raw_tables.update(rows)
+
     analyze(tree["statements"][0].get("node") or {}, {})
-    return [Violation(code, name, tuple(sorted(found[code])), code != "I3") for code, name in (
+    return [Violation(code, name, tuple(sorted(found[code])), code != "I3",
+                      tuple(sorted(raw_tables)) if code == "I4" else ()) for code, name in (
         ("I1", "ytd_summed_across_periods"), ("I2", "ytd_without_period"), ("I3", "month_summed_as_ytd"),
+        ("I4", "avg_over_fact_rows"),
     ) if found[code]]

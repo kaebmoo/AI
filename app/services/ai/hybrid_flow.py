@@ -1,6 +1,8 @@
 import asyncio
+import functools
 import json
 import logging
+import os
 import re
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, cast
 
@@ -127,16 +129,44 @@ def _period_columns(context_table: str, config_engine=None) -> List[str]:
         return []
 
 
+@functools.lru_cache(maxsize=16)
+def _contract_grain(path: str, mtime_ns: int) -> Dict[str, tuple]:
+    from app.services.datafeed_knowledge import load_contract
+
+    contract, _ = load_contract(path)
+    return {f"feed_{contract['domain']}_{ds['name']}": tuple(ds["keys"])
+            for ds in contract.get("datasets") or [] if ds.get("keys")}
+
+
+def _grain_keys(context_table: str, config_engine=None) -> Dict[str, tuple]:
+    """{table: key columns} of a file source's tables — one row per key combination — from its contract's
+    datasets[].keys (read on change, no migration). Empty = legacy context / no contract / unreadable."""
+    try:
+        from sqlalchemy import text
+
+        if config_engine is None:
+            from app.db.session import config_engine
+        with config_engine.connect() as conn:
+            path = conn.execute(text(
+                "SELECT ds.contract_file FROM schema_contexts sc JOIN data_sources ds ON ds.id = sc.source_id "
+                "WHERE sc.main_view = :t AND sc.is_active = 1 AND sc.status = 'active'"), {"t": context_table}).scalar()
+        return _contract_grain(path, os.stat(path).st_mtime_ns) if path else {}
+    except Exception:
+        return {}
+
+
 def cumulative_sum_error(sql_query: str, context_table: str, config_engine=None) -> Optional[str]:
     """Refuse blocking period invariants and guide retries. Audit 407's SUM(COALESCE(YTD, 0))
-    escaped the regex guard and inflated the answer, so inspect the parse tree."""
+    escaped the regex guard and inflated the answer, so inspect the parse tree. A context
+    without point-in-time columns still gets I4 (audit 518: AVG over feed_sales' raw rows)."""
     cumulative = _cumulative_columns(context_table, config_engine)
     periods = _period_columns(context_table, config_engine)
-    if not cumulative or not periods:
+    grain = _grain_keys(context_table, config_engine)
+    if not grain and (not cumulative or not periods):
         return None
     summable = _summable_columns(context_table, config_engine)
     try:
-        violations = sql_invariants.check(sql_query, cumulative, summable, periods)
+        violations = sql_invariants.check(sql_query, cumulative, summable, periods, grain)
     except Exception:
         # ponytail: a checker bug must not block answers.
         logger.warning("Hybrid Mode: invariant checker failed")
@@ -152,6 +182,14 @@ def cumulative_sum_error(sql_query: str, context_table: str, config_engine=None)
             return (prefix + f"คอลัมน์ {', '.join(v.columns)} เป็นยอดสะสมตั้งแต่ต้นปี (YTD) ณ งวด — SUM ข้ามงวดได้ตัวเลขเกินจริงหลายเท่า "
                     f"ต้องเลือกงวดเดียวเท่านั้น: WHERE {periods[0]} = <งวดที่ต้องการ> (ห้าม BETWEEN / IN หลายงวด / ไม่กรองงวด) "
                     f"แล้วรวมได้เฉพาะข้ามมิติอื่นในงวดนั้น; ถ้าต้องการรวมหลายเดือนจริง ให้ใช้คอลัมน์รายเดือน (*_month) แทน")
+        if v.code == "I4":
+            table = v.tables[0]
+            keys = next((k for t, k in grain.items() if t.lower() == table), ())
+            period = periods[0] if periods else "คอลัมน์งวด"
+            return (prefix + f"AVG({', '.join(v.columns)}) บนแถวดิบของ {table} (grain: {', '.join(keys)}) "
+                    f"= ค่าเฉลี่ยต่อรายการ ไม่ใช่ต่อเดือน/ต่อหน่วย — ให้ SUM ต่อมิติที่ถาม × {period} ใน CTE ก่อน "
+                    f"แล้วค่อยเฉลี่ยจาก CTE; เดือนที่ไม่มีแถวนับเป็น 0 (หารด้วยจำนวนเดือนของช่วง); "
+                    f"อย่าตัดหน่วยที่ไม่มียอดในงวดใดงวดหนึ่ง (เริ่มจากรายชื่อหน่วยของทั้งสองช่วง)")
         return (prefix + f"คอลัมน์ {', '.join(v.columns)} เป็นยอดสะสมตั้งแต่ต้นปี (YTD) ณ งวด แต่ query อ่านโดยไม่มีเงื่อนไขงวด "
                 f"ต้องเลือกงวดเดียว: WHERE {periods[0]} = <งวดที่ต้องการ> หรือแสดงคอลัมน์งวด {periods[0]} ในแต่ละแถว")
     return None
@@ -159,7 +197,7 @@ def cumulative_sum_error(sql_query: str, context_table: str, config_engine=None)
 
 def invariant_code(error: str) -> Optional[str]:
     """Recognize our blocking retry messages, never SQL or arbitrary validation errors."""
-    for code, name in (("I1", "ytd_summed_across_periods"), ("I2", "ytd_without_period")):
+    for code, name in (("I1", "ytd_summed_across_periods"), ("I2", "ytd_without_period"), ("I4", "avg_over_fact_rows")):
         if error.startswith(f"{code} {name}: "):
             return code
     return None
