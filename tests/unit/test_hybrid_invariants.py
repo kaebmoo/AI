@@ -159,6 +159,7 @@ async def test_later_validation_failure_keeps_existing_final_result(execution):
     ("I1 ytd_summed_across_periods: guidance", "I1"),
     ("I2 ytd_without_period: guidance", "I2"),
     ("I4 avg_over_fact_rows: guidance", "I4"),
+    ("I5 month_outside_reference_year: guidance", "I5"),
     ("I1 unrelated: guidance", None),
     ("I2 ytd_without_period_extra: guidance", None),
     ("I3 month_summed_as_ytd: guidance", None),
@@ -239,3 +240,86 @@ def test_grain_keys_come_from_the_contract_and_follow_its_changes(tmp_path):
         assert hybrid_flow._grain_keys("feed_sales_fact_sales", engine) == {}
     finally:
         engine.dispose()
+
+
+# I5 month_outside_reference_year (plan §5): audit 518 asked "เดือน กันยายน" from the Sep 2569 sales report
+# (scope 202501..202609) and was answered from 202509 — a month without a year is the latest one up to the
+# reference period.
+INCIDENT = "เดือน กันยายน มีรายได้ของหน่วยงานไหน ผิดปกติไปจากค่าเฉลี่ยก่อนหน้าบ้าง"
+PORTAL_SCOPE = {"year_month": [*range(202501, 202513), *range(202601, 202610)]}
+SEP_2025 = ("WITH m AS (SELECT unit_fname, year_month, SUM(amount) AS amt FROM t WHERE metric = 'actual' "
+            "AND year_month BETWEEN 202501 AND 202509 GROUP BY 1, 2) "
+            "SELECT unit_fname, SUM(amt) FILTER (WHERE year_month = 202509), "
+            "SUM(amt) FILTER (WHERE year_month < 202509) / 8 FROM m GROUP BY unit_fname")
+SEP_2026 = SEP_2025.replace("2025", "2026")
+
+
+@pytest.fixture
+def portal_scope():
+    from app.services.data_sources import request_scope
+
+    token = request_scope.set(PORTAL_SCOPE)
+    yield
+    request_scope.reset(token)
+
+
+@pytest.mark.parametrize("question,sql,expected", [
+    (INCIDENT, SEP_2025, "เดือนกันยายนที่ไม่ระบุปี = 202609 (งวดอ้างอิง 202609)"),
+    (INCIDENT, SEP_2026, None),
+    ("ยอดขาย ก.ย. ของทั้งสองปี", "SELECT year_month, SUM(amount) FROM t WHERE year_month IN (202509, 202609) GROUP BY 1",
+     None),
+    ("ยอดขาย ก.ย. รายหน่วยงาน", "SELECT SUM(amount) FROM t WHERE year_month = 202509", "= 202609"),
+    ("ยอดขายเดือนธันวาคม", "SELECT SUM(amount) FROM t WHERE year_month = 202512", None),
+    ("ยอดขายเดือนธันวาคม", "SELECT SUM(amount) FROM t WHERE year_month = 202612",
+     "เดือนธันวาคมที่ไม่ระบุปี = 202512 (งวดอ้างอิง 202609)"),
+    ("ยอดขายมกราคมถึงสิงหาคม", "SELECT SUM(amount) FROM t WHERE year_month BETWEEN 202501 AND 202508", "= 202601"),
+    ("ยอดขายเดือนกันยายน 2568", SEP_2025, None),
+    ("ยอดขายเดือนกันยายนปี 68", SEP_2025, None),
+    ("ยอดขายเดือนกันยายน 2025", SEP_2025, None),
+    ("ยอดขายกันยายนเทียบปีก่อน", "SELECT SUM(amount) FROM t WHERE year_month = 202509", None),
+    ("ยอดขายกันยายนปีที่แล้ว", "SELECT SUM(amount) FROM t WHERE year_month = 202509", None),
+    ("ยอดขายกันยายน YoY", "SELECT SUM(amount) FROM t WHERE year_month = 202509", None),
+    ("ยอดขายรายเดือน", SEP_2025, None),
+    (INCIDENT, "SELECT SUM(amount) FROM t WHERE year = 2025 AND month = 9", None),
+])
+def test_month_without_a_year_is_the_reference_year(portal_scope, question, sql, expected):
+    error = hybrid_flow.unasked_year_error(question, sql)
+    if expected is None:
+        assert error is None
+    else:
+        assert error.startswith("I5 month_outside_reference_year: ") and expected in error
+
+
+def test_no_reference_period_no_check():
+    from app.services.data_sources import request_data_period
+
+    assert hybrid_flow.unasked_year_error(INCIDENT, SEP_2025) is None
+    token = request_data_period.set(202609)  # chat / Telegram: the source's data period
+    try:
+        assert hybrid_flow.unasked_year_error(INCIDENT, SEP_2025).startswith("I5 ")
+    finally:
+        request_data_period.reset(token)
+
+
+async def ask_incident(service, **kwargs):
+    return await hybrid_flow.query_hybrid(
+        service, INCIDENT, "system", context_name="feed_sales", max_retries=1,
+        two_pass_enabled=True, value_verification_enabled=False, **kwargs,
+    )
+
+
+async def test_i5_retry_answers_from_the_reference_year(sales, portal_scope):
+    sales.provider.generate_content.side_effect = [SEP_2025, SEP_2026]
+    result = await ask_incident(sales)
+    assert result.error is None and result.sql_query == SEP_2026 and result.retry_count == 1
+    assert result.retry_history[0]["error"].startswith(
+        "I5 month_outside_reference_year: เดือนกันยายนที่ไม่ระบุปี = 202609 (งวดอ้างอิง 202609) — ใช้ 202609")
+    assert result.retry_history[0]["error"] in sales.provider.generate_content.await_args_list[1].args[0]
+
+
+async def test_last_i5_fails_closed(sales, portal_scope):
+    sales.provider.generate_content.return_value = SEP_2025
+    trace = new_trace(INCIDENT)
+    result = await ask_incident(sales, trace=trace)
+    assert result.error == "query_failed" and trace.stages["invariant"] == "I5"
+    sales.mcp_client.call_tool.assert_not_awaited()
