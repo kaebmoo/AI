@@ -185,6 +185,19 @@ class TestSimpleQueryEndpoint:
         assert len(data["data"]) == 2
 
 
+    def test_columns_keep_the_sql_order(self, query_client):
+        """PLAN_ANOMALY_AVG_FIX §7: the portal's Go hook re-marshals rows as maps, which sorts their keys
+        (audit 518's header came out in code-point order) — `columns` carries the SQL's order."""
+        row = {"หน่วยงาน": "ก", "รายได้เดือนกันยายน": 2.0, "รายได้เฉลี่ยก่อนกันยายน": 1.0, "ส่วนต่างรายได้": 1.0,
+               "เปอร์เซ็นต์เปลี่ยนแปลง": 100.0}
+        with patch("app.services.query_engine.QueryEngine") as MockEngine:
+            MockEngine.return_value.query = AsyncMock(return_value=_mock_query_engine_result(data=[row, dict(row)]))
+            body = query_client.post("/api/v1/query/", json={"question": "q", "include_data": True, "max_rows": 1}).json()
+            plain = query_client.post("/api/v1/query/", json={"question": "q"}).json()
+        assert body["columns"] == list(row) != sorted(row)
+        assert plain["columns"] is None
+
+
 class TestPortalFields:
     """F11 Phase A: optional portal fields accepted without breaking the contract."""
 
@@ -266,11 +279,12 @@ class TestMultiContextResponse:
         assert body["data_as_of"] is None and body["error"] is None  # freshness is per part
         first, second = body["parts"]
         assert first == {"context": "feed_revenue", "question": "ถาม feed_revenue", "answer": "คำตอบ feed_revenue", "row_count": 2,
-                         "error": None, "data_as_of": {"period": 202608}, "sql": "SELECT v FROM feed_revenue", "data": [{"v": 3.0}]}
+                         "error": None, "data_as_of": {"period": 202608}, "sql": "SELECT v FROM feed_revenue", "data": [{"v": 3.0}],
+                         "columns": ["v"]}
         assert second["data_as_of"] == {"period": 202607}
         with patch("app.services.multi_context.ask", AsyncMock(return_value=self._multi())):
             plain = query_client.post("/api/v1/query/", json={"question": "รายได้และ EBT"}).json()
-        assert "sql" not in plain["parts"][0] and "data" not in plain["parts"][0]
+        assert "sql" not in plain["parts"][0] and "data" not in plain["parts"][0] and "columns" not in plain["parts"][0]
 
     def test_single_context_answer_has_no_parts(self, query_client):
         with patch("app.services.query_engine.QueryEngine") as MockEngine:

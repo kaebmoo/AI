@@ -50,6 +50,8 @@ class SimpleQueryResponse(BaseModel):
     context: str = Field("", description="Data context used")
     sql: Optional[str] = Field(None, description="Generated SQL (if include_sql=True)")
     data: Optional[List[Dict[str, Any]]] = Field(None, description="Raw data rows")
+    # a JSON object carries no key order through every client (a Go map re-sorts it): the SQL's column order
+    columns: Optional[List[str]] = Field(None, description="Column order of `data` as in the SQL (if include_data=True)")
     row_count: Optional[int] = Field(None, description="Total row count")
     execution_time_ms: float = Field(0, description="Total execution time in ms")
     error: Optional[str] = Field(None, description="Error message if query failed")
@@ -74,6 +76,11 @@ def _find_refusal(exc: BaseException):
     return outbound.find(exc, (ScopeError, ContextNotAllowed, LLMPolicyError, AuditUnavailable))
 
 
+def _columns(rows) -> List[str]:
+    """The result's column order — the keys of its first row (as query_audit.result_columns)."""
+    return list(rows[0].keys()) if rows and isinstance(rows[0], dict) else []
+
+
 def _multi_response(multi, request_body: SimpleQueryRequest) -> SimpleQueryResponse:
     parts = []
     for part in multi.parts:
@@ -88,6 +95,7 @@ def _multi_response(multi, request_body: SimpleQueryRequest) -> SimpleQueryRespo
             entry["sql"] = qr.sql_query if qr is not None else None
         if request_body.include_data:
             entry["data"] = rows[:request_body.max_rows]
+            entry["columns"] = _columns(rows)
         parts.append(entry)
     return SimpleQueryResponse(
         answer=multi.answer, context=multi.context_name, row_count=sum(p["row_count"] for p in parts),
@@ -146,6 +154,7 @@ async def run_simple_query(request_body: SimpleQueryRequest, *, user_id, api_key
         context=result.context_name or request_body.context or "",
         sql=qr.sql_query if request_body.include_sql else None,  # asked for = its own field, never inside the answer
         data=data_rows if request_body.include_data else None,
+        columns=_columns(data_rows) if request_body.include_data else None,
         row_count=row_count,
         execution_time_ms=round(result.execution_time_ms, 1),
         error=outbound.result_code(qr.error) if qr.error else None,

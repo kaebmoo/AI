@@ -43,6 +43,11 @@ Request เพิ่มเติมสำหรับ portal (optional ทั้
   ใหม่ต่อ query (ไม่ผ่าน MCP) และอ่านได้เฉพาะ main view ของ context
 - cache คำตอบแยกตาม scope
 
+Response มี `columns` (2026-10-28, `PLAN_ANOMALY_AVG_FIX.md` §7) เมื่อขอ `include_data` — ลำดับคอลัมน์ของ `data` ตามที่ SQL เลือก
+(ชุดเดียวกับ `query_audit.result_columns`; คำถามข้าม context: `parts[].columns` ต่อส่วน) — ใช้เป็นหัวตารางและลำดับคอลัมน์ของ CSV;
+อย่าใช้ลำดับ key ของ object ในแถว: ตัวกลางที่ parse JSON เป็น map แล้ว serialize ใหม่ (เช่น `res.json` ของ PocketBase/Go) เรียง key ตามตัวอักษร
+— audit 518 ได้หัวตาราง "รายได้เฉลี่ยก่อนกันยายน | รายได้เดือนกันยายน | ส่วนต่างรายได้ | หน่วยงาน | …" แทนลำดับใน SQL · ไม่มี field นี้ (server เก่า) = ใช้ key ของแถวแรกเหมือนเดิม
+
 Response มี `data_as_of` (Plan 7 Phase 2) — ความสดของข้อมูลที่ใช้ตอบ มาจาก `manifest.json` ของ build ที่ AI ตรวจแล้ว
 (reconcile.ok + sha256) และเป็น build เดียวกับที่ SQL อ่านจริง (คำตอบจาก cache ก็เป็น build เดียวกัน เพราะ cache ผูก build):
 ```json
