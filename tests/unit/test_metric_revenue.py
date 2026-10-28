@@ -231,3 +231,60 @@ def test_dimension_labels_use_each_grains_table(metrics):
         assert dimension_labels(metrics, engine) == {"bu": "กลุ่มธุรกิจ", "unit_name": "ฝ่าย"}
     finally:
         engine.dispose()
+
+
+# "รายได้สะสม กลุ่มธุรกิจ ไม่เอารายได้อื่น" (audit 527 / 529, 2026-10-29): pass 1 wrote the value it leaves out as a
+# selection, and the compiler — which had no exclusions — answered with BG 8 alone
+NEGATED = "รายได้สะสม กลุ่มธุรกิจ ไม่เอารายได้อื่น"
+LOOKUP = [{"column_name": "bu", "column_value": BG8, "keyword": "รายได้อื่น"}]
+MAPPING = {"keyword": "รายได้อื่น", "sql_condition": "BUSINESS_GROUP = 'รายได้อื่น'"}
+
+
+@pytest.mark.parametrize("filters,expected", [
+    (({"column": "bu", "operator": "NOT LIKE", "value": "%รายได้อื่น%"},), [(BG1, 900), (BG4, 1800)]),
+    (({"column": "bu", "operator": "<>", "value": BG8},), [(BG1, 900), (BG4, 1800)]),
+    (({"column": "bu", "operator": "NOT IN", "value": [BG8, BG1]},), [(BG4, 1800)]),
+    # two exclusions on one column narrow — as alternatives (OR) they would keep every row
+    (({"column": "bu", "operator": "<>", "value": BG8}, {"column": "bu", "operator": "<>", "value": BG1}),
+     [(BG4, 1800)]),
+    (({"column": "bu_seq", "operator": "<>", "value": 8},), [(BG1, 900), (BG4, 1800)]),
+])
+def test_exclusions_compile_and_leave_their_values_out(resolved, databases, filters, expected):
+    compiled, rows = execute(CompileRequest("revenue", 202609, "cumulative", dimensions=("bu",), filters=filters),
+                             resolved, databases)
+    assert compiled.table == BU and rows == expected and not compiled.official
+
+
+def test_an_exclusion_without_a_breakdown_sums_the_rest(resolved, databases):
+    req = CompileRequest("revenue", 202609, "cumulative", filters=({"column": "bu", "operator": "<>", "value": BG8},))
+    compiled, rows = execute(req, resolved, databases)
+    assert compiled.table == BU and rows == [(2700,)]  # the official total (2910) holds BG 8
+
+
+def test_the_reports_scope_stays_when_units_are_only_left_out(resolved):
+    scoped = {"revenue": replace(resolved["revenue"], official_scope="bu_seq < 9")}
+    out = CompileRequest("revenue", 202609, "cumulative", dimensions=("bu",),
+                         filters=({"column": "bu", "operator": "<>", "value": BG8},))
+    picked = CompileRequest("revenue", 202609, "cumulative", dimensions=("bu",),
+                            filters=({"column": "bu", "operator": "=", "value": BG8},))
+    assert "(bu_seq < 9)" in compile(out, scoped).sql and "(bu_seq < 9)" not in compile(picked, scoped).sql
+
+
+@pytest.mark.parametrize("filters", [
+    [{"column": "bu", "operator": "LIKE", "value": "%8.รายได้อื่น%"}],  # audit 529, practice neg2
+    [{"column": "bu", "operator": "LIKE", "value": "%รายได้อื่น%"}],  # audit 527
+    [{"column": "bu", "operator": "<>", "value": BG8}],  # practice neg1 / neg3 / neg5 (declined before)
+    [{"column": "bu", "operator": "LIKE", "value": "%"}, {"column": "bu", "operator": "<>", "value": BG8}],  # neg4
+])
+def test_the_incidents_intents_leave_bg8_out(resolved, databases, filters):
+    from app.services.ai.metric_compiler import leave_out_negated
+
+    intent = {"intent_type": "aggregation", "metrics": ["revenue_ytd"], "metric_id": "revenue",
+              "aggregate_function": "SUM", "dimensions": ["bu"], "filters": filters,
+              "time_range": {"year": 2026, "month": 9, "cumulative": True}, "ordering": None, "limit": None,
+              "matched_mappings": [MAPPING]}
+    intent, _ = leave_out_negated(intent, NEGATED, LOOKUP)
+    req, reason = plan_with_reason(intent, NEGATED, resolved, [], 202609, {TOTAL, BU, ORG}, value_matches=LOOKUP)
+    assert reason is None
+    compiled, rows = execute(req, resolved, databases)
+    assert rows == [(BG1, 900), (BG4, 1800)]

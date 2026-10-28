@@ -841,3 +841,68 @@ def test_plan_declines_period_sets_that_are_not_two_periods(metrics, values):
         return
     assert compiler.plan_with_reason(selection, "EBT เทียบ", compiler.resolve(metrics), [], 202609, set()) == (
         None, "period_filter:compare")
+
+
+# what the question leaves out is read in code (audit 527 / 529: "ไม่เอารายได้อื่น" came back as bu LIKE '%รายได้อื่น%')
+LOOKUP = [{"column_name": "bu", "column_value": "8.รายได้อื่น", "keyword": "รายได้อื่น"}]
+SELECTS = {"column": "bu", "operator": "LIKE", "value": "%8.รายได้อื่น%"}
+MAPPING = {"keyword": "รายได้อื่น", "sql_condition": "BUSINESS_GROUP = 'รายได้อื่น'"}
+
+
+@pytest.mark.parametrize("question,turned", [
+    ("รายได้สะสม กลุ่มธุรกิจ ไม่เอารายได้อื่น", True),
+    ("รายได้ไม่รวมกลุ่ม 8.รายได้อื่น", True),
+    ("รายได้ยกเว้น BG 8 รายได้อื่น", True),
+    ("รายได้ทุกกลุ่ม นอกจากรายได้อื่น", True),
+    ("revenue excluding รายได้อื่น", True),
+    ("รายได้อื่นสะสม", False),
+    ("รายได้ไม่รวมภาษี กลุ่มรายได้อื่น", False),  # another word between: the negation is of ภาษี
+    ("รายได้อื่น เทียบกับที่ไม่รวมรายได้อื่น", False),  # also asked for as itself
+    ("รายได้ไม่รวมรายได้อื่น, เฉพาะรายได้อื่น", False),
+])
+def test_a_value_the_question_leaves_out_becomes_an_exclusion(question, turned):
+    intent = {"filters": [dict(SELECTS)], "matched_mappings": [dict(MAPPING)]}
+    out, done = compiler.leave_out_negated(intent, question, LOOKUP)
+    assert out["filters"][0]["operator"] == ("NOT LIKE" if turned else "LIKE")
+    assert done == (["bu NOT LIKE %8.รายได้อื่น%"] if turned else [])
+    assert out["matched_mappings"] == ([] if turned else [MAPPING])  # its condition selects the value
+    assert intent["filters"] == [SELECTS]  # pass 1's own intent is not edited in place
+
+
+@pytest.mark.parametrize("operator,expected", [
+    ("=", "<>"), ("in", "NOT IN"), ("like", "NOT LIKE"), ("!=", "<>"), ("not  like", "NOT LIKE"), ("<>", "<>"),
+])
+def test_operators_are_spelled_one_way_and_exclusions_stay(operator, expected):
+    value = ["8.รายได้อื่น"] if operator == "in" else "8.รายได้อื่น"
+    intent = {"filters": [{"column": "bu", "operator": operator, "value": value}]}
+    out, _ = compiler.leave_out_negated(intent, "รายได้ ไม่เอารายได้อื่น", LOOKUP)
+    assert out["filters"][0]["operator"] == expected
+
+
+def test_other_intents_pass_untouched():
+    assert compiler.leave_out_negated(None, "ไม่เอา x") == (None, [])
+    assert compiler.leave_out_negated({"intent_type": "x"}, "ไม่เอา x") == ({"intent_type": "x"}, [])
+    out, done = compiler.leave_out_negated({"filters": [{"column": "time_key", "operator": "=", "value": 202609}]},
+                                           "ไม่รวม 202609")
+    assert done == [] and out["filters"][0]["operator"] == "="  # numbers are periods / codes, not named values
+    assert "matched_mappings" not in out
+
+
+NAN = "ebt ไม่รวมน่าน"
+
+
+@pytest.mark.parametrize("intent_type,where", [("aggregation", "compiled"), ("trend", "pass 2")])
+async def test_both_paths_read_the_exclusion(metrics, intent, monkeypatch, intent_type, where):
+    monkeypatch.setattr(compiler, "load_metrics", lambda c: metrics)
+    selects = {"column": "sub_unit", "operator": "LIKE", "value": "%น่าน%"}
+    service = _service(intent | {"intent_type": intent_type, "metric_id": "ebt", "filters": [selects]})
+    prompt, two_pass, compiled = await hybrid_flow.build_first_attempt_prompt(
+        service=service, question=NAN, system_prompt="system", history=None,
+        context_name="feed_ebt", context_table="feed_ebt_fact_ebt", context_thai="EBT",
+        two_pass_enabled=True, cheap_model=None, detect_hierarchy_level=lambda *a: None,
+        format_value_matches=service.format_value_matches, get_vanna_context_string=lambda q: "",
+        lookup_values_from_question=lambda *a: [], on_status=None, attempt=0, max_retries=1)
+    if where == "compiled":
+        assert '"sub_unit" NOT LIKE \'%น่าน%\'' in compiled.sql and "sub_unit\" LIKE" not in compiled.sql
+    else:
+        assert compiled is None and "sub_unit NOT LIKE %น่าน%" in prompt
