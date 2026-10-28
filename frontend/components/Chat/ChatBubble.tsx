@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import Markdown from 'react-native-markdown-display';
 import { TechnicalAccordion } from './TechnicalAccordion';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -322,13 +323,13 @@ export const ChatBubble = ({ message, onTrain, onAskFrom }: ChatBubbleProps) => 
                         {hasMoreData && (
                             <TouchableOpacity
                                 onPress={() => setShowAllData(!showAllData)}
-                                className="py-3 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 active:bg-gray-50 dark:active:bg-gray-700 transition"
+                                accessibilityRole="button"
+                                className="py-3 flex-row items-center justify-center gap-1 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 active:bg-gray-50 dark:active:bg-gray-700 transition"
                             >
-                                <Text className="text-[13px] text-center font-semibold"
+                                <Ionicons name={showAllData ? 'chevron-up' : 'chevron-down'} size={14} color={colors.accent} />
+                                <Text className="text-[13px] font-semibold"
                                     style={{ color: colors.accent, fontFamily: THAI_FONT_FAMILY }}>
-                                    {showAllData
-                                        ? '▲ ย่อข้อมูล'
-                                        : `▼ แสดงทั้งหมด ${message.data?.length || 0} รายการ`}
+                                    {showAllData ? 'ย่อข้อมูล' : `แสดงทั้งหมด ${message.data?.length || 0} รายการ`}
                                 </Text>
                             </TouchableOpacity>
                         )}
@@ -348,9 +349,15 @@ export const ChatBubble = ({ message, onTrain, onAskFrom }: ChatBubbleProps) => 
                                     // W5: active = NT yellow (matches chart toolbar active state)
                                     style={showPivot ? { backgroundColor: '#FFD100', borderColor: '#FFD100' } : undefined}
                                 >
+                                    <Ionicons
+                                        name={showPivot ? 'close' : 'grid-outline'}
+                                        size={13}
+                                        color={showPivot ? '#212121' : isDark ? '#D1D5DB' : '#4B5563'}
+                                        style={{ marginRight: 4 }}
+                                    />
                                     <Text className={`text-xs font-semibold ${showPivot ? '' : isDark ? 'text-gray-300' : 'text-gray-600'}`}
                                         style={{ fontFamily: THAI_FONT_FAMILY, ...(showPivot ? { color: '#212121' } : {}) }}>
-                                        {showPivot ? '✕ ปิด Pivot' : '⊞ เปิด Pivot Tool'}
+                                        {showPivot ? 'ปิด Pivot' : 'เปิด Pivot Tool'}
                                     </Text>
                                 </TouchableOpacity>
                                 {showPivot && (
@@ -377,9 +384,16 @@ export const ChatBubble = ({ message, onTrain, onAskFrom }: ChatBubbleProps) => 
                                         : 'bg-gray-50 dark:bg-gray-800/40 border-gray-200 dark:border-gray-700'
                                     }`}
                             >
-                                <Text className="mr-3 text-base">
-                                    {warning.severity === 'important' ? '⚠️' : warning.severity === 'warning' ? '📝' : 'ℹ️'}
-                                </Text>
+                                <Ionicons
+                                    name={warning.severity === 'important' ? 'alert-circle' : warning.severity === 'warning' ? 'warning' : 'information-circle'}
+                                    size={18}
+                                    color={warning.severity === 'important'
+                                        ? (isDark ? '#FCA5A5' : '#B91C1C')
+                                        : warning.severity === 'warning'
+                                            ? (isDark ? '#FCD34D' : '#B45309')
+                                            : (isDark ? '#D1D5DB' : '#4B5563')}
+                                    style={{ marginRight: 10, marginTop: 1 }}
+                                />
                                 <Text
                                     className={`flex-1 text-sm font-medium leading-5 ${warning.severity === 'important'
                                         ? 'text-red-800 dark:text-red-200'
@@ -409,11 +423,12 @@ export const ChatBubble = ({ message, onTrain, onAskFrom }: ChatBubbleProps) => 
                                     onPress={() => onAskFrom(message.question!, alt.context)}
                                     accessibilityRole="button"
                                     accessibilityLabel={`ถามจาก ${alt.display_name || alt.context}`}
-                                    className="px-3 py-1.5 rounded-full border"
+                                    className="flex-row items-center gap-1 px-3 py-1.5 rounded-full border"
                                     style={{ borderColor: colors.accent }}
                                 >
+                                    <Ionicons name="refresh" size={12} color={colors.accent} />
                                     <Text className="text-xs font-semibold" style={{ color: colors.accent, fontFamily: THAI_FONT_FAMILY }}>
-                                        {`↻ ${alt.display_name || alt.context}`}
+                                        {alt.display_name || alt.context}
                                     </Text>
                                 </TouchableOpacity>
                             ))}
@@ -430,28 +445,33 @@ export const ChatBubble = ({ message, onTrain, onAskFrom }: ChatBubbleProps) => 
                 {!isUser && message.chatId && (
                     <View className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
                         {feedbackState ? (
-                            <View className="flex-row items-center">
-                                <Text className="text-xs text-gray-400 dark:text-gray-500">
-                                    {feedbackState === 'thumbs_up' ? '👍 ขอบคุณสำหรับ feedback' : '👎 ขอบคุณ เราจะปรับปรุงต่อไป'}
+                            <View className="flex-row items-center gap-1.5">
+                                <Ionicons name="checkmark-circle" size={14} color={isDark ? '#9CA3AF' : '#6B7280'} />
+                                <Text className="text-xs text-gray-500 dark:text-gray-400">
+                                    {feedbackState === 'thumbs_up' ? 'ขอบคุณสำหรับ feedback' : 'ขอบคุณ เราจะปรับปรุงต่อไป'}
                                 </Text>
                             </View>
                         ) : (
                             <View>
                                 <View className="flex-row items-center gap-2">
-                                    <Text className="text-xs text-gray-400 dark:text-gray-500 mr-1">คำตอบนี้เป็นอย่างไร?</Text>
+                                    <Text className="text-xs text-gray-500 dark:text-gray-400 mr-1">คำตอบนี้เป็นอย่างไร?</Text>
                                     <TouchableOpacity
                                         onPress={() => handleFeedback('thumbs_up', 'perfect')}
                                         disabled={feedbackSubmitting}
+                                        accessibilityRole="button"
+                                        accessibilityLabel="คำตอบดี"
                                         className="px-3 py-1.5 rounded-full bg-gray-50 dark:bg-gray-700 active:bg-green-50 dark:active:bg-green-900/20"
                                     >
-                                        <Text className="text-sm">👍</Text>
+                                        <Ionicons name="thumbs-up-outline" size={16} color={isDark ? '#D1D5DB' : '#4B5563'} />
                                     </TouchableOpacity>
                                     <TouchableOpacity
                                         onPress={() => setShowCategoryPicker(true)}
                                         disabled={feedbackSubmitting}
+                                        accessibilityRole="button"
+                                        accessibilityLabel="คำตอบยังไม่ดี"
                                         className="px-3 py-1.5 rounded-full bg-gray-50 dark:bg-gray-700 active:bg-red-50 dark:active:bg-red-900/20"
                                     >
-                                        <Text className="text-sm">👎</Text>
+                                        <Ionicons name="thumbs-down-outline" size={16} color={isDark ? '#D1D5DB' : '#4B5563'} />
                                     </TouchableOpacity>
                                 </View>
                                 {showCategoryPicker && (
