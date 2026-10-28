@@ -10,6 +10,7 @@ import json
 import logging
 import math
 import re
+from typing import Any
 
 from sqlalchemy import text
 
@@ -214,6 +215,63 @@ TREND_WORDS = ("รายเดือน", "แต่ละเดือน", "�
                "รายปี", "แต่ละปี", "ปีไหน", "ไตรมาส", "trend", "monthly")
 # words that name an org unit without naming a level: the owner chose to ask back (CMP-3 ค)
 GENERIC_UNIT_WORDS = ("หน่วยงาน", "จังหวัด")
+# a filter that leaves its value out, by the operator that would select it
+EXCLUDE = {"=": "<>", "LIKE": "NOT LIKE", "IN": "NOT IN"}
+_OPERATOR_SPELLING = {"!=": "<>", "NOT_LIKE": "NOT LIKE", "NOT_IN": "NOT IN"}
+# words that leave out what follows: "ไม่เอารายได้อื่น" — pass 1 wrote it as bu LIKE '%8.รายได้อื่น%' in both live answers
+# (audit 527 / 529) and 1 of 5 practice ones, as <> in the other 4 (2026-10-29)
+NEGATION_WORDS = ("ไม่เอา", "ไม่รวม", "ไม่นับ", "ไม่ใช่", "ยกเว้น", "นอกจาก", "เว้น", "ตัดออก", "หักออก",
+                  "except", "excluding", "exclude", "without")
+# what may sit between that word and the value: "ไม่รวมกลุ่ม 8.รายได้อื่น", "ยกเว้น BG 8" — any other word ends the
+# negation ("ไม่รวมภาษี กลุ่ม 4" does not leave out BG 4)
+# ponytail: a fixed filler list; a parser if questions need more
+_NEGATION_FILLER = re.compile(r"(?:[\s\d.'\"“”]|กลุ่มธุรกิจ|กลุ่ม|ธุรกิจ|bg|bu|ของ|ที่เป็น|หมวด|ประเภท)*")
+
+
+def _left_out(question: str, word: str) -> bool:
+    """Every mention of `word` in the (casefolded) question follows a negation word, filler only between."""
+    starts = [m.start() for m in re.finditer(re.escape(word), question)] if word else []
+
+    def negated(start: int) -> bool:
+        return any(question.rfind(neg, 0, start) >= 0 and _NEGATION_FILLER.fullmatch(
+            question[question.rfind(neg, 0, start) + len(neg):start]) for neg in NEGATION_WORDS)
+
+    return bool(starts) and all(negated(start) for start in starts)
+
+
+def leave_out_negated(intent: Any, question: str, value_matches=None) -> tuple[Any, list[str]]:
+    """Pass 1's intent with every filter on a value the question leaves out turned into its exclusion, the mappings
+    of those words dropped (their conditions select), and operators spelled one way — read by the compiled path and
+    by pass 2 alike. Returns (intent, the filters it turned)."""
+    if not isinstance(intent, dict) or not isinstance(intent.get("filters"), list):
+        return intent, []
+    asked = question.casefold()
+    found_as: dict[str, set[str]] = {}  # a value → the question's words the lookup found it by ("รายได้อื่น" → 8.รายได้อื่น)
+    for match in value_matches or ():
+        if isinstance(match, dict) and isinstance(match.get("column_value"), str) and isinstance(match.get("keyword"), str):
+            found_as.setdefault(match["column_value"].casefold().strip(), set()).add(match["keyword"].casefold().strip())
+
+    def left_out(value) -> bool:
+        if not isinstance(value, str):
+            return False
+        name = value.strip("%").casefold().strip()
+        return any(_left_out(asked, word) for word in {name, *found_as.get(name, ())})
+
+    filters, turned = [], []
+    for item in intent["filters"]:
+        if isinstance(item, dict) and isinstance(item.get("operator"), str):
+            operator = " ".join(item["operator"].upper().split())
+            item = {**item, "operator": _OPERATOR_SPELLING.get(operator, operator)}
+            values = item.get("value") if isinstance(item.get("value"), list) else [item.get("value")]
+            if item["operator"] in EXCLUDE and values and all(left_out(v) for v in values):
+                item = {**item, "operator": EXCLUDE[item["operator"]]}
+                turned.append(f"{item.get('column')} {item['operator']} {item.get('value')}")
+        filters.append(item)
+    intent = {**intent, "filters": filters}
+    if isinstance(intent.get("matched_mappings"), list):
+        intent["matched_mappings"] = [m for m in intent["matched_mappings"] if not (
+            isinstance(m, dict) and isinstance(m.get("keyword"), str) and _left_out(asked, m["keyword"].casefold().strip()))]
+    return intent, turned
 _MONTH_NAMES = "|".join(re.escape(m) for m in (*_MONTHS, *_MONTHS_SHORT))
 # "ม.ค.-ก.ย." / "มกราคม ถึง กันยายน": a year to date at the end month, however pass 1 filled time_range
 _YEAR_TO_DATE_SPAN = re.compile(rf"(?:ม\.ค\.|มกราคม)\s*(?:-|–|ถึง(?:เดือน)?)\s*({_MONTH_NAMES})")
@@ -265,13 +323,13 @@ def _validate_shape(dimensions, filters, metric: Metric) -> None:
         if not isinstance(item, dict) or item.get("column") not in declared:
             raise ValueError("Undeclared filter column")
         operator, value = item.get("operator"), item.get("value")
-        if operator in ("=", "LIKE") and isinstance(value, str):
+        if operator in ("=", "LIKE", "<>", "NOT LIKE") and isinstance(value, str):
             continue
-        if operator == "IN" and isinstance(value, list) and value and all(isinstance(v, str) for v in value):
+        if operator in ("IN", "NOT IN") and isinstance(value, list) and value and all(isinstance(v, str) for v in value):
             continue
-        if operator == "=" and _is_number(value):
+        if operator in ("=", "<>") and _is_number(value):
             continue
-        if operator == "IN" and isinstance(value, list) and value and all(
+        if operator in ("IN", "NOT IN") and isinstance(value, list) and value and all(
                 _is_number(v) for v in value):
             continue
         raise ValueError("Unsupported filter operator or value")
@@ -319,15 +377,16 @@ def _support_reason(intent: dict, metric: Metric, extra_names: frozenset[str] = 
             if item.get("column") not in declared:
                 return "shape:filter:" + _reason_detail(item.get("column"))
             operator, value = item.get("operator"), item.get("value")
-            if operator in ("=", "LIKE") and isinstance(value, str):
+            # what a filter selects (= / LIKE / IN) or leaves out (<> / NOT LIKE / NOT IN — "ไม่รวมรายได้อื่น")
+            if operator in ("=", "LIKE", "<>", "NOT LIKE") and isinstance(value, str):
                 continue
-            if operator == "IN" and isinstance(value, list) and value and all(isinstance(v, str) for v in value):
+            if operator in ("IN", "NOT IN") and isinstance(value, list) and value and all(isinstance(v, str) for v in value):
                 continue
             # practice server 20261026-0947: pass 1 wrote bu_seq = 8; only numeric dimensions accept numbers.
             if item["column"] in numeric:
-                if operator == "=" and _is_number(value):
+                if operator in ("=", "<>") and _is_number(value):
                     continue
-                if operator == "IN" and isinstance(value, list) and value and all(
+                if operator in ("IN", "NOT IN") and isinstance(value, list) and value and all(
                         _is_number(v) for v in value):
                     continue
             return "shape:filter:" + _reason_detail(operator)
@@ -737,7 +796,8 @@ def plan_with_reason(
             holder = holders.get(text_value) if text_value is not None else None
             # eval 134850: pass 1's `department` (a dim_org column) moved to division_name — the column must hold it too
             if (holder is not None and isinstance(item.get("column"), str) and item["column"] not in declared
-                    and item["column"].casefold() in seen_in.get(text_value, ()) and item.get("operator") in ("=", "LIKE")):
+                    and item["column"].casefold() in seen_in.get(text_value, ())
+                    and item.get("operator") in ("=", "LIKE", "<>", "NOT LIKE")):
                 item = {**item, "column": holder}
             remaining.append(item)
     range_cumulative = False
@@ -1050,25 +1110,28 @@ def compile(req: CompileRequest, resolved: dict[str, Metric]) -> Compiled:
             # No filter = the question named no unit, so a breakdown stays inside the report's
             # scope (the EBT report is of the two sales lines); a filter picks units explicitly,
             # and those outside the scope stay computable (contract: ebt_dimension_breakdown).
-            if not req.filters and metric.official_scope:
+            # Leaving units out ("ไม่รวม …") picks none: the rest stay inside the scope.
+            if metric.official_scope and all(item["operator"] in EXCLUDE.values() for item in req.filters):
                 period += f" AND ({metric.official_scope})"
             # filters on one column with one operator are alternatives ("ฝ่าย A และฝ่าย B" arrives as two LIKE
-            # filters on unit_fname; two = can never both hold); mixed operators (= X with LIKE 'ส่วน') narrow
+            # filters on unit_fname; two = can never both hold); mixed operators (= X with LIKE 'ส่วน') narrow;
+            # exclusions always narrow ("ไม่รวม A และ B": <> A OR <> B would keep everything)
             by_column: dict[tuple[str, str], list[str]] = {}
             for item in req.filters:
                 column, operator, value = _quote(item["column"]), item["operator"], item["value"]
-                if operator == "IN":
-                    predicate = f"{column} IN ({', '.join(_literal(v) for v in value)})"
+                if operator in ("IN", "NOT IN"):
+                    predicate = f"{column} {operator} ({', '.join(_literal(v) for v in value)})"
                 else:
-                    if operator == "LIKE" and "%" not in value:
+                    if operator in ("LIKE", "NOT LIKE") and "%" not in value:
                         value = f"%{value}%"
                     predicate = f"{column} {operator} {_literal(value)}"
                 by_column.setdefault((column, operator), []).append(predicate)
             columns_operators = {}
             for column, operator in by_column:
                 columns_operators.setdefault(column, set()).add(operator)
-            for (column, _), predicates in by_column.items():
-                alternatives = len(predicates) > 1 and len(columns_operators[column]) == 1
+            for (column, operator), predicates in by_column.items():
+                alternatives = (len(predicates) > 1 and len(columns_operators[column]) == 1
+                                and operator not in EXCLUDE.values())
                 period += " AND " + (f"({' OR '.join(predicates)})" if alternatives else " AND ".join(predicates))
         # a ratio's column says so in its name: "EBT Margin (%)" reads as percent in the data block too
         alias = f"{metric.name_th} (%)" if (metric.unit or "").strip().lower() in ("percent", "%") else metric.name_th

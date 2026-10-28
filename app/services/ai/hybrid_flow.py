@@ -992,6 +992,12 @@ async def build_first_attempt_prompt(
             value_note=value_note(value_matches),
             metric_note=metric_block,
         )
+        # "ไม่เอารายได้อื่น" read in code, not trusted to pass 1 (audit 527 / 529 selected the value it left out)
+        intent_json, turned = metric_compiler.leave_out_negated(intent_json, question, value_matches)
+        if turned:
+            logger.info("Two-Pass: left out what the question excludes: %s", turned)
+            if trace is not None:
+                trace.stages["left_out"] = len(turned)
         if intent_state_enabled and intent_json:
             from app.services.ai import intent_state
             intent_state.set_intent(conversation_id, intent_json)
