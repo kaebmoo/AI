@@ -359,13 +359,19 @@ Example for hierarchical data (hierarchy: {hierarchy_chain}):
     request_note = f"\n{request_note} — ในคำอธิบายให้เรียกตัวเลขตามคอลัมน์ที่ใช้จริง\n" if request_note else ""
     if request_explain_note.get():
         request_note += f"\n{request_explain_note.get()}\n"
-    # D-1 = ก, D-2 = ก (owner 2026-10-28): "ผิดปกติ" at a threshold, not every unit with a big percent (audit 518)
+    # D-1 = ก, D-2 = ก (owner 2026-10-28): "ผิดปกติ" at a threshold, not every unit with a big percent (audit 518).
+    # Only for a question in the rules' own words: always on, "รายได้รายเดือน" got an unasked baseline and a false
+    # "เกิน 30% … มีนัยสำคัญ" (practice 2026-10-29)
     from app.services.ai.explain_amounts import CHANGE_MIN_BAHT, CHANGE_MIN_PCT, CHANGE_MIN_SD
-    change_rule = (
-        f"\n6. **ผิดปกติ / มีนัยสำคัญ:** ถ้าผลมีคอลัมน์ส่วนต่างหรือ % เปลี่ยนแปลง ให้เรียกว่าผิดปกติ / มีนัยสำคัญ เฉพาะแถวที่ส่วนต่าง"
-        f" ≥ {CHANGE_MIN_BAHT / 1e6:g} ล้านบาท และ (เปลี่ยน ≥ {CHANGE_MIN_PCT}% หรือ ≥ {CHANGE_MIN_SD} SD เมื่อผลมี SD) และบอกเกณฑ์นี้ในคำบรรยาย;"
-        f" % สูงบนฐานที่ส่วนต่างต่ำกว่าเกณฑ์ไม่ใช่ข้อสรุป"
-        f"\n7. \"ค่าเฉลี่ยก่อนหน้า\" ที่คำถามไม่ระบุช่วง = เดือนมกราคมถึงเดือนก่อนเดือนที่ถามของปีเดียวกัน — บอกช่วงฐานที่ SQL ใช้จริง")
+    change_rule = ""
+    if "ผิดปกติ" in question or "นัยสำคัญ" in question:
+        change_rule += (
+            f"\n6. **ผิดปกติ / มีนัยสำคัญ:** เรียกแถวใดว่าผิดปกติ / มีนัยสำคัญ ได้เฉพาะเมื่อส่วนต่าง ≥ {CHANGE_MIN_BAHT / 1e6:g} ล้านบาท"
+            f" และ (เปลี่ยน ≥ {CHANGE_MIN_PCT}% หรือ ≥ {CHANGE_MIN_SD} SD เมื่อผลมี SD) ตามตัวเลขในผลลัพธ์ และบอกเกณฑ์นี้ในคำบรรยาย;"
+            f" % สูงบนฐานที่ส่วนต่างต่ำกว่าเกณฑ์ไม่ใช่ข้อสรุป")
+    if "ค่าเฉลี่ย" in question:
+        change_rule += ("\n7. \"ค่าเฉลี่ยก่อนหน้า\" ที่คำถามไม่ระบุช่วง หมายถึงเดือนมกราคมถึงเดือนก่อนเดือนที่ถามของปีเดียวกัน — "
+                        "บอกช่วงฐานตามเงื่อนไขงวดใน SQL (WHERE / BETWEEN) และถ้าไม่ใช่ช่วงนี้ให้บอกว่าต่าง")
 
     return f"""Question: {question}{request_note}
 SQL: {sql}

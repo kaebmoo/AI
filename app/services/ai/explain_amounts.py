@@ -4,6 +4,7 @@ The model turns baht cells into ล้านบาท by itself and slips: "ห�
 (audit 518), "993.7 ล้านบาท" for −99.37 million in 3 of 5 practice answers (2026-10-28). Like thai_year, the text
 is read in code rather than the model asked to be careful."""
 
+import bisect
 import re
 from typing import Any, Iterable, List
 
@@ -27,22 +28,26 @@ _HEADING = re.compile(r"^\s*(?:#{1,6}\s|\*\*[^\n]*\*\*\s*$)", re.M)
 
 
 def stated(text: str) -> List[tuple]:
-    """(baht, tolerance, as written) of each amount the text states; tolerance = the rounding the text shows or
-    1%, None for "หลาย…ล้าน" (a least value, checked against the top only)."""
+    """(baht, tolerance, as written) of each amount the text states; tolerance = one unit of the last digit it
+    shows ("99.37" ±0.01 ล้าน, "500" ±100 ล้าน — the model truncates as often as it rounds), None for
+    "หลาย…ล้าน" (a least value, checked against the top only)."""
     out = []
     for m in _AMOUNT.finditer(text or ""):
         number, decimals, scale, baht = m.groups()
         if not baht and not (scale or "").endswith("ล้าน"):
             continue
         size = _SCALE.get(scale, 1.0)
-        value = float(number.replace(",", "")) * size
-        out.append((value, max(0.5 * 10 ** -len(decimals or "") * size, 0.01 * value), m.group(0).strip(" *")))
+        digits = number.replace(",", "")
+        zeros = len(digits) - len(digits.rstrip("0")) if digits.strip("0") else 0
+        unit = 10.0 ** -len(decimals) if decimals else 10.0 ** zeros
+        out.append((float(digits) * size, unit * size, m.group(0).strip(" *")))
     return out + [(2 * _SEVERAL_SIZE[m.group(1)], None, m.group(0)) for m in _SEVERAL.finditer(text or "")]
 
 
 def supported(rows) -> List[float]:
-    """|values| a result holds: every numeric cell, the difference of two cells of a row, each column's sum."""
-    values, sums = [], {}
+    """|values| a result holds: every numeric cell, the difference of two cells of a row — or of one column, one
+    period beside another (up to 200 rows) — and each column's sum and mean."""
+    values, columns = [], {}
     for row in rows or []:
         if not isinstance(row, dict):
             continue
@@ -50,19 +55,27 @@ def supported(rows) -> List[float]:
         values += [abs(v) for _, v in cells]
         values += [abs(a - b) for i, (_, a) in enumerate(cells) for _, b in cells[i + 1:]]
         for k, v in cells:
-            sums[k] = sums.get(k, 0.0) + v
-    return values + [abs(s) for s in sums.values()]
+            columns.setdefault(k, []).append(v)
+    for column in columns.values():
+        values += [abs(sum(column)), abs(sum(column) / len(column))]
+        if len(column) <= 200:  # ponytail: O(n²) per column; past 200 rows the model saw an aggregate anyway
+            values += [abs(a - b) for i, a in enumerate(column) for b in column[i + 1:]]
+    return values
 
 
 def unsupported(text: str, rows, extra: Iterable[float] = ()) -> List[str]:
-    """The amounts text states that the result does not hold: above all it supports (+1%), or none of its cells /
-    row differences / column sums within the text's rounding. `extra` = amounts it may quote from elsewhere."""
-    support = supported(rows) + [abs(v) for v in extra]
+    """The amounts text states that the result does not hold: above all it supports (+1%), or none of the values
+    `supported` lists within the text's last digit. `extra` = amounts it may quote from elsewhere."""
+    support = sorted(supported(rows) + [abs(v) for v in extra])
     if not support:
         return []
-    top = max(support)
+
+    def held(value, tol):
+        i = bisect.bisect_left(support, value - tol)
+        return i < len(support) and support[i] <= value + tol
+
     return [written for value, tol, written in stated(text)
-            if value > top * 1.01 or (tol is not None and not any(abs(value - s) <= tol for s in support))]
+            if value > support[-1] * 1.01 or (tol is not None and not held(value, tol))]
 
 
 def quoted(question: str) -> List[float]:
