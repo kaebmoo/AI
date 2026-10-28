@@ -20,6 +20,9 @@ from app.services.data_sources import SourceBoundMCPClient, source_resolver
 from app.services.schema_service import SchemaService
 from app.services.query_engine import (QueryEngine, QueryEngineResult, context_keyword_hits,
                                        detect_context_from_question)
+# shared with /api/v1/query (PLAN_ANOMALY_AVG_FIX §6 ข้อ 2) — the names this module used before
+from app.services.query_engine import context_mismatch as _context_mismatch, other_contexts as _others  # noqa: F401
+from app.services.query_engine import same_context as _same_context  # noqa: F401
 from app.services.ai.thai_year import period_th
 from app.services.retention import EXPIRED_ANSWER, stores_results
 from app.services.intent_classifier import classify_intent
@@ -221,18 +224,6 @@ def _resolve_context_with_history(
 # Which data source answered — and where else the question could be answered from
 # =============================================================================
 
-def _same_context(a: Optional[str], b: Optional[str]) -> bool:
-    # stored names are spelled with a space or an underscore ('transfer price' / 'transfer_price')
-    return bool(a and b) and a.replace("_", " ").lower() == b.replace("_", " ").lower()
-
-
-def _others(hits: Dict[str, Dict[str, Any]], context_name: Optional[str]) -> List[Dict[str, Any]]:
-    """The contexts other than context_name whose keywords the question names — the router's order, best first."""
-    ranked = sorted(hits.items(), key=lambda kv: len(kv[1]["keywords"]) + kv[1]["priority"] * 0.1, reverse=True)
-    return [{"context": name, "display_name": hit.get("display_name") or name,
-             "description": hit.get("description"), "keywords": hit["keywords"]}
-            for name, hit in ranked if not _same_context(name, context_name)]
-
 
 def _answer_source(engine_result: QueryEngineResult, question: str, schema_service: SchemaService) -> Optional[dict]:
     """What the chat shows above an answer: the context it was read from, how far that data runs, and up to three
@@ -256,43 +247,6 @@ def _answer_source(engine_result: QueryEngineResult, question: str, schema_servi
         logger.warning(f"Failed to describe the answer's source (non-fatal): {e}")
         return None
 
-
-def _context_mismatch(request_context: Optional[str], question: str, schema_service: SchemaService) -> Optional[dict]:
-    """The user picked a context none of whose keywords the question names, while other contexts' keywords are
-    there — e.g. "EBT" asked with the revenue feed selected. Returns the warning for the answer and a note for the
-    prompt (say the data is not here rather than rename another column as the thing asked); None otherwise,
-    including auto mode, where the router already went where the keywords point.
-
-    ponytail: keyword evidence only, as good as the contexts' keyword lists — a generic keyword ("ค่า" inside
-    "มูลค่า") can warn needlessly. It warns and answers rather than blocking for that reason; admins tune the
-    lists in Admin → Contexts."""
-    if not request_context:
-        return None
-    hits = context_keyword_hits(question, schema_service)
-    if any(_same_context(name, request_context) for name in hits):
-        return None
-    others = _others(hits, request_context)
-    if not others:
-        return None
-    keywords = list(dict.fromkeys(kw for other in others for kw in other["keywords"]))
-    quoted = ", ".join(f"“{kw}”" for kw in keywords)
-    names = ", ".join(other["display_name"] for other in others)
-    try:
-        selected = (schema_service.get_context_info(request_context) or {}).get("display_name") or request_context
-    except Exception:
-        selected = request_context
-    return {
-        "warning": {
-            "code": "context_mismatch",
-            "severity": "important",
-            "message": (f"คำถามมีคำว่า {quoted} ซึ่งไม่อยู่ในแหล่งข้อมูลที่เลือก ({selected}) แต่ตรงกับ {names} — "
-                        f"คำตอบนี้อาจไม่ใช่สิ่งที่ถาม ลองถามจากแหล่งที่แนะนำด้านล่าง"),
-        },
-        "prompt_note": (f"**แหล่งข้อมูลอาจไม่ตรงกับคำถาม:** คำถามมีคำว่า {quoted} ซึ่งเป็นคำของแหล่งข้อมูลอื่น ({names}) "
-                        f"ไม่ใช่ของแหล่งที่ผู้ใช้เลือก ({selected}). ถ้าตารางของแหล่งนี้ไม่มีข้อมูลหรือตัวชี้วัดที่ถามจริง "
-                        f"ให้ตอบตรง ๆ ว่าแหล่งข้อมูลนี้ไม่มีข้อมูลนั้น และแนะนำให้ถามจาก {names} — "
-                        f"ห้ามนำคอลัมน์อื่นมาตั้งชื่อหรืออธิบายว่าเป็นสิ่งที่ถาม (เช่น ห้ามเรียกรายได้ว่า EBT)"),
-    }
 
 
 def _add_source(response_data: dict, engine_result: QueryEngineResult, question: str,

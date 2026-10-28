@@ -28,8 +28,8 @@ from app.services.mcp_client import MCPClientService
 from app.services.admin_config_service import AdminConfigService
 from app.core.llm_policy import FULL, LLMPolicyError, PolicyMCPClient, RequestPolicy, history_without_answers, normalize, request_llm_policy
 from app.services.data_sources import (LEGACY, SourceBoundMCPClient, legacy_data_period, request_data_period,
-                                       request_pinned, request_prompt_note, request_scope, request_scope_columns,
-                                       source_resolver)
+                                       request_explain_note, request_pinned, request_prompt_note, request_scope,
+                                       request_scope_columns, source_resolver)
 from app.services import query_audit
 from app.services.retention import stores_results
 from app.services.workspaces import canonical_context, check_context, workspace_of_context
@@ -65,6 +65,62 @@ def context_keyword_hits(question: str, schema_service: SchemaService = None, al
     except Exception:
         pass
     return hits
+
+
+def same_context(a: Optional[str], b: Optional[str]) -> bool:
+    # stored names are spelled with a space or an underscore ('transfer price' / 'transfer_price')
+    return bool(a and b) and a.replace("_", " ").lower() == b.replace("_", " ").lower()
+
+
+def other_contexts(hits: Dict[str, Dict[str, Any]], context_name: Optional[str]) -> List[Dict[str, Any]]:
+    """The contexts other than context_name whose keywords the question names — the router's order, best first."""
+    ranked = sorted(hits.items(), key=lambda kv: len(kv[1]["keywords"]) + kv[1]["priority"] * 0.1, reverse=True)
+    return [{"context": name, "display_name": hit.get("display_name") or name,
+             "description": hit.get("description"), "keywords": hit["keywords"]}
+            for name, hit in ranked if not same_context(name, context_name)]
+
+
+def context_mismatch(request_context: Optional[str], question: str, schema_service: SchemaService) -> Optional[dict]:
+    """The user picked a context none of whose keywords the question names, while other contexts' keywords are
+    there — e.g. "EBT" asked with the revenue feed selected. Returns the warning for the answer and a note for the
+    prompt (say the data is not here rather than rename another column as the thing asked); None otherwise,
+    including auto mode, where the router already went where the keywords point.
+
+    ponytail: keyword evidence only, as good as the contexts' keyword lists — a generic keyword ("ค่า" inside
+    "มูลค่า") can warn needlessly. It warns and answers rather than blocking for that reason; admins tune the
+    lists in Admin → Contexts."""
+    if not request_context:
+        return None
+    hits = context_keyword_hits(question, schema_service)
+    if any(same_context(name, request_context) for name in hits):
+        return None
+    others = other_contexts(hits, request_context)
+    if not others:
+        return None
+    keywords = list(dict.fromkeys(kw for other in others for kw in other["keywords"]))
+    quoted = ", ".join(f"“{kw}”" for kw in keywords)
+    names = ", ".join(other["display_name"] for other in others)
+    try:
+        info = schema_service.get_context_info(request_context) or {}
+    except Exception:
+        info = {}
+    selected = info.get("display_name") or request_context
+    what = (info.get("description") or "").split(" — ")[0].strip() or selected  # "ยอดขายจาก Sales DW รายเดือน"
+    return {
+        # /query (D-3 = ก): answer from the data there is and call it by its name — explanation step only
+        "explain_note": (f"**ชื่อตัวเลข:** คำถามมีคำว่า {quoted} แต่ข้อมูลที่ใช้ตอบคือ {what} ({selected}) — "
+                         f"เรียกตัวเลขตามข้อมูลนี้ และบอกหนึ่งบรรทัดว่าตัวเลขนี้ไม่ใช่ข้อมูลของ {names}"),
+        "warning": {
+            "code": "context_mismatch",
+            "severity": "important",
+            "message": (f"คำถามมีคำว่า {quoted} ซึ่งไม่อยู่ในแหล่งข้อมูลที่เลือก ({selected}) แต่ตรงกับ {names} — "
+                        f"คำตอบนี้อาจไม่ใช่สิ่งที่ถาม ลองถามจากแหล่งที่แนะนำด้านล่าง"),
+        },
+        "prompt_note": (f"**แหล่งข้อมูลอาจไม่ตรงกับคำถาม:** คำถามมีคำว่า {quoted} ซึ่งเป็นคำของแหล่งข้อมูลอื่น ({names}) "
+                        f"ไม่ใช่ของแหล่งที่ผู้ใช้เลือก ({selected}). ถ้าตารางของแหล่งนี้ไม่มีข้อมูลหรือตัวชี้วัดที่ถามจริง "
+                        f"ให้ตอบตรง ๆ ว่าแหล่งข้อมูลนี้ไม่มีข้อมูลนั้น และแนะนำให้ถามจาก {names} — "
+                        f"ห้ามนำคอลัมน์อื่นมาตั้งชื่อหรืออธิบายว่าเป็นสิ่งที่ถาม (เช่น ห้ามเรียกรายได้ว่า EBT)"),
+    }
 
 
 def detect_context_from_question(question: str, schema_service: SchemaService = None, allowed=None) -> str:
@@ -402,12 +458,15 @@ class QueryEngine:
         channel: Optional[str] = None,
         request_group: Optional[str] = None,
         prompt_note: Optional[str] = None,
+        explain_note: Optional[str] = None,
     ) -> QueryEngineResult:
         """
         Main entry point.
 
         prompt_note: text appended to the system prompt for this request only (chat: the selected context
-        may not hold what the question asks — see chat._context_mismatch); part of the cache key.
+        may not hold what the question asks — see context_mismatch); part of the cache key.
+        explain_note: the same kind of note for the explanation step only (/query: context_mismatch's
+        explain_note); part of the cache key.
 
         api_key_id / channel (Phase 4.5): who is asking and through what — for the query audit only.
         request_group (Phase 5): audit id shared by the sub-questions of one multi-context question.
@@ -438,12 +497,13 @@ class QueryEngine:
         cols = request_scope_columns.set(None)  # filled by the resolver, which reads the context's mapping
         period = request_data_period.set(None)  # the source's manifest period, once the source is known
         note = request_prompt_note.set(prompt_note or None)  # into every user prompt (hybrid_flow.scope_note)
+        explain = request_explain_note.set(explain_note or None)  # into the explanation prompt only
         audit = {"user_id": user_id, "api_key_id": api_key_id, "channel": channel, "question": question,
                  "request_group": request_group}
         try:
             engine_result = await self._query(question, provider, context, mode, history, max_retries,
                                               conversation_id, provider_kwargs, on_status, user_id, scope, allowed_contexts,
-                                              prompt_note=prompt_note)
+                                              prompt_note=prompt_note, explain_note=explain_note)
             written = await self._audit(engine_result, scope, audit, getattr(engine_result, "context_name", None))
             if not written and api_key_id is not None:
                 # a channel that holds a key answers a caller we cannot ask afterwards: without the
@@ -463,12 +523,13 @@ class QueryEngine:
             request_scope_columns.reset(cols)
             request_data_period.reset(period)
             request_prompt_note.reset(note)
+            request_explain_note.reset(explain)
             request_pinned.reset(pin)
             request_scope.reset(token)
 
     async def _query(self, question, provider, context, mode, history, max_retries,
                      conversation_id, provider_kwargs, on_status, user_id, scope, allowed_contexts=None,
-                     prompt_note=None) -> QueryEngineResult:
+                     prompt_note=None, explain_note=None) -> QueryEngineResult:
         """Body of query() — runs with request_scope set."""
         start_time = time.time()
         if context:  # before the cache, before any LLM call — and only the stored name travels on
@@ -487,6 +548,8 @@ class QueryEngine:
         context_name_for_cache = context or "auto"
         if prompt_note:  # another prompt, another answer (keys without a note unchanged)
             context_name_for_cache += "|note:" + hashlib.sha256(prompt_note.encode()).hexdigest()[:16]
+        if explain_note:
+            context_name_for_cache += "|explain:" + hashlib.sha256(explain_note.encode()).hexdigest()[:16]
         # scope in the key: the same question under another scope is another answer (unscoped keys unchanged)
         scope_key = json.dumps(scope, sort_keys=True, default=str) if scope else ""
         if scope_key:

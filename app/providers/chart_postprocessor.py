@@ -354,9 +354,18 @@ Example for hierarchical data (hierarchy: {hierarchy_chain}):
 
     # chat's note when the picked data source may not hold what is asked: without it here the explanation still
     # titled revenue "EBT" though the SQL no longer did (2026-10-22)
-    from app.services.data_sources import request_prompt_note
+    from app.services.data_sources import request_explain_note, request_prompt_note
     request_note = request_prompt_note.get()
     request_note = f"\n{request_note} — ในคำอธิบายให้เรียกตัวเลขตามคอลัมน์ที่ใช้จริง\n" if request_note else ""
+    if request_explain_note.get():
+        request_note += f"\n{request_explain_note.get()}\n"
+    # D-1 = ก, D-2 = ก (owner 2026-10-28): "ผิดปกติ" at a threshold, not every unit with a big percent (audit 518)
+    from app.services.ai.explain_amounts import CHANGE_MIN_BAHT, CHANGE_MIN_PCT, CHANGE_MIN_SD
+    change_rule = (
+        f"\n6. **ผิดปกติ / มีนัยสำคัญ:** ถ้าผลมีคอลัมน์ส่วนต่างหรือ % เปลี่ยนแปลง ให้เรียกว่าผิดปกติ / มีนัยสำคัญ เฉพาะแถวที่ส่วนต่าง"
+        f" ≥ {CHANGE_MIN_BAHT / 1e6:g} ล้านบาท และ (เปลี่ยน ≥ {CHANGE_MIN_PCT}% หรือ ≥ {CHANGE_MIN_SD} SD เมื่อผลมี SD) และบอกเกณฑ์นี้ในคำบรรยาย;"
+        f" % สูงบนฐานที่ส่วนต่างต่ำกว่าเกณฑ์ไม่ใช่ข้อสรุป"
+        f"\n7. \"ค่าเฉลี่ยก่อนหน้า\" ที่คำถามไม่ระบุช่วง = เดือนมกราคมถึงเดือนก่อนเดือนที่ถามของปีเดียวกัน — บอกช่วงฐานที่ SQL ใช้จริง")
 
     return f"""Question: {question}{request_note}
 SQL: {sql}
@@ -370,7 +379,7 @@ CRITICAL RULES:
 1. **SQL is the ground truth** — describe ONLY what the SQL actually queries. If the SQL has no WHERE filter for a province/department, do NOT mention any specific province/department. Look at the SQL's WHERE clause and GROUP BY to understand the scope.
 2. **Dimension columns** (Year/ปี, Month/เดือน, Quarter/ไตรมาส) — NEVER SUM or aggregate them. Report as-is (e.g., "เดือนมกราคม 2568" NOT "เดือนที่ 78").
 3. Only SUM/aggregate **MEASURE columns** (revenue, amount, cost, etc.).
-4. If data has multiple months, summarize each month individually or say "เดือน 1-12" — do NOT add month numbers together.{year_rule}
+4. If data has multiple months, summarize each month individually or say "เดือน 1-12" — do NOT add month numbers together.{year_rule}{change_rule}
 
 Ensure the "explanation" value is formatted as **beautiful Markdown**:
 - Use `###` for main summaries and `####` for subsections.

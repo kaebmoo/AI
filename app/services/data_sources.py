@@ -100,6 +100,9 @@ request_data_period: ContextVar[Optional[int]] = ContextVar("request_data_period
 # Chat's note for this request (the picked context may not hold what is asked) — QueryEngine sets it, scope_note()
 # puts it in every user prompt: in the system prompt alone the model still named revenue "EBT" (2026-10-22).
 request_prompt_note: ContextVar[Optional[str]] = ContextVar("request_prompt_note", default=None)
+# /query's note for the explanation step only (what the numbers are called when the question names another
+# context's word, D-3) — kept out of pass 1 / pass 2 so other questions' SQL does not move
+request_explain_note: ContextVar[Optional[str]] = ContextVar("request_explain_note", default=None)
 
 
 _legacy_periods: Dict[tuple, Optional[int]] = {}  # (db path, mtime, view) → YYYYMM; a re-import changes the mtime

@@ -114,14 +114,17 @@ async def run_simple_query(request_body: SimpleQueryRequest, *, user_id, api_key
     A refusal (ScopeError / ContextNotAllowed / LLMPolicyError) and a missing audit row
     (AuditUnavailable) are raised as themselves, unwrapped from any ExceptionGroup; every other
     failure is the caller's to present."""
-    from app.services.query_engine import QueryEngine
+    from app.services.query_engine import QueryEngine, context_mismatch
 
     async def ask(mcp):
         from app.services import multi_context  # Phase 5: off unless the workspace is enabled in admin_config
         engine = QueryEngine(mcp_client=mcp, db_session=db, admin_config=admin_config)
+        # "รายได้" asked of the sales report (audit 518): the explanation names the numbers by the data used (D-3)
+        mismatch = context_mismatch(request_body.context, request_body.question, engine.schema_service)
+        note = {"explain_note": mismatch["explain_note"]} if mismatch else {}
         return await multi_context.ask(engine, request_body.question, request_body.context,
                                        user_id=user_id, scope=request_body.scope,
-                                       allowed_contexts=allowed, api_key_id=api_key_id, channel=channel)
+                                       allowed_contexts=allowed, api_key_id=api_key_id, channel=channel, **note)
 
     try:
         if mcp_client:

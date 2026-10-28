@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, cast
 from app.core.outbound import message
 from app.providers.base import ConfidenceResult, QueryResult, RetryStatus
 from app.providers.chart_postprocessor import postprocess_chart_result
-from app.services.ai import metric_compiler, sql_invariants
+from app.services.ai import explain_amounts, metric_compiler, sql_invariants
 from app.services.ai.metric_compiler import Compiled
 from app.services.ai.hierarchy_context import format_level_note, get_column_hierarchies, named_levels
 from app.services.ai.thai_year import fix_explanation
@@ -693,30 +693,17 @@ async def build_explanation(
             explain_data = prepare_data_for_explanation(data)
         simple_system_prompt = "You are a data visualization assistant. Analyze the data and provide a Thai explanation and chart recommendation."
 
-        original_model = None
-        provider_model = get_provider_model(service)
-        if cheap_model and cheap_model != provider_model:
-            original_model = provider_model
-            set_provider_model(service, cheap_model)
-            logger.info("Hybrid Mode: Explanation using cheap model '%s' (default: '%s')", cheap_model, original_model)
+        async def explain(asked: str) -> Any:
+            original_model = None
+            provider_model = get_provider_model(service)
+            if cheap_model and cheap_model != provider_model:
+                original_model = provider_model
+                set_provider_model(service, cheap_model)
+                logger.info("Hybrid Mode: Explanation using cheap model '%s' (default: '%s')", cheap_model, original_model)
 
-        try:
-            explanation = await service.provider.explain_result(
-                question,
-                sql_query,
-                explain_data,
-                simple_system_prompt,
-                dimension_families=dim_families,
-                hierarchy_info=hierarchy_info,
-                schema_metadata=schema_metadata,
-            )
-        except RECOVERABLE_FLOW_EXCEPTIONS as cheap_err:
-            if original_model:
-                logger.warning("Cheap model '%s' failed for explanation: %s. Retrying with default model '%s'...", cheap_model, cheap_err, original_model)
-                set_provider_model(service, original_model)
-                original_model = None
+            try:
                 explanation = await service.provider.explain_result(
-                    question,
+                    asked,
                     sql_query,
                     explain_data,
                     simple_system_prompt,
@@ -724,25 +711,60 @@ async def build_explanation(
                     hierarchy_info=hierarchy_info,
                     schema_metadata=schema_metadata,
                 )
-            else:
-                raise
-        finally:
-            if original_model:
-                set_provider_model(service, original_model)
+            except RECOVERABLE_FLOW_EXCEPTIONS as cheap_err:
+                if original_model:
+                    logger.warning("Cheap model '%s' failed for explanation: %s. Retrying with default model '%s'...", cheap_model, cheap_err, original_model)
+                    set_provider_model(service, original_model)
+                    original_model = None
+                    explanation = await service.provider.explain_result(
+                        asked,
+                        sql_query,
+                        explain_data,
+                        simple_system_prompt,
+                        dimension_families=dim_families,
+                        hierarchy_info=hierarchy_info,
+                        schema_metadata=schema_metadata,
+                    )
+                else:
+                    raise
+            finally:
+                if original_model:
+                    set_provider_model(service, original_model)
 
-        # The LLM may see a reduced payload, but chart structure must always be
-        # decided from the query's complete result. This runs for Claude,
-        # Gemini, Matcha, and any provider implementing the same interface.
-        explanation = postprocess_chart_result(
-            explanation,
-            data=data,
-            dimension_families=dim_families,
-            hierarchy_info=hierarchy_info,
-            schema_metadata=schema_metadata,
-        )
-        # the model converts ค.ศ. → พ.ศ. by itself and slips (2026 → "2566") — the years in the text are
-        # checked against the years of this answer in code, not asked for (RESULT_F11 §9)
-        explanation = fix_explanation(explanation, question, sql_query, data, schema_metadata)
+            # The LLM may see a reduced payload, but chart structure must always be
+            # decided from the query's complete result. This runs for Claude,
+            # Gemini, Matcha, and any provider implementing the same interface.
+            explanation = postprocess_chart_result(
+                explanation,
+                data=data,
+                dimension_families=dim_families,
+                hierarchy_info=hierarchy_info,
+                schema_metadata=schema_metadata,
+            )
+            # the model converts ค.ศ. → พ.ศ. by itself and slips (2026 → "2566") — the years in the text are
+            # checked against the years of this answer in code, not asked for (RESULT_F11 §9)
+            return fix_explanation(explanation, question, sql_query, data, schema_metadata)
+
+        explanation = await explain(question)
+        # the amounts are checked the same way (F5): one re-ask naming them, then the rows' own text (D-4 = ก)
+        # what the model saw (aggregated past 200 rows) counts too — its own sums, not summed into the result's
+        allowed = explain_amounts.quoted(question) + (
+            explain_amounts.supported(explain_data) if explain_data is not data else [])
+        bad = explain_amounts.unsupported(explain_amounts.text_of(explanation), data, allowed)
+        if bad:
+            logger.warning("Hybrid Mode: explanation states amounts the result does not hold: %s", bad)
+            if trace is not None:
+                record_usage(trace, "explain", service.provider)
+            explanation = await explain(question + explain_amounts.retry_note(bad))
+            still = explain_amounts.unsupported(explain_amounts.text_of(explanation), data, allowed)
+            if still:
+                logger.warning("Hybrid Mode: explanation still states %s; written from the rows", still)
+                explanation = explain_amounts.from_rows(explanation, data)
+            if trace is not None:
+                trace.stages["explain_amounts"] = "from_rows" if still else "retried"
+        text = explain_amounts.text_of(explanation)
+        if text:
+            explanation = explain_amounts.with_text(explanation, explain_amounts.drop_display_advice(text))
 
         t_explain = time.perf_counter() - t0
         logger.debug("Hybrid Mode: Explanation Generation took %.4fs", t_explain)
