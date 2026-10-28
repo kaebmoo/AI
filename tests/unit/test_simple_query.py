@@ -198,6 +198,21 @@ class TestSimpleQueryEndpoint:
         assert plain["columns"] is None
 
 
+    def test_a_word_of_another_context_reaches_the_explanation_note(self, query_client):
+        """PLAN_ANOMALY_AVG_FIX §6 ข้อ 2 (D-3): "รายได้" asked of feed_sales — /query passes context_mismatch's
+        explain_note to the engine; no named context = no note (the router followed the words)."""
+        mismatch = {"explain_note": "**ชื่อตัวเลข:** x", "prompt_note": "chat only", "warning": {}}
+        with patch("app.services.query_engine.QueryEngine") as MockEngine, \
+                patch("app.services.query_engine.context_mismatch", return_value=mismatch) as found:
+            MockEngine.return_value.query = AsyncMock(return_value=_mock_query_engine_result(data=[{"v": 1}]))
+            query_client.post("/api/v1/query/", json={"question": "รายได้", "context": "feed_sales"})
+            assert MockEngine.return_value.query.await_args.kwargs["explain_note"] == "**ชื่อตัวเลข:** x"
+            assert "prompt_note" not in MockEngine.return_value.query.await_args.kwargs
+            found.return_value = None
+            query_client.post("/api/v1/query/", json={"question": "รายได้", "context": "feed_sales"})
+            assert "explain_note" not in MockEngine.return_value.query.await_args.kwargs
+
+
 class TestPortalFields:
     """F11 Phase A: optional portal fields accepted without breaking the contract."""
 
