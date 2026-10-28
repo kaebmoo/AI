@@ -47,6 +47,7 @@ def execution(monkeypatch):
     monkeypatch.setattr(hybrid_flow, "_cumulative_columns", lambda *a: ["ebt"])
     monkeypatch.setattr(hybrid_flow, "_summable_columns", lambda *a: ["ebt_month"])
     monkeypatch.setattr(hybrid_flow, "_period_columns", lambda *a: ["time_key"])
+    monkeypatch.setattr(hybrid_flow, "_grain_keys", lambda *a: {})
     monkeypatch.setattr(hybrid_flow, "scope_note", lambda: "")
     monkeypatch.setattr(hybrid_flow, "resolve_context_info", lambda *a, **kw: (
         SimpleNamespace(get_context_info=lambda c: {}), "t", "EBT"))
@@ -157,6 +158,7 @@ async def test_later_validation_failure_keeps_existing_final_result(execution):
 @pytest.mark.parametrize("error,expected", [
     ("I1 ytd_summed_across_periods: guidance", "I1"),
     ("I2 ytd_without_period: guidance", "I2"),
+    ("I4 avg_over_fact_rows: guidance", "I4"),
     ("I1 unrelated: guidance", None),
     ("I2 ytd_without_period_extra: guidance", None),
     ("I3 month_summed_as_ytd: guidance", None),
@@ -165,3 +167,75 @@ async def test_later_validation_failure_keeps_existing_final_result(execution):
 ])
 def test_invariant_code_only_recognizes_our_blocking_messages(error, expected):
     assert hybrid_flow.invariant_code(error) == expected
+
+
+# I4 avg_over_fact_rows (plan/PLAN_ANOMALY_AVG_FIX.md §4): feed_sales has no point-in-time column, so before
+# I4 its SQL never reached the checker (F10) — audit 518 averaged raw rows and was answered.
+ROW_AVERAGE = ("SELECT unit_fname, AVG(amount) FROM t WHERE metric = 'actual' "
+               "AND year_month BETWEEN 202601 AND 202608 GROUP BY unit_fname")
+MONTHLY_AVERAGE = ("WITH m AS (SELECT unit_fname, year_month, SUM(amount) AS amt FROM t WHERE metric = 'actual' "
+                   "AND year_month BETWEEN 202601 AND 202608 GROUP BY 1, 2) "
+                   "SELECT unit_fname, SUM(amt) / 8 FROM m GROUP BY unit_fname")
+SALES_KEYS = ("year_month", "cost_center", "product_code", "metric", "sales_line")
+
+
+@pytest.fixture
+def sales(execution, monkeypatch):
+    monkeypatch.setattr(hybrid_flow, "_cumulative_columns", lambda *a: [])
+    monkeypatch.setattr(hybrid_flow, "_summable_columns", lambda *a: ["amount"])
+    monkeypatch.setattr(hybrid_flow, "_period_columns", lambda *a: ["year_month"])
+    monkeypatch.setattr(hybrid_flow, "_grain_keys", lambda *a: {"t": SALES_KEYS})
+    return execution
+
+
+async def test_context_without_point_in_time_still_gets_i4(sales):
+    sales.provider.generate_content.side_effect = [ROW_AVERAGE, MONTHLY_AVERAGE]
+    result = await query(sales)
+    assert result.error is None and result.sql_query == MONTHLY_AVERAGE and result.retry_count == 1
+    error = result.retry_history[0]["error"]
+    assert error.startswith("I4 avg_over_fact_rows: AVG(amount) บนแถวดิบของ t "
+                            "(grain: year_month, cost_center, product_code, metric, sales_line)")
+    assert "SUM ต่อมิติที่ถาม × year_month ใน CTE ก่อน" in error and "เดือนที่ไม่มีแถวนับเป็น 0" in error
+    assert error in sales.provider.generate_content.await_args_list[1].args[0]
+
+
+@pytest.mark.parametrize("rescue_enabled", [False, True])
+async def test_last_i4_fails_closed(sales, monkeypatch, rescue_enabled):
+    sales.provider.generate_content.return_value = ROW_AVERAGE
+    rescue = AsyncMock()
+    monkeypatch.setattr(retry_loop, "query_with_retry", rescue)
+    trace = new_trace(QUESTION)
+    result = await query(sales, trace=trace, escalation_tool_loop_enabled=rescue_enabled)
+    assert result.error == "query_failed" and result.sql_query == "" and result.data == []
+    assert trace.stages["invariant"] == "I4"
+    sales.mcp_client.call_tool.assert_not_awaited()
+    rescue.assert_not_awaited()
+
+
+def test_grain_keys_come_from_the_contract_and_follow_its_changes(tmp_path):
+    import os
+
+    contract = tmp_path / "sales.yaml"
+    contract.write_text("domain: sales\ndatasets:\n- name: fact_sales\n  keys: [year_month, cost_center]\n"
+                        "- name: dim_product\n  keys: [product_code]\n- name: notes\n")
+    engine = create_engine(f"sqlite:///{tmp_path/'c.db'}")
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE data_sources (id INTEGER, contract_file TEXT)"))
+        conn.execute(text("CREATE TABLE schema_contexts (main_view TEXT, source_id INTEGER, is_active INTEGER, "
+                          "status TEXT)"))
+        conn.execute(text("INSERT INTO data_sources VALUES (1, :p), (2, NULL)"), {"p": str(contract)})
+        conn.execute(text("INSERT INTO schema_contexts VALUES ('feed_sales_fact_sales', 1, 1, 'active'), "
+                          "('legacy_view', 2, 1, 'active')"))
+    try:
+        assert hybrid_flow._grain_keys("feed_sales_fact_sales", engine) == {
+            "feed_sales_fact_sales": ("year_month", "cost_center"), "feed_sales_dim_product": ("product_code",)}
+        contract.write_text("domain: sales\ndatasets:\n- name: fact_sales\n  keys: [year_month]\n")
+        stat = contract.stat()
+        os.utime(contract, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
+        assert hybrid_flow._grain_keys("feed_sales_fact_sales", engine) == {"feed_sales_fact_sales": ("year_month",)}
+        assert hybrid_flow._grain_keys("legacy_view", engine) == {}
+        assert hybrid_flow._grain_keys("unknown", engine) == {}
+        contract.unlink()
+        assert hybrid_flow._grain_keys("feed_sales_fact_sales", engine) == {}
+    finally:
+        engine.dispose()

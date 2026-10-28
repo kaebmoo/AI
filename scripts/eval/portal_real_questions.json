@@ -3558,6 +3558,53 @@
      "sql": "SELECT SUM(CASE WHEN year_month=202608 THEN revenue_ytd END), SUM(CASE WHEN year_month=202508 THEN revenue_ytd END) FROM fact_service_group_monthly WHERE service_group_nt ILIKE '%cctv%'"
     }
    ]
+  },
+  {
+   "id": "P16",
+   "asked_at": "2026-10-28 08:04",
+   "question": "เดือน กันยายน มีรายได้ของหน่วยงานไหน ผิดปกติไปจากค่าเฉลี่ยก่อนหน้าบ้าง",
+   "time_in_question": true,
+   "context": "feed_sales",
+   "scope": {
+    "year_month": [
+     202501,
+     202502,
+     202503,
+     202504,
+     202505,
+     202506,
+     202507,
+     202508,
+     202509,
+     202510,
+     202511,
+     202512,
+     202601,
+     202602,
+     202603,
+     202604,
+     202605,
+     202606,
+     202607,
+     202608,
+     202609
+    ]
+   },
+   "oracle_status": "query_audit 518 (portal, รายงานยอดขาย งวด 2569-09) — เฉลย scripts/eval/check_anomaly_avg.py ข้อ 3 (plan/RESULT_ANOMALY_AVG_FIX.md §0): ยอด ก.ย. 69 เทียบค่าเฉลี่ยต่อเดือน ม.ค.–ส.ค. 69 (เดือนว่าง = 0); values = ยอด ก.ย. 69 ของ 3 หน่วยแรกในตารางเฉลย",
+   "accept": [
+    {
+     "base": "ยอดขาย ก.ย. 2569 ของหน่วยที่ต่างจากค่าเฉลี่ยต่อเดือน ม.ค.–ส.ค. 2569 มากสุด 3 หน่วย",
+     "years_be": [
+      2569
+     ],
+     "values": [
+      134.03,
+      -13.35,
+      86.04
+     ],
+     "sql": "scripts/eval/check_anomaly_avg.py --by unit_fname --month 202609 (anomalies())"
+    }
+   ]
   }
  ]
 }

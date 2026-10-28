@@ -236,7 +236,9 @@ def main():
     for q in spec["questions"]:
         if only and q["id"] not in only:
             continue
-        body = {"question": q["question"], "context": spec["context"], "scope": spec["scope"], **spec["request"]}
+        # a question asked from another report carries its own context / scope (P16: รายงานยอดขาย)
+        body = {"question": q["question"], "context": q.get("context", spec["context"]),
+                "scope": q.get("scope", spec["scope"]), **spec["request"]}
         answers[q["id"]] = ask(args.base_url, key, body)
         print(f"{q['id']} {answers[q['id']]['_seconds']}s", flush=True)
         time.sleep(args.pause)

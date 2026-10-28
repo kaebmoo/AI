@@ -22,6 +22,12 @@ CONTRACT = Path(__file__).parent.parent / "fixtures" / "ebt_metrics_1_6_0.yaml"
 I1 = Violation("I1", "ytd_summed_across_periods", ("amount_ytd",), True)
 I2 = Violation("I2", "ytd_without_period", ("amount_ytd",), True)
 I3 = Violation("I3", "month_summed_as_ytd", ("ebt_month",), False)
+# datasets[].keys of NT-Report DataFeed/contracts/ebt.yaml 1.6.0
+EBT_GRAIN = {
+    "feed_ebt_fact_ebt": ("time_key", "cost_center", "measure_type", "group_0", "group_1", "group_2", "partner_status"),
+    "feed_ebt_fact_ebt_division_monthly": ("division", "time_key"),
+    "feed_ebt_fact_ebt_total_monthly": ("time_key",),
+}
 
 AUDIT_407 = """SELECT
     cost_center,
@@ -83,7 +89,7 @@ def resolved(metrics):
 ])
 def test_compiler_shapes(resolved, metric_id, mode, shape):
     sql = compile(CompileRequest(metric_id, 202609, mode, **shape), resolved).sql
-    assert check(sql, PIT, SUMMABLE, PERIOD) == []
+    assert check(sql, PIT, SUMMABLE, PERIOD, EBT_GRAIN) == []
 
 
 @pytest.mark.parametrize("mode", ["cumulative", "month"])
@@ -91,7 +97,7 @@ def test_compiler_ranking(resolved, mode):
     margin = replace(resolved["ebt_margin"], ranking={"scope": "is_hq = 0", "base": "rev - other", "base_name_th": "ฐาน"})
     sql = compile(CompileRequest("ebt_margin", 202609, mode, dimensions=("sub_unit",), order_desc=True, limit=10),
                   resolved | {"ebt_margin": margin}).sql
-    assert check(sql, PIT, SUMMABLE, PERIOD) == []
+    assert check(sql, PIT, SUMMABLE, PERIOD, EBT_GRAIN) == []
 
 
 @pytest.mark.parametrize("predicate,pinned", [
@@ -230,3 +236,130 @@ def test_concurrent_calls_use_independent_cursors():
     with ThreadPoolExecutor(max_workers=4) as pool:
         results = list(pool.map(lambda sql: check(sql, PIT, SUMMABLE, PERIOD), queries))
     assert results == [[I1], []] * 8
+
+
+# I4 avg_over_fact_rows — plan/PLAN_ANOMALY_AVG_FIX.md §4: the portal's "ผิดปกติจากค่าเฉลี่ยก่อนหน้า" (audit 518)
+# averaged feed_sales' raw rows (org × product × sales line) and compared that with a month's SUM.
+SALES_GRAIN = {"feed_sales_fact_sales": ("year_month", "cost_center", "product_code", "metric", "sales_line")}
+SALES_SUMMABLE = {"amount"}
+MONTH = ["year_month"]
+I4 = Violation("I4", "avg_over_fact_rows", ("amount",), True, ("feed_sales_fact_sales",))
+
+# Appendix B of the plan, whole (audit 519 — the SQL the owner pasted)
+APPENDIX_B = """WITH avg_before_sep AS (
+    SELECT unit_fname, AVG(amount) AS avg_amount_before_sep
+    FROM feed_sales_fact_sales
+    WHERE metric = 'actual' AND year_month BETWEEN 202601 AND 202608
+    GROUP BY unit_fname
+),
+sep_amount AS (
+    SELECT unit_fname, SUM(amount) AS amount_sep
+    FROM feed_sales_fact_sales
+    WHERE metric = 'actual' AND year_month = 202609
+    GROUP BY unit_fname
+)
+SELECT s.unit_fname AS "หน่วยงาน",
+       s.amount_sep AS "ยอดขายเดือนกันยายน",
+       a.avg_amount_before_sep AS "ค่าเฉลี่ยยอดขายก่อนกันยายน",
+       (s.amount_sep - a.avg_amount_before_sep) AS "ส่วนต่าง",
+       CASE WHEN a.avg_amount_before_sep = 0 THEN NULL
+            ELSE (s.amount_sep - a.avg_amount_before_sep) / NULLIF(a.avg_amount_before_sep, 0) * 100
+       END AS "เปอร์เซ็นต์เปลี่ยนแปลง"
+FROM sep_amount s
+LEFT JOIN avg_before_sep a ON s.unit_fname = a.unit_fname
+WHERE a.avg_amount_before_sep IS NOT NULL
+  AND ABS(s.amount_sep - a.avg_amount_before_sep) > 0 -- กรองเฉพาะที่มีความแตกต่าง
+ORDER BY ABS(s.amount_sep - a.avg_amount_before_sep) DESC
+"""
+
+
+def test_appendix_b_averages_raw_rows():
+    assert check(APPENDIX_B, (), SALES_SUMMABLE, MONTH, SALES_GRAIN) == [I4]
+
+
+@pytest.mark.parametrize("sql", [
+    "SELECT AVG(amount) FROM feed_sales_fact_sales WHERE metric = 'actual'",
+    "SELECT unit_fname, AVG(amount) FROM feed_sales_fact_sales WHERE year_month = 202609 GROUP BY unit_fname",
+    "SELECT unit_fname, AVG(amount) OVER (PARTITION BY unit_fname) FROM feed_sales_fact_sales",
+    "SELECT unit_fname, SUM(amount) / COUNT(*) FROM feed_sales_fact_sales GROUP BY unit_fname",
+    "SELECT SUM(amount) / NULLIF(COUNT(product_code), 0) FROM feed_sales_fact_sales",
+    "SELECT CASE WHEN COUNT(*) > 0 THEN AVG(amount) END FROM feed_sales_fact_sales",
+    "SELECT AVG(CASE WHEN year_month < 202609 THEN amount END) FROM feed_sales_fact_sales",
+    "SELECT MEDIAN(f.amount), STDDEV_SAMP(f.amount) FROM feed_sales_fact_sales f JOIN feed_sales_dim_org o "
+    "ON o.cost_center = f.cost_center",
+    'SELECT AVG("AMOUNT") FROM FEED_SALES_FACT_SALES GROUP BY year_month',
+])
+def test_averages_over_raw_rows(sql):
+    assert check(sql, (), SALES_SUMMABLE, MONTH, SALES_GRAIN) == [I4]
+
+
+def oracle_sql():
+    """The fixed answer's own SQL (scripts/eval/check_anomaly_avg.py anomalies())."""
+    from scripts.eval.check_anomaly_avg import VIEW, anomalies
+
+    con = Mock()
+    anomalies(con, "unit_fname", 202609, 5e6, 30, 2)
+    sql = con.execute.call_args.args[0]
+    assert VIEW in sql
+    return sql
+
+
+@pytest.mark.parametrize("sql", [
+    oracle_sql(),
+    "SELECT unit_fname, AVG(amt) FROM (SELECT unit_fname, year_month, SUM(amount) AS amt FROM feed_sales_fact_sales "
+    "GROUP BY 1, 2) m GROUP BY unit_fname",
+    "SELECT AVG(amount) FROM feed_sales_fact_sales WHERE cost_center = '1' AND product_code IN ('2') "
+    "AND metric = 'actual' GROUP BY sales_line",
+    "SELECT year_month, cost_center, product_code, AVG(amount) FROM feed_sales_fact_sales "
+    "WHERE metric = 'actual' GROUP BY 1, 2, 3",
+    "SELECT year_month AS ym, cost_center, product_code, metric, AVG(amount) FROM feed_sales_fact_sales GROUP BY ALL",
+    "SELECT AVG(amount) FROM other_table",
+    "SELECT unit_fname, SUM(amount) / COUNT(DISTINCT year_month) FROM feed_sales_fact_sales GROUP BY unit_fname",
+    "SELECT unit_fname, year_month, AVG(SUM(amount)) OVER (PARTITION BY unit_fname) FROM feed_sales_fact_sales "
+    "GROUP BY 1, 2",
+    "SELECT AVG(CAST(year_month AS DOUBLE)), AVG(row_count) FROM feed_sales_fact_sales",
+    "SELECT SUM(amount) FROM feed_sales_fact_sales",
+])
+def test_averages_that_are_not_over_raw_rows(sql):
+    assert check(sql, (), SALES_SUMMABLE, MONTH, SALES_GRAIN) == []
+
+
+def test_small_grain_with_every_key_but_one_pinned():
+    grain = {"feed_revenue_fact_bu_monthly": ("year_month", "bu_seq")}
+    pinned = "SELECT AVG(revenue_month) FROM feed_revenue_fact_bu_monthly WHERE bu_seq = 3"
+    grouped = "SELECT bu_seq, AVG(revenue_month) FROM feed_revenue_fact_bu_monthly GROUP BY bu_seq"
+    loose = "SELECT AVG(revenue_month) FROM feed_revenue_fact_bu_monthly"
+    assert check(pinned, (), {"revenue_month"}, MONTH, grain) == []
+    assert check(grouped, (), {"revenue_month"}, MONTH, grain) == []
+    assert check(loose, (), {"revenue_month"}, MONTH, grain) == [
+        Violation("I4", "avg_over_fact_rows", ("revenue_month",), True, ("feed_revenue_fact_bu_monthly",))]
+
+
+def test_i4_beside_period_invariants():
+    assert check(AUDIT_407, PIT, SUMMABLE, PERIOD, EBT_GRAIN) == [I1]
+    sql = "SELECT AVG(ebt_month), SUM(amount_ytd) FROM feed_ebt_fact_ebt"
+    assert check(sql, PIT, SUMMABLE, PERIOD, EBT_GRAIN) == [
+        I1, I3, Violation("I4", "avg_over_fact_rows", ("ebt_month",), True, ("feed_ebt_fact_ebt",))]
+
+
+def test_without_grain_or_measures_nothing_is_parsed(monkeypatch):
+    from app.services.ai import sql_invariants
+
+    monkeypatch.setattr(sql_invariants, "_parser_conn", object())
+    assert check(APPENDIX_B, (), SALES_SUMMABLE, MONTH, {}) == []
+    assert check(APPENDIX_B, (), (), MONTH, SALES_GRAIN) == []
+
+
+@pytest.mark.parametrize("mode", ["cumulative", "month"])
+@pytest.mark.parametrize("shape", [
+    {},
+    {"dimensions": ("unit_fname",), "order_desc": True, "limit": 10},
+    {"dimensions": ("unit_fname",), "base_period": 202509},
+])
+def test_sales_compiler_shapes(mode, shape):
+    declaration = yaml.safe_load((CONTRACT.parent / "sales_metrics_1_4_1.yaml").read_text())["metrics"][0]
+    values = {f.name: declaration.get(f.name) for f in fields(Metric)}
+    values.update(metric_id=declaration["id"], synonyms=tuple(values["synonyms"]),
+                  dimensions=tuple(values["dimensions"]), dataset=f"feed_sales_{values['dataset']}")
+    sql = compile(CompileRequest("sales_vs_target", 202609, mode, **shape), resolve([Metric(**values)])).sql
+    assert check(sql, (), SALES_SUMMABLE, MONTH, SALES_GRAIN) == []
