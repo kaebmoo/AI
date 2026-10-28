@@ -215,6 +215,8 @@ TREND_WORDS = ("รายเดือน", "แต่ละเดือน", "�
                "รายปี", "แต่ละปี", "ปีไหน", "ไตรมาส", "trend", "monthly")
 # words that name an org unit without naming a level: the owner chose to ask back (CMP-3 ค)
 GENERIC_UNIT_WORDS = ("หน่วยงาน", "จังหวัด")
+# a question about an average: no declared shape computes one (plan() declines it)
+AVERAGE_WORDS = ("เฉลี่ย", "average", "avg")
 # a filter that leaves its value out, by the operator that would select it
 EXCLUDE = {"=": "<>", "LIKE": "NOT LIKE", "IN": "NOT IN"}
 _OPERATOR_SPELLING = {"!=": "<>", "NOT_LIKE": "NOT LIKE", "NOT_IN": "NOT IN"}
@@ -625,6 +627,11 @@ def plan_with_reason(
                      if isinstance(word, str) and word.strip() and word.casefold() in question.casefold()), None)
     if excluded is not None:
         return None, "excluded_word:" + _reason_detail(excluded.casefold())
+    # audit 530 / 531: "…ต่างจาก / ผิดปกติไปจากค่าเฉลี่ยเดือนก่อนหน้า" compiled as a two-period comparison (pass 1 wrote
+    # comparison, once with SUM): the compiler sums declared terms and has no average over periods — such a question
+    # goes to free SQL, where I4 (sql_invariants) refuses an average of raw rows
+    if intent.get("aggregate_function") == "AVG" or any(word in question.casefold() for word in AVERAGE_WORDS):
+        return None, "shape:average"
     ignore = set()
     ancestor = metric
     visited = set()
