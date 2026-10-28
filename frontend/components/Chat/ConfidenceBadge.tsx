@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, Animated } from 'react-native';
+import { View, Text, TouchableOpacity } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
 export interface ConfidenceFactor {
@@ -31,6 +32,7 @@ const colorMap = {
         border: 'border-emerald-200 dark:border-emerald-800',
         text: 'text-emerald-700 dark:text-emerald-300',
         icon: 'text-emerald-500',
+        hex: '#10B981',
         bar: 'bg-emerald-500',
         label: 'bg-emerald-100 dark:bg-emerald-900/40',
     },
@@ -39,6 +41,7 @@ const colorMap = {
         border: 'border-amber-200 dark:border-amber-800',
         text: 'text-amber-700 dark:text-amber-300',
         icon: 'text-amber-500',
+        hex: '#F59E0B',
         bar: 'bg-amber-500',
         label: 'bg-amber-100 dark:bg-amber-900/40',
     },
@@ -47,6 +50,7 @@ const colorMap = {
         border: 'border-orange-200 dark:border-orange-800',
         text: 'text-orange-700 dark:text-orange-300',
         icon: 'text-orange-500',
+        hex: '#F97316',
         bar: 'bg-orange-500',
         label: 'bg-orange-100 dark:bg-orange-900/40',
     },
@@ -55,17 +59,18 @@ const colorMap = {
         border: 'border-red-200 dark:border-red-800',
         text: 'text-red-700 dark:text-red-300',
         icon: 'text-red-500',
+        hex: '#EF4444',
         bar: 'bg-red-500',
         label: 'bg-red-100 dark:bg-red-900/40',
     },
 };
 
 const iconMap = {
-    high: { icon: '✓', label: 'shield-check' },
-    medium: { icon: '!', label: 'alert-circle' },
-    low: { icon: '?', label: 'help-circle' },
-    very_low: { icon: '✗', label: 'x-circle' },
-};
+    high: 'checkmark',
+    medium: 'alert',
+    low: 'help',
+    very_low: 'close',
+} as const;
 
 export const ConfidenceBadge = ({ confidence, compact = false }: ConfidenceBadgeProps) => {
     const [expanded, setExpanded] = useState(false);
@@ -98,13 +103,13 @@ export const ConfidenceBadge = ({ confidence, compact = false }: ConfidenceBadge
                 onPress={() => setExpanded(!expanded)}
                 className="flex-row items-center justify-between px-4 py-3"
                 activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityState={{ expanded }}
             >
                 <View className="flex-row items-center flex-1">
                     {/* Icon Circle */}
                     <View className={`w-8 h-8 rounded-full items-center justify-center mr-3 ${colors.label}`}>
-                        <Text className={`text-base font-bold ${colors.icon}`}>
-                            {iconInfo.icon}
-                        </Text>
+                        <Ionicons name={iconInfo} size={16} color={colors.hex} />
                     </View>
 
                     {/* Score and Label */}
@@ -124,9 +129,7 @@ export const ConfidenceBadge = ({ confidence, compact = false }: ConfidenceBadge
                 </View>
 
                 {/* Expand/Collapse indicator */}
-                <Text className={`text-sm ${colors.text}`}>
-                    {expanded ? '▲' : '▼'}
-                </Text>
+                <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={16} color={colors.hex} />
             </TouchableOpacity>
 
             {/* Progress Bar */}
@@ -188,7 +191,7 @@ export const ConfidenceBadge = ({ confidence, compact = false }: ConfidenceBadge
                     {/* Recommendation */}
                     <View className={`mx-4 mb-4 p-3 rounded-lg ${colors.label}`}>
                         <View className="flex-row items-start">
-                            <Text className="mr-2">💡</Text>
+                            <Ionicons name="bulb-outline" size={16} color={colors.hex} style={{ marginRight: 8, marginTop: 1 }} />
                             <Text className={`flex-1 text-sm ${colors.text}`}>
                                 {confidence.recommendation}
                             </Text>

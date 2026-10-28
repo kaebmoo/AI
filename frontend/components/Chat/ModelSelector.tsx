@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../../services/api';
+import { DropdownPill, DropdownItem } from './DropdownPill';
 
 interface Provider {
     id: string;
@@ -89,65 +90,40 @@ export const ModelSelector = ({ provider, onSelect }: ModelSelectorProps) => {
 
     if (loading) {
         return (
-            <View className="flex-row bg-gray-100 dark:bg-gray-800 rounded-full p-2 border border-gray-200 dark:border-gray-700">
+            <View className="h-9 flex-row items-center px-3 bg-gray-100 dark:bg-gray-800 rounded-full border border-gray-200 dark:border-gray-700">
                 <ActivityIndicator size="small" color="#9CA3AF" />
-                <Text className="text-xs text-gray-500 dark:text-gray-400 ml-2">Loading models...</Text>
+                <Text className="text-xs text-gray-500 dark:text-gray-400 ml-2">กำลังโหลดโมเดล...</Text>
             </View>
         );
     }
 
     if (error) {
         return (
-            <View className="flex-row bg-red-50 dark:bg-red-900/20 rounded-full p-2 border border-red-200 dark:border-red-800">
+            <View className="h-9 flex-row items-center px-3 bg-red-50 dark:bg-red-900/20 rounded-full border border-red-200 dark:border-red-800">
                 <Ionicons name="alert-circle" size={14} color="#DC2626" />
-                <Text className="text-xs text-red-600 dark:text-red-400 ml-2">{error}</Text>
+                <Text className="text-xs text-red-700 dark:text-red-300 ml-2">{error}</Text>
             </View>
         );
     }
 
     if (providers.length === 0) {
         return (
-            <View className="flex-row bg-yellow-50 dark:bg-yellow-900/20 rounded-full p-2 border border-yellow-200 dark:border-yellow-800">
+            <View className="h-9 flex-row items-center px-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-full border border-yellow-200 dark:border-yellow-800">
                 <Ionicons name="warning" size={14} color="#D97706" />
-                <Text className="text-xs text-yellow-700 dark:text-yellow-400 ml-2">
-                    No AI models enabled. Contact admin.
+                <Text className="text-xs text-yellow-800 dark:text-yellow-300 ml-2">
+                    ยังไม่มีโมเดล AI เปิดใช้ ติดต่อผู้ดูแลระบบ
                 </Text>
             </View>
         );
     }
 
-    return (
-        <View className="flex-row bg-gray-100 dark:bg-gray-800 rounded-full p-1 border border-gray-200 dark:border-gray-700">
-            {providers.map((p) => {
-                const isActive = provider === p.id;
-                const iconName = iconMap[p.icon] || 'hardware-chip';
-                const activeColor = colorMap[p.id] || '#6B7280';
+    const items: DropdownItem[] = providers.map((p) => ({
+        key: p.id,
+        label: p.name,
+        description: p.model,
+        icon: iconMap[p.icon] || 'hardware-chip',
+        color: colorMap[p.id] || '#6B7280',
+    }));
 
-                return (
-                    <TouchableOpacity
-                        key={p.id}
-                        onPress={() => onSelect(p.id)}
-                        className={`px-3 py-1.5 rounded-full flex-row items-center gap-1 ${
-                            isActive ? 'bg-white dark:bg-gray-600 shadow-sm' : ''
-                        }`}
-                    >
-                        <Ionicons
-                            name={iconName}
-                            size={14}
-                            color={isActive ? activeColor : '#9CA3AF'}
-                        />
-                        <Text
-                            className={`text-xs font-medium ${
-                                isActive
-                                    ? 'text-gray-900 dark:text-white'
-                                    : 'text-gray-500 dark:text-gray-400'
-                            }`}
-                        >
-                            {p.name}
-                        </Text>
-                    </TouchableOpacity>
-                );
-            })}
-        </View>
-    );
+    return <DropdownPill title="โมเดล AI" items={items} selected={provider} onSelect={onSelect} />;
 };

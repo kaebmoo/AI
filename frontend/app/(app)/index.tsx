@@ -7,7 +7,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, router } from 'expo-router';
 import { ModelSelector } from '../../components/Chat/ModelSelector';
-import { ContextSelector, ContextBadge, DataContext } from '../../components/Chat/ContextSelector';
+import { ContextSelector, DataContext } from '../../components/Chat/ContextSelector';
 import { ChatBubble, Message } from '../../components/Chat/ChatBubble';
 import { ErrorBoundary } from '../../components/ErrorBoundary';
 import { ConversationList } from '../../components/Chat/ConversationList';
@@ -336,6 +336,13 @@ export default function ChatScreen() {
   // ---------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------
+  const selectors = (
+    <View className="flex-row items-center gap-2">
+      <ContextSelector context={context} onSelect={setContext} />
+      <ModelSelector provider={provider} onSelect={setProvider} />
+    </View>
+  );
+
   return (
     <SafeAreaView className="flex-1 bg-gray-50 dark:bg-gray-900">
       <View className="flex-1 flex-row">
@@ -370,40 +377,39 @@ export default function ChatScreen() {
         {/* Main chat area */}
         <View className="flex-1">
           <View className="flex-1 w-full max-w-7xl mx-auto">
-            {/* Header */}
-            <View className="px-4 py-3 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 shadow-sm z-10 w-full">
-              <View className="flex-row items-center justify-between">
-                <View className="flex-row items-center gap-2">
-                  {/* Sidebar toggle / New Chat */}
-                  <TouchableOpacity
-                    onPress={() => setSidebarVisible(!sidebarVisible)}
-                    className="w-9 h-9 rounded-lg items-center justify-center bg-gray-100 dark:bg-gray-800"
-                  >
-                    <Ionicons name={sidebarVisible ? 'close' : 'menu'} size={20} color="#6B7280" />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={handleNewChat}
-                    className="w-9 h-9 rounded-lg items-center justify-center bg-blue-600"
-                  >
-                    <Ionicons name="add" size={20} color="white" />
-                  </TouchableOpacity>
-                  <View>
-                    <Text className="text-lg font-bold text-gray-900 dark:text-white">NT AI Assistant</Text>
-                    <Text className="text-xs text-gray-500 dark:text-gray-400">Powered by Agentic AI</Text>
-                  </View>
-                </View>
-                <View className="flex-row items-center gap-2">
-                  <ContextBadge context={context} />
-                  <TouchableOpacity onPress={signOut}>
-                    <Ionicons name="log-out-outline" size={24} color="#EF4444" />
-                  </TouchableOpacity>
-                </View>
+            {/* Header: one row on wide screens; the selectors drop to a second row below 768 */}
+            <View className="px-4 py-2 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 z-10 w-full">
+              <View className="flex-row items-center gap-2">
+                <TouchableOpacity
+                  onPress={() => setSidebarVisible(!sidebarVisible)}
+                  accessibilityRole="button"
+                  accessibilityLabel={sidebarVisible ? 'ปิดรายการสนทนา' : 'เปิดรายการสนทนา'}
+                  className="w-9 h-9 rounded-lg items-center justify-center bg-gray-100 dark:bg-gray-800"
+                >
+                  <Ionicons name={sidebarVisible ? 'close' : 'menu'} size={20} color="#6B7280" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={handleNewChat}
+                  accessibilityRole="button"
+                  accessibilityLabel="สนทนาใหม่"
+                  className="w-9 h-9 rounded-lg items-center justify-center bg-blue-600"
+                >
+                  <Ionicons name="add" size={20} color="white" />
+                </TouchableOpacity>
+                <Text numberOfLines={1} className="flex-1 ml-1 text-base font-bold text-gray-900 dark:text-white">
+                  NT AI Assistant
+                </Text>
+                {isWideScreen && selectors}
+                <TouchableOpacity
+                  onPress={signOut}
+                  accessibilityRole="button"
+                  accessibilityLabel="ออกจากระบบ"
+                  className="w-9 h-9 rounded-lg items-center justify-center"
+                >
+                  <Ionicons name="log-out-outline" size={22} color="#6B7280" />
+                </TouchableOpacity>
               </View>
-              {/* Selectors Row */}
-              <View className="flex-row items-center gap-2 mt-2">
-                <ContextSelector context={context} onSelect={setContext} />
-                <ModelSelector provider={provider} onSelect={setProvider} />
-              </View>
+              {!isWideScreen && <View className="mt-2">{selectors}</View>}
             </View>
 
             {/* Loading overlay for conversation restore */}
@@ -435,13 +441,6 @@ export default function ChatScreen() {
                   className="flex-1"
                 />
 
-                {/* Disclaimer */}
-                <View className="px-4 py-2 bg-amber-50 dark:bg-amber-900/20 border-t border-amber-200 dark:border-amber-800">
-                  <Text className="text-xs text-amber-700 dark:text-amber-300 text-center">
-                    หมายเหตุ: ข้อมูล &quot;รายได้อื่น&quot; เป็นรายได้ที่ยังไม่สุทธิ
-                  </Text>
-                </View>
-
                 {/* Status Text */}
                 {loading && statusText ? (
                   <View className="px-4 py-2 bg-blue-50 dark:bg-blue-900/20 border-t border-blue-100 dark:border-blue-800">
@@ -455,7 +454,7 @@ export default function ChatScreen() {
                 ) : null}
 
                 {/* Input Area */}
-                <View className="p-4 bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-800">
+                <View className="px-4 pt-3 pb-3 bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-800">
                   <View className="flex-row items-center gap-2">
                     <TextInput
                       ref={inputRef}
@@ -470,6 +469,8 @@ export default function ChatScreen() {
                     />
                     <TouchableOpacity
                       onPress={handleSend}
+                      accessibilityRole="button"
+                      accessibilityLabel="ส่งคำถาม"
                       disabled={loading || !input.trim()}
                       className={`w-12 h-12 rounded-full items-center justify-center ${
                         loading || !input.trim()
@@ -488,6 +489,9 @@ export default function ChatScreen() {
                       )}
                     </TouchableOpacity>
                   </View>
+                  <Text className="mt-2 text-[11px] text-center text-gray-500 dark:text-gray-400">
+                    หมายเหตุ: ข้อมูล &quot;รายได้อื่น&quot; เป็นรายได้ที่ยังไม่สุทธิ
+                  </Text>
                 </View>
               </KeyboardAvoidingView>
             )}
