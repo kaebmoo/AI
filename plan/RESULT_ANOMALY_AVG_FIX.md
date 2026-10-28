@@ -1,6 +1,6 @@
 # RESULT — "หน่วยงานไหนผิดปกติจากค่าเฉลี่ยก่อนหน้า" (`plan/PLAN_ANOMALY_AVG_FIX.md`)
 
-> หนึ่งหัวข้อต่อ phase · branch `claude/anomaly-avg-fix` (worktree `_worktrees/AI-anomaly`) · ยังไม่ขึ้นของจริง
+> หนึ่งหัวข้อต่อ phase · branch `claude/anomaly-avg-fix` (worktree `_worktrees/AI-anomaly`) · **ขึ้นของจริง 2026-10-29 05:03 (main `f3e2c17`)** — §ขึ้นของจริง
 
 | Phase | สถานะ | วันที่ |
 |---|---|---|
@@ -291,3 +291,15 @@ Phase 0 พบว่า SQL ของรอบ portal (518) ใช้ 2025 → �
   แต่ฐานข้ามปีให้ตัวเลขผิด; I5 ตรวจเฉพาะเดือนที่ถามจึงไม่จับ — ทางเลือก: (ก) ข้อความ retry ของ I4 บอกสูตร "SUM ของช่วงฐาน ÷ จำนวนเดือน" แทนการสร้างตารางเดือน
   (ข) ขยาย I5 ให้ literal ของช่วงฐานต้องอยู่ปีเดียวกับเดือนที่ถาม เมื่อคำถามไม่ระบุช่วง (D-1 ก) — ต้องเจ้าของเคาะ; Phase 5 (D-5) แก้ทั้งสองรูปด้วย compiler
 - เกณฑ์ D-2 เป็นค่าคงที่ใน code (ยังไม่ใช่ admin_config)
+
+---
+
+## §ขึ้นของจริง (แผน §9 ข้อ 1 — เจ้าของสั่ง 2026-10-29)
+
+- 05:03:30 ff `main` (`/Users/seal/Documents/GitHub/AI`) `c5fabf3` → **`f3e2c17`** (`git merge --ff-only claude/anomaly-avg-fix`; working tree สะอาดก่อน ff) — ไม่มี migration, ไม่มีการแก้ DB / contract
+- server จริง (`uvicorn --reload`, reloader pid 8180) เปลี่ยน worker เอง: 10980 (เริ่ม 2026-10-28 19:40:03) → **75687 (เริ่ม 05:03:31)** และ listen :8000; route ที่ต้อง auth ตอบ 401 = app ขึ้นครบ
+- ถอยกลับ: `git -C /Users/seal/Documents/GitHub/AI reset --hard c5fabf3` (reload เอง)
+- **ยังไม่ push** (`origin/main` ยังอยู่ที่ `c5fabf3`) — หลัง push ให้ดู `gh run list --branch main` (dependency ที่ไม่ pin เคยทำ CI แดงเอง)
+- audit ล่าสุดก่อนขึ้น = **id 529** (2026-10-28 21:59:46 UTC) — ทุกแถว id > 529 เป็นของ code ใหม่
+- **ค้าง (แผน §9 ข้อ 3, เจ้าของ):** ถามคำถามเหตุการณ์บน portal อีกครั้ง → บันทึก audit id, SQL, คำตอบ, หัวตาราง เทียบ oracle §0.3
+  — หัวตารางบน portal จะยังเรียงตามตัวอักษรจนกว่า NT-Report 4.2 จะใช้ `columns` (`PROMPT_ANOMALY_AVG_FIX_NT_REPORT.md`)
