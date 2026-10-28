@@ -5,7 +5,7 @@
 | Phase | สถานะ | วันที่ |
 |---|---|---|
 | 0 หลักฐาน | เสร็จ — ผลตรงแผน §1 (F1, F4 = ปี 2568, F8, F9 ยืนยัน) | 2026-10-28 |
-| 1 I4 `avg_over_fact_rows` | — | |
+| 1 I4 `avg_over_fact_rows` | เสร็จ — `cabaf71` + tests `7a4fb8c`; ยิง 4/4 รอบเหตุการณ์, false positive 0/60 | 2026-10-28 |
 | 2 I5 เดือนที่ไม่ระบุปี | — | |
 | 3 คำบรรยาย | รอเจ้าของเคาะ D-1..D-4 | |
 | 4.1 `columns` ใน response | — | |
@@ -78,3 +78,70 @@ Baseline ก่อนแก้ (worktree ที่ `3f2cde2` = main `e79ee5f` + 
 - `--by unit_fname_current` ให้ตารางข้อ 3 **เหมือนกันทุกแถว** → ไม่มีหน่วยที่ผิดปกติเพราะย้ายศูนย์ต้นทุนภายในปี 2569
 - ฝ่ายธุรกิจลูกค้าภาครัฐ ที่ตารางของ portal ว่า +67,085% จริงคือ 728.43 → 810.49 ล้าน (+11.3%, ไม่ติดเกณฑ์ 30%/2 SD)
 - คำถามเหตุการณ์ที่จะเพิ่มในชุดวัด (Phase 1): `accept.values` = ยอด ก.ย. 69 ของ 3 หน่วยแรก = **134.03, −13.35, 86.04** ล้านบาท
+
+---
+
+## §1 Phase 1 — I4 `avg_over_fact_rows`
+
+**commit:** `cabaf71` fix (`sql_invariants.py`, `hybrid_flow.py`, `docs/DECLARED_METRICS.md` §6) · `7a4fb8c` tests + คำถามเหตุการณ์ P16
+· **ACC-T 2287 passed, 3 skipped** (baseline 2253 + 34) · **ACC-L ผ่าน**
+
+### 1.1 ที่ทำ
+
+- กฎใน `sql_invariants.check(..., grain)` ตามแผน §4 ข้อ 1 ทุกข้อ: `avg/mean/median/stddev*/var*` (aggregate หรือ window) หรือ `SUM(x) / COUNT(*)|COUNT(col)`
+  ของคอลัมน์ summable, FROM เป็นตารางจริงล้วน (มี CTE / subquery / table function ปน = ไม่ตรวจ), key ที่ไม่ถูกตรึง > 1
+  — ตรึง = GROUP BY (รวม `GROUP BY 1`, alias, `GROUP BY ALL`), PARTITION BY ของ window นั้น, `col = ค่าคงที่ / scalar subquery`, `col IN (ค่าเดียว)` ใน WHERE / JOIN ON;
+  window บน query ที่ GROUP BY อยู่แล้ว (เช่น `AVG(SUM(amount)) OVER (...)`) = แถวเป็นกลุ่ม ไม่ใช่แถวดิบ → ไม่ตรวจ
+- `Violation` มี field `tables` เพิ่ม (ค่าเริ่มต้น `()` — I1–I3 เท่าเดิม); I1–I3 คำนวณเฉพาะเมื่อ context มีคอลัมน์ point-in-time **และ** คอลัมน์งวด (เงื่อนไขเดิม) —
+  `single_period` เขียนใหม่ผ่าน `fixed()` ตัวเดียวกับ I4 โดยพฤติกรรมเท่าเดิม (test I1–I3 เดิมผ่านทุกข้อโดยไม่แก้)
+- `cumulative_sum_error` ตรวจเมื่อมี grain แม้ไม่มีคอลัมน์ point-in-time (ปิด F10 ส่วน feed_sales); ข้อความ retry ตามแผน §4 ข้อ 2; `invariant_code` รู้จัก I4
+- **grain = contract (ทางที่แนะนำ)**: `_grain_keys(main_view)` → `data_sources.contract_file` ของ context → `datasets[].keys` ผ่าน `datafeed_knowledge.load_contract`,
+  cache ด้วย `lru_cache` ตาม (path, mtime_ns), ชื่อตาราง `feed_<domain>_<dataset>`
+  — เหตุผล: ไม่ต้อง migrate config.db ก่อน restart (บทเรียน §SALES.3), contract เป็นที่ประกาศ grain อยู่แล้ว (ไม่มีสำเนาให้ไม่ตรงกัน), เปลี่ยน contract = มีผลทันทีโดยไม่ต้อง sync;
+  legacy context ไม่มี `contract_file` → `{}` → ไม่ตรวจ (D-6 = ก)
+- `scripts/eval/run_portal_questions.py`: คำถามที่มี `context` / `scope` ของตัวเองใช้ของตัวเอง (2 บรรทัด — **นอกไฟล์ที่แผนอนุญาต**: P16 เป็นคำถามของรายงานยอดขาย
+  แต่ไฟล์ทั้งชุดเป็น `feed_revenue` scope ถึง 202608 จึงถามให้ถูกที่ไม่ได้ถ้าไม่แก้) · เพิ่ม **P16** (`feed_sales`, scope 202501…202609, `values` 134.03 / −13.35 / 86.04, `years_be` [2569])
+
+### 1.2 tests (แผน §4 ข้อ 4)
+
+- ต้องผิด: Appendix B ทั้งก้อน · `AVG(amount)` ไม่มี GROUP BY · GROUP BY `unit_fname` · `AVG … OVER (PARTITION BY unit_fname)` · `SUM/COUNT(*)` · `SUM/NULLIF(COUNT(col),0)` ·
+  AVG ใน CASE ทั้งสองรูป · `MEDIAN` / `STDDEV_SAMP` บน fact JOIN dim · ชื่อตัวใหญ่ในเครื่องหมายคำพูด
+- ต้องผ่าน: SQL ของ `anomalies()` ใน `check_anomaly_avg.py` (ดึงจากฟังก์ชันจริงด้วย mock con) · AVG จาก subquery ที่ SUM ต่อเดือนแล้ว · ตรึง key ครบเหลือหนึ่ง (WHERE / `GROUP BY 1,2,3` / `GROUP BY ALL`) ·
+  ตารางไม่รู้ grain · `SUM/COUNT(DISTINCT year_month)` · window บนกลุ่ม · AVG ของคอลัมน์ที่ไม่ summable · ตาราง grain เล็ก (`fact_bu_monthly` WHERE `bu_seq = 3` / GROUP BY `bu_seq`)
+- compiler: `test_compiler_shapes` / `test_compiler_ranking` (ebt ทุกรูป) ส่ง grain ของ ebt 1.6.0 แล้วยังว่าง + รูปของ `sales_vs_target` (cumulative/month × ยอดรวม/จัดอันดับ/สองงวด) ไม่มี I4
+- ต่อสาย: context ไม่มี point-in-time ยังได้ I4 แล้ว retry ตอบได้ (ข้อความขึ้นต้น `I4 avg_over_fact_rows: AVG(amount) บนแถวดิบของ t (grain: …)` และอยู่ใน prompt รอบสอง) ·
+  รอบสุดท้ายยังผิด → `query_failed` ก่อน tool loop (ทั้งเปิด/ปิด) · `_grain_keys` อ่าน contract จริงบน sqlite ชั่วคราว ตามการแก้ไฟล์ (mtime) และคืน `{}` เมื่อ legacy / ไม่รู้จัก / ไฟล์หาย
+
+### 1.3 server ซ้อม — คำถามเหตุการณ์ (scope แบบ portal 21 เดือน, `feed_sales`, restart ก่อนทุกรอบ)
+
+ก่อน = code ของ `main` (`e79ee5f`, port 8007) · หลัง = `7a4fb8c` (port 8006, worktree `AI-anomaly-run`) · สำเนา config.db/app.db/Chroma ชุดเดียวกัน (ของจริง 19:20), key ซ้อม id 6 บนสำเนา
+· ตรวจกับ oracle §0.3 ที่ ±0.01 บาท ต่อแถว (ยอด ก.ย. และค่าเฉลี่ยต่อเดือน ม.ค.–ส.ค. เดือนว่าง = 0) — `.ai/eval/compare.py`
+
+| รอบ | I4 ยิง (รอบแรก) | SQL สุดท้าย | แถว | ตรง oracle (ยอด + ค่าเฉลี่ย) |
+|---|---|---|---:|---|
+| ก่อน (replay §0.2) | — | `AVG(amount)` แถวดิบ, 2569 | 89 | 13/89 (เฉพาะหน่วยเล็กที่บังเอิญตรง) |
+| หลัง r1 | ✓ | CTE รายเดือน + เติมเดือนว่าง แต่ **ฐาน = 202501–202608 (20 เดือน) ÷ 8** เทียบ 202609 | 88 | 1/88 — **ผิดเรื่องงวด (ไม่ใช่ I4)**: คำบรรยายบอก "ม.ค.–ส.ค. 2568" |
+| หลัง r2 | ✓ | CTE รายเดือน, units ของทั้งสองช่วง, เดือนว่าง = 0, 2569 | 65 (กรอง > 20%) | **65/65** · 3 แถวแรก = 3 หน่วยแรกของ oracle |
+| หลัง r3 | ✓ | CTE รายเดือน + CROSS JOIN เดือน, 2569 | 48 (กรอง > 30%) | **48/48** · 3 แถวแรก = 3 หน่วยแรกของ oracle |
+| หลัง (P16 ในชุด regression) | ✓ | CTE รายเดือน แต่ `months` มีแค่ 202601–202608 → ไม่มีแถว 202609 | 0 | "ไม่พบข้อมูล" — ผิด แต่ไม่ได้ให้ตัวเลขผิด |
+
+- SQL สุดท้ายไม่มี AVG ต่อแถว **4/4 รอบ**; I4 ยิงบน SQL รอบแรก (AVG แถวดิบ) ทุกรอบ — ไม่มี I4 ยิงซ้ำบนคำตอบที่ retry แล้ว
+- r1 = ฐานข้ามปี (portal scope เริ่ม 202501) — บันทึกแยกตามแผน §4 ข้อ 5; I5 (Phase 2) ตรวจเฉพาะเดือนที่ถาม (202609 อยู่ใน SQL) จึงไม่จับรูปนี้ → §2
+- เกณฑ์ "ผิดปกติ" ยังเลือกเองต่อรอบ (> 10% / 20% / 30%) — D-2 ยังไม่เคาะ (Phase 3)
+- หลักฐานของ F5 จาก r2: คำบรรยายเขียน "ลดลงประมาณ **993.7 ล้านบาท**" ทั้งที่ตารางมี −99.37 ล้าน (และ 522.0 / 501.0 / 174.5 แทน 52.20 / 50.10 / 17.45 — ผิด ×10 ทุกตัว)
+  → ตัวตรวจ "เกินขอบบน" ของ §6 ข้อ 1 อาจไม่จับ เพราะ 993.7 ล้าน < ผลรวมคอลัมน์ — ให้ Phase 3 พิจารณา (r3 เขียนถูก: 99.4 / 50.1 / 17.4)
+
+### 1.4 regression (ชุดเดียวกัน ก่อน/หลัง, server ซ้อมตัวละชุด, restart ก่อนเริ่ม)
+
+| ชุด | ก่อน (`e79ee5f`) | หลัง (`7a4fb8c`) | ข้อที่ต่าง |
+|---|---:|---:|---|
+| คำถามจริง (16 รวม P16) | 10 | 9 | P08 "รายได้ ปี 69 10 อันดับแรก" ✓ → ✗ |
+| sales (10) | 9 | 9 | — |
+| revenue (10) | 10 | 10 | — |
+| expense (10) | 8 | 8 | — |
+| ebt (14) | 10 | 10 | — (P14 ฐาน ✓ → ✗ แต่ผิดทั้งสองฝั่ง) |
+| **รวม (60)** | **47** | **46** | |
+
+- **P08 ไม่เกี่ยวกับ I4**: audit บนสำเนา — ก่อน `compiled:revenue` (8 แถว), หลัง `declined:shape:ordering:SUM(revenue)` → free SQL `year = 2026 AND month = 10` = 0 แถว;
+  pass 1 รอบนั้นเขียน `ordering.column = "SUM(revenue)"` (prompt ของ pass 1 ไม่ถูกแก้) และ I4 ไม่ได้ยิงในคำถามนี้ = ความแปรปรวนของ pass 1 — รอบ regression ของ Phase 2 (§2) วัดซ้ำ
+- **I4 ยิง 1 ครั้งใน 60 ข้อ = P16 (true positive)** · false positive = 0 · SQL ของ compiler ไม่เคยถูกตรวจว่าผิด
