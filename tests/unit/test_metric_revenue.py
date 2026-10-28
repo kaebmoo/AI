@@ -288,3 +288,30 @@ def test_the_incidents_intents_leave_bg8_out(resolved, databases, filters):
     assert reason is None
     compiled, rows = execute(req, resolved, databases)
     assert rows == [(BG1, 900), (BG4, 1800)]
+
+
+# audit 530 / 531 (2026-10-29): average questions compiled as two-period comparisons — pass 1's intents, replayed
+AVERAGE_530 = ("รายได้เดือนนี้ของกลุ่มบริการใดที่ต่างจากค่าเฉลี่ยเดือนก่อนหน้าบ้าง",
+               {"intent_type": "comparison", "metrics": ["revenue"], "metric_id": "revenue", "aggregate_function": "SUM",
+                "dimensions": ["bu"], "filters": [{"column": "year_month", "operator": "=", "value": 202609}],
+                "time_range": {"year": 2026, "month": 9, "cumulative": False}})
+AVERAGE_531 = ("เดือน กันยายน มีรายได้ของกลุ่มบริการ ผิดปกติไปจากค่าเฉลี่ยก่อนหน้าบ้าง",
+               {"intent_type": "comparison", "metrics": ["revenue"], "metric_id": "revenue", "aggregate_function": "AVG",
+                "dimensions": ["bu", "year_month"], "filters": [{"column": "month", "operator": "IN", "value": list(range(1, 10))}],
+                "time_range": {"year": 2026, "month": 9, "cumulative": False}})
+
+
+@pytest.mark.parametrize("question,intent", [
+    AVERAGE_530, AVERAGE_531,
+    ("รายได้เฉลี่ยต่อเดือนแยกกลุ่มธุรกิจ", {**AVERAGE_530[1], "intent_type": "aggregation"}),  # the word alone
+    ("average revenue by bu", {**AVERAGE_530[1], "intent_type": "aggregation"}),
+    ("รายได้แยกกลุ่มธุรกิจ", {**AVERAGE_530[1], "intent_type": "aggregation", "aggregate_function": "AVG"}),  # AVG alone
+])
+def test_an_average_question_is_not_compiled(resolved, question, intent):
+    assert plan_with_reason(intent, question, resolved, [], 202609, {TOTAL, BU, ORG}) == (None, "shape:average")
+
+
+def test_a_comparison_without_an_average_still_compiles(resolved, databases):
+    question, intent = AVERAGE_530
+    req, reason = plan_with_reason(intent, "รายได้เดือนนี้ของกลุ่มธุรกิจเทียบเดือนก่อน", resolved, [], 202609, {TOTAL, BU, ORG})
+    assert reason is None and req.base_period is not None
