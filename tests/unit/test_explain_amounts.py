@@ -47,7 +47,22 @@ def test_the_incidents_amounts_are_caught():
 def test_amounts_the_result_holds_pass():
     assert explain_amounts.unsupported(PRACTICE_RIGHT, PRACTICE) == []
     assert explain_amounts.unsupported("ฝ่ายธุรกิจลูกค้าภาครัฐ 1,113.22 ล้านบาท เพิ่มขึ้น 1,111.57 ล้านบาท", AUDIT_518) == []
-    assert explain_amounts.unsupported("ประมาณ 1,000 ล้านบาท", [{"v": 993_700_000.0}]) == []  # within 1%
+    assert explain_amounts.unsupported("ประมาณ 1,000 ล้านบาท", [{"v": 993_700_000.0}]) == []  # "1,000" ±1,000 ล้าน
+
+
+# practice 2026-10-29: the checker's first false positives — one period beside another is a difference of two rows
+MONTHS = [{"year_month": 202608, "ยอดขายรวม": 3480996164.0599966}, {"year_month": 202609, "ยอดขายรวม": 3385506748.569999}]
+REVENUE = [{"year_month": 202600 + m, "revenue": v} for m, v in enumerate(
+    [3052478462.75, 3426600726.95, 3204134387.87, 3229866055.5, 3258479056.56, 3764616276.34], 1)]
+
+
+@pytest.mark.parametrize("text,rows,expected", [
+    ("กันยายนลดลงจากสิงหาคม **95.48 ล้านบาท** (ประมาณ 95 ล้านบาท)", MONTHS, []),  # truncated, not rounded
+    ("มิถุนายนสูงกว่าพฤษภาคม 506.14 ล้านบาท หรือประมาณ 500 ล้านบาท; เฉลี่ยเดือนละ 3,322.70 ล้านบาท", REVENUE, []),
+    ("สูงกว่าค่าเฉลี่ย ม.ค.–พ.ค. (เฉลี่ยประมาณ 3,234.71 ล้านบาท)", REVENUE, ["3,234.71 ล้านบาท"]),  # 3,234.31: wrong
+])
+def test_rows_compared_and_rounded_figures(text, rows, expected):
+    assert explain_amounts.unsupported(text, rows) == expected
 
 
 @pytest.mark.parametrize("text,expected", [
@@ -62,9 +77,9 @@ def test_what_is_read_as_money(text, expected):
 
 
 def test_amounts_quoted_from_the_question_or_the_rule_pass():
-    question = "หน่วยงานที่ยอดขายเกิน 20 ล้านบาท"
-    text = "หน่วยงานที่ยอดเกิน 20 ล้านบาท และส่วนต่าง ≥ 5 ล้านบาท ตามเกณฑ์: ลดลง 99.37 ล้านบาท"
-    assert explain_amounts.unsupported(text, PRACTICE) == ["20 ล้านบาท", "5 ล้านบาท"]
+    question = "หน่วยงานที่ยอดขายเกิน 700 ล้านบาท"
+    text = "หน่วยงานที่ยอดเกิน 700 ล้านบาท และส่วนต่าง ≥ 5 ล้านบาท ตามเกณฑ์: ลดลง 99.37 ล้านบาท"
+    assert explain_amounts.unsupported(text, PRACTICE) == ["700 ล้านบาท", "5 ล้านบาท"]
     assert explain_amounts.unsupported(text, PRACTICE, explain_amounts.quoted(question)) == []
 
 
@@ -150,7 +165,8 @@ def test_the_note_and_the_rules_reach_the_explanation_only():
     finally:
         request_explain_note.reset(token)
     prompt = build_explain_prompt("q", "SELECT 1", PRACTICE)
-    assert "ชื่อตัวเลข" not in prompt
-    assert ("เฉพาะแถวที่ส่วนต่าง ≥ 5 ล้านบาท และ (เปลี่ยน ≥ 30% หรือ ≥ 2 SD เมื่อผลมี SD) และบอกเกณฑ์นี้ในคำบรรยาย"
+    assert "ชื่อตัวเลข" not in prompt and "ผิดปกติ / มีนัยสำคัญ" not in prompt and "ค่าเฉลี่ยก่อนหน้า" not in prompt
+    prompt = build_explain_prompt("เดือน กันยายน มีรายได้ของหน่วยงานไหน ผิดปกติไปจากค่าเฉลี่ยก่อนหน้าบ้าง", "SELECT 1", PRACTICE)
+    assert ("ได้เฉพาะเมื่อส่วนต่าง ≥ 5 ล้านบาท และ (เปลี่ยน ≥ 30% หรือ ≥ 2 SD เมื่อผลมี SD) ตามตัวเลขในผลลัพธ์ และบอกเกณฑ์นี้"
             in prompt)
-    assert "เดือนมกราคมถึงเดือนก่อนเดือนที่ถามของปีเดียวกัน" in prompt
+    assert "หมายถึงเดือนมกราคมถึงเดือนก่อนเดือนที่ถามของปีเดียวกัน" in prompt
