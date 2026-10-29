@@ -17,6 +17,7 @@ export interface PendingFeedback {
     created_at: string | null;
     question: string;
     ai_response: string;
+    generated_sql: string | null;
 }
 
 export interface TrendingQuery {

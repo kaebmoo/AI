@@ -292,6 +292,15 @@ const Feedback: React.FC = () => {
                             </div>
                         )}
 
+                        {reviewModal.generated_sql && (
+                            <div style={{ marginBottom: 16 }}>
+                                <Text strong>Generated SQL:</Text>
+                                <pre style={{ background: '#fafafa', border: '1px solid #f0f0f0', padding: 12, borderRadius: 8, marginTop: 4, maxHeight: 240, overflow: 'auto', fontSize: 12, whiteSpace: 'pre-wrap' }}>
+                                    {reviewModal.generated_sql}
+                                </pre>
+                            </div>
+                        )}
+
                         {reviewModal.feedback_text && (
                             <div style={{ marginBottom: 16 }}>
                                 <Text strong>User Comment:</Text>

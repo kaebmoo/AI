@@ -41,7 +41,8 @@ def get_pending_reviews(
             "feedback_text": f.feedback_text,
             "created_at": f.created_at.isoformat() if f.created_at else None,
             "question": c.question,
-            "ai_response": c.ai_response
+            "ai_response": c.ai_response,
+            "generated_sql": c.generated_sql,
         }
         for f, c in pending
     ]
