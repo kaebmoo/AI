@@ -39,7 +39,7 @@ def list_golden_examples(
         query = query.filter(GoldenExample.is_active == is_active)
 
     total = query.count()
-    examples = query.order_by(GoldenExample.usage_count.desc(), GoldenExample.created_at.desc()).offset(offset).limit(limit).all()
+    examples = query.order_by(GoldenExample.created_at.desc(), GoldenExample.usage_count.desc()).offset(offset).limit(limit).all()
     categories = db.query(GoldenExample.category).distinct().filter(GoldenExample.category.isnot(None)).all()
     category_list = [category_row[0] for category_row in categories if category_row[0]]
 
