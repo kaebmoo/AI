@@ -356,7 +356,7 @@ def scope_note() -> str:
 
 
 def _scope_note() -> str:
-    from app.services.data_sources import request_scope, request_scope_columns
+    from app.services.data_sources import plan_note, request_plan_tables, request_scope, request_scope_columns
 
     scope = request_scope.get()
     anchored = reference_period()
@@ -384,7 +384,8 @@ def _scope_note() -> str:
             lines.append(f"- {label}: {', '.join(str(v) for v in values)}"
                          + (f" — ค่าล่าสุด/งวดอ้างอิง = {max(values)}" if len(values) > 1
                             and all(isinstance(v, int) for v in values) else ""))
-    note = ("\n**ขอบเขตข้อมูลของคำขอนี้ — ทุกตารางถูกกรองไว้แล้วเท่านี้:**\n" + "\n".join(lines))
+    note = ("\n**ขอบเขตข้อมูลของคำขอนี้ — ทุกตารางถูกกรองไว้แล้วเท่านี้:**\n" + "\n".join(lines)
+            + plan_note(scope, request_plan_tables.get()))
     if anchored is not None:
         note += _period_rules(anchored)
     return note + "\n"

@@ -5,6 +5,8 @@ Migration script (Plan 7 Phase 1): data source registry in the config DB.
 - source_tables  — per-source allowlist: view name → file (relative to root) + column types
 - schema_contexts.source_id — every existing context is bound to 'legacy' → behavior unchanged
 - schema_contexts.scope_columns (Phase 3) — JSON {"scope key": "column"}; NULL = the context accepts no scope
+- schema_contexts.scope_plan_tables (2026-10-30) — JSON {"table": {} | {"where": "<plan rows>"}}: the year_month scope
+  filters these on whole years (a plan's targets are published for the year); NULL = none
 
 Safe to run multiple times (idempotent).
 
@@ -81,6 +83,9 @@ def migrate(config_engine=None):
         if "scope_columns" not in existing:  # Phase 3: {"scope key": "column"} the caller's scope may filter on
             conn.execute(text("ALTER TABLE schema_contexts ADD COLUMN scope_columns TEXT"))
             print("Added schema_contexts.scope_columns")
+        if "scope_plan_tables" not in existing:  # {"table": {} | {"where": ...}}: the period scope opens whole years
+            conn.execute(text("ALTER TABLE schema_contexts ADD COLUMN scope_plan_tables TEXT"))
+            print("Added schema_contexts.scope_plan_tables")
         if "source_id" not in existing:
             conn.execute(text("ALTER TABLE schema_contexts ADD COLUMN source_id INTEGER REFERENCES data_sources(id)"))
             print("Added schema_contexts.source_id")

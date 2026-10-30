@@ -107,6 +107,41 @@ def tables_section(domain: str, contract: dict) -> str:
             "คอลัมน์/grain ที่ตารางหลักไม่มี — ห้ามตอบจากตารางหลักโดยทิ้งเงื่อนไขของคำถาม):\n" + "\n".join(lines) + "\n")
 
 
+# contract dtype → the DuckDB type a declared plan `where` is bound against (plan_where_error); the rest VARCHAR
+_DUCK_TYPES = {"Int64": "BIGINT", "integer": "BIGINT", "double": "DOUBLE", "boolean": "BOOLEAN"}
+
+
+def plan_tables_value(domain: str, contract: dict) -> Optional[str]:
+    """scope_plan_tables as stored: {feed_<domain>_<dataset>: {} | {"where": ...}} — datasets of this contract that carry
+    the period scope column, each `where` one BOOLEAN over its columns (bound by DuckDB). An entry that fails is left out
+    and logged: its months stay filtered, as before. None = the contract declares none."""
+    declared = contract.get("scope_plan_tables")
+    if declared is None:
+        return None
+    from app.services.data_sources import PERIOD_KEY, plan_where_error, scope_column_names
+
+    if not isinstance(declared, Mapping):
+        logger.warning("scope_plan_tables of %s must map dataset → {} or {where: ...} — none opens", domain)
+        declared = {}
+    periods = set(scope_column_names((contract.get("scope_columns") or {}).get(PERIOD_KEY)))
+    datasets = {d["name"]: {c["name"]: _DUCK_TYPES.get(c.get("dtype"), "VARCHAR") for c in d["columns"]}
+                for d in contract["datasets"]}
+    plans = {}
+    for name, entry in declared.items():
+        entry = {} if entry is None else entry
+        columns = datasets.get(name)
+        where = entry.get("where") if isinstance(entry, Mapping) else None
+        reason = ("not a dataset of this contract" if columns is None
+                  else f"has no {PERIOD_KEY} scope column" if not periods & set(columns)
+                  else "must be {} or {where: ...}" if not isinstance(entry, Mapping) or set(entry) - {"where"}
+                  else where is not None and plan_where_error(where, columns))
+        if reason:
+            logger.warning("scope_plan_tables.%s of %s ignored: %s", name, domain, reason)
+            continue
+        plans[f"feed_{domain}_{name}"] = {} if where is None else {"where": where}
+    return json.dumps(plans, ensure_ascii=False, sort_keys=True)
+
+
 def register_context(conn, domain: str, contract: dict) -> str:
     """Upsert schema_contexts row for feed_<domain>."""
     context_name = f"feed_{domain}"
@@ -133,8 +168,13 @@ def register_context(conn, domain: str, contract: dict) -> str:
     values = {"main_view": main_view, "description": description, "instruction_th": instruction}
     if contract.get("scope_columns"):  # Phase 3: the owner declares what a caller's scope may filter on
         values["scope_columns"] = json.dumps(contract["scope_columns"], ensure_ascii=False)
-    row = conn.execute(text("SELECT source, status, main_view, description, instruction_th, scope_columns "
-                            "FROM schema_contexts WHERE name = :name"), {"name": context_name}).mappings().first()
+    row = conn.execute(text("SELECT * FROM schema_contexts WHERE name = :name"), {"name": context_name}).mappings().first()
+    plans = plan_tables_value(domain, contract)
+    if plans is not None and row is not None and "scope_plan_tables" not in row:
+        logger.warning("schema_contexts has no scope_plan_tables — run scripts/migrate_data_sources.py; "
+                       "the plan tables of %s stay filtered by month", context_name)
+    elif plans is not None or (row is not None and row.get("scope_plan_tables") is not None):
+        values["scope_plan_tables"] = plans  # None: the contract withdrew its declaration
     _declare(conn, "schema_contexts", {"name": context_name}, values, row, stamp=True, insert={
         "display_name": f"DataFeed {domain}", "is_active": 1, "priority": FEED_PRIORITY, "status": "active",
         "keywords": json.dumps(DOMAIN_KEYWORDS.get(domain, []) + FEED_MARKERS, ensure_ascii=False)})

@@ -12,7 +12,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy import create_engine, text
 
-from app.services.data_sources import ScopeError, SourceBoundMCPClient, SourceResolver, request_scope
+from app.services.data_sources import (ScopeError, SourceBoundMCPClient, SourceResolver, plan_where_error,
+                                       plan_where_unsafe, request_scope, scope_filters)
 from scripts.migrate_data_sources import migrate
 from tests.unit import knowledge_db
 
@@ -281,6 +282,206 @@ def test_contract_scope_columns_are_synced(tmp_path):
         sync_knowledge(conn, "x", contract)
     with config.connect() as conn:
         assert json.loads(conn.execute(text("SELECT scope_columns FROM schema_contexts")).scalar()) == {"year_month": "time_key"}
+
+
+# --- scope_plan_tables: a plan's targets are published for the year (portal, feed_sales, 2026-10-30) ---------
+# The portal sends year_month = January last year … the report's month. A target table cut to those months gave
+# "เป้า ม.ค.-ธ.ค. 2569" as nine months (2,169.67 vs 2,892.88 ล้านบาท) and the model called it the whole year.
+
+TGT = [{"name": "year_month", "type": "BIGINT"}, {"name": "bu", "type": "VARCHAR"}, {"name": "target", "type": "DOUBLE"}]
+MIX = [{"name": "year_month", "type": "BIGINT"}, {"name": "bu", "type": "VARCHAR"}, {"name": "metric", "type": "VARCHAR"},
+       {"name": "amount", "type": "DOUBLE"}]
+MAPPING = {"year_month": "year_month", "org_code": "cost_center"}
+COLUMNS = {"tgt": ["year_month", "bu"], "mix": ["year_month", "metric"], "fact": ["year_month", "cost_center"]}
+PLANS = {"tgt": None, "mix": "metric = 'target'"}
+
+
+class TestPlanFilters:
+    def test_a_plan_table_is_filtered_on_whole_years(self):
+        f = scope_filters({"year_month": [202501, 202509, 202609]}, MAPPING, COLUMNS, PLANS)
+        assert f["tgt"] == '("year_month" BETWEEN 202501 AND 202512 OR "year_month" BETWEEN 202601 AND 202612)'
+        assert f["mix"] == ('(((metric = \'target\') AND ("year_month" BETWEEN 202501 AND 202512 OR "year_month" '
+                            'BETWEEN 202601 AND 202612)) OR "year_month" IN (202501, 202509, 202609))')
+        assert f["fact"] == '"year_month" IN (202501, 202509, 202609)'
+
+    def test_one_month_opens_its_year(self):
+        f = scope_filters({"year_month": 202609}, MAPPING, COLUMNS, PLANS)
+        assert f["tgt"] == '("year_month" BETWEEN 202601 AND 202612)' and f["fact"] == '"year_month" = 202609'
+
+    @pytest.mark.parametrize("plans", [None, {}])
+    def test_without_plan_tables_nothing_changes(self, plans):
+        scope = {"year_month": [202508, 202609]}
+        assert scope_filters(scope, MAPPING, COLUMNS, plans) == scope_filters(scope, MAPPING, COLUMNS) == {
+            t: '"year_month" IN (202508, 202609)' for t in COLUMNS}
+
+    @pytest.mark.parametrize("value", [2026, [202609, 2026], 202613, "202609"])
+    def test_a_value_that_is_not_yyyymm_opens_nothing(self, value):
+        f = scope_filters({"year_month": value}, {"year_month": "year_month"}, {"tgt": ["year_month"]}, {"tgt": None})
+        assert "BETWEEN" not in f["tgt"]
+
+    def test_other_keys_still_filter_a_plan_table(self):
+        f = scope_filters({"year_month": 202609, "org_code": "A"}, MAPPING,
+                          {"tgt": ["year_month", "cost_center"], "mix": ["year_month"]}, PLANS)
+        assert f == {"tgt": '"cost_center" = \'A\' AND ("year_month" BETWEEN 202601 AND 202612)'}
+
+    @pytest.mark.parametrize("where", [
+        "metric = 'target') OR (1=1", "1=1; DROP TABLE x", "metric IN (SELECT 1)", "metric = 'a' -- x",
+        "metric = 'a' /* x */", "metric = 'x", "", None, 1])
+    def test_a_where_that_could_leave_its_parentheses_is_unsafe(self, where):
+        assert plan_where_unsafe(where)
+
+    @pytest.mark.parametrize("where, ok", [
+        ("metric = 'target'", True), ("metric = 'it''s; -- fine'", True), ("(metric = 'target') OR (amount > 0)", True),
+        ("metric", False), ("amount", False), ("nope = 1", False), ("read_csv('x') IS NULL", False)])
+    def test_a_declared_where_must_bind_as_one_boolean(self, where, ok):
+        cols = {"year_month": "BIGINT", "metric": "VARCHAR", "amount": "DOUBLE"}
+        assert (plan_where_error(where, cols) is None) is ok
+
+
+@pytest.fixture
+def plan_env(env, tmp_path):
+    """feed_x with a target table (2025-12 … 2027-01) and a table of actuals to 202608 beside targets for 2026."""
+    root = tmp_path / "latest"
+    (root / "fact_tgt.csv").write_text("year_month,bu,target\n202512,1.X,5\n" + "".join(
+        f"2026{m:02d},1.X,{m}\n" for m in range(1, 13)) + "202701,1.X,1000\n")
+    (root / "fact_mix.csv").write_text("year_month,bu,metric,amount\n" + "".join(
+        f"2026{m:02d},1.X,target,{m}\n" for m in range(1, 13)) + "202607,1.X,actual,70\n202608,1.X,actual,80\n")
+    with env._engine().begin() as conn:
+        for table, file, cols in (("feed_x_fact_tgt", "fact_tgt.csv", TGT), ("feed_x_fact_mix", "fact_mix.csv", MIX)):
+            conn.execute(text("INSERT INTO source_tables (source_id, table_name, file_name, columns) VALUES (2, :t, :f, :c)"),
+                         {"t": table, "f": file, "c": json.dumps(cols)})
+        conn.execute(text("UPDATE schema_contexts SET scope_plan_tables = :p WHERE name = 'feed_x'"), {"p": json.dumps(
+            {"feed_x_fact_tgt": {}, "feed_x_fact_mix": {"where": "metric = 'target'"}})})
+    return env
+
+
+PORTAL = {"year_month": [202501 + i for i in range(12)] + [202601 + i for i in range(7)]}  # Jan 2025 … Jul 2026
+
+
+class TestPlanTablesScope:
+    def test_the_whole_year_of_targets_is_seen(self, plan_env):
+        a = resolve(plan_env, "feed_x", PORTAL).adapter
+        assert a.execute_query("SELECT SUM(target) AS s FROM feed_x_fact_tgt WHERE year_month BETWEEN 202601 AND 202612") \
+            == [{"s": 78.0}]  # 1 + … + 12, not 1 + … + 7
+
+    def test_actuals_stop_at_the_scope_month(self, plan_env):
+        a = resolve(plan_env, "feed_x", PORTAL).adapter
+        assert a.execute_query("SELECT MAX(year_month) AS m FROM feed_x_fact_mix WHERE metric = 'actual'") == [{"m": 202607}]
+        assert a.execute_query("SELECT MAX(year_month) AS m FROM feed_x_fact_mix WHERE metric = 'target'") == [{"m": 202612}]
+        assert a.execute_query("SELECT MAX(year_month) AS m FROM feed_x_fact_org") == [{"m": 202607}]
+        assert a.execute_query("SELECT MAX(year_month) AS m FROM feed_x_fact_bu") == [{"m": 202607}]
+
+    def test_a_year_outside_the_scope_stays_unseen(self, plan_env):
+        a = resolve(plan_env, "feed_x", PORTAL).adapter
+        assert a.execute_query("SELECT MIN(year_month) AS lo, MAX(year_month) AS hi FROM feed_x_fact_tgt") == \
+            [{"lo": 202512, "hi": 202612}]  # 2027's target is next year's plan
+        assert a.execute_query("SELECT COUNT(*) AS n FROM feed_x_fact_tgt WHERE year_month >= 202701") == [{"n": 0}]
+
+    def test_an_org_scope_still_closes_a_target_table_without_an_org_column(self, plan_env):
+        a = resolve(plan_env, "feed_x", {**PORTAL, "org_code": "A"}).adapter
+        with pytest.raises(PermissionError):
+            a.execute_query("SELECT SUM(target) FROM feed_x_fact_tgt")
+
+    def test_the_model_is_told(self, plan_env):
+        from app.services.data_sources import request_plan_tables
+        token = request_scope.set(PORTAL)
+        try:
+            note = plan_env.for_context("feed_x").adapter.scope_note
+            assert request_plan_tables.get() == {"feed_x_fact_tgt": None, "feed_x_fact_mix": "metric = 'target'"}
+        finally:
+            request_scope.reset(token)
+        assert "feed_x_fact_mix (เฉพาะแถวที่ metric = 'target'); feed_x_fact_tgt" in note
+        assert "ครบ 12 เดือน**ของปี 2025 (พ.ศ. 2568), 2026 (พ.ศ. 2569)" in note
+        assert "ยอดจริงมีถึง 202607" in note and "ห้ามเรียกว่า \"ทั้งปี\"" in note
+
+    def test_no_declaration_means_the_months_as_before(self, plan_env):
+        with plan_env._engine().begin() as conn:
+            conn.execute(text("UPDATE schema_contexts SET scope_plan_tables = NULL"))
+        a = resolve(plan_env, "feed_x", PORTAL).adapter
+        assert a.execute_query("SELECT MAX(year_month) AS m FROM feed_x_fact_tgt") == [{"m": 202607}]
+        assert "ตารางเป้า" not in a.scope_note
+
+    @pytest.mark.parametrize("declared", [
+        '{"feed_x_fact_mix": {"where": "metric = \'target\') OR (1=1"}}', '{"feed_x_fact_mix": {"when": "x"}}',
+        '{"feed_x_fact_mix": 1}', '["feed_x_fact_mix"]', "not json"])
+    def test_a_bad_entry_opens_nothing(self, plan_env, declared):
+        with plan_env._engine().begin() as conn:
+            conn.execute(text("UPDATE schema_contexts SET scope_plan_tables = :p"), {"p": declared})
+        a = resolve(plan_env, "feed_x", PORTAL).adapter
+        assert a.execute_query("SELECT MAX(year_month) AS m FROM feed_x_fact_mix") == [{"m": 202607}]
+
+
+    def test_the_note_reaches_the_ai_call_and_is_reset_after(self, plan_env):
+        """The resolver sets request_plan_tables; pass 1 / pass 2 read it through hybrid_flow.scope_note()."""
+        from app.providers.base import QueryResult
+        from app.services.ai import hybrid_flow
+        from app.services.data_sources import request_plan_tables
+        qe, engine = TestQueryEngineScope()._engine()
+        seen = []
+
+        async def query_hybrid(**kwargs):
+            seen.append(hybrid_flow.scope_note())
+            return QueryResult(question="q", sql_query="SELECT 1", data=[{"n": 1}], explanation="", tokens_used=0,
+                               provider="matcha")
+
+        provider = MagicMock()
+        provider.is_configured.return_value = True
+        provider.get_model.return_value = None
+        ai_service = MagicMock()
+        ai_service.query_hybrid = AsyncMock(side_effect=query_hybrid)
+        schema_cls = MagicMock()
+        schema_cls.return_value.build_system_prompt.return_value = "prompt"
+        warning_detector = MagicMock()
+        warning_detector.detect = AsyncMock(return_value=[])
+        with patch.object(qe, "source_resolver", plan_env), \
+             patch.object(qe.provider_registry, "create_provider", return_value=provider), \
+             patch.object(qe, "AIService", return_value=ai_service), \
+             patch.object(qe, "SchemaService", schema_cls), \
+             patch.object(qe, "WarningDetector", return_value=warning_detector):
+            qe._query_cache.clear()
+            qe._dedup_store.clear()
+            asyncio.run(engine.query("เป้าทั้งปี", context="feed_x", scope=PORTAL))
+            qe._query_cache.clear()
+            qe._dedup_store.clear()
+        assert len(seen) == 1 and "ตารางเป้า/แผน** feed_x_fact_mix" in seen[0]
+        assert request_plan_tables.get() is None
+
+def test_contract_plan_tables_are_synced(tmp_path, caplog):
+    from app.services.datafeed_knowledge import sync_knowledge
+    config = create_engine(f"sqlite:///{tmp_path / 'c.db'}")
+    with config.begin() as conn:
+        conn.execute(text("CREATE TABLE schema_contexts (id INTEGER PRIMARY KEY, name TEXT, display_name TEXT, "
+                          "description TEXT, main_view TEXT, is_active BOOLEAN, priority INTEGER, keywords TEXT, "
+                          "instruction_th TEXT, updated_at TIMESTAMP)"))
+        conn.execute(text("CREATE TABLE schema_metadata (table_name TEXT, column_name TEXT, description TEXT, "
+                          "data_type TEXT, is_summable BOOLEAN, is_groupable BOOLEAN)"))
+        conn.execute(text("CREATE TABLE vanna_documentation (doc_key TEXT, title TEXT, content TEXT, category TEXT, "
+                          "context_name TEXT, is_active INTEGER)"))
+    migrate(config)
+    knowledge_db.add_provenance(config)
+    cols = [{"name": "year_month", "dtype": "Int64"}, {"name": "metric", "dtype": "string"},
+            {"name": "amount", "dtype": "double"}]
+    contract = {"domain": "x", "schema_version": "1", "primary_dataset": "f", "scope_columns": {"year_month": "year_month"},
+                "datasets": [{"name": "f", "columns": cols}, {"name": "tgt", "columns": cols},
+                             {"name": "dim", "columns": [{"name": "bu", "dtype": "string"}]}],
+                "scope_plan_tables": {"tgt": {}, "f": {"where": "metric = 'target'"}, "dim": {}, "nope": {},
+                                      "bad": {"where": "metric"}}}
+    contract["datasets"].append({"name": "bad", "columns": cols})
+
+    def stored():
+        with config.connect() as conn:
+            raw = conn.execute(text("SELECT scope_plan_tables FROM schema_contexts")).scalar()
+        return raw and json.loads(raw)
+
+    with config.begin() as conn:
+        sync_knowledge(conn, "x", contract)
+    assert stored() == {"feed_x_tgt": {}, "feed_x_f": {"where": "metric = 'target'"}}  # dim / nope / bad left out
+    assert {"scope_plan_tables.dim", "scope_plan_tables.nope", "scope_plan_tables.bad"} <= {
+        r.getMessage().split(" of ")[0] for r in caplog.records}
+    del contract["scope_plan_tables"]  # the contract withdraws it: so does the context
+    with config.begin() as conn:
+        sync_knowledge(conn, "x", contract)
+    assert stored() is None
 
 
 class TestCteScoping:

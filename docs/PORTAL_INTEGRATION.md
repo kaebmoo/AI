@@ -39,6 +39,13 @@ Request เพิ่มเติมสำหรับ portal (optional ทั้
   ณ เดือนสุดท้ายของปีนั้นในขอบเขต — คอลัมน์ยอดสะสม (point-in-time ตาม `agg` ใน contract เช่น `revenue_ytd`, `ebt`) อ่าน ณ งวดเดียว
   ไม่ SUM รายเดือน (SUM รายเดือนของ revenue พลาดยอด net ของ BG8) — pass 1 เขียน `time_range.cumulative`, code เติมเดือนสุดท้าย
   และบอก pass 2 ว่าคอลัมน์ไหนสะสม (`hybrid_flow.intent_period_note` / `build_pass2_prompt`); คำตอบบอกฐานเช่น "สะสม ม.ค.–ส.ค. 2569"
+- **ตารางเป้า/แผนเห็นครบทั้งปี (`scope_plan_tables`, 2026-10-30):** ตารางที่ contract ประกาศใน `scope_plan_tables` ถูกกรอง
+  `year_month` ระดับ**ปี** (`BETWEEN y01 AND y12` ของทุกปีใน scope) แทนรายเดือน — เป้าประกาศทั้งปีตั้งแต่ต้นปีและ dashboard ก็แสดงครบ
+  12 เดือน; ตารางที่มีทั้ง actual และ target ประกาศ `where` (เช่น `metric = 'target'`) → แถวที่ตรงเห็นทั้งปี แถวอื่นยังเป็นเดือนของ scope.
+  **ยอดจริงไม่เกินงวดรายงานเหมือนเดิม**, ปีนอก scope (เป้าปีหน้า) มองไม่เห็น, key อื่น (`org_code`) กรองเหมือนเดิม — ตารางเป้าที่ไม่มี
+  `cost_center` ยังใช้ไม่ได้เมื่อ scope มี `org_code`; prompt บอกโมเดลว่าตารางไหนเห็นทั้งปี และคำตอบที่รวมไม่ครบปีห้ามเรียกว่า "ทั้งปี"
+  (`data_sources.plan_note`). ก่อนหน้านี้ "เป้ายอดขาย ม.ค.–ธ.ค. 2569 ICT Solution" จาก portal งวด 202609 ได้ 2,169.67 (ม.ค.–ก.ย.)
+  แทน 2,892.88 ล้านบาท. portal ส่ง scope รูปเดิม ไม่ต้องแก้อะไร
 - context legacy (business DB เดิม) ใช้ scope ได้ถ้า admin ตั้ง `scope_columns` — query ที่มี scope รันใน process บน connection read-only
   ใหม่ต่อ query (ไม่ผ่าน MCP) และอ่านได้เฉพาะ main view ของ context
 - cache คำตอบแยกตาม scope

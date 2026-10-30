@@ -183,6 +183,22 @@ def test_the_column_is_named_when_it_differs_from_the_key(scoped, monkeypatch):
         request_scope_columns.reset(token)
 
 
+
+def test_plan_tables_the_scope_opened_reach_every_pass(scoped):
+    """A target table under the portal's scope holds the whole year (scope_plan_tables) — the user prompt, which pass 1
+    reads too, must not say every table stops at the scope's months (portal, feed_sales, 2026-10-30)."""
+    from app.services.data_sources import request_plan_tables
+
+    scoped({"year_month": [202601 + i for i in range(9)]})
+    assert "ตารางเป้า" not in _prompt()  # nothing opened: as before
+    token = request_plan_tables.set({"feed_sales_fact_sales_target_monthly": None})
+    try:
+        prompt = _prompt()
+    finally:
+        request_plan_tables.reset(token)
+    assert "ตารางเป้า/แผน** feed_sales_fact_sales_target_monthly" in prompt
+    assert "ครบ 12 เดือน**ของปี 2026 (พ.ศ. 2569)" in prompt and "กรองเดือนถึง 202609 เอง" in prompt
+
 # --- no scope, but the source names the period its data runs to (2026-10-22) ------------------------
 
 @pytest.fixture

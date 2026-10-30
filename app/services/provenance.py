@@ -30,7 +30,7 @@ KNOWLEDGE_TABLES = ("schema_contexts", "schema_metadata", "schema_business_rules
 # these makes a declared row theirs; editing anything else — keywords, priority, workspace, on/off, display
 # names, dimension family — leaves it declared, because the contract never writes those fields.
 DECLARED_FIELDS = {
-    "schema_contexts": frozenset({"main_view", "description", "instruction_th", "scope_columns"}),
+    "schema_contexts": frozenset({"main_view", "description", "instruction_th", "scope_columns", "scope_plan_tables"}),
     "schema_metadata": frozenset({"description", "data_type", "is_summable", "is_groupable"}),
     "schema_metrics": frozenset({"name_th", "synonyms", "extends", "dataset", "period", "dimensions", "terms", "expr",
                                   "official_scope", "official_total", "reference", "unit", "note_th", "ranking",

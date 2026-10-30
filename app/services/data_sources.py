@@ -23,6 +23,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import threading
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
@@ -92,6 +93,9 @@ request_pinned: ContextVar[bool] = ContextVar("request_pinned", default=False)
 # it lands on are not the same name (expense/ebt map `year_month` to `time_key`), and a prompt
 # that names the key alone pins the period to a column the tables do not have (RESULT_F11 §8).
 request_scope_columns: ContextVar[Optional[Dict[str, str]]] = ContextVar("request_scope_columns", default=None)
+# The plan tables this request's period scope opened to whole years ({table: its where or None}, sorted) — set by
+# the resolver, read by the prompt notes: "ทุกตารางถูกกรองแล้ว" is not true of them (scope_plan_tables, 2026-10-30)
+request_plan_tables: ContextVar[Optional[Dict[str, Optional[str]]]] = ContextVar("request_plan_tables", default=None)
 # The period (YYYYMM) the answered context's data runs to, from its source's manifest — set by QueryEngine
 # once the source is resolved; None = legacy / no manifest. Without a scope, this is the reference period
 # the prompt's "no period named = the year to date" rule anchors on, so chat and Telegram get the same
@@ -209,12 +213,75 @@ def scope_column_names(value: Any) -> List[str]:
     return list(names)
 
 
-def scope_filters(scope: Dict[str, Any], mapping: Dict[str, Any], table_columns: Dict[str, Optional[List[str]]]) -> Dict[str, str]:
+# The portal's period key (YYYYMM values) — the one a plan table (scope_plan_tables) widens to whole years
+PERIOD_KEY = "year_month"
+_LITERALS = re.compile(r"'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"")
+
+
+def plan_years(scope: Dict[str, Any]) -> Optional[List[int]]:
+    """The years (ค.ศ.) of the scope's period key when every value is a YYYYMM int — None = no plan table opens."""
+    value = scope.get(PERIOD_KEY)
+    values = value if isinstance(value, list) else [value]
+    if not values or not all(type(v) is int and 100001 <= v <= 999912 and 1 <= v % 100 <= 12 for v in values):
+        return None
+    return sorted({v // 100 for v in values})
+
+
+def plan_where_unsafe(where: Any) -> Optional[str]:
+    """Why `where` can't sit in a scope view as one parenthesised predicate (; / comment / subquery / a quote or
+    parenthesis it doesn't close) — None = it can. Checked again per request: the predicate goes into view DDL."""
+    if not isinstance(where, str) or not where.strip():
+        return "where ต้องเป็นข้อความที่ไม่ว่าง"
+    bare = _LITERALS.sub("", where)
+    if re.search(r";|--|/\*|\*/|['\"]|\bselect\b", bare, re.I):
+        return "where ห้ามมี ; / comment / subquery / เครื่องหมายคำพูดที่ไม่ปิด"
+    depth = 0
+    for ch in bare:
+        depth += {"(": 1, ")": -1}.get(ch, 0)
+        if depth < 0:
+            break
+    return "where มีวงเล็บไม่ครบคู่" if depth else None
+
+
+def plan_where_error(where: Any, columns: Dict[str, str]) -> Optional[str]:
+    """plan_where_unsafe, then DuckDB (the parser of check_select) binds it over an empty table of `columns`
+    ({name: DuckDB type}): one BOOLEAN expression over those columns — None = valid. For the contract sync."""
+    reason = plan_where_unsafe(where)
+    if reason:
+        return reason
+    import duckdb
+
+    from app.services.database_adapter import check_select
+
+    con = duckdb.connect()
+    try:
+        con.execute("CREATE TABLE t (" + ", ".join('"' + c.replace('"', '""') + f'" {t}' for c, t in columns.items()) + ")")
+        check_select(f"SELECT 1 FROM t WHERE ({where})", {"t"}, cur=con.cursor())
+        kind = con.execute(f"DESCRIBE SELECT ({where}) AS p FROM t").fetchone()[1]
+    except (duckdb.Error, PermissionError) as exc:
+        return f"where ใช้ไม่ได้: {exc}"
+    finally:
+        con.close()
+    return None if kind == "BOOLEAN" else f"where ต้องเป็นเงื่อนไข (BOOLEAN) ไม่ใช่ {kind}"
+
+
+def _plan_predicate(column: str, years: List[int], where: Optional[str], months: str) -> str:
+    # BETWEEN y01 AND y12 is the same integer test in DuckDB and SQLite (no division to round differently)
+    col = '"' + column.replace('"', '""') + '"'
+    whole = " OR ".join(f"{col} BETWEEN {y * 100 + 1} AND {y * 100 + 12}" for y in years)
+    return f"({whole})" if where is None else f"((({where}) AND ({whole})) OR {months})"
+
+
+def scope_filters(scope: Dict[str, Any], mapping: Dict[str, Any], table_columns: Dict[str, Optional[List[str]]],
+                  plan_tables: Optional[Dict[str, Optional[str]]] = None) -> Dict[str, str]:
     """{table: predicate} for every table carrying a column of every scoped key.
 
     mapping: scope key → column, or its names in order (schema_contexts.scope_columns); table_columns: table →
     its columns, or None to trust the mapping (legacy main view: the first name). Each table is filtered on the
     first name it has; a table with none of a key's names is left out — under the scope it can't be queried at all.
+    plan_tables: {table: where or None} (schema_contexts.scope_plan_tables) — a plan's targets are published for the
+    whole year, so these see every month of the scope's years; `where` = the plan rows of a table that also holds
+    actuals, whose other rows keep the scope's months. Every other key (org_code) filters them as before.
     """
     unknown = sorted(set(scope) - set(mapping))
     if unknown:
@@ -222,26 +289,70 @@ def scope_filters(scope: Dict[str, Any], mapping: Dict[str, Any], table_columns:
     names = {key: scope_column_names(mapping[key]) for key in scope}
     for key in sorted(scope):  # every value is checked once, whichever tables qualify
         _predicate(names[key][0], scope[key])
+    years = plan_years(scope) if plan_tables else None
+    plans = {t.lower(): w for t, w in (plan_tables or {}).items()}
     filters = {}
     for table, cols in table_columns.items():
         have = None if cols is None else {c.lower() for c in cols}
         chosen = {key: names[key][0] if have is None else next((n for n in names[key] if n.lower() in have), None)
                   for key in sorted(scope)}
         if all(chosen.values()):
-            filters[table] = " AND ".join(_predicate(chosen[key], scope[key]) for key in sorted(scope))
+            parts = [_predicate(chosen[key], scope[key]) for key in sorted(scope)]
+            if years and table.lower() in plans:
+                at = sorted(scope).index(PERIOD_KEY)
+                parts[at] = _plan_predicate(chosen[PERIOD_KEY], years, plans[table.lower()], parts[at])
+            filters[table] = " AND ".join(parts)
     if not filters:
         needed = sorted({n for key in scope for n in names[key]})
         raise ScopeError(f"ไม่มีตารางใดของ context นี้ที่มีคอลัมน์ {needed} ให้บังคับ scope")
     return filters
 
 
-def _scope_note(scope: Dict[str, Any], tables: List[str], main_view: str) -> str:
+def _plan_tables(raw: Optional[str], context_name: Optional[str]) -> Dict[str, Optional[str]]:
+    """schema_contexts.scope_plan_tables ({table: {} or {"where": ...}}) → {table (lower): where or None}.
+    An entry of another shape, or a where that could leave its parentheses, opens nothing — its months stay
+    filtered as before; logged, never raised (the scope itself still holds)."""
+    try:
+        declared = json.loads(raw) if raw else {}
+    except ValueError:
+        declared = None
+    if not isinstance(declared, dict):
+        logger.warning("scope_plan_tables of %s is not a JSON object — no table opens", context_name)
+        return {}
+    plans = {}
+    for table, entry in declared.items():
+        where = entry.get("where") if isinstance(entry, dict) else None
+        if not isinstance(entry, dict) or set(entry) - {"where"} or (where is not None and plan_where_unsafe(where)):
+            logger.warning("scope_plan_tables of %s: entry %s ignored", context_name, table)
+            continue
+        plans[str(table).lower()] = where
+    return plans
+
+
+def plan_note(scope: Dict[str, Any], opened: Optional[Dict[str, Optional[str]]]) -> str:
+    """The plan tables the scope opened to whole years, for both scope notes — "" when none. Told nothing, the model
+    called nine months of target "ทั้งปี" (portal, feed_sales, 2026-10-30: 2,169.67 vs 2,892.88 ล้านบาท)."""
+    years = plan_years(scope) if opened else None
+    if not years:
+        return ""
+    value = scope[PERIOD_KEY]
+    newest = max(value) if isinstance(value, list) else value
+    tables = "; ".join(f"{t} (เฉพาะแถวที่ {w})" if w else t for t, w in sorted(opened.items()))
+    return (f"\n- ยกเว้น**ตารางเป้า/แผน** {tables}: {PERIOD_KEY} ของตารางเหล่านี้กรองระดับปี — มีเป้า**ครบ 12 เดือน**"
+            f"ของปี {', '.join(f'{y} (พ.ศ. {y + 543})' for y in years)}: \"เป้าทั้งปี\" = SUM ทั้ง 12 เดือนของปีนั้น; "
+            f"ยอดจริงมีถึง {newest} เท่านั้น — เป้าที่เทียบกับยอดจริง (% เทียบเป้า / เป้าสะสม) ต้องกรองเดือนถึง {newest} เอง"
+            f"\n- คำตอบที่รวมเพียงบางเดือนของปี ต้องบอกช่วงเดือนในคำตอบ **ห้ามเรียกว่า \"ทั้งปี\"**")
+
+
+def _scope_note(scope: Dict[str, Any], tables: List[str], main_view: str,
+                opened: Optional[Dict[str, Optional[str]]] = None) -> str:
     """System-prompt note: the LLM must know the rows are pre-filtered and which tables exist —
     and, when the scope can't filter the context's main view, that it must use another table."""
     note = (
         "\n\n**ขอบเขตข้อมูล (scope) ที่ผู้เรียกกำหนด — บังคับที่ระบบแล้ว:** "
         + ", ".join(f"{k} = {v}" for k, v in sorted(scope.items()))
         + "\n- ข้อมูลทุกแถวที่ query ได้ถูกกรองตาม scope นี้แล้ว — \"ล่าสุด\" / \"ทั้งหมด\" / \"หน่วยงานเรา\" หมายถึงภายใน scope นี้"
+        + plan_note(scope, opened)
         + f"\n- query ได้เฉพาะตาราง: {', '.join(sorted(tables))} (อ้างชื่อตรง ๆ ห้ามมี schema นำหน้า)"
     )
     if main_view and main_view.lower() not in {t.lower() for t in tables}:
@@ -402,7 +513,8 @@ class SourceResolver:
             raise ScopeError("scope ต้องเป็น object เช่น {\"year_month\": 202607}")
         try:
             with self._engine().connect() as conn:
-                row = self._context_row(conn, context_name or "", "SELECT sc.main_view, sc.scope_columns FROM schema_contexts sc")
+                # sc.*: scope_plan_tables may not be migrated yet — then nothing opens (row.get below)
+                row = self._context_row(conn, context_name or "", "SELECT sc.* FROM schema_contexts sc")
         except (OperationalError, ProgrammingError) as exc:
             if _not_migrated(exc):
                 raise ScopeError("config DB ยังไม่รองรับ scope — รัน scripts/migrate_data_sources.py") from exc
@@ -417,13 +529,17 @@ class SourceResolver:
             raise ScopeError(f"scope_columns ของ context '{context_name}' ต้องเป็น {{key: column หรือ [column, ...]}}")
         # the prompt speaks of the main view's column: the first name
         request_scope_columns.set({k: scope_column_names(v)[0] for k, v in mapping.items() if k in scope})
+        plans = _plan_tables(row.get("scope_plan_tables"), context_name)
+        tables = {row["main_view"]: None} if source.adapter is None else source.adapter.view_columns
+        filters = scope_filters(scope, mapping, tables, plans)
+        opened = {t: plans[t.lower()] for t in filters if t.lower() in plans} if plan_years(scope) else {}
+        request_plan_tables.set(opened or None)
+        note = _scope_note(scope, list(filters), row["main_view"], opened)
         if source.adapter is None:  # legacy business DB: the context's main view is the only table
             from app.db.session import business_engine
-            filters = scope_filters(scope, mapping, {row["main_view"]: None})
-            adapter = ScopedSQLite(business_engine.url.database, filters, _scope_note(scope, list(filters), row["main_view"]))
+            adapter = ScopedSQLite(business_engine.url.database, filters, note)
         else:
-            filters = scope_filters(scope, mapping, source.adapter.view_columns)
-            adapter = ScopedDuckDB(source.adapter, filters, _scope_note(scope, list(filters), row["main_view"]))
+            adapter = ScopedDuckDB(source.adapter, filters, note)
         return replace(source, adapter=adapter)
 
     def _resolve(self, context_name: Optional[str]) -> ResolvedSource:

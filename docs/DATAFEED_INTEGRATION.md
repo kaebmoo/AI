@@ -143,6 +143,12 @@ logic อยู่ที่ `app/services/datafeed_knowledge.py` (`gen_docs_from
 - `scope_columns` ใน contract (`{scope key: column}` หรือ `{scope key: [column, ...]}`, Plan 7 Phase 3) → `schema_contexts.scope_columns` —
   กำหนดว่า portal จำกัดขอบเขตด้วย `scope` ได้ด้วย key อะไร; dataset ที่ไม่มีคอลัมน์ของ key ใช้ไม่ได้ภายใต้ scope; key ที่มีหลายชื่อ
   (ตารางเรียกคอลัมน์เดียวกันต่างชื่อ เช่น `dim_org_snapshot.effective_month`) = แต่ละตารางกรองด้วยชื่อแรกที่ตัวเองมี (ดู `docs/PORTAL_INTEGRATION.md`)
+- **`scope_plan_tables:` ใน contract (2026-10-30)** = ตารางเป้า/แผนที่ scope `year_month` กรอง**ระดับปี** แทนรายเดือน (`{dataset: {}}` ทั้งตารางเป็นเป้า,
+  `{dataset: {where: "metric = 'target'"}}` ตารางผสม actual+target — แถวอื่นยังกรองรายเดือน) → `schema_contexts.scope_plan_tables`
+  (JSON ชื่อเต็ม `feed_<domain>_<dataset>`; ต้องมีคอลัมน์ก่อน: `scripts/migrate_data_sources.py` — ไม่มี = warning, ตารางยังกรองรายเดือนเหมือนเดิม).
+  ตรวจตอน sync: ต้องเป็น dataset ของ contract ที่มีคอลัมน์ของ `scope_columns.year_month`, `where` ต้องผูก (bind) กับคอลัมน์ของ dataset เป็น BOOLEAN
+  นิพจน์เดียวด้วย DuckDB และห้ามมี `;` / comment / subquery / วงเล็บหรือเครื่องหมายคำพูดที่ไม่ปิด — entry ที่ผิดถูกข้าม (log) ตัวอื่นเข้า; ตรวจซ้ำ
+  ทุก request ก่อนเข้า DDL ของ scope view. contract ถอน = คอลัมน์เป็น NULL. ไม่ประกาศ = พฤติกรรมเดิมทุกอย่าง — พฤติกรรมฝั่ง portal ดู `docs/PORTAL_INTEGRATION.md`
 - **`metrics:` ใน contract (2026-10-24, ebt 1.5.0)** → `sync_metrics` → ตาราง `schema_metrics` (`declared`; ต้องมีตารางก่อน: `scripts/migrate_schema_metrics.py` — ไม่มี = ข้ามพร้อม warning,
   server ยังเริ่มได้) — ตรวจกับ datasets ของ contract ตอน sync (dataset/คอลัมน์งวด/มิติ/คอลัมน์ใน `where`/ชื่อใน `expr`/`official_total`/`extends` ต้องมีจริง; metric ที่ผิดถูกข้าม ตัวอื่นเข้า);
   `dataset` และ `official_total.dataset` เก็บเป็นชื่อเต็ม `feed_<domain>_<dataset>`; metric ที่ contract เลิกประกาศถูกถอน (เฉพาะแถว `declared`); ผู้ใช้คือ `app/services/ai/metric_compiler.py` — ดู `docs/DECLARED_METRICS.md`

@@ -28,8 +28,8 @@ from app.services.mcp_client import MCPClientService
 from app.services.admin_config_service import AdminConfigService
 from app.core.llm_policy import FULL, LLMPolicyError, PolicyMCPClient, RequestPolicy, history_without_answers, normalize, request_llm_policy
 from app.services.data_sources import (LEGACY, SourceBoundMCPClient, legacy_data_period, request_data_period,
-                                       request_explain_note, request_pinned, request_prompt_note, request_scope,
-                                       request_scope_columns, source_resolver)
+                                       request_explain_note, request_pinned, request_plan_tables, request_prompt_note,
+                                       request_scope, request_scope_columns, source_resolver)
 from app.services import query_audit
 from app.services.retention import stores_results
 from app.services.workspaces import canonical_context, check_context, workspace_of_context
@@ -495,6 +495,7 @@ class QueryEngine:
         pin = request_pinned.set(allowed_contexts is not None)  # restricted key: see data_sources.request_pinned
         llm = request_llm_policy.set(None)  # Phase 4.5: set once the context's source is known (_execute_query)
         cols = request_scope_columns.set(None)  # filled by the resolver, which reads the context's mapping
+        plans = request_plan_tables.set(None)  # likewise: the plan tables the scope opened to whole years
         period = request_data_period.set(None)  # the source's manifest period, once the source is known
         note = request_prompt_note.set(prompt_note or None)  # into every user prompt (hybrid_flow.scope_note)
         explain = request_explain_note.set(explain_note or None)  # into the explanation prompt only
@@ -521,6 +522,7 @@ class QueryEngine:
         finally:
             request_llm_policy.reset(llm)
             request_scope_columns.reset(cols)
+            request_plan_tables.reset(plans)
             request_data_period.reset(period)
             request_prompt_note.reset(note)
             request_explain_note.reset(explain)
